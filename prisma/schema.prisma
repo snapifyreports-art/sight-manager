@@ -1,0 +1,180 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  CEO
+  DIRECTOR
+  SITE_MANAGER
+  CONTRACT_MANAGER
+  CONTRACTOR
+}
+
+enum JobStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  ON_HOLD
+  COMPLETED
+}
+
+enum OrderStatus {
+  PENDING
+  ORDERED
+  CONFIRMED
+  DELIVERED
+  CANCELLED
+}
+
+enum ContactType {
+  SUPPLIER
+  CONTRACTOR
+}
+
+enum EventType {
+  JOB_STARTED
+  JOB_COMPLETED
+  JOB_STOPPED
+  JOB_EDITED
+  ORDER_PLACED
+  ORDER_DELIVERED
+  ORDER_CANCELLED
+  WORKFLOW_CREATED
+  WORKFLOW_UPDATED
+  USER_ACTION
+  NOTIFICATION
+  SYSTEM
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String
+  email         String    @unique
+  password      String
+  role          UserRole  @default(CONTRACTOR)
+  jobTitle      String?
+  company       String?
+  phone         String?
+  avatar        String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  workflows     Workflow[]
+  assignedJobs  Job[]        @relation("AssignedJobs")
+  events        EventLog[]
+  jobActions    JobAction[]
+}
+
+model Workflow {
+  id          String    @id @default(cuid())
+  name        String
+  description String?
+  status      String    @default("active")
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  createdById String
+
+  createdBy   User      @relation(fields: [createdById], references: [id])
+  jobs        Job[]
+  events      EventLog[]
+}
+
+model Job {
+  id            String    @id @default(cuid())
+  name          String
+  description   String?
+  workflowId    String
+  location      String?
+  address       String?
+  siteName      String?
+  plot          String?
+  startDate     DateTime?
+  endDate       DateTime?
+  status        JobStatus @default(NOT_STARTED)
+  assignedToId  String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  workflow      Workflow  @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  assignedTo    User?     @relation("AssignedJobs", fields: [assignedToId], references: [id])
+  orders        MaterialOrder[]
+  events        EventLog[]
+  actions       JobAction[]
+}
+
+model JobAction {
+  id          String    @id @default(cuid())
+  jobId       String
+  userId      String
+  action      String
+  notes       String?
+  createdAt   DateTime  @default(now())
+
+  job         Job       @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id])
+}
+
+model Supplier {
+  id              String    @id @default(cuid())
+  name            String
+  contactName     String?
+  contactEmail    String?
+  contactNumber   String?
+  type            String?
+  emailTemplate   String?
+  accountNumber   String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  orders          MaterialOrder[]
+}
+
+model MaterialOrder {
+  id                    String      @id @default(cuid())
+  supplierId            String
+  jobId                 String
+  orderDetails          String?
+  dateOfOrder           DateTime    @default(now())
+  orderType             String?
+  automated             Boolean     @default(false)
+  status                OrderStatus @default(PENDING)
+  expectedDeliveryDate  DateTime?
+  deliveredDate         DateTime?
+  leadTimeDays          Int?
+  items                 String?
+  createdAt             DateTime    @default(now())
+  updatedAt             DateTime    @updatedAt
+
+  supplier              Supplier    @relation(fields: [supplierId], references: [id])
+  job                   Job         @relation(fields: [jobId], references: [id], onDelete: Cascade)
+}
+
+model Contact {
+  id        String      @id @default(cuid())
+  name      String
+  email     String?
+  phone     String?
+  type      ContactType
+  company   String?
+  notes     String?
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+}
+
+model EventLog {
+  id          String    @id @default(cuid())
+  type        EventType
+  description String
+  workflowId  String?
+  jobId       String?
+  userId      String?
+  createdAt   DateTime  @default(now())
+
+  workflow    Workflow?  @relation(fields: [workflowId], references: [id], onDelete: SetNull)
+  job         Job?       @relation(fields: [jobId], references: [id], onDelete: SetNull)
+  user        User?      @relation(fields: [userId], references: [id], onDelete: SetNull)
+}
