@@ -11,8 +11,8 @@ import {
   Package,
   PackageCheck,
   PackageX,
-  GitBranch,
-  GitBranchPlus,
+  Building2,
+  PlusCircle,
   UserCog,
   Bell,
   Server,
@@ -20,6 +20,7 @@ import {
   Search,
   ChevronLeft,
   ChevronRight,
+  LayoutGrid,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -41,31 +42,39 @@ interface EventUser {
   email: string;
 }
 
-interface EventWorkflow {
+interface EventSite {
   id: string;
   name: string;
+}
+
+interface EventPlot {
+  id: string;
+  name: string;
+  siteId: string;
 }
 
 interface EventJob {
   id: string;
   name: string;
-  workflowId: string;
+  plotId: string;
 }
 
 interface EventLogEntry {
   id: string;
   type: string;
   description: string;
-  workflowId: string | null;
+  siteId: string | null;
+  plotId: string | null;
   jobId: string | null;
   userId: string | null;
   createdAt: string;
   user: EventUser | null;
-  workflow: EventWorkflow | null;
+  site: EventSite | null;
+  plot: EventPlot | null;
   job: EventJob | null;
 }
 
-interface WorkflowOption {
+interface SiteOption {
   id: string;
   name: string;
 }
@@ -86,8 +95,10 @@ const EVENT_TYPES = [
   "ORDER_PLACED",
   "ORDER_DELIVERED",
   "ORDER_CANCELLED",
-  "WORKFLOW_CREATED",
-  "WORKFLOW_UPDATED",
+  "SITE_CREATED",
+  "SITE_UPDATED",
+  "PLOT_CREATED",
+  "PLOT_UPDATED",
   "USER_ACTION",
   "NOTIFICATION",
   "SYSTEM",
@@ -152,19 +163,33 @@ const EVENT_TYPE_CONFIG: Record<
     iconBg: "bg-orange-500/15",
     iconColor: "text-orange-600 dark:text-orange-400",
   },
-  WORKFLOW_CREATED: {
-    label: "Workflow Created",
-    icon: GitBranchPlus,
+  SITE_CREATED: {
+    label: "Site Created",
+    icon: PlusCircle,
     badgeVariant: "default",
     iconBg: "bg-indigo-500/15",
     iconColor: "text-indigo-600 dark:text-indigo-400",
   },
-  WORKFLOW_UPDATED: {
-    label: "Workflow Updated",
-    icon: GitBranch,
+  SITE_UPDATED: {
+    label: "Site Updated",
+    icon: Building2,
     badgeVariant: "secondary",
     iconBg: "bg-purple-500/15",
     iconColor: "text-purple-600 dark:text-purple-400",
+  },
+  PLOT_CREATED: {
+    label: "Plot Created",
+    icon: LayoutGrid,
+    badgeVariant: "default",
+    iconBg: "bg-cyan-500/15",
+    iconColor: "text-cyan-600 dark:text-cyan-400",
+  },
+  PLOT_UPDATED: {
+    label: "Plot Updated",
+    icon: LayoutGrid,
+    badgeVariant: "secondary",
+    iconBg: "bg-cyan-500/15",
+    iconColor: "text-cyan-600 dark:text-cyan-400",
   },
   USER_ACTION: {
     label: "User Action",
@@ -206,11 +231,11 @@ function getEventConfig(type: string) {
 export function EventsClient({
   initialEvents,
   initialPagination,
-  workflows,
+  sites,
 }: {
   initialEvents: EventLogEntry[];
   initialPagination: PaginationInfo;
-  workflows: WorkflowOption[];
+  sites: SiteOption[];
 }) {
   const [events, setEvents] = useState(initialEvents);
   const [pagination, setPagination] = useState(initialPagination);
@@ -218,22 +243,22 @@ export function EventsClient({
 
   // Filters
   const [typeFilter, setTypeFilter] = useState<string>("all");
-  const [workflowFilter, setWorkflowFilter] = useState<string>("all");
+  const [siteFilter, setSiteFilter] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
 
-  // Determine if server filters are active (type/workflow require refetch)
-  const hasServerFilters = typeFilter !== "all" || workflowFilter !== "all";
+  // Determine if server filters are active (type/site require refetch)
+  const hasServerFilters = typeFilter !== "all" || siteFilter !== "all";
 
   const fetchEvents = useCallback(
-    async (page: number, type: string, workflowId: string) => {
+    async (page: number, type: string, siteId: string) => {
       setLoading(true);
       try {
         const params = new URLSearchParams();
         params.set("page", String(page));
         params.set("limit", "50");
         if (type !== "all") params.set("type", type);
-        if (workflowId !== "all") params.set("workflowId", workflowId);
+        if (siteId !== "all") params.set("siteId", siteId);
 
         const res = await fetch(`/api/events?${params.toString()}`);
         if (!res.ok) throw new Error("Failed to fetch events");
@@ -258,27 +283,27 @@ export function EventsClient({
   useEffect(() => {
     // Skip on initial render with no filters and page 1
     if (currentPage === 1 && !hasServerFilters) return;
-    fetchEvents(currentPage, typeFilter, workflowFilter);
+    fetchEvents(currentPage, typeFilter, siteFilter);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentPage, typeFilter, workflowFilter]);
+  }, [currentPage, typeFilter, siteFilter]);
 
   // Reset to page 1 when filters change
   function handleTypeChange(value: string | null) {
     if (value === null) return;
     setTypeFilter(value);
     setCurrentPage(1);
-    if (value !== "all" || workflowFilter !== "all") {
-      fetchEvents(1, value, workflowFilter);
-    } else if (value === "all" && workflowFilter === "all") {
+    if (value !== "all" || siteFilter !== "all") {
+      fetchEvents(1, value, siteFilter);
+    } else if (value === "all" && siteFilter === "all") {
       // Reset to initial
       setEvents(initialEvents);
       setPagination(initialPagination);
     }
   }
 
-  function handleWorkflowChange(value: string | null) {
+  function handleSiteChange(value: string | null) {
     if (value === null) return;
-    setWorkflowFilter(value);
+    setSiteFilter(value);
     setCurrentPage(1);
     if (typeFilter !== "all" || value !== "all") {
       fetchEvents(1, typeFilter, value);
@@ -296,7 +321,7 @@ export function EventsClient({
       (event) =>
         event.description.toLowerCase().includes(query) ||
         event.user?.name.toLowerCase().includes(query) ||
-        event.workflow?.name.toLowerCase().includes(query) ||
+        event.site?.name.toLowerCase().includes(query) ||
         event.job?.name.toLowerCase().includes(query)
     );
   }, [events, searchQuery]);
@@ -319,7 +344,7 @@ export function EventsClient({
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Events Log</h1>
         <p className="text-sm text-muted-foreground">
-          Track all activity across workflows, jobs, and orders
+          Track all activity across sites, jobs, and orders
         </p>
       </div>
 
@@ -357,24 +382,24 @@ export function EventsClient({
               </SelectContent>
             </Select>
 
-            {/* Workflow filter */}
+            {/* Site filter */}
             <Select
-              value={workflowFilter}
-              onValueChange={handleWorkflowChange}
+              value={siteFilter}
+              onValueChange={handleSiteChange}
             >
               <SelectTrigger className="w-full sm:w-[200px]">
                 <SelectValue>
-                  {workflowFilter === "all"
-                    ? "All Workflows"
-                    : workflows.find((w) => w.id === workflowFilter)?.name ??
-                      "All Workflows"}
+                  {siteFilter === "all"
+                    ? "All Sites"
+                    : sites.find((s) => s.id === siteFilter)?.name ??
+                      "All Sites"}
                 </SelectValue>
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All Workflows</SelectItem>
-                {workflows.map((w) => (
-                  <SelectItem key={w.id} value={w.id}>
-                    {w.name}
+                <SelectItem value="all">All Sites</SelectItem>
+                {sites.map((s) => (
+                  <SelectItem key={s.id} value={s.id}>
+                    {s.name}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -400,9 +425,9 @@ export function EventsClient({
             </div>
             <h3 className="text-lg font-semibold">No events found</h3>
             <p className="mt-1 max-w-sm text-sm text-muted-foreground">
-              {searchQuery || typeFilter !== "all" || workflowFilter !== "all"
+              {searchQuery || typeFilter !== "all" || siteFilter !== "all"
                 ? "Try adjusting your filters to find what you're looking for."
-                : "Events will appear here as activity happens across your workflows and jobs."}
+                : "Events will appear here as activity happens across your sites and jobs."}
             </p>
           </CardContent>
         </Card>
@@ -453,18 +478,18 @@ export function EventsClient({
                               {event.user.name}
                             </span>
                           )}
-                          {event.workflow && (
+                          {event.site && (
                             <Link
-                              href={`/workflows/${event.workflow.id}`}
+                              href={`/sites/${event.site.id}`}
                               className="hover:text-foreground hover:underline"
                               onClick={(e) => e.stopPropagation()}
                             >
-                              {event.workflow.name}
+                              {event.site.name}
                             </Link>
                           )}
                           {event.job && (
                             <Link
-                              href={`/workflows/${event.job.workflowId}`}
+                              href={`/jobs/${event.job.id}`}
                               className="hover:text-foreground hover:underline"
                               onClick={(e) => e.stopPropagation()}
                             >

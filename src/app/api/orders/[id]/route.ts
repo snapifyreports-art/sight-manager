@@ -17,9 +17,11 @@ export async function GET(
     where: { id },
     include: {
       supplier: true,
+      contact: true,
+      orderItems: true,
       job: {
         include: {
-          workflow: true,
+          plot: { include: { site: true } },
         },
       },
     },
@@ -46,7 +48,10 @@ export async function PUT(
 
   const existing = await prisma.materialOrder.findUnique({
     where: { id },
-    include: { supplier: true, job: true },
+    include: {
+      supplier: true,
+      job: { include: { plot: true } },
+    },
   });
 
   if (!existing) {
@@ -57,6 +62,7 @@ export async function PUT(
 
   if (body.supplierId !== undefined) data.supplierId = body.supplierId;
   if (body.jobId !== undefined) data.jobId = body.jobId;
+  if (body.contactId !== undefined) data.contactId = body.contactId || null;
   if (body.orderDetails !== undefined)
     data.orderDetails = body.orderDetails || null;
   if (body.orderType !== undefined) data.orderType = body.orderType || null;
@@ -70,14 +76,25 @@ export async function PUT(
       ? parseInt(body.leadTimeDays, 10)
       : null;
   }
-  if (body.items !== undefined) data.items = body.items || null;
+  if (body.itemsDescription !== undefined) data.itemsDescription = body.itemsDescription || null;
+
+  // Accept explicit deliveredDate
+  if (body.deliveredDate !== undefined) {
+    data.deliveredDate = body.deliveredDate
+      ? new Date(body.deliveredDate)
+      : null;
+  }
 
   // Handle status changes
   if (body.status !== undefined) {
     data.status = body.status;
 
-    // Auto-set deliveredDate when status changes to DELIVERED
-    if (body.status === "DELIVERED" && existing.status !== "DELIVERED") {
+    // Auto-set deliveredDate when status changes to DELIVERED (if not explicitly set)
+    if (
+      body.status === "DELIVERED" &&
+      existing.status !== "DELIVERED" &&
+      !body.deliveredDate
+    ) {
       data.deliveredDate = new Date();
     }
 
@@ -85,7 +102,7 @@ export async function PUT(
     if (body.status !== existing.status) {
       const eventType =
         body.status === "DELIVERED"
-          ? "ORDER_DELIVERED"
+          ? "DELIVERY_CONFIRMED"
           : body.status === "CANCELLED"
             ? "ORDER_CANCELLED"
             : "ORDER_PLACED";
@@ -93,7 +110,9 @@ export async function PUT(
       await prisma.eventLog.create({
         data: {
           type: eventType,
-          description: `Order for ${existing.supplier.name} — ${existing.job.name} status changed to ${body.status}`,
+          description: `Order for ${existing.supplier.name} — ${existing.job.name} ${body.status === "DELIVERED" ? "delivery confirmed" : `status changed to ${body.status}`}`,
+          siteId: existing.job.plot.siteId,
+          plotId: existing.job.plotId,
           jobId: existing.jobId,
           userId: session.user?.id || null,
         },
@@ -106,9 +125,11 @@ export async function PUT(
     data,
     include: {
       supplier: true,
+      contact: true,
+      orderItems: true,
       job: {
         include: {
-          workflow: true,
+          plot: { include: { site: true } },
         },
       },
     },
@@ -130,7 +151,10 @@ export async function DELETE(
 
   const existing = await prisma.materialOrder.findUnique({
     where: { id },
-    include: { supplier: true, job: true },
+    include: {
+      supplier: true,
+      job: { include: { plot: true } },
+    },
   });
 
   if (!existing) {
@@ -141,6 +165,8 @@ export async function DELETE(
     data: {
       type: "ORDER_CANCELLED",
       description: `Order for ${existing.supplier.name} — ${existing.job.name} was deleted`,
+      siteId: existing.job.plot.siteId,
+      plotId: existing.job.plotId,
       jobId: existing.jobId,
       userId: session.user?.id || null,
     },

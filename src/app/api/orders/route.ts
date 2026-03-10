@@ -20,9 +20,11 @@ export async function GET(req: NextRequest) {
     where,
     include: {
       supplier: true,
+      contact: true,
+      orderItems: true,
       job: {
         include: {
-          workflow: true,
+          plot: { include: { site: true } },
         },
       },
     },
@@ -42,11 +44,12 @@ export async function POST(req: NextRequest) {
   const {
     supplierId,
     jobId,
+    contactId,
     orderDetails,
     orderType,
     expectedDeliveryDate,
     leadTimeDays,
-    items,
+    itemsDescription,
   } = body;
 
   if (!supplierId || !jobId) {
@@ -60,19 +63,22 @@ export async function POST(req: NextRequest) {
     data: {
       supplierId,
       jobId,
+      contactId: contactId || null,
       orderDetails: orderDetails || null,
       orderType: orderType || null,
       expectedDeliveryDate: expectedDeliveryDate
         ? new Date(expectedDeliveryDate)
         : null,
       leadTimeDays: leadTimeDays ? parseInt(leadTimeDays, 10) : null,
-      items: items || null,
+      itemsDescription: itemsDescription || null,
     },
     include: {
       supplier: true,
+      contact: true,
+      orderItems: true,
       job: {
         include: {
-          workflow: true,
+          plot: { include: { site: true } },
         },
       },
     },
@@ -82,6 +88,8 @@ export async function POST(req: NextRequest) {
     data: {
       type: "ORDER_PLACED",
       description: `Order created for ${order.supplier.name} — ${order.job.name}`,
+      siteId: order.job.plot.siteId,
+      plotId: order.job.plotId,
       jobId: order.jobId,
       userId: session.user?.id || null,
     },

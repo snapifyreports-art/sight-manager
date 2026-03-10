@@ -6,18 +6,19 @@ export const metadata = {
 };
 
 export default async function EventsLogPage() {
-  const [events, total, workflows] = await Promise.all([
+  const [events, total, sites] = await Promise.all([
     prisma.eventLog.findMany({
       include: {
         user: { select: { id: true, name: true, email: true } },
-        workflow: { select: { id: true, name: true } },
-        job: { select: { id: true, name: true, workflowId: true } },
+        site: { select: { id: true, name: true } },
+        plot: { select: { id: true, name: true, siteId: true } },
+        job: { select: { id: true, name: true, plotId: true } },
       },
       orderBy: { createdAt: "desc" },
       take: 50,
     }),
     prisma.eventLog.count(),
-    prisma.workflow.findMany({
+    prisma.site.findMany({
       select: { id: true, name: true },
       orderBy: { name: "asc" },
     }),
@@ -39,7 +40,7 @@ export default async function EventsLogPage() {
         page: 1,
         totalPages,
       }}
-      workflows={workflows}
+      sites={sites}
     />
   );
 }

@@ -6,19 +6,21 @@ import { useSession, signOut } from "next-auth/react";
 import {
   HardHat,
   LayoutDashboard,
-  GitBranch,
-  Briefcase,
+  ClipboardList,
+  Building2,
   ShoppingCart,
   Users,
   ScrollText,
+  BarChart3,
   Settings,
   LogOut,
   ChevronLeft,
   Menu,
+  UserCog,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { NAV_PERMISSION_MAP } from "@/lib/permissions";
 import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
@@ -36,11 +38,13 @@ import { useState } from "react";
 
 const navItems = [
   { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-  { label: "Workflows", href: "/workflows", icon: GitBranch },
-  { label: "Jobs", href: "/jobs", icon: Briefcase },
+  { label: "Tasks", href: "/tasks", icon: ClipboardList },
+  { label: "Sites", href: "/sites", icon: Building2 },
   { label: "Orders", href: "/orders", icon: ShoppingCart },
   { label: "Contacts", href: "/contacts", icon: Users },
   { label: "Events Log", href: "/events-log", icon: ScrollText },
+  { label: "Analytics", href: "/analytics", icon: BarChart3 },
+  { label: "Users", href: "/users", icon: UserCog },
   { label: "Settings", href: "/settings", icon: Settings },
 ];
 
@@ -68,13 +72,13 @@ function SidebarNav({ collapsed = false }: { collapsed?: boolean }) {
   return (
     <div className="flex h-full flex-col">
       {/* Logo */}
-      <div className={cn("flex h-14 items-center border-b px-4", collapsed && "justify-center px-2")}>
-        <Link href="/dashboard" className="flex items-center gap-2.5">
-          <div className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-            <HardHat className="size-4.5" />
+      <div className={cn("flex h-16 items-center gap-3 px-4", collapsed && "justify-center px-2")}>
+        <Link href="/dashboard" className="flex items-center gap-3">
+          <div className="flex size-9 items-center justify-center rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-600/25">
+            <HardHat className="size-5" />
           </div>
           {!collapsed && (
-            <span className="text-base font-semibold tracking-tight">
+            <span className="text-[15px] font-bold tracking-tight text-foreground">
               Sight Manager
             </span>
           )}
@@ -82,9 +86,15 @@ function SidebarNav({ collapsed = false }: { collapsed?: boolean }) {
       </div>
 
       {/* Nav Links */}
-      <ScrollArea className="flex-1 py-3">
-        <nav className={cn("flex flex-col gap-1", collapsed ? "px-2" : "px-3")}>
-          {navItems.map((item) => {
+      <ScrollArea className="flex-1 py-2">
+        <nav className={cn("flex flex-col gap-0.5", collapsed ? "px-2" : "px-3")}>
+          {navItems.filter((item) => {
+            const requiredPermission = NAV_PERMISSION_MAP[item.href];
+            if (!requiredPermission) return true;
+            const userPermissions = (session?.user as { permissions?: string[] })?.permissions;
+            if (!userPermissions) return true;
+            return userPermissions.includes(requiredPermission);
+          }).map((item) => {
             const isActive =
               pathname === item.href ||
               (item.href !== "/dashboard" && pathname.startsWith(item.href));
@@ -94,15 +104,20 @@ function SidebarNav({ collapsed = false }: { collapsed?: boolean }) {
               <Link
                 href={item.href}
                 className={cn(
-                  "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-                  "hover:bg-accent hover:text-accent-foreground",
+                  "group flex items-center gap-3 rounded-lg px-3 py-2.5 text-[13px] font-medium transition-all duration-150",
                   isActive
-                    ? "bg-accent text-accent-foreground"
-                    : "text-muted-foreground",
+                    ? "bg-gradient-to-r from-blue-600/[0.12] to-blue-600/[0.04] text-blue-700 shadow-sm shadow-blue-600/5"
+                    : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
                   collapsed && "justify-center px-2"
                 )}
               >
-                <Icon className="size-4.5 shrink-0" />
+                {isActive && !collapsed && (
+                  <div className="absolute left-0 h-6 w-[3px] rounded-r-full bg-blue-600" />
+                )}
+                <Icon className={cn(
+                  "size-[18px] shrink-0 transition-colors",
+                  isActive ? "text-blue-600" : "text-muted-foreground/70 group-hover:text-foreground"
+                )} />
                 {!collapsed && <span>{item.label}</span>}
               </Link>
             );
@@ -116,31 +131,31 @@ function SidebarNav({ collapsed = false }: { collapsed?: boolean }) {
               );
             }
 
-            return <div key={item.href}>{linkContent}</div>;
+            return <div key={item.href} className="relative">{linkContent}</div>;
           })}
         </nav>
       </ScrollArea>
 
       {/* User Section */}
-      <div className="border-t p-3">
+      <div className="border-t border-border/50 p-3">
         {session?.user && (
           <div
             className={cn(
-              "flex items-center gap-3",
-              collapsed && "flex-col gap-2"
+              "flex items-center gap-3 rounded-lg p-2 transition-colors hover:bg-accent/40",
+              collapsed && "flex-col gap-2 p-1"
             )}
           >
             <Avatar size="sm">
-              <AvatarFallback className="text-xs">
+              <AvatarFallback className="bg-gradient-to-br from-blue-500 to-indigo-500 text-[11px] font-semibold text-white">
                 {getInitials(session.user.name)}
               </AvatarFallback>
             </Avatar>
             {!collapsed && (
               <div className="flex flex-1 flex-col overflow-hidden">
-                <span className="truncate text-sm font-medium">
+                <span className="truncate text-[13px] font-semibold">
                   {session.user.name}
                 </span>
-                <span className="truncate text-xs text-muted-foreground">
+                <span className="truncate text-[11px] text-muted-foreground">
                   {formatRole(session.user.role)}
                 </span>
               </div>
@@ -164,6 +179,7 @@ function SidebarNav({ collapsed = false }: { collapsed?: boolean }) {
               <Button
                 variant="ghost"
                 size="icon-sm"
+                className="text-muted-foreground hover:text-foreground"
                 onClick={() => signOut({ callbackUrl: "/login" })}
               >
                 <LogOut className="size-3.5" />
@@ -182,7 +198,7 @@ export function Sidebar() {
   return (
     <aside
       className={cn(
-        "hidden h-screen flex-col border-r bg-background transition-all duration-300 md:flex",
+        "hidden h-screen flex-col border-r border-border/50 bg-gradient-to-b from-white to-slate-50/80 transition-all duration-300 md:flex",
         collapsed ? "w-[60px]" : "w-[240px]"
       )}
     >
@@ -191,7 +207,7 @@ export function Sidebar() {
         <Button
           variant="outline"
           size="icon-xs"
-          className="absolute -right-3 top-[18px] z-10 rounded-full border bg-background shadow-sm"
+          className="absolute -right-3 top-[22px] z-10 rounded-full border bg-white shadow-sm hover:shadow-md transition-shadow"
           onClick={() => setCollapsed(!collapsed)}
         >
           <ChevronLeft

@@ -30,11 +30,18 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         );
         if (!isValid) return null;
 
+        // Fetch user permissions
+        const perms = await prisma.userPermission.findMany({
+          where: { userId: user.id },
+          select: { permission: true },
+        });
+
         return {
           id: user.id,
           name: user.name,
           email: user.email,
           role: user.role,
+          permissions: perms.map((p) => p.permission),
         };
       },
     }),
@@ -44,6 +51,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       if (user) {
         token.id = user.id;
         token.role = (user as { role: string }).role;
+        token.permissions = (user as { permissions: string[] }).permissions;
       }
       return token;
     },
@@ -51,6 +59,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       if (session.user) {
         session.user.id = token.id as string;
         (session.user as { role: string }).role = token.role as string;
+        session.user.permissions = (token.permissions as string[]) || [];
       }
       return session;
     },

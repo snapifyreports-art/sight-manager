@@ -15,6 +15,13 @@ enum UserRole {
   CONTRACTOR
 }
 
+enum SiteStatus {
+  ACTIVE
+  ON_HOLD
+  COMPLETED
+  ARCHIVED
+}
+
 enum JobStatus {
   NOT_STARTED
   IN_PROGRESS
@@ -35,16 +42,33 @@ enum ContactType {
   CONTRACTOR
 }
 
+enum NotificationType {
+  JOBS_STARTING_TODAY
+  JOBS_OVERDUE
+  MATERIALS_OVERDUE
+  DELIVERIES_DUE_TODAY
+  JOBS_READY_FOR_SIGNOFF
+  NEW_NOTES_PHOTOS
+  ORDERS_TO_SEND
+  NEXT_STAGE_READY
+}
+
 enum EventType {
   JOB_STARTED
   JOB_COMPLETED
   JOB_STOPPED
   JOB_EDITED
+  JOB_SIGNED_OFF
   ORDER_PLACED
   ORDER_DELIVERED
   ORDER_CANCELLED
-  WORKFLOW_CREATED
-  WORKFLOW_UPDATED
+  DELIVERY_CONFIRMED
+  PHOTO_UPLOADED
+  SCHEDULE_CASCADED
+  SITE_CREATED
+  SITE_UPDATED
+  PLOT_CREATED
+  PLOT_UPDATED
   USER_ACTION
   NOTIFICATION
   SYSTEM
@@ -63,47 +87,88 @@ model User {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
-  workflows     Workflow[]
+  sites         Site[]
   assignedJobs  Job[]        @relation("AssignedJobs")
+  signedOffJobs Job[]        @relation("SignedOffJobs")
   events        EventLog[]
   jobActions    JobAction[]
+  uploadedPhotos JobPhoto[]
+  pushSubscriptions       PushSubscription[]
+  notificationPreferences NotificationPreference[]
+  permissions             UserPermission[]
 }
 
-model Workflow {
-  id          String    @id @default(cuid())
+model Site {
+  id          String     @id @default(cuid())
   name        String
   description String?
-  status      String    @default("active")
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  location    String?
+  address     String?
+  status      SiteStatus @default(ACTIVE)
   createdById String
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
 
-  createdBy   User      @relation(fields: [createdById], references: [id])
-  jobs        Job[]
+  createdBy   User       @relation(fields: [createdById], references: [id])
+  plots       Plot[]
   events      EventLog[]
 }
 
-model Job {
-  id            String    @id @default(cuid())
-  name          String
-  description   String?
-  workflowId    String
-  location      String?
-  address       String?
-  siteName      String?
-  plot          String?
-  startDate     DateTime?
-  endDate       DateTime?
-  status        JobStatus @default(NOT_STARTED)
-  assignedToId  String?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+model Plot {
+  id                   String    @id @default(cuid())
+  name                 String
+  description          String?
+  siteId               String
+  plotNumber           String?
+  reservationType      String?
+  houseType            String?
+  reservationDate      DateTime?
+  exchangeDate         DateTime?
+  legalDate            DateTime?
+  approvalG            Boolean   @default(false)
+  approvalE            Boolean   @default(false)
+  approvalW            Boolean   @default(false)
+  approvalKCO          Boolean   @default(false)
+  buildCompletePercent Float     @default(0)
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
 
-  workflow      Workflow  @relation(fields: [workflowId], references: [id], onDelete: Cascade)
-  assignedTo    User?     @relation("AssignedJobs", fields: [assignedToId], references: [id])
+  site        Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  jobs        Job[]
+  events      EventLog[]
+
+  @@unique([siteId, plotNumber])
+}
+
+model Job {
+  id              String    @id @default(cuid())
+  name            String
+  description     String?
+  plotId          String
+  location        String?
+  address         String?
+  startDate       DateTime?
+  endDate         DateTime?
+  status          JobStatus @default(NOT_STARTED)
+  assignedToId    String?
+  stageCode       String?
+  actualStartDate DateTime?
+  actualEndDate   DateTime?
+  signedOffById   String?
+  signedOffAt     DateTime?
+  signOffNotes    String?
+  sortOrder       Int       @default(0)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  plot          Plot            @relation(fields: [plotId], references: [id], onDelete: Cascade)
+  assignedTo    User?           @relation("AssignedJobs", fields: [assignedToId], references: [id])
+  signedOffBy   User?           @relation("SignedOffJobs", fields: [signedOffById], references: [id])
   orders        MaterialOrder[]
   events        EventLog[]
   actions       JobAction[]
+  contractors   JobContractor[]
+  photos        JobPhoto[]
 }
 
 model JobAction {
@@ -116,6 +181,31 @@ model JobAction {
 
   job         Job       @relation(fields: [jobId], references: [id], onDelete: Cascade)
   user        User      @relation(fields: [userId], references: [id])
+}
+
+model JobContractor {
+  id        String   @id @default(cuid())
+  jobId     String
+  contactId String
+  createdAt DateTime @default(now())
+
+  job       Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  contact   Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@unique([jobId, contactId])
+}
+
+model JobPhoto {
+  id           String   @id @default(cuid())
+  jobId        String
+  url          String
+  fileName     String?
+  caption      String?
+  uploadedById String?
+  createdAt    DateTime @default(now())
+
+  job          Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  uploadedBy   User?    @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
 }
 
 model Supplier {
@@ -131,12 +221,14 @@ model Supplier {
   updatedAt       DateTime  @updatedAt
 
   orders          MaterialOrder[]
+  templateOrders  TemplateOrder[]
 }
 
 model MaterialOrder {
   id                    String      @id @default(cuid())
   supplierId            String
   jobId                 String
+  contactId             String?
   orderDetails          String?
   dateOfOrder           DateTime    @default(now())
   orderType             String?
@@ -145,12 +237,27 @@ model MaterialOrder {
   expectedDeliveryDate  DateTime?
   deliveredDate         DateTime?
   leadTimeDays          Int?
-  items                 String?
+  itemsDescription      String?
   createdAt             DateTime    @default(now())
   updatedAt             DateTime    @updatedAt
 
   supplier              Supplier    @relation(fields: [supplierId], references: [id])
   job                   Job         @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  contact               Contact?    @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  orderItems            OrderItem[]
+}
+
+model OrderItem {
+  id        String   @id @default(cuid())
+  orderId   String
+  name      String
+  quantity  Float    @default(1)
+  unit      String   @default("units")
+  unitCost  Float    @default(0)
+  totalCost Float    @default(0)
+  createdAt DateTime @default(now())
+
+  order     MaterialOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
 }
 
 model Contact {
@@ -163,18 +270,115 @@ model Contact {
   notes     String?
   createdAt DateTime    @default(now())
   updatedAt DateTime    @updatedAt
+
+  orders          MaterialOrder[]
+  jobContractors  JobContractor[]
 }
+
+// ---------- Plot Templates ----------
+
+model PlotTemplate {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  typeLabel   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  jobs        TemplateJob[]
+}
+
+model TemplateJob {
+  id          String   @id @default(cuid())
+  templateId  String
+  name        String
+  description String?
+  stageCode   String?
+  sortOrder   Int      @default(0)
+  startWeek   Int
+  endWeek     Int
+  createdAt   DateTime @default(now())
+
+  template    PlotTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  orders      TemplateOrder[]
+}
+
+model TemplateOrder {
+  id                   String   @id @default(cuid())
+  templateJobId        String
+  supplierId           String?
+  itemsDescription     String?
+  orderWeekOffset      Int      @default(-2)
+  deliveryWeekOffset   Int      @default(0)
+  createdAt            DateTime @default(now())
+
+  templateJob          TemplateJob @relation(fields: [templateJobId], references: [id], onDelete: Cascade)
+  supplier             Supplier?   @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  items                TemplateOrderItem[]
+}
+
+model TemplateOrderItem {
+  id              String  @id @default(cuid())
+  templateOrderId String
+  name            String
+  quantity        Float   @default(1)
+  unit            String  @default("units")
+  unitCost        Float   @default(0)
+
+  templateOrder   TemplateOrder @relation(fields: [templateOrderId], references: [id], onDelete: Cascade)
+}
+
+// ---------- Push Notifications ----------
+
+model PushSubscription {
+  id        String   @id @default(cuid())
+  userId    String
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model NotificationPreference {
+  id      String           @id @default(cuid())
+  userId  String
+  type    NotificationType
+  enabled Boolean          @default(true)
+
+  user    User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, type])
+}
+
+// ---------- User Permissions ----------
+
+model UserPermission {
+  id         String @id @default(cuid())
+  userId     String
+  permission String
+
+  user       User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, permission])
+}
+
+// ---------- Event Log ----------
 
 model EventLog {
   id          String    @id @default(cuid())
   type        EventType
   description String
-  workflowId  String?
+  siteId      String?
+  plotId      String?
   jobId       String?
   userId      String?
   createdAt   DateTime  @default(now())
 
-  workflow    Workflow?  @relation(fields: [workflowId], references: [id], onDelete: SetNull)
-  job         Job?       @relation(fields: [jobId], references: [id], onDelete: SetNull)
-  user        User?      @relation(fields: [userId], references: [id], onDelete: SetNull)
+  site        Site?     @relation(fields: [siteId], references: [id], onDelete: SetNull)
+  plot        Plot?     @relation(fields: [plotId], references: [id], onDelete: SetNull)
+  job         Job?      @relation(fields: [jobId], references: [id], onDelete: SetNull)
+  user        User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
 }

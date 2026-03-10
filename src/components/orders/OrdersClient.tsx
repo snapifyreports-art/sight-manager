@@ -68,7 +68,7 @@ interface Supplier {
   updatedAt: string;
 }
 
-interface Workflow {
+interface Site {
   id: string;
   name: string;
   description: string | null;
@@ -78,28 +78,48 @@ interface Workflow {
   createdById: string;
 }
 
+interface Plot {
+  id: string;
+  name: string;
+  description: string | null;
+  siteId: string;
+  createdAt: string;
+  updatedAt: string;
+  site: Site;
+}
+
 interface Job {
   id: string;
   name: string;
   description: string | null;
-  workflowId: string;
+  plotId: string;
   location: string | null;
   address: string | null;
-  siteName: string | null;
-  plot: string | null;
   startDate: string | null;
   endDate: string | null;
   status: string;
   assignedToId: string | null;
   createdAt: string;
   updatedAt: string;
-  workflow: Workflow;
+  plot: Plot;
+}
+
+interface OrderItem {
+  id: string;
+  orderId: string;
+  name: string;
+  quantity: number;
+  unit: string;
+  unitCost: number;
+  totalCost: number;
+  createdAt: string;
 }
 
 interface Order {
   id: string;
   supplierId: string;
   jobId: string;
+  contactId: string | null;
   orderDetails: string | null;
   dateOfOrder: string;
   orderType: string | null;
@@ -108,11 +128,12 @@ interface Order {
   expectedDeliveryDate: string | null;
   deliveredDate: string | null;
   leadTimeDays: number | null;
-  items: string | null;
+  itemsDescription: string | null;
   createdAt: string;
   updatedAt: string;
   supplier: Supplier;
   job: Job;
+  orderItems: OrderItem[];
 }
 
 type OrderStatus = "PENDING" | "ORDERED" | "CONFIRMED" | "DELIVERED" | "CANCELLED";
@@ -187,21 +208,23 @@ function StatusBadge({ status }: { status: string }) {
 interface OrderFormData {
   supplierId: string;
   jobId: string;
+  contactId: string;
   orderDetails: string;
   orderType: string;
   expectedDeliveryDate: string;
   leadTimeDays: string;
-  items: string;
+  itemsDescription: string;
 }
 
 const EMPTY_FORM: OrderFormData = {
   supplierId: "",
   jobId: "",
+  contactId: "",
   orderDetails: "",
   orderType: "",
   expectedDeliveryDate: "",
   leadTimeDays: "",
-  items: "",
+  itemsDescription: "",
 };
 
 function OrderFormFields({
@@ -254,9 +277,7 @@ function OrderFormFields({
           <SelectContent>
             {jobs.map((j) => (
               <SelectItem key={j.id} value={j.id}>
-                {j.name}
-                {j.siteName ? ` — ${j.siteName}` : ""}
-                {j.plot ? ` (Plot ${j.plot})` : ""}
+                {j.name} &mdash; {j.plot.site.name} &gt; {j.plot.name}
               </SelectItem>
             ))}
           </SelectContent>
@@ -320,15 +341,15 @@ function OrderFormFields({
         </div>
       </div>
 
-      {/* Items */}
+      {/* Items Description */}
       <div className="grid gap-2">
-        <Label htmlFor="items">Items</Label>
+        <Label htmlFor="itemsDescription">Items Description</Label>
         <Textarea
-          id="items"
+          id="itemsDescription"
           placeholder="List materials / items..."
-          value={form.items}
+          value={form.itemsDescription}
           onChange={(e) =>
-            setForm((prev) => ({ ...prev, items: e.target.value }))
+            setForm((prev) => ({ ...prev, itemsDescription: e.target.value }))
           }
         />
       </div>
@@ -426,13 +447,14 @@ function EditOrderDialog({
   const [form, setForm] = useState<OrderFormData>({
     supplierId: order.supplierId,
     jobId: order.jobId,
+    contactId: order.contactId || "",
     orderDetails: order.orderDetails || "",
     orderType: order.orderType || "",
     expectedDeliveryDate: order.expectedDeliveryDate
       ? order.expectedDeliveryDate.split("T")[0]
       : "",
     leadTimeDays: order.leadTimeDays?.toString() || "",
-    items: order.items || "",
+    itemsDescription: order.itemsDescription || "",
   });
   const [submitting, setSubmitting] = useState(false);
 
@@ -720,9 +742,14 @@ export function OrdersClient({
                               {order.orderType}
                             </p>
                           )}
-                          {order.items && (
+                          {order.itemsDescription && (
                             <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                              {order.items}
+                              {order.itemsDescription}
+                            </p>
+                          )}
+                          {order.orderItems.length > 0 && (
+                            <p className="mt-0.5 text-xs text-muted-foreground">
+                              {order.orderItems.length} item{order.orderItems.length !== 1 ? "s" : ""}
                             </p>
                           )}
                         </div>
@@ -736,7 +763,7 @@ export function OrdersClient({
                         <div>
                           <p className="text-sm">{order.job.name}</p>
                           <p className="text-xs text-muted-foreground">
-                            {order.job.workflow.name}
+                            {order.job.plot.site.name} &gt; {order.job.plot.name}
                           </p>
                         </div>
                       </TableCell>

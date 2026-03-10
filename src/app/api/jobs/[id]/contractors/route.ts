@@ -1,0 +1,93 @@
+import { NextRequest, NextResponse } from "next/server";
+import { auth } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
+
+// GET /api/jobs/[id]/contractors — list contractors on a job
+export async function GET(
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const session = await auth();
+  if (!session) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const { id } = await params;
+
+  const contractors = await prisma.jobContractor.findMany({
+    where: { jobId: id },
+    include: {
+      contact: true,
+    },
+    orderBy: { createdAt: "asc" },
+  });
+
+  return NextResponse.json(contractors);
+}
+
+// PUT /api/jobs/[id]/contractors — replace all contractor assignments
+export async function PUT(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const session = await auth();
+  if (!session) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const { id } = await params;
+  const body = await req.json();
+  const { contactIds } = body as { contactIds: string[] };
+
+  if (!Array.isArray(contactIds)) {
+    return NextResponse.json(
+      { error: "contactIds must be an array" },
+      { status: 400 }
+    );
+  }
+
+  // Verify job exists
+  const job = await prisma.job.findUnique({
+    where: { id },
+    include: { plot: true },
+  });
+  if (!job) {
+    return NextResponse.json({ error: "Job not found" }, { status: 404 });
+  }
+
+  // Replace all assignments in a transaction
+  const result = await prisma.$transaction(async (tx) => {
+    // Delete existing assignments
+    await tx.jobContractor.deleteMany({ where: { jobId: id } });
+
+    // Create new assignments
+    if (contactIds.length > 0) {
+      await tx.jobContractor.createMany({
+        data: contactIds.map((contactId) => ({
+          jobId: id,
+          contactId,
+        })),
+      });
+    }
+
+    // Log event
+    await tx.eventLog.create({
+      data: {
+        type: "JOB_EDITED",
+        description: `Contractors updated on "${job.name}" (${contactIds.length} assigned)`,
+        siteId: job.plot.siteId,
+        plotId: job.plotId,
+        jobId: id,
+        userId: session.user.id,
+      },
+    });
+
+    return tx.jobContractor.findMany({
+      where: { jobId: id },
+      include: { contact: true },
+      orderBy: { createdAt: "asc" },
+    });
+  });
+
+  return NextResponse.json(result);
+}

@@ -1,0 +1,61 @@
+import { NextRequest, NextResponse } from "next/server";
+import { auth } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
+
+// POST /api/sites/[id]/plots — create a plot in a site
+export async function POST(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const session = await auth();
+  if (!session) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const { id: siteId } = await params;
+  const body = await request.json();
+  const { name, description } = body;
+
+  if (!name || typeof name !== "string" || name.trim().length === 0) {
+    return NextResponse.json(
+      { error: "Plot name is required" },
+      { status: 400 }
+    );
+  }
+
+  // Verify site exists
+  const site = await prisma.site.findUnique({
+    where: { id: siteId },
+    select: { id: true, name: true },
+  });
+
+  if (!site) {
+    return NextResponse.json({ error: "Site not found" }, { status: 404 });
+  }
+
+  const plot = await prisma.plot.create({
+    data: {
+      name: name.trim(),
+      description: description?.trim() || null,
+      siteId,
+    },
+    include: {
+      _count: {
+        select: { jobs: true },
+      },
+    },
+  });
+
+  // Log the event
+  await prisma.eventLog.create({
+    data: {
+      type: "PLOT_CREATED",
+      description: `Plot "${plot.name}" was created in site "${site.name}"`,
+      siteId,
+      plotId: plot.id,
+      userId: session.user.id,
+    },
+  });
+
+  return NextResponse.json(plot, { status: 201 });
+}

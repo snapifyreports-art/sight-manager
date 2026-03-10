@@ -8,15 +8,15 @@ export const metadata = {
 export default async function DashboardPage() {
   // Run all queries in parallel for performance
   const [
-    totalWorkflows,
+    totalSites,
     totalContacts,
     pendingOrders,
     jobStatusCounts,
     recentEvents,
     trafficLightJobs,
   ] = await Promise.all([
-    // Total workflows
-    prisma.workflow.count(),
+    // Total sites
+    prisma.site.count(),
 
     // Total contacts
     prisma.contact.count(),
@@ -38,7 +38,7 @@ export default async function DashboardPage() {
       orderBy: { createdAt: "desc" },
       include: {
         user: { select: { name: true } },
-        workflow: { select: { name: true } },
+        site: { select: { name: true } },
         job: { select: { name: true } },
       },
     }),
@@ -54,9 +54,12 @@ export default async function DashboardPage() {
         id: true,
         name: true,
         status: true,
-        siteName: true,
-        plot: true,
-        workflow: { select: { name: true } },
+        plot: {
+          select: {
+            name: true,
+            site: { select: { name: true } },
+          },
+        },
         assignedTo: { select: { name: true } },
       },
     }),
@@ -79,7 +82,7 @@ export default async function DashboardPage() {
   // Serialize dates for client component
   const data: DashboardData = {
     stats: {
-      totalWorkflows,
+      totalSites,
       activeJobs,
       pendingOrders,
       totalContacts,
@@ -91,7 +94,7 @@ export default async function DashboardPage() {
       description: event.description,
       createdAt: event.createdAt.toISOString(),
       user: event.user,
-      workflow: event.workflow,
+      site: event.site,
       job: event.job,
     })),
     trafficLightJobs,

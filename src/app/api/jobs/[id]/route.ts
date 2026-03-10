@@ -16,10 +16,14 @@ export async function GET(
   const job = await prisma.job.findUnique({
     where: { id },
     include: {
-      workflow: true,
+      plot: { include: { site: true } },
       assignedTo: true,
+      contractors: {
+        include: { contact: true },
+        orderBy: { createdAt: "asc" },
+      },
       orders: {
-        include: { supplier: true },
+        include: { supplier: true, orderItems: true },
         orderBy: { createdAt: "desc" },
       },
       actions: {
@@ -48,7 +52,10 @@ export async function PUT(
   const { id } = await params;
   const body = await req.json();
 
-  const existing = await prisma.job.findUnique({ where: { id } });
+  const existing = await prisma.job.findUnique({
+    where: { id },
+    include: { plot: true },
+  });
   if (!existing) {
     return NextResponse.json({ error: "Job not found" }, { status: 404 });
   }
@@ -58,17 +65,15 @@ export async function PUT(
     data: {
       name: body.name ?? existing.name,
       description: body.description !== undefined ? body.description : existing.description,
-      workflowId: body.workflowId ?? existing.workflowId,
+      plotId: body.plotId ?? existing.plotId,
       assignedToId: body.assignedToId !== undefined ? body.assignedToId : existing.assignedToId,
       location: body.location !== undefined ? body.location : existing.location,
       address: body.address !== undefined ? body.address : existing.address,
-      siteName: body.siteName !== undefined ? body.siteName : existing.siteName,
-      plot: body.plot !== undefined ? body.plot : existing.plot,
       startDate: body.startDate !== undefined ? (body.startDate ? new Date(body.startDate) : null) : existing.startDate,
       endDate: body.endDate !== undefined ? (body.endDate ? new Date(body.endDate) : null) : existing.endDate,
     },
     include: {
-      workflow: true,
+      plot: { include: { site: true } },
       assignedTo: true,
       _count: { select: { orders: true } },
     },
@@ -78,7 +83,8 @@ export async function PUT(
     data: {
       type: "JOB_EDITED",
       description: `Job "${job.name}" was updated`,
-      workflowId: job.workflowId,
+      siteId: job.plot.siteId,
+      plotId: job.plotId,
       jobId: job.id,
       userId: session.user.id,
     },

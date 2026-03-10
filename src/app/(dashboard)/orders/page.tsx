@@ -10,9 +10,11 @@ export default async function OrdersPage() {
     prisma.materialOrder.findMany({
       include: {
         supplier: true,
+        contact: true,
+        orderItems: true,
         job: {
           include: {
-            workflow: true,
+            plot: { include: { site: true } },
           },
         },
       },
@@ -23,7 +25,7 @@ export default async function OrdersPage() {
     }),
     prisma.job.findMany({
       include: {
-        workflow: true,
+        plot: { include: { site: true } },
       },
       orderBy: { name: "asc" },
     }),
@@ -42,16 +44,25 @@ export default async function OrdersPage() {
       createdAt: order.supplier.createdAt.toISOString(),
       updatedAt: order.supplier.updatedAt.toISOString(),
     },
+    orderItems: order.orderItems.map((item) => ({
+      ...item,
+      createdAt: item.createdAt.toISOString(),
+    })),
     job: {
       ...order.job,
       startDate: order.job.startDate?.toISOString() ?? null,
       endDate: order.job.endDate?.toISOString() ?? null,
       createdAt: order.job.createdAt.toISOString(),
       updatedAt: order.job.updatedAt.toISOString(),
-      workflow: {
-        ...order.job.workflow,
-        createdAt: order.job.workflow.createdAt.toISOString(),
-        updatedAt: order.job.workflow.updatedAt.toISOString(),
+      plot: {
+        ...order.job.plot,
+        createdAt: order.job.plot.createdAt.toISOString(),
+        updatedAt: order.job.plot.updatedAt.toISOString(),
+        site: {
+          ...order.job.plot.site,
+          createdAt: order.job.plot.site.createdAt.toISOString(),
+          updatedAt: order.job.plot.site.updatedAt.toISOString(),
+        },
       },
     },
   }));
@@ -68,10 +79,15 @@ export default async function OrdersPage() {
     endDate: j.endDate?.toISOString() ?? null,
     createdAt: j.createdAt.toISOString(),
     updatedAt: j.updatedAt.toISOString(),
-    workflow: {
-      ...j.workflow,
-      createdAt: j.workflow.createdAt.toISOString(),
-      updatedAt: j.workflow.updatedAt.toISOString(),
+    plot: {
+      ...j.plot,
+      createdAt: j.plot.createdAt.toISOString(),
+      updatedAt: j.plot.updatedAt.toISOString(),
+      site: {
+        ...j.plot.site,
+        createdAt: j.plot.site.createdAt.toISOString(),
+        updatedAt: j.plot.site.updatedAt.toISOString(),
+      },
     },
   }));
 

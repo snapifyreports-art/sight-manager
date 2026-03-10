@@ -18,11 +18,13 @@ import { MobileSidebar } from "./Sidebar";
 
 const pageTitles: Record<string, string> = {
   "/dashboard": "Dashboard",
-  "/workflows": "Workflows",
-  "/jobs": "Jobs",
+  "/tasks": "Tasks",
+  "/sites": "Sites",
   "/orders": "Orders",
   "/contacts": "Contacts",
   "/events-log": "Events Log",
+  "/analytics": "Analytics",
+  "/users": "Users",
   "/settings": "Settings",
 };
 
@@ -57,10 +59,10 @@ export function Header() {
   const pageTitle = getPageTitle(pathname);
 
   return (
-    <header className="flex h-14 shrink-0 items-center gap-3 border-b bg-background px-4">
+    <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border/50 bg-white/80 px-4 backdrop-blur-sm">
       <MobileSidebar />
 
-      <h1 className="text-lg font-semibold">{pageTitle}</h1>
+      <h1 className="text-sm font-semibold text-slate-700">{pageTitle}</h1>
 
       <div className="ml-auto flex items-center gap-2">
         {session?.user && (
@@ -70,16 +72,16 @@ export function Header() {
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="gap-2 px-1.5"
+                  className="gap-2 px-2 hover:bg-slate-100"
                 />
               }
             >
               <Avatar size="sm">
-                <AvatarFallback className="text-xs">
+                <AvatarFallback className="bg-gradient-to-br from-blue-500 to-indigo-500 text-[10px] font-semibold text-white">
                   {getInitials(session.user.name)}
                 </AvatarFallback>
               </Avatar>
-              <span className="hidden text-sm font-medium sm:inline-block">
+              <span className="hidden text-[13px] font-medium text-slate-700 sm:inline-block">
                 {session.user.name}
               </span>
             </DropdownMenuTrigger>

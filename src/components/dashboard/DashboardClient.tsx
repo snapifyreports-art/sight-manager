@@ -1,13 +1,14 @@
 "use client";
 
 import {
-  GitBranch,
+  Building2,
   Briefcase,
   ShoppingCart,
   Users,
   Clock,
   Activity,
   CircleDot,
+  TrendingUp,
 } from "lucide-react";
 import {
   Card,
@@ -35,7 +36,7 @@ import { formatDistanceToNow } from "date-fns";
 // ---------- Types ----------
 
 interface StatsData {
-  totalWorkflows: number;
+  totalSites: number;
   activeJobs: number;
   pendingOrders: number;
   totalContacts: number;
@@ -54,7 +55,7 @@ interface EventLogEntry {
   description: string;
   createdAt: string;
   user: { name: string } | null;
-  workflow: { name: string } | null;
+  site: { name: string } | null;
   job: { name: string } | null;
 }
 
@@ -62,9 +63,7 @@ interface TrafficLightJob {
   id: string;
   name: string;
   status: string;
-  siteName: string | null;
-  plot: string | null;
-  workflow: { name: string };
+  plot: { name: string; site: { name: string } };
   assignedTo: { name: string } | null;
 }
 
@@ -84,29 +83,29 @@ const STATUS_CONFIG: Record<
   COMPLETED: {
     label: "Completed",
     color: "#22c55e",
-    borderColor: "border-l-green-500",
-    bgColor: "bg-green-500/10",
-    dotColor: "text-green-500",
+    borderColor: "border-l-emerald-500",
+    bgColor: "bg-emerald-50",
+    dotColor: "text-emerald-500",
   },
   IN_PROGRESS: {
     label: "In Progress",
-    color: "#f59e0b",
-    borderColor: "border-l-amber-500",
-    bgColor: "bg-amber-500/10",
-    dotColor: "text-amber-500",
+    color: "#3b82f6",
+    borderColor: "border-l-blue-500",
+    bgColor: "bg-blue-50",
+    dotColor: "text-blue-500",
   },
   ON_HOLD: {
     label: "On Hold",
-    color: "#ef4444",
-    borderColor: "border-l-red-500",
-    bgColor: "bg-red-500/10",
-    dotColor: "text-red-500",
+    color: "#f59e0b",
+    borderColor: "border-l-amber-500",
+    bgColor: "bg-amber-50",
+    dotColor: "text-amber-500",
   },
   NOT_STARTED: {
     label: "Not Started",
     color: "#94a3b8",
-    borderColor: "border-l-slate-400",
-    bgColor: "bg-slate-400/10",
+    borderColor: "border-l-slate-300",
+    bgColor: "bg-slate-50",
     dotColor: "text-slate-400",
   },
 };
@@ -119,8 +118,10 @@ const EVENT_TYPE_VARIANT: Record<string, "default" | "secondary" | "destructive"
   ORDER_PLACED: "outline",
   ORDER_DELIVERED: "default",
   ORDER_CANCELLED: "destructive",
-  WORKFLOW_CREATED: "default",
-  WORKFLOW_UPDATED: "secondary",
+  SITE_CREATED: "default",
+  SITE_UPDATED: "secondary",
+  PLOT_CREATED: "default",
+  PLOT_UPDATED: "secondary",
   USER_ACTION: "secondary",
   NOTIFICATION: "outline",
   SYSTEM: "outline",
@@ -138,32 +139,36 @@ function formatEventType(type: string): string {
 function StatsCards({ stats }: { stats: StatsData }) {
   const cards = [
     {
-      title: "Total Workflows",
-      value: stats.totalWorkflows,
-      icon: GitBranch,
-      accent: "text-chart-1",
-      bg: "bg-chart-1/10",
+      title: "Total Sites",
+      value: stats.totalSites,
+      icon: Building2,
+      gradient: "from-blue-500 to-blue-600",
+      shadow: "shadow-blue-500/20",
+      lightBg: "bg-blue-50",
     },
     {
       title: "Active Jobs",
       value: stats.activeJobs,
       icon: Briefcase,
-      accent: "text-chart-2",
-      bg: "bg-chart-2/10",
+      gradient: "from-emerald-500 to-emerald-600",
+      shadow: "shadow-emerald-500/20",
+      lightBg: "bg-emerald-50",
     },
     {
       title: "Pending Orders",
       value: stats.pendingOrders,
       icon: ShoppingCart,
-      accent: "text-chart-3",
-      bg: "bg-chart-3/10",
+      gradient: "from-amber-500 to-orange-500",
+      shadow: "shadow-amber-500/20",
+      lightBg: "bg-amber-50",
     },
     {
       title: "Total Contacts",
       value: stats.totalContacts,
       icon: Users,
-      accent: "text-chart-4",
-      bg: "bg-chart-4/10",
+      gradient: "from-violet-500 to-purple-600",
+      shadow: "shadow-violet-500/20",
+      lightBg: "bg-violet-50",
     },
   ];
 
@@ -172,19 +177,24 @@ function StatsCards({ stats }: { stats: StatsData }) {
       {cards.map((card) => {
         const Icon = card.icon;
         return (
-          <Card key={card.title}>
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardDescription className="text-sm font-medium">
-                {card.title}
-              </CardDescription>
-              <div className={`rounded-lg p-2 ${card.bg}`}>
-                <Icon className={`size-4 ${card.accent}`} />
+          <div
+            key={card.title}
+            className="group relative overflow-hidden rounded-xl border border-border/50 bg-white p-5 shadow-sm transition-all hover:shadow-md"
+          >
+            <div className="flex items-start justify-between">
+              <div>
+                <p className="text-[13px] font-medium text-slate-500">{card.title}</p>
+                <p className="mt-2 text-3xl font-bold tracking-tight text-slate-900">
+                  {card.value}
+                </p>
               </div>
-            </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold tracking-tight">{card.value}</div>
-            </CardContent>
-          </Card>
+              <div className={`flex size-11 items-center justify-center rounded-xl bg-gradient-to-br ${card.gradient} shadow-md ${card.shadow}`}>
+                <Icon className="size-5 text-white" />
+              </div>
+            </div>
+            {/* Subtle bottom accent */}
+            <div className={`absolute bottom-0 left-0 right-0 h-[2px] bg-gradient-to-r ${card.gradient} opacity-40`} />
+          </div>
         );
       })}
     </div>
@@ -209,24 +219,29 @@ function TrafficLightSection({
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-2">
-        <Activity className="size-5 text-muted-foreground" />
-        <h2 className="text-lg font-semibold">Job Health Overview</h2>
+      <div className="flex items-center gap-2.5">
+        <div className="flex size-8 items-center justify-center rounded-lg bg-slate-100">
+          <Activity className="size-4 text-slate-600" />
+        </div>
+        <div>
+          <h2 className="text-base font-semibold text-slate-900">Job Health Overview</h2>
+          <p className="text-xs text-slate-500">Real-time status across all sites</p>
+        </div>
       </div>
 
       {/* Summary pills */}
-      <div className="flex flex-wrap gap-3">
+      <div className="flex flex-wrap gap-2.5">
         {statusOrder.map((status) => {
           const config = STATUS_CONFIG[status];
           const count = jobsByStatus[status];
           return (
             <div
               key={status}
-              className={`flex items-center gap-2 rounded-full px-4 py-1.5 text-sm font-medium ${config.bgColor}`}
+              className={`flex items-center gap-2 rounded-full border border-border/40 px-4 py-2 text-[13px] font-medium ${config.bgColor}`}
             >
               <CircleDot className={`size-3.5 ${config.dotColor}`} />
-              <span>
-                {config.label}: {count}
+              <span className="text-slate-700">
+                {config.label}: <span className="font-semibold">{count}</span>
               </span>
             </div>
           );
@@ -239,41 +254,35 @@ function TrafficLightSection({
           {trafficLightJobs.map((job) => {
             const config = STATUS_CONFIG[job.status] ?? STATUS_CONFIG.NOT_STARTED;
             return (
-              <Card
+              <div
                 key={job.id}
-                className={`border-l-4 ${config.borderColor}`}
+                className={`rounded-xl border border-border/40 border-l-[3px] bg-white p-4 shadow-sm transition-all hover:shadow-md ${config.borderColor}`}
               >
-                <CardContent className="pt-4">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate font-medium">{job.name}</p>
-                      <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                        {job.workflow.name}
-                        {job.siteName ? ` \u2022 ${job.siteName}` : ""}
-                        {job.plot ? ` \u2022 Plot ${job.plot}` : ""}
-                      </p>
-                    </div>
-                    <div className={`mt-0.5 flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${config.bgColor}`}>
-                      <CircleDot className={`size-2.5 ${config.dotColor}`} />
-                      <span>{config.label}</span>
-                    </div>
-                  </div>
-                  {job.assignedTo && (
-                    <p className="mt-2 text-xs text-muted-foreground">
-                      Assigned to {job.assignedTo.name}
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold text-slate-900">{job.name}</p>
+                    <p className="mt-1 truncate text-xs text-slate-500">
+                      {job.plot.site.name} &bull; {job.plot.name}
                     </p>
-                  )}
-                </CardContent>
-              </Card>
+                  </div>
+                  <div className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold ${config.bgColor}`}>
+                    <CircleDot className={`size-2.5 ${config.dotColor}`} />
+                    <span className="text-slate-600">{config.label}</span>
+                  </div>
+                </div>
+                {job.assignedTo && (
+                  <p className="mt-3 text-xs text-slate-400">
+                    Assigned to <span className="font-medium text-slate-500">{job.assignedTo.name}</span>
+                  </p>
+                )}
+              </div>
             );
           })}
         </div>
       ) : (
-        <Card>
-          <CardContent className="py-8 text-center text-sm text-muted-foreground">
-            No active jobs to display.
-          </CardContent>
-        </Card>
+        <div className="rounded-xl border border-dashed border-border bg-slate-50/50 py-10 text-center">
+          <p className="text-sm text-slate-400">No active jobs to display.</p>
+        </div>
       )}
     </div>
   );
@@ -295,95 +304,96 @@ function JobStatusChart({ jobsByStatus }: { jobsByStatus: JobsByStatus }) {
   return (
     <div className="grid gap-4 lg:grid-cols-2">
       {/* Pie Chart */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Status Distribution</CardTitle>
-          <CardDescription>Breakdown of all jobs by current status</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {total === 0 ? (
-            <div className="flex h-[260px] items-center justify-center text-sm text-muted-foreground">
-              No job data available.
-            </div>
-          ) : (
-            <ResponsiveContainer width="100%" height={260}>
-              <PieChart>
-                <Pie
-                  data={pieData}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={60}
-                  outerRadius={100}
-                  paddingAngle={3}
-                  dataKey="value"
-                  label={(props: PieLabelRenderProps) =>
-                    `${props.name ?? ""} ${(Number(props.percent ?? 0) * 100).toFixed(0)}%`
-                  }
-                  labelLine={false}
-                >
-                  {pieData.map((entry) => (
-                    <Cell key={entry.name} fill={entry.color} />
-                  ))}
-                </Pie>
-                <Tooltip
-                  contentStyle={{
-                    borderRadius: "8px",
-                    border: "1px solid hsl(var(--border))",
-                    backgroundColor: "hsl(var(--card))",
-                    color: "hsl(var(--card-foreground))",
-                  }}
-                />
-              </PieChart>
-            </ResponsiveContainer>
-          )}
-        </CardContent>
-      </Card>
+      <div className="rounded-xl border border-border/50 bg-white p-6 shadow-sm">
+        <div className="mb-4">
+          <h3 className="text-sm font-semibold text-slate-900">Status Distribution</h3>
+          <p className="text-xs text-slate-500">Breakdown of all jobs by current status</p>
+        </div>
+        {total === 0 ? (
+          <div className="flex h-[260px] items-center justify-center text-sm text-slate-400">
+            No job data available.
+          </div>
+        ) : (
+          <ResponsiveContainer width="100%" height={260}>
+            <PieChart>
+              <Pie
+                data={pieData}
+                cx="50%"
+                cy="50%"
+                innerRadius={65}
+                outerRadius={105}
+                paddingAngle={4}
+                dataKey="value"
+                strokeWidth={0}
+                label={(props: PieLabelRenderProps) =>
+                  `${props.name ?? ""} ${(Number(props.percent ?? 0) * 100).toFixed(0)}%`
+                }
+                labelLine={false}
+              >
+                {pieData.map((entry) => (
+                  <Cell key={entry.name} fill={entry.color} />
+                ))}
+              </Pie>
+              <Tooltip
+                contentStyle={{
+                  borderRadius: "12px",
+                  border: "1px solid #e2e8f0",
+                  backgroundColor: "#fff",
+                  color: "#1e293b",
+                  fontSize: "13px",
+                  boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
+                }}
+              />
+            </PieChart>
+          </ResponsiveContainer>
+        )}
+      </div>
 
       {/* Bar Chart */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Jobs by Status</CardTitle>
-          <CardDescription>Comparative view of job statuses</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {total === 0 ? (
-            <div className="flex h-[260px] items-center justify-center text-sm text-muted-foreground">
-              No job data available.
-            </div>
-          ) : (
-            <ResponsiveContainer width="100%" height={260}>
-              <BarChart data={barData} barCategoryGap="20%">
-                <XAxis
-                  dataKey="name"
-                  tick={{ fontSize: 12 }}
-                  tickLine={false}
-                  axisLine={false}
-                />
-                <YAxis
-                  allowDecimals={false}
-                  tick={{ fontSize: 12 }}
-                  tickLine={false}
-                  axisLine={false}
-                />
-                <Tooltip
-                  contentStyle={{
-                    borderRadius: "8px",
-                    border: "1px solid hsl(var(--border))",
-                    backgroundColor: "hsl(var(--card))",
-                    color: "hsl(var(--card-foreground))",
-                  }}
-                />
-                <Legend />
-                <Bar dataKey="Jobs" radius={[6, 6, 0, 0]}>
-                  {barData.map((_, index) => (
-                    <Cell key={index} fill={pieData[index].color} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          )}
-        </CardContent>
-      </Card>
+      <div className="rounded-xl border border-border/50 bg-white p-6 shadow-sm">
+        <div className="mb-4">
+          <h3 className="text-sm font-semibold text-slate-900">Jobs by Status</h3>
+          <p className="text-xs text-slate-500">Comparative view of job statuses</p>
+        </div>
+        {total === 0 ? (
+          <div className="flex h-[260px] items-center justify-center text-sm text-slate-400">
+            No job data available.
+          </div>
+        ) : (
+          <ResponsiveContainer width="100%" height={260}>
+            <BarChart data={barData} barCategoryGap="20%">
+              <XAxis
+                dataKey="name"
+                tick={{ fontSize: 12, fill: "#64748b" }}
+                tickLine={false}
+                axisLine={false}
+              />
+              <YAxis
+                allowDecimals={false}
+                tick={{ fontSize: 12, fill: "#64748b" }}
+                tickLine={false}
+                axisLine={false}
+              />
+              <Tooltip
+                contentStyle={{
+                  borderRadius: "12px",
+                  border: "1px solid #e2e8f0",
+                  backgroundColor: "#fff",
+                  color: "#1e293b",
+                  fontSize: "13px",
+                  boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
+                }}
+              />
+              <Legend />
+              <Bar dataKey="Jobs" radius={[8, 8, 0, 0]}>
+                {barData.map((_, index) => (
+                  <Cell key={index} fill={pieData[index].color} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        )}
+      </div>
     </div>
   );
 }
@@ -392,31 +402,33 @@ function JobStatusChart({ jobsByStatus }: { jobsByStatus: JobsByStatus }) {
 
 function RecentActivity({ events }: { events: EventLogEntry[] }) {
   return (
-    <Card>
-      <CardHeader>
-        <div className="flex items-center gap-2">
-          <Clock className="size-4 text-muted-foreground" />
-          <CardTitle>Recent Activity</CardTitle>
+    <div className="rounded-xl border border-border/50 bg-white shadow-sm">
+      <div className="border-b border-border/50 px-6 py-4">
+        <div className="flex items-center gap-2.5">
+          <div className="flex size-8 items-center justify-center rounded-lg bg-slate-100">
+            <Clock className="size-4 text-slate-600" />
+          </div>
+          <div>
+            <h3 className="text-sm font-semibold text-slate-900">Recent Activity</h3>
+            <p className="text-xs text-slate-500">Latest events across all sites and jobs</p>
+          </div>
         </div>
-        <CardDescription>Latest events across all workflows and jobs</CardDescription>
-      </CardHeader>
-      <CardContent>
+      </div>
+      <div className="px-6 py-2">
         {events.length === 0 ? (
-          <p className="py-6 text-center text-sm text-muted-foreground">
+          <p className="py-8 text-center text-sm text-slate-400">
             No recent activity.
           </p>
         ) : (
-          <div className="space-y-0">
-            {events.map((event, index) => (
+          <div className="divide-y divide-border/40">
+            {events.map((event) => (
               <div
                 key={event.id}
-                className={`flex items-start gap-3 py-3 ${
-                  index !== events.length - 1 ? "border-b" : ""
-                }`}
+                className="flex items-start gap-3 py-4"
               >
                 {/* Timeline dot */}
-                <div className="mt-1.5 flex flex-col items-center">
-                  <div className="size-2 rounded-full bg-primary" />
+                <div className="mt-2 flex flex-col items-center">
+                  <div className="size-2 rounded-full bg-blue-500 ring-4 ring-blue-500/10" />
                 </div>
 
                 {/* Content */}
@@ -426,21 +438,21 @@ function RecentActivity({ events }: { events: EventLogEntry[] }) {
                       {formatEventType(event.type)}
                     </Badge>
                     {event.job && (
-                      <span className="text-xs text-muted-foreground">
+                      <span className="text-xs font-medium text-slate-500">
                         {event.job.name}
                       </span>
                     )}
                   </div>
-                  <p className="mt-1 text-sm">{event.description}</p>
-                  <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                    {event.user && <span>by {event.user.name}</span>}
-                    {event.workflow && (
+                  <p className="mt-1.5 text-sm text-slate-700">{event.description}</p>
+                  <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px] text-slate-400">
+                    {event.user && <span className="font-medium">{event.user.name}</span>}
+                    {event.site && (
                       <>
-                        <span className="text-border">&middot;</span>
-                        <span>{event.workflow.name}</span>
+                        <span>&middot;</span>
+                        <span>{event.site.name}</span>
                       </>
                     )}
-                    <span className="text-border">&middot;</span>
+                    <span>&middot;</span>
                     <span>
                       {formatDistanceToNow(new Date(event.createdAt), {
                         addSuffix: true,
@@ -452,8 +464,8 @@ function RecentActivity({ events }: { events: EventLogEntry[] }) {
             ))}
           </div>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }
 
@@ -461,13 +473,19 @@ function RecentActivity({ events }: { events: EventLogEntry[] }) {
 
 export function DashboardClient({ data }: { data: DashboardData }) {
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       {/* Page Header */}
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Dashboard</h1>
-        <p className="text-sm text-muted-foreground">
-          Overview of your construction site operations
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900">Dashboard</h1>
+          <p className="mt-1 text-sm text-slate-500">
+            Overview of your construction site operations
+          </p>
+        </div>
+        <div className="hidden items-center gap-2 rounded-full bg-blue-50 px-4 py-2 text-[13px] font-medium text-blue-700 sm:flex">
+          <TrendingUp className="size-4" />
+          <span>{data.stats.activeJobs} active jobs</span>
+        </div>
       </div>
 
       {/* Stats Row */}

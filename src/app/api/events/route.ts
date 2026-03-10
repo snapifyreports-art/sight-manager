@@ -13,7 +13,8 @@ export async function GET(req: NextRequest) {
   const page = Math.max(1, parseInt(searchParams.get("page") || "1", 10));
   const limit = Math.min(100, Math.max(1, parseInt(searchParams.get("limit") || "50", 10)));
   const type = searchParams.get("type");
-  const workflowId = searchParams.get("workflowId");
+  const siteId = searchParams.get("siteId");
+  const plotId = searchParams.get("plotId");
   const jobId = searchParams.get("jobId");
 
   // Build where clause from filters
@@ -23,8 +24,12 @@ export async function GET(req: NextRequest) {
     where.type = type;
   }
 
-  if (workflowId) {
-    where.workflowId = workflowId;
+  if (siteId) {
+    where.siteId = siteId;
+  }
+
+  if (plotId) {
+    where.plotId = plotId;
   }
 
   if (jobId) {
@@ -36,8 +41,9 @@ export async function GET(req: NextRequest) {
       where,
       include: {
         user: { select: { id: true, name: true, email: true } },
-        workflow: { select: { id: true, name: true } },
-        job: { select: { id: true, name: true, workflowId: true } },
+        site: { select: { id: true, name: true } },
+        plot: { select: { id: true, name: true, siteId: true } },
+        job: { select: { id: true, name: true, plotId: true } },
       },
       orderBy: { createdAt: "desc" },
       skip: (page - 1) * limit,
@@ -54,4 +60,42 @@ export async function GET(req: NextRequest) {
     page,
     totalPages,
   });
+}
+
+export async function POST(req: NextRequest) {
+  const session = await auth();
+  if (!session) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const body = await req.json();
+  const { type, description, siteId, plotId, jobId } = body;
+
+  if (!type || !description) {
+    return NextResponse.json(
+      { error: "type and description are required" },
+      { status: 400 }
+    );
+  }
+
+  // Validate event type
+  if (!Object.values(EventType).includes(type as EventType)) {
+    return NextResponse.json(
+      { error: `Invalid event type: ${type}` },
+      { status: 400 }
+    );
+  }
+
+  const event = await prisma.eventLog.create({
+    data: {
+      type: type as EventType,
+      description,
+      siteId: siteId || null,
+      plotId: plotId || null,
+      jobId: jobId || null,
+      userId: session.user.id,
+    },
+  });
+
+  return NextResponse.json(event, { status: 201 });
 }

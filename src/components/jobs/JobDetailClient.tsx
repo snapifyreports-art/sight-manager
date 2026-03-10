@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { format, formatDistanceToNow } from "date-fns";
 import {
@@ -12,13 +12,20 @@ import {
   MapPin,
   Calendar,
   User,
-  GitBranch,
-  Building,
-  Hash,
+  Building2,
+  LayoutGrid,
   ShoppingCart,
   Clock,
   CircleDot,
   Package,
+  HardHat,
+  UserPlus,
+  X,
+  Loader2,
+  Mail,
+  AlertTriangle,
+  ArrowRight,
+  Send,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -29,6 +36,19 @@ import {
   CardTitle,
   CardDescription,
 } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+  DialogClose,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { PhotoUpload } from "./PhotoUpload";
 
 // ---------- Types ----------
 
@@ -36,25 +56,31 @@ interface JobDetail {
   id: string;
   name: string;
   description: string | null;
-  workflowId: string;
+  plotId: string;
   location: string | null;
   address: string | null;
-  siteName: string | null;
-  plot: string | null;
   startDate: string | null;
   endDate: string | null;
   status: string;
   assignedToId: string | null;
   createdAt: string;
   updatedAt: string;
-  workflow: {
+  plot: {
     id: string;
     name: string;
     description: string | null;
-    status: string;
+    siteId: string;
     createdAt: string;
     updatedAt: string;
-    createdById: string;
+    site: {
+      id: string;
+      name: string;
+      description: string | null;
+      status: string;
+      createdAt: string;
+      updatedAt: string;
+      createdById: string;
+    };
   };
   assignedTo: {
     id: string;
@@ -62,6 +88,17 @@ interface JobDetail {
     email: string;
     role: string;
   } | null;
+  contractors: Array<{
+    id: string;
+    contactId: string;
+    contact: {
+      id: string;
+      name: string;
+      company: string | null;
+      phone: string | null;
+      email: string | null;
+    };
+  }>;
   orders: Array<{
     id: string;
     supplierId: string;
@@ -74,10 +111,18 @@ interface JobDetail {
     expectedDeliveryDate: string | null;
     deliveredDate: string | null;
     leadTimeDays: number | null;
-    items: string | null;
+    itemsDescription: string | null;
     createdAt: string;
     updatedAt: string;
     supplier: { id: string; name: string };
+    orderItems: Array<{
+      id: string;
+      name: string;
+      quantity: number;
+      unit: string;
+      unitCost: number;
+      totalCost: number;
+    }>;
   }>;
   actions: Array<{
     id: string;
@@ -88,6 +133,72 @@ interface JobDetail {
     createdAt: string;
     user: { id: string; name: string };
   }>;
+  photos: Array<{
+    id: string;
+    url: string;
+    fileName: string | null;
+    caption: string | null;
+    createdAt: string;
+    uploadedBy?: { id: string; name: string } | null;
+  }>;
+}
+
+interface NextJobContractor {
+  contactId: string;
+  name: string;
+  email: string | null;
+  company: string | null;
+}
+
+interface NextJobPendingOrder {
+  id: string;
+  supplierName: string;
+  status: string;
+  expectedDeliveryDate: string | null;
+  itemsDescription: string | null;
+}
+
+interface NextJobDetail {
+  id: string;
+  name: string;
+  startDate: string | null;
+  endDate: string | null;
+  status: string;
+  sortOrder: number;
+  assignedToId: string | null;
+  contractors: NextJobContractor[];
+  pendingOrders: NextJobPendingOrder[];
+}
+
+interface NextJobResponse {
+  job: {
+    id: string;
+    name: string;
+    plotName: string;
+    siteName: string;
+    endDate: string | null;
+    actualEndDate: string | null;
+  };
+  nextJobs: NextJobDetail[];
+  cascade: {
+    needed: boolean;
+    deltaDays: number;
+    jobUpdates: Array<{
+      jobId: string;
+      jobName: string;
+      originalStart: string | null;
+      originalEnd: string | null;
+      newStart: string;
+      newEnd: string;
+    }>;
+    orderUpdates: Array<{
+      orderId: string;
+      originalOrderDate: string;
+      originalDeliveryDate: string | null;
+      newOrderDate: string;
+      newDeliveryDate: string | null;
+    }>;
+  };
 }
 
 // ---------- Status Config ----------
@@ -150,12 +261,104 @@ function StatusBadge({ status }: { status: string }) {
 
 // ---------- Main Component ----------
 
+interface ContractorContact {
+  id: string;
+  name: string;
+  company: string | null;
+  phone: string | null;
+  email: string | null;
+}
+
 export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
   const router = useRouter();
   const [job, setJob] = useState(initialJob);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
+  // Contractor dialog state
+  const [contractorDialogOpen, setContractorDialogOpen] = useState(false);
+  const [allContractors, setAllContractors] = useState<ContractorContact[]>([]);
+  const [selectedContractorIds, setSelectedContractorIds] = useState<Set<string>>(new Set());
+  const [loadingContractors, setLoadingContractors] = useState(false);
+  const [savingContractors, setSavingContractors] = useState(false);
+
+  // Fetch contractor contacts when dialog opens
+  useEffect(() => {
+    if (contractorDialogOpen && allContractors.length === 0) {
+      setLoadingContractors(true);
+      fetch("/api/contacts?type=CONTRACTOR")
+        .then((r) => r.json())
+        .then((data) => {
+          setAllContractors(data);
+        })
+        .catch(console.error)
+        .finally(() => setLoadingContractors(false));
+    }
+    if (contractorDialogOpen) {
+      setSelectedContractorIds(
+        new Set(job.contractors.map((c) => c.contactId))
+      );
+    }
+  }, [contractorDialogOpen, allContractors.length, job.contractors]);
+
+  const handleSaveContractors = useCallback(async () => {
+    setSavingContractors(true);
+    try {
+      const res = await fetch(`/api/jobs/${job.id}/contractors`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contactIds: Array.from(selectedContractorIds),
+        }),
+      });
+      if (res.ok) {
+        const updated = await res.json();
+        setJob((prev) => ({
+          ...prev,
+          contractors: updated,
+        }));
+        setContractorDialogOpen(false);
+        router.refresh();
+      }
+    } catch (error) {
+      console.error("Failed to save contractors:", error);
+    } finally {
+      setSavingContractors(false);
+    }
+  }, [job.id, selectedContractorIds, router]);
+
+  // Sign-off dialog state
+  const [signOffDialogOpen, setSignOffDialogOpen] = useState(false);
+  const [signOffNotes, setSignOffNotes] = useState("");
+  const [signingOff, setSigningOff] = useState(false);
+
+  // Confirm delivery dialog state
+  const [deliveryDialogOpen, setDeliveryDialogOpen] = useState(false);
+  const [deliveryOrderId, setDeliveryOrderId] = useState<string | null>(null);
+  const [deliveryDate, setDeliveryDate] = useState(
+    format(new Date(), "yyyy-MM-dd")
+  );
+  const [deliveryNotes, setDeliveryNotes] = useState("");
+  const [confirmingDelivery, setConfirmingDelivery] = useState(false);
+
+  // Post-delivery notification dialog state
+  const [postDeliveryDialogOpen, setPostDeliveryDialogOpen] = useState(false);
+  const [deliveryNotifySupplier, setDeliveryNotifySupplier] = useState("");
+  const [deliveryNotifyContractors, setDeliveryNotifyContractors] = useState<Set<string>>(new Set());
+  const [sendingDeliveryEmail, setSendingDeliveryEmail] = useState(false);
+
+  // Post-signoff multi-step dialog state
+  const [postSignOffDialogOpen, setPostSignOffDialogOpen] = useState(false);
+  const [postSignOffData, setPostSignOffData] = useState<NextJobResponse | null>(null);
+  const [postSignOffStep, setPostSignOffStep] = useState<"cascade" | "notify">("cascade");
+  const [applyingCascade, setApplyingCascade] = useState(false);
+  const [sendingNotifications, setSendingNotifications] = useState(false);
+  const [notifyContractorIds, setNotifyContractorIds] = useState<Set<string>>(new Set());
+
   async function handleAction(action: string) {
+    if (action === "complete") {
+      setSignOffDialogOpen(true);
+      return;
+    }
     setActionLoading(action);
     try {
       const res = await fetch(`/api/jobs/${job.id}/actions`, {
@@ -173,6 +376,189 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
     }
   }
 
+  async function handleSignOff() {
+    setSigningOff(true);
+    try {
+      const res = await fetch(`/api/jobs/${job.id}/actions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "complete",
+          signOffNotes: signOffNotes || undefined,
+        }),
+      });
+      if (res.ok) {
+        const updated = await res.json();
+        setJob((prev) => ({ ...prev, status: updated.status }));
+        setSignOffDialogOpen(false);
+        setSignOffNotes("");
+
+        // Fetch next-job data for post-signoff dialog
+        try {
+          const nextRes = await fetch(`/api/jobs/${job.id}/next`);
+          if (nextRes.ok) {
+            const nextData: NextJobResponse = await nextRes.json();
+            if (nextData.cascade.needed || nextData.nextJobs.length > 0) {
+              setPostSignOffData(nextData);
+              setPostSignOffStep(nextData.cascade.needed ? "cascade" : "notify");
+              // Pre-select all contractors with emails
+              const allIds = new Set<string>();
+              for (const nj of nextData.nextJobs) {
+                for (const c of nj.contractors) {
+                  if (c.email) allIds.add(c.contactId);
+                }
+              }
+              setNotifyContractorIds(allIds);
+              setPostSignOffDialogOpen(true);
+            } else {
+              router.refresh();
+            }
+          } else {
+            router.refresh();
+          }
+        } catch {
+          router.refresh();
+        }
+      }
+    } finally {
+      setSigningOff(false);
+    }
+  }
+
+  async function handleConfirmDelivery() {
+    if (!deliveryOrderId) return;
+    setConfirmingDelivery(true);
+    try {
+      const res = await fetch(`/api/orders/${deliveryOrderId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          status: "DELIVERED",
+          deliveredDate: deliveryDate,
+        }),
+      });
+      if (res.ok) {
+        // Capture supplier name before state update
+        const confirmedOrder = job.orders.find((o) => o.id === deliveryOrderId);
+        setJob((prev) => ({
+          ...prev,
+          orders: prev.orders.map((o) =>
+            o.id === deliveryOrderId
+              ? { ...o, status: "DELIVERED", deliveredDate: deliveryDate }
+              : o
+          ),
+        }));
+        setDeliveryDialogOpen(false);
+        setDeliveryOrderId(null);
+        setDeliveryNotes("");
+
+        // Open post-delivery notification dialog if contractors with emails exist
+        if (confirmedOrder && job.contractors.some((c) => c.contact.email)) {
+          setDeliveryNotifySupplier(confirmedOrder.supplier.name);
+          setDeliveryNotifyContractors(
+            new Set(job.contractors.filter((c) => c.contact.email).map((c) => c.contactId))
+          );
+          setPostDeliveryDialogOpen(true);
+        } else {
+          router.refresh();
+        }
+      }
+    } finally {
+      setConfirmingDelivery(false);
+    }
+  }
+
+  async function handleSendDeliveryNotification() {
+    setSendingDeliveryEmail(true);
+    try {
+      const contractorsToNotify = job.contractors.filter(
+        (c) => deliveryNotifyContractors.has(c.contactId) && c.contact.email
+      );
+      await Promise.all(
+        contractorsToNotify.map((c) =>
+          fetch("/api/email/send", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              type: "delivery_confirmed",
+              to: c.contact.email,
+              recipientName: c.contact.name,
+              data: {
+                jobName: job.name,
+                supplierName: deliveryNotifySupplier,
+                siteName: job.plot.site.name,
+                plotName: job.plot.name,
+              },
+            }),
+          })
+        )
+      );
+    } catch (error) {
+      console.error("Failed to send delivery notification:", error);
+    } finally {
+      setSendingDeliveryEmail(false);
+      setPostDeliveryDialogOpen(false);
+      router.refresh();
+    }
+  }
+
+  async function handleApplyCascade() {
+    if (!postSignOffData) return;
+    setApplyingCascade(true);
+    try {
+      await fetch(`/api/jobs/${job.id}/cascade`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          newEndDate: postSignOffData.job.actualEndDate,
+          confirm: true,
+        }),
+      });
+      setPostSignOffStep("notify");
+    } catch (error) {
+      console.error("Failed to apply cascade:", error);
+    } finally {
+      setApplyingCascade(false);
+    }
+  }
+
+  async function handleSendNextStageNotification() {
+    if (!postSignOffData) return;
+    setSendingNotifications(true);
+    try {
+      for (const nj of postSignOffData.nextJobs) {
+        const contractorsToNotify = nj.contractors.filter(
+          (c) => notifyContractorIds.has(c.contactId) && c.email
+        );
+        await Promise.all(
+          contractorsToNotify.map((c) =>
+            fetch("/api/email/send", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                type: "next_stage_ready",
+                to: c.email,
+                recipientName: c.name,
+                data: {
+                  completedJobName: job.name,
+                  nextJobName: nj.name,
+                  siteName: job.plot.site.name,
+                  plotName: job.plot.name,
+                },
+              }),
+            })
+          )
+        );
+      }
+    } catch (error) {
+      console.error("Failed to send notifications:", error);
+    } finally {
+      setSendingNotifications(false);
+      setPostSignOffDialogOpen(false);
+      router.refresh();
+    }
+  }
+
   return (
     <div className="space-y-6">
       {/* Back + Header */}
@@ -181,10 +567,10 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
           variant="ghost"
           size="sm"
           className="w-fit"
-          onClick={() => router.push("/jobs")}
+          onClick={() => router.push(`/sites/${job.plot.site.id}/plots/${job.plotId}`)}
         >
           <ArrowLeft className="size-4" data-icon="inline-start" />
-          Back to Jobs
+          Back to Plot
         </Button>
 
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -233,7 +619,7 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
                 disabled={actionLoading !== null}
               >
                 <CheckCircle className="size-3.5" data-icon="inline-start" />
-                {actionLoading === "complete" ? "Completing..." : "Complete"}
+                Sign Off
               </Button>
             )}
           </div>
@@ -243,25 +629,53 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
       {/* Info Grid */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <InfoCard
-          icon={GitBranch}
-          label="Workflow"
-          value={job.workflow.name}
+          icon={Building2}
+          label="Site"
+          value={job.plot.site.name}
+        />
+        <InfoCard
+          icon={LayoutGrid}
+          label="Plot"
+          value={job.plot.name}
         />
         <InfoCard
           icon={User}
           label="Assigned To"
           value={job.assignedTo?.name ?? "Unassigned"}
         />
-        <InfoCard
-          icon={Building}
-          label="Site"
-          value={job.siteName ?? "\u2014"}
-        />
-        <InfoCard
-          icon={Hash}
-          label="Plot"
-          value={job.plot ?? "\u2014"}
-        />
+        <Card>
+          <CardContent className="pt-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <HardHat className="size-3.5" />
+                <span className="text-xs font-medium">Contractors</span>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 px-1.5 text-xs"
+                onClick={() => setContractorDialogOpen(true)}
+              >
+                <UserPlus className="size-3" />
+                Manage
+              </Button>
+            </div>
+            {job.contractors.length === 0 ? (
+              <p className="mt-1 text-sm text-muted-foreground">None assigned</p>
+            ) : (
+              <div className="mt-1.5 flex flex-wrap gap-1">
+                {job.contractors.map((c) => (
+                  <span
+                    key={c.id}
+                    className="inline-flex items-center rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700"
+                  >
+                    {c.contact.name}
+                  </span>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
         <InfoCard
           icon={MapPin}
           label="Location"
@@ -320,6 +734,10 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
                   const orderConfig =
                     ORDER_STATUS_CONFIG[order.status] ??
                     ORDER_STATUS_CONFIG.PENDING;
+                  const orderTotal = order.orderItems.reduce(
+                    (sum, item) => sum + item.totalCost,
+                    0
+                  );
                   return (
                     <div
                       key={order.id}
@@ -334,6 +752,18 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
                             {order.orderDetails}
                           </p>
                         )}
+                        {order.orderItems.length > 0 && (
+                          <div className="mt-1 space-y-0.5">
+                            {order.orderItems.map((item) => (
+                              <p key={item.id} className="text-xs text-muted-foreground">
+                                {item.name} &mdash; {item.quantity} {item.unit} @ {item.unitCost.toFixed(2)} = {item.totalCost.toFixed(2)}
+                              </p>
+                            ))}
+                            <p className="text-xs font-medium">
+                              Total: {orderTotal.toFixed(2)}
+                            </p>
+                          </div>
+                        )}
                         <p className="mt-1 text-xs text-muted-foreground">
                           Ordered{" "}
                           {format(
@@ -347,9 +777,40 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
                             )}`}
                         </p>
                       </div>
-                      <Badge variant={orderConfig.variant}>
-                        {orderConfig.label}
-                      </Badge>
+                      <div className="flex flex-col items-end gap-1.5">
+                        <Badge variant={orderConfig.variant}>
+                          {orderConfig.label}
+                        </Badge>
+                        {order.status !== "DELIVERED" &&
+                          order.status !== "CANCELLED" && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-6 px-2 text-[11px]"
+                              onClick={() => {
+                                setDeliveryOrderId(order.id);
+                                setDeliveryDate(
+                                  format(new Date(), "yyyy-MM-dd")
+                                );
+                                setDeliveryNotes("");
+                                setDeliveryDialogOpen(true);
+                              }}
+                            >
+                              <CheckCircle className="size-3" />
+                              Confirm Delivery
+                            </Button>
+                          )}
+                        {order.status === "DELIVERED" &&
+                          order.deliveredDate && (
+                            <span className="text-[10px] text-green-600">
+                              Delivered{" "}
+                              {format(
+                                new Date(order.deliveredDate),
+                                "dd MMM"
+                              )}
+                            </span>
+                          )}
+                      </div>
                     </div>
                   );
                 })}
@@ -435,6 +896,15 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
         </Card>
       </div>
 
+      {/* Photos */}
+      <PhotoUpload
+        jobId={job.id}
+        photos={job.photos}
+        onPhotosChange={(newPhotos) =>
+          setJob((prev) => ({ ...prev, photos: newPhotos }))
+        }
+      />
+
       {/* Notes */}
       {job.description && (
         <Card>
@@ -448,6 +918,613 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
           </CardContent>
         </Card>
       )}
+
+      {/* Manage Contractors Dialog */}
+      <Dialog
+        open={contractorDialogOpen}
+        onOpenChange={setContractorDialogOpen}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Manage Contractors</DialogTitle>
+            <DialogDescription>
+              Assign contractors to this job.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[50vh] space-y-1 overflow-y-auto py-2">
+            {loadingContractors ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="size-5 animate-spin text-muted-foreground" />
+              </div>
+            ) : allContractors.length === 0 ? (
+              <p className="py-4 text-center text-sm text-muted-foreground">
+                No contractors found. Add contractors in the Contacts page first.
+              </p>
+            ) : (
+              allContractors.map((contractor) => {
+                const checked = selectedContractorIds.has(contractor.id);
+                return (
+                  <label
+                    key={contractor.id}
+                    className={`flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 transition-colors ${
+                      checked
+                        ? "bg-blue-50 ring-1 ring-blue-200"
+                        : "hover:bg-muted/50"
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => {
+                        setSelectedContractorIds((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(contractor.id)) {
+                            next.delete(contractor.id);
+                          } else {
+                            next.add(contractor.id);
+                          }
+                          return next;
+                        });
+                      }}
+                      className="size-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium">{contractor.name}</p>
+                      {contractor.company && (
+                        <p className="text-xs text-muted-foreground">
+                          {contractor.company}
+                        </p>
+                      )}
+                    </div>
+                    {contractor.phone && (
+                      <span className="text-xs text-muted-foreground">
+                        {contractor.phone}
+                      </span>
+                    )}
+                  </label>
+                );
+              })
+            )}
+          </div>
+          <DialogFooter>
+            <DialogClose render={<Button variant="outline" />}>
+              Cancel
+            </DialogClose>
+            <Button
+              onClick={handleSaveContractors}
+              disabled={savingContractors}
+            >
+              {savingContractors ? (
+                <>
+                  <Loader2 className="size-4 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                `Save (${selectedContractorIds.size} selected)`
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Sign-Off Dialog */}
+      <Dialog open={signOffDialogOpen} onOpenChange={setSignOffDialogOpen}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Sign Off Job</DialogTitle>
+            <DialogDescription>
+              Confirm completion and sign off &ldquo;{job.name}&rdquo;.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label htmlFor="sign-off-notes">Sign-Off Notes</Label>
+              <Textarea
+                id="sign-off-notes"
+                placeholder="Any notes about the completed job..."
+                value={signOffNotes}
+                onChange={(e) => setSignOffNotes(e.target.value)}
+                rows={3}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Photos (optional)</Label>
+              <PhotoUpload
+                jobId={job.id}
+                photos={job.photos}
+                onPhotosChange={(newPhotos) =>
+                  setJob((prev) =>
+                    prev ? { ...prev, photos: newPhotos } : prev
+                  )
+                }
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <DialogClose render={<Button variant="outline" />}>
+              Cancel
+            </DialogClose>
+            <Button
+              onClick={handleSignOff}
+              disabled={signingOff}
+              className="bg-green-600 hover:bg-green-700"
+            >
+              {signingOff ? (
+                <>
+                  <Loader2 className="size-4 animate-spin" />
+                  Signing off...
+                </>
+              ) : (
+                <>
+                  <CheckCircle className="size-4" />
+                  Sign Off &amp; Complete
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Confirm Delivery Dialog */}
+      <Dialog open={deliveryDialogOpen} onOpenChange={setDeliveryDialogOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Confirm Delivery</DialogTitle>
+            <DialogDescription>
+              Mark this order as delivered.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label htmlFor="delivery-date">Delivery Date</Label>
+              <Input
+                id="delivery-date"
+                type="date"
+                value={deliveryDate}
+                onChange={(e) => setDeliveryDate(e.target.value)}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <DialogClose render={<Button variant="outline" />}>
+              Cancel
+            </DialogClose>
+            <Button
+              onClick={handleConfirmDelivery}
+              disabled={confirmingDelivery}
+              className="bg-green-600 hover:bg-green-700"
+            >
+              {confirmingDelivery ? (
+                <>
+                  <Loader2 className="size-4 animate-spin" />
+                  Confirming...
+                </>
+              ) : (
+                "Confirm Delivery"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Post-Delivery Notification Dialog */}
+      <Dialog
+        open={postDeliveryDialogOpen}
+        onOpenChange={(open) => {
+          setPostDeliveryDialogOpen(open);
+          if (!open) router.refresh();
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Mail className="size-5 text-blue-500" />
+              Notify Contractors?
+            </DialogTitle>
+            <DialogDescription>
+              Delivery from <strong>{deliveryNotifySupplier}</strong> has been
+              confirmed for &ldquo;{job.name}&rdquo;. Would you like to email
+              the contractors?
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[40vh] space-y-1 overflow-y-auto py-2">
+            {job.contractors.map((c) => {
+              const checked = deliveryNotifyContractors.has(c.contactId);
+              const hasEmail = !!c.contact.email;
+              return (
+                <label
+                  key={c.contactId}
+                  className={`flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 transition-colors ${
+                    !hasEmail
+                      ? "opacity-50 cursor-not-allowed"
+                      : checked
+                        ? "bg-blue-50 ring-1 ring-blue-200"
+                        : "hover:bg-muted/50"
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked && hasEmail}
+                    disabled={!hasEmail}
+                    onChange={() => {
+                      if (!hasEmail) return;
+                      setDeliveryNotifyContractors((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(c.contactId)) next.delete(c.contactId);
+                        else next.add(c.contactId);
+                        return next;
+                      });
+                    }}
+                    className="size-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium">{c.contact.name}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {c.contact.email || "No email address"}
+                    </p>
+                  </div>
+                </label>
+              );
+            })}
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setPostDeliveryDialogOpen(false);
+                router.refresh();
+              }}
+            >
+              Skip
+            </Button>
+            <Button
+              onClick={handleSendDeliveryNotification}
+              disabled={
+                sendingDeliveryEmail || deliveryNotifyContractors.size === 0
+              }
+            >
+              {sendingDeliveryEmail ? (
+                <>
+                  <Loader2 className="size-4 animate-spin" />
+                  Sending...
+                </>
+              ) : (
+                <>
+                  <Send className="size-4" />
+                  Send Email ({deliveryNotifyContractors.size})
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Post-SignOff Multi-Step Dialog */}
+      <Dialog
+        open={postSignOffDialogOpen}
+        onOpenChange={(open) => {
+          setPostSignOffDialogOpen(open);
+          if (!open) router.refresh();
+        }}
+      >
+        <DialogContent className="sm:max-w-lg">
+          {/* Step A: Cascade Preview */}
+          {postSignOffData &&
+            postSignOffStep === "cascade" &&
+            postSignOffData.cascade.needed && (
+              <>
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2">
+                    <Calendar className="size-5 text-amber-500" />
+                    Schedule Adjustment
+                  </DialogTitle>
+                  <DialogDescription>
+                    This job finished{" "}
+                    <strong>
+                      {Math.abs(postSignOffData.cascade.deltaDays)} day
+                      {Math.abs(postSignOffData.cascade.deltaDays) !== 1
+                        ? "s"
+                        : ""}{" "}
+                      {postSignOffData.cascade.deltaDays > 0 ? "late" : "early"}
+                    </strong>
+                    . Would you like to shift the subsequent schedule?
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="max-h-[40vh] space-y-2 overflow-y-auto py-2">
+                  {postSignOffData.cascade.jobUpdates.length > 0 && (
+                    <div className="space-y-1.5">
+                      <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                        Jobs affected
+                      </p>
+                      {postSignOffData.cascade.jobUpdates.map((ju) => (
+                        <div
+                          key={ju.jobId}
+                          className="flex items-center justify-between rounded-lg border px-3 py-2 text-sm"
+                        >
+                          <span className="font-medium">{ju.jobName}</span>
+                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                            <span>
+                              {ju.originalStart
+                                ? format(new Date(ju.originalStart), "dd MMM")
+                                : "\u2014"}{" "}
+                              \u2013{" "}
+                              {ju.originalEnd
+                                ? format(new Date(ju.originalEnd), "dd MMM")
+                                : "\u2014"}
+                            </span>
+                            <ArrowRight className="size-3" />
+                            <span className="font-medium text-foreground">
+                              {format(new Date(ju.newStart), "dd MMM")} \u2013{" "}
+                              {format(new Date(ju.newEnd), "dd MMM")}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {postSignOffData.cascade.orderUpdates.length > 0 && (
+                    <div className="mt-3 space-y-1.5">
+                      <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                        Orders affected
+                      </p>
+                      {postSignOffData.cascade.orderUpdates.map((ou) => (
+                        <div
+                          key={ou.orderId}
+                          className="flex items-center justify-between rounded-lg border px-3 py-2 text-sm"
+                        >
+                          <span className="text-muted-foreground">Order</span>
+                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                            <span>
+                              {format(
+                                new Date(ou.originalOrderDate),
+                                "dd MMM"
+                              )}
+                              {ou.originalDeliveryDate
+                                ? ` \u2192 ${format(new Date(ou.originalDeliveryDate), "dd MMM")}`
+                                : ""}
+                            </span>
+                            <ArrowRight className="size-3" />
+                            <span className="font-medium text-foreground">
+                              {format(new Date(ou.newOrderDate), "dd MMM")}
+                              {ou.newDeliveryDate
+                                ? ` \u2192 ${format(new Date(ou.newDeliveryDate), "dd MMM")}`
+                                : ""}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <DialogFooter>
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      if (postSignOffData.nextJobs.length > 0) {
+                        setPostSignOffStep("notify");
+                      } else {
+                        setPostSignOffDialogOpen(false);
+                        router.refresh();
+                      }
+                    }}
+                  >
+                    Skip
+                  </Button>
+                  <Button
+                    onClick={handleApplyCascade}
+                    disabled={applyingCascade}
+                    className="bg-amber-600 hover:bg-amber-700"
+                  >
+                    {applyingCascade ? (
+                      <>
+                        <Loader2 className="size-4 animate-spin" />
+                        Applying...
+                      </>
+                    ) : (
+                      <>
+                        <Calendar className="size-4" />
+                        Apply Cascade
+                      </>
+                    )}
+                  </Button>
+                </DialogFooter>
+              </>
+            )}
+
+          {/* Step B: Next Stage Notification / Blocking */}
+          {postSignOffData && postSignOffStep === "notify" && (
+            <>
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  {postSignOffData.nextJobs.some(
+                    (nj) => nj.pendingOrders.length > 0
+                  ) ? (
+                    <AlertTriangle className="size-5 text-amber-500" />
+                  ) : (
+                    <CheckCircle className="size-5 text-green-500" />
+                  )}
+                  Next Stage
+                </DialogTitle>
+                <DialogDescription>
+                  {postSignOffData.nextJobs.length === 0
+                    ? "No subsequent jobs found \u2014 this was the last stage."
+                    : `${postSignOffData.nextJobs.length} job${postSignOffData.nextJobs.length !== 1 ? "s" : ""} in the next stage.`}
+                </DialogDescription>
+              </DialogHeader>
+              <div className="max-h-[50vh] space-y-4 overflow-y-auto py-2">
+                {postSignOffData.nextJobs.map((nj) => {
+                  const hasBlockingOrders = nj.pendingOrders.length > 0;
+                  return (
+                    <div
+                      key={nj.id}
+                      className={`rounded-lg border p-3 ${
+                        hasBlockingOrders
+                          ? "border-amber-200 bg-amber-50/50"
+                          : "border-green-200 bg-green-50/50"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        {hasBlockingOrders ? (
+                          <AlertTriangle className="size-4 shrink-0 text-amber-500" />
+                        ) : (
+                          <CheckCircle className="size-4 shrink-0 text-green-500" />
+                        )}
+                        <p className="text-sm font-medium">{nj.name}</p>
+                      </div>
+
+                      {hasBlockingOrders ? (
+                        <div className="mt-2 space-y-1.5">
+                          <p className="text-xs font-medium text-amber-700">
+                            Cannot start \u2014 awaiting delivery:
+                          </p>
+                          {nj.pendingOrders.map((po) => (
+                            <div
+                              key={po.id}
+                              className={`flex items-center justify-between rounded px-2 py-1.5 text-xs ${
+                                po.status === "PENDING"
+                                  ? "bg-red-100 text-red-700"
+                                  : "bg-amber-100 text-amber-700"
+                              }`}
+                            >
+                              <span>
+                                {po.supplierName}
+                                {po.itemsDescription
+                                  ? ` \u2014 ${po.itemsDescription}`
+                                  : ""}
+                              </span>
+                              <div className="flex items-center gap-1.5">
+                                <Badge
+                                  variant={
+                                    po.status === "PENDING"
+                                      ? "destructive"
+                                      : "outline"
+                                  }
+                                  className="h-5 text-[10px]"
+                                >
+                                  {po.status === "PENDING"
+                                    ? "Not Ordered!"
+                                    : po.status}
+                                </Badge>
+                                {po.expectedDeliveryDate && (
+                                  <span className="text-[10px]">
+                                    Due{" "}
+                                    {format(
+                                      new Date(po.expectedDeliveryDate),
+                                      "dd MMM"
+                                    )}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="mt-2 space-y-1">
+                          <p className="text-xs font-medium text-green-700">
+                            Ready to begin
+                          </p>
+                          {nj.contractors.length > 0 && (
+                            <div className="mt-1.5 space-y-1">
+                              {nj.contractors.map((c) => {
+                                const checked = notifyContractorIds.has(
+                                  c.contactId
+                                );
+                                const hasEmail = !!c.email;
+                                return (
+                                  <label
+                                    key={c.contactId}
+                                    className={`flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-xs transition-colors ${
+                                      !hasEmail
+                                        ? "cursor-not-allowed opacity-50"
+                                        : checked
+                                          ? "bg-green-100 ring-1 ring-green-300"
+                                          : "hover:bg-green-100/50"
+                                    }`}
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={checked && hasEmail}
+                                      disabled={!hasEmail}
+                                      onChange={() => {
+                                        if (!hasEmail) return;
+                                        setNotifyContractorIds((prev) => {
+                                          const next = new Set(prev);
+                                          if (next.has(c.contactId))
+                                            next.delete(c.contactId);
+                                          else next.add(c.contactId);
+                                          return next;
+                                        });
+                                      }}
+                                      className="size-3.5 rounded border-gray-300 text-green-600 focus:ring-green-500"
+                                    />
+                                    <span className="font-medium">{c.name}</span>
+                                    <span className="text-muted-foreground">
+                                      {c.email || "No email"}
+                                    </span>
+                                  </label>
+                                );
+                              })}
+                            </div>
+                          )}
+                          {nj.contractors.length === 0 && (
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              No contractors assigned to this job.
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              <DialogFooter>
+                {postSignOffData.nextJobs.every(
+                  (nj) => nj.pendingOrders.length > 0
+                ) ? (
+                  <Button
+                    onClick={() => {
+                      setPostSignOffDialogOpen(false);
+                      router.refresh();
+                    }}
+                  >
+                    Got it
+                  </Button>
+                ) : (
+                  <>
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setPostSignOffDialogOpen(false);
+                        router.refresh();
+                      }}
+                    >
+                      Skip
+                    </Button>
+                    <Button
+                      onClick={handleSendNextStageNotification}
+                      disabled={
+                        sendingNotifications || notifyContractorIds.size === 0
+                      }
+                    >
+                      {sendingNotifications ? (
+                        <>
+                          <Loader2 className="size-4 animate-spin" />
+                          Sending...
+                        </>
+                      ) : (
+                        <>
+                          <Send className="size-4" />
+                          Notify ({notifyContractorIds.size})
+                        </>
+                      )}
+                    </Button>
+                  </>
+                )}
+              </DialogFooter>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

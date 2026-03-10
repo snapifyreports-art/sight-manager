@@ -7,13 +7,6 @@ import { HardHat, Loader2, Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -49,89 +42,104 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-muted/40 px-4">
-      <div className="w-full max-w-sm">
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden px-4">
+      {/* Background */}
+      <div className="absolute inset-0 bg-gradient-to-br from-blue-50 via-indigo-50/30 to-slate-100" />
+      <div className="absolute -top-40 -right-40 size-80 rounded-full bg-blue-200/30 blur-3xl" />
+      <div className="absolute -bottom-40 -left-40 size-80 rounded-full bg-indigo-200/30 blur-3xl" />
+
+      <div className="relative z-10 w-full max-w-[400px]">
         {/* Branding */}
-        <div className="mb-8 flex flex-col items-center gap-3">
-          <div className="flex size-12 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm">
-            <HardHat className="size-6" />
+        <div className="mb-8 flex flex-col items-center gap-4">
+          <div className="flex size-14 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-600/30">
+            <HardHat className="size-7" />
           </div>
           <div className="text-center">
-            <h1 className="text-2xl font-bold tracking-tight">Sight Manager</h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Construction Site Management
+            <h1 className="text-2xl font-bold tracking-tight text-slate-900">
+              Sight Manager
+            </h1>
+            <p className="mt-1 text-sm text-slate-500">
+              Construction Site Management Platform
             </p>
           </div>
         </div>
 
         {/* Login Card */}
-        <Card>
-          <CardHeader className="text-center">
-            <CardTitle>Welcome back</CardTitle>
-            <CardDescription>
+        <div className="rounded-2xl border border-white/60 bg-white/80 p-8 shadow-xl shadow-black/[0.04] backdrop-blur-sm">
+          <div className="mb-6 text-center">
+            <h2 className="text-lg font-semibold text-slate-900">Welcome back</h2>
+            <p className="mt-1 text-sm text-slate-500">
               Sign in to your account to continue
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-              {error && (
-                <div className="rounded-lg bg-destructive/10 px-3 py-2.5 text-sm text-destructive">
-                  {error}
-                </div>
-              )}
+            </p>
+          </div>
 
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="email">Email</Label>
+          <form onSubmit={handleSubmit} className="flex flex-col gap-5">
+            {error && (
+              <div className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-600 ring-1 ring-red-100">
+                {error}
+              </div>
+            )}
+
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="email" className="text-[13px] font-medium text-slate-700">
+                Email
+              </Label>
+              <Input
+                id="email"
+                type="email"
+                placeholder="name@company.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+                autoComplete="email"
+                disabled={loading}
+                className="h-11 rounded-xl border-slate-200 bg-slate-50/50 px-4 text-sm transition-colors focus:bg-white"
+              />
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="password" className="text-[13px] font-medium text-slate-700">
+                Password
+              </Label>
+              <div className="relative">
                 <Input
-                  id="email"
-                  type="email"
-                  placeholder="name@company.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  id="password"
+                  type={showPassword ? "text" : "password"}
+                  placeholder="Enter your password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
                   required
-                  autoComplete="email"
+                  autoComplete="current-password"
                   disabled={loading}
+                  className="h-11 rounded-xl border-slate-200 bg-slate-50/50 px-4 pr-10 text-sm transition-colors focus:bg-white"
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 transition-colors hover:text-slate-600"
+                  tabIndex={-1}
+                >
+                  {showPassword ? (
+                    <EyeOff className="size-4" />
+                  ) : (
+                    <Eye className="size-4" />
+                  )}
+                </button>
               </div>
+            </div>
 
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="password">Password</Label>
-                <div className="relative">
-                  <Input
-                    id="password"
-                    type={showPassword ? "text" : "password"}
-                    placeholder="Enter your password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    required
-                    autoComplete="current-password"
-                    disabled={loading}
-                    className="pr-9"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                    tabIndex={-1}
-                  >
-                    {showPassword ? (
-                      <EyeOff className="size-4" />
-                    ) : (
-                      <Eye className="size-4" />
-                    )}
-                  </button>
-                </div>
-              </div>
+            <Button
+              type="submit"
+              className="mt-1 h-11 w-full rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 font-semibold shadow-md shadow-blue-600/25 transition-all hover:shadow-lg hover:shadow-blue-600/30"
+              disabled={loading}
+            >
+              {loading && <Loader2 className="size-4 animate-spin" />}
+              {loading ? "Signing in..." : "Sign in"}
+            </Button>
+          </form>
+        </div>
 
-              <Button type="submit" className="mt-1 w-full" disabled={loading}>
-                {loading && <Loader2 className="size-4 animate-spin" />}
-                {loading ? "Signing in..." : "Sign in"}
-              </Button>
-            </form>
-          </CardContent>
-        </Card>
-
-        <p className="mt-6 text-center text-xs text-muted-foreground">
+        <p className="mt-8 text-center text-xs text-slate-400">
           Sight Manager &copy; {new Date().getFullYear()}
         </p>
       </div>
