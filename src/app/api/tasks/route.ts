@@ -1,15 +1,16 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { addDays } from "date-fns";
+import { getServerCurrentDate } from "@/lib/dev-date";
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   const session = await auth();
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const now = new Date();
+  const now = getServerCurrentDate(req);
   const in7Days = addDays(now, 7);
   const in3Days = addDays(now, 3);
 
@@ -90,6 +91,23 @@ export async function GET() {
     orderBy: { endDate: "asc" },
   });
 
+  // 4b. Late Start — NOT_STARTED jobs whose start date has passed
+  const lateStartJobs = await prisma.job.findMany({
+    where: {
+      status: "NOT_STARTED",
+      startDate: { lt: now },
+    },
+    include: {
+      plot: {
+        include: {
+          site: { select: { id: true, name: true } },
+        },
+      },
+      assignedTo: { select: { id: true, name: true } },
+    },
+    orderBy: { startDate: "asc" },
+  });
+
   // 5. Overdue Materials — ORDERED/CONFIRMED orders past expected delivery date
   const overdueOrders = await prisma.materialOrder.findMany({
     where: {
@@ -155,6 +173,7 @@ export async function GET() {
     sendOrder: JSON.parse(JSON.stringify(sendOrder)),
     signOffJobs: JSON.parse(JSON.stringify(signOffJobs)),
     overdueJobs: JSON.parse(JSON.stringify(overdueJobs)),
+    lateStartJobs: JSON.parse(JSON.stringify(lateStartJobs)),
     overdueOrders: JSON.parse(JSON.stringify(overdueOrders)),
     upcomingJobs: JSON.parse(JSON.stringify(upcomingJobs)),
     upcomingDeliveries: JSON.parse(JSON.stringify(upcomingDeliveries)),
@@ -163,6 +182,7 @@ export async function GET() {
       sendOrder: sendOrder.length,
       signOffJobs: signOffJobs.length,
       overdueJobs: overdueJobs.length,
+      lateStartJobs: lateStartJobs.length,
       overdueOrders: overdueOrders.length,
       upcoming: upcomingJobs.length + upcomingDeliveries.length,
     },

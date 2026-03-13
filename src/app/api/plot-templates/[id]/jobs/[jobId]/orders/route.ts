@@ -14,7 +14,20 @@ export async function POST(
 
   const { id, jobId } = await params;
   const body = await request.json();
-  const { itemsDescription, orderWeekOffset, deliveryWeekOffset, supplierId, items } = body;
+  const {
+    itemsDescription,
+    orderWeekOffset,
+    deliveryWeekOffset,
+    supplierId,
+    items,
+    anchorType,
+    anchorAmount,
+    anchorUnit,
+    anchorDirection,
+    anchorJobId,
+    leadTimeAmount,
+    leadTimeUnit,
+  } = body;
 
   const job = await prisma.templateJob.findFirst({
     where: { id: jobId, templateId: id },
@@ -33,6 +46,13 @@ export async function POST(
       itemsDescription: itemsDescription?.trim() || null,
       orderWeekOffset: orderWeekOffset ?? -2,
       deliveryWeekOffset: deliveryWeekOffset ?? 0,
+      anchorType: anchorType || null,
+      anchorAmount: anchorAmount ?? null,
+      anchorUnit: anchorUnit || null,
+      anchorDirection: anchorDirection || null,
+      anchorJobId: anchorJobId || null,
+      leadTimeAmount: leadTimeAmount ?? null,
+      leadTimeUnit: leadTimeUnit || null,
       items: items?.length
         ? {
             create: items.map(
@@ -51,7 +71,13 @@ export async function POST(
           }
         : undefined,
     },
-    include: { items: true, supplier: true },
+    include: {
+      items: true,
+      supplier: true,
+      anchorJob: {
+        select: { id: true, name: true, startWeek: true, stageCode: true },
+      },
+    },
   });
 
   return NextResponse.json(order, { status: 201 });

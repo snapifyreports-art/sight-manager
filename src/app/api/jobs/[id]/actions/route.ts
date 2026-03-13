@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { sendPushToUser } from "@/lib/push";
+import { getServerCurrentDate } from "@/lib/dev-date";
 import type { EventType, JobStatus } from "@prisma/client";
 
 const ACTION_STATUS_MAP: Record<string, JobStatus> = {
@@ -45,6 +46,22 @@ export async function POST(
     return NextResponse.json({ error: "Job not found" }, { status: 404 });
   }
 
+  // Guard against double-start and double-complete
+  if (action === "start" && existing.status === "IN_PROGRESS") {
+    return NextResponse.json(
+      { error: "Job is already in progress" },
+      { status: 400 }
+    );
+  }
+  if (action === "complete" && existing.status === "COMPLETED") {
+    return NextResponse.json(
+      { error: "Job is already completed" },
+      { status: 400 }
+    );
+  }
+
+  const now = getServerCurrentDate(req);
+
   // Create the job action record
   await prisma.jobAction.create({
     data: {
@@ -63,19 +80,31 @@ export async function POST(
     // Build update data
     const updateData: Record<string, unknown> = { status: newStatus };
 
-    // Handle start action — set actualStartDate
+    // Handle start action — set actualStartDate + progress orders
     if (action === "start" && !existing.actualStartDate) {
-      updateData.actualStartDate = new Date();
+      updateData.actualStartDate = now;
+    }
+    if (action === "start") {
+      // Progress PENDING material orders to ORDERED
+      await prisma.materialOrder.updateMany({
+        where: { jobId: id, status: "PENDING" },
+        data: { status: "ORDERED", dateOfOrder: now },
+      });
     }
 
     // Handle complete/sign-off action
     if (action === "complete") {
-      updateData.actualEndDate = new Date();
+      updateData.actualEndDate = now;
       updateData.signedOffById = session.user.id;
-      updateData.signedOffAt = new Date();
+      updateData.signedOffAt = now;
       if (signOffNotes) {
         updateData.signOffNotes = signOffNotes;
       }
+      // Progress ORDERED/CONFIRMED material orders to DELIVERED
+      await prisma.materialOrder.updateMany({
+        where: { jobId: id, status: { in: ["ORDERED", "CONFIRMED"] } },
+        data: { status: "DELIVERED", deliveredDate: now },
+      });
     }
 
     job = await prisma.job.update({
@@ -113,6 +142,86 @@ export async function POST(
       userId: session.user.id,
     },
   });
+
+  // Auto-reorder: when a job starts, create draft orders from template orders
+  if (action === "start" && existing.stageCode) {
+    try {
+      // Find template jobs matching this job's stageCode or name
+      const templateJobs = await prisma.templateJob.findMany({
+        where: {
+          OR: [
+            { stageCode: existing.stageCode },
+            { name: existing.name },
+          ],
+        },
+        include: {
+          orders: {
+            include: {
+              supplier: true,
+              items: true,
+            },
+          },
+        },
+      });
+
+      for (const tj of templateJobs) {
+        for (const to of tj.orders) {
+          if (!to.supplierId || to.items.length === 0) continue;
+
+          // Check if an automated order already exists for this job+supplier
+          const existingOrder = await prisma.materialOrder.findFirst({
+            where: {
+              jobId: id,
+              supplierId: to.supplierId,
+              automated: true,
+            },
+          });
+
+          if (existingOrder) continue;
+
+          // Calculate expected delivery date from lead time
+          let expectedDelivery: Date | null = null;
+          if (to.leadTimeAmount && to.leadTimeUnit) {
+            expectedDelivery = new Date(now.getTime());
+            const days =
+              to.leadTimeUnit === "weeks"
+                ? to.leadTimeAmount * 7
+                : to.leadTimeAmount;
+            expectedDelivery.setDate(expectedDelivery.getDate() + days);
+          }
+
+          // Create draft PENDING order
+          await prisma.materialOrder.create({
+            data: {
+              supplierId: to.supplierId,
+              jobId: id,
+              automated: true,
+              status: "PENDING",
+              itemsDescription: to.itemsDescription,
+              expectedDeliveryDate: expectedDelivery,
+              leadTimeDays: to.leadTimeAmount
+                ? to.leadTimeUnit === "weeks"
+                  ? to.leadTimeAmount * 7
+                  : to.leadTimeAmount
+                : null,
+              orderItems: {
+                create: to.items.map((item) => ({
+                  name: item.name,
+                  quantity: item.quantity,
+                  unit: item.unit,
+                  unitCost: item.unitCost,
+                  totalCost: item.quantity * item.unitCost,
+                })),
+              },
+            },
+          });
+        }
+      }
+    } catch (e) {
+      // Don't fail the action if auto-reorder fails
+      console.error("Auto-reorder error:", e);
+    }
+  }
 
   // Fire-and-forget push notification for relevant actions
   if (action === "complete" && existing.assignedToId) {

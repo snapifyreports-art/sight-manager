@@ -7,6 +7,7 @@ import {
   isAfter,
   addDays,
 } from "date-fns";
+import { getCurrentDate } from "@/lib/dev-date";
 
 /** Pixels per calendar day */
 export const DAY_WIDTH = 20;
@@ -84,7 +85,7 @@ export function getTimelineRange(
     }>;
   }>
 ): { timelineStart: Date; timelineEnd: Date } {
-  const today = new Date();
+  const today = getCurrentDate();
   let earliest: Date | null = null;
   let latest: Date | null = null;
 

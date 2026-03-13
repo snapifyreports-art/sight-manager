@@ -14,7 +14,7 @@ export async function POST(
 
   const { id } = await params;
   const body = await request.json();
-  const { name, description, stageCode, sortOrder, startWeek, endWeek } = body;
+  const { name, description, stageCode, sortOrder, startWeek, endWeek, parentId, durationWeeks } = body;
 
   if (!name || typeof name !== "string" || name.trim().length === 0) {
     return NextResponse.json(
@@ -47,10 +47,15 @@ export async function POST(
       sortOrder: sortOrder ?? 0,
       startWeek,
       endWeek,
+      parentId: parentId || null,
+      durationWeeks: durationWeeks ?? null,
     },
     include: {
       orders: {
         include: { items: true },
+      },
+      children: {
+        orderBy: { sortOrder: "asc" },
       },
     },
   });

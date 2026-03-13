@@ -240,6 +240,7 @@ async function main() {
   console.log("Job actions created");
 
   // --- Plot Templates ---
+  // Template 1: Appletree — NEW hierarchical sub-jobs
   const tpl1 = await prisma.plotTemplate.create({
     data: {
       name: "House - Appletree",
@@ -247,25 +248,44 @@ async function main() {
       typeLabel: "Detached 4-Bed",
     },
   });
-  const tpl1Jobs = await Promise.all([
-    prisma.templateJob.create({ data: { templateId: tpl1.id, name: "Groundworks", description: "Foundation excavation and concrete pour", sortOrder: 0, startWeek: 1, endWeek: 3 } }),
-    prisma.templateJob.create({ data: { templateId: tpl1.id, name: "Brickwork", description: "Superstructure brickwork to plate level", sortOrder: 1, startWeek: 3, endWeek: 7 } }),
-    prisma.templateJob.create({ data: { templateId: tpl1.id, name: "Roofing", description: "Roof trusses, tiling and leadwork", sortOrder: 2, startWeek: 7, endWeek: 9 } }),
-    prisma.templateJob.create({ data: { templateId: tpl1.id, name: "First Fix Electrical", description: "First fix wiring, back boxes, consumer unit", sortOrder: 3, startWeek: 9, endWeek: 11 } }),
-    prisma.templateJob.create({ data: { templateId: tpl1.id, name: "First Fix Plumbing", description: "First fix pipework, drainage, heating", sortOrder: 4, startWeek: 9, endWeek: 11 } }),
-    prisma.templateJob.create({ data: { templateId: tpl1.id, name: "Plastering", description: "Internal walls and ceilings", sortOrder: 5, startWeek: 11, endWeek: 13 } }),
-  ]);
 
-  // Template orders for Appletree
+  // Groundworks stage (Wk 1-5) with sub-jobs
+  const gw = await prisma.templateJob.create({ data: { templateId: tpl1.id, name: "Groundworks", stageCode: "GW", sortOrder: 0, startWeek: 1, endWeek: 5 } });
+  const gwFnd = await prisma.templateJob.create({ data: { templateId: tpl1.id, parentId: gw.id, name: "Foundations", stageCode: "FND", sortOrder: 0, startWeek: 1, endWeek: 2, durationWeeks: 2 } });
+  await prisma.templateJob.create({ data: { templateId: tpl1.id, parentId: gw.id, name: "Damp Proof Course", stageCode: "DPC", sortOrder: 1, startWeek: 3, endWeek: 3, durationWeeks: 1 } });
+  await prisma.templateJob.create({ data: { templateId: tpl1.id, parentId: gw.id, name: "Oversite", stageCode: "OG", sortOrder: 2, startWeek: 4, endWeek: 4, durationWeeks: 1 } });
+  await prisma.templateJob.create({ data: { templateId: tpl1.id, parentId: gw.id, name: "Drainage", stageCode: "DRN", sortOrder: 3, startWeek: 5, endWeek: 5, durationWeeks: 1 } });
+
+  // Brickwork stage (Wk 6-9) with sub-jobs
+  const bw = await prisma.templateJob.create({ data: { templateId: tpl1.id, name: "Brickwork", stageCode: "BW", sortOrder: 1, startWeek: 6, endWeek: 9 } });
+  const bwB1 = await prisma.templateJob.create({ data: { templateId: tpl1.id, parentId: bw.id, name: "Brickwork 1st Lift", stageCode: "B1", sortOrder: 0, startWeek: 6, endWeek: 7, durationWeeks: 2 } });
+  await prisma.templateJob.create({ data: { templateId: tpl1.id, parentId: bw.id, name: "Brickwork 2nd Lift", stageCode: "B2", sortOrder: 1, startWeek: 8, endWeek: 9, durationWeeks: 2 } });
+
+  // Roofing stage (Wk 10-11) with sub-jobs
+  const rf = await prisma.templateJob.create({ data: { templateId: tpl1.id, name: "Roofing", stageCode: "RF", sortOrder: 2, startWeek: 10, endWeek: 11 } });
+  const rfRfs = await prisma.templateJob.create({ data: { templateId: tpl1.id, parentId: rf.id, name: "Roof Structure", stageCode: "RFS", sortOrder: 0, startWeek: 10, endWeek: 10, durationWeeks: 1 } });
+  await prisma.templateJob.create({ data: { templateId: tpl1.id, parentId: rf.id, name: "Tiling", stageCode: "TL", sortOrder: 1, startWeek: 11, endWeek: 11, durationWeeks: 1 } });
+
+  // First Fix stage (Wk 12-17) with sub-jobs
+  const ff = await prisma.templateJob.create({ data: { templateId: tpl1.id, name: "First Fix", stageCode: "1F", sortOrder: 3, startWeek: 12, endWeek: 17 } });
+  const ff1fe = await prisma.templateJob.create({ data: { templateId: tpl1.id, parentId: ff.id, name: "First Fix Electrical", stageCode: "1FE", sortOrder: 0, startWeek: 12, endWeek: 13, durationWeeks: 2 } });
+  await prisma.templateJob.create({ data: { templateId: tpl1.id, parentId: ff.id, name: "First Fix Plumbing", stageCode: "1FP", sortOrder: 1, startWeek: 14, endWeek: 15, durationWeeks: 2 } });
+  await prisma.templateJob.create({ data: { templateId: tpl1.id, parentId: ff.id, name: "First Fix Joinery", stageCode: "1FJ", sortOrder: 2, startWeek: 16, endWeek: 17, durationWeeks: 2 } });
+
+  // Plastering stage (Wk 18-19)
+  const pl = await prisma.templateJob.create({ data: { templateId: tpl1.id, name: "Plastering", stageCode: "PL", sortOrder: 4, startWeek: 18, endWeek: 19 } });
+  await prisma.templateJob.create({ data: { templateId: tpl1.id, parentId: pl.id, name: "Plastering", stageCode: "PL", sortOrder: 0, startWeek: 18, endWeek: 19, durationWeeks: 2 } });
+
+  // Template orders — attached to sub-jobs
   const tplOrder1 = await prisma.templateOrder.create({
-    data: { templateJobId: tpl1Jobs[0].id, itemsDescription: "Concrete for foundations", orderWeekOffset: -2, deliveryWeekOffset: 0 },
+    data: { templateJobId: gwFnd.id, itemsDescription: "Concrete for foundations", orderWeekOffset: -2, deliveryWeekOffset: 0 },
   });
   await prisma.templateOrderItem.createMany({ data: [
     { templateOrderId: tplOrder1.id, name: "Ready-mix Concrete C30", quantity: 48, unit: "m³", unitCost: 95 },
   ]});
 
   const tplOrder2 = await prisma.templateOrder.create({
-    data: { templateJobId: tpl1Jobs[1].id, itemsDescription: "Bricks and mortar", orderWeekOffset: -2, deliveryWeekOffset: 0 },
+    data: { templateJobId: bwB1.id, itemsDescription: "Bricks and mortar", orderWeekOffset: -2, deliveryWeekOffset: 0 },
   });
   await prisma.templateOrderItem.createMany({ data: [
     { templateOrderId: tplOrder2.id, name: "Ibstock Leicester Red Multi", quantity: 10000, unit: "units", unitCost: 0.45 },
@@ -273,7 +293,7 @@ async function main() {
   ]});
 
   const tplOrder3 = await prisma.templateOrder.create({
-    data: { templateJobId: tpl1Jobs[2].id, itemsDescription: "Roof trusses and tiles", orderWeekOffset: -3, deliveryWeekOffset: 0 },
+    data: { templateJobId: rfRfs.id, itemsDescription: "Roof trusses and tiles", orderWeekOffset: -3, deliveryWeekOffset: 0 },
   });
   await prisma.templateOrderItem.createMany({ data: [
     { templateOrderId: tplOrder3.id, name: "Fink Roof Trusses", quantity: 12, unit: "sets", unitCost: 285 },
@@ -282,7 +302,7 @@ async function main() {
   ]});
 
   const tplOrder4 = await prisma.templateOrder.create({
-    data: { templateJobId: tpl1Jobs[3].id, itemsDescription: "Electrical first fix materials", orderWeekOffset: -1, deliveryWeekOffset: 0 },
+    data: { templateJobId: ff1fe.id, itemsDescription: "Electrical first fix materials", orderWeekOffset: -1, deliveryWeekOffset: 0 },
   });
   await prisma.templateOrderItem.createMany({ data: [
     { templateOrderId: tplOrder4.id, name: "Twin & Earth 2.5mm Cable", quantity: 20, unit: "rolls", unitCost: 42 },

@@ -39,12 +39,24 @@ export async function GET(
           },
         },
       },
+      rainedOffDays: {
+        select: { date: true, note: true },
+        orderBy: { date: "asc" },
+      },
     },
   });
 
   if (!site) {
     return NextResponse.json({ error: "Site not found" }, { status: 404 });
   }
+
+  // Sort plots numerically by plotNumber (Prisma sorts strings alphabetically)
+  site.plots.sort((a, b) => {
+    const numA = parseInt(a.plotNumber ?? "", 10);
+    const numB = parseInt(b.plotNumber ?? "", 10);
+    if (!isNaN(numA) && !isNaN(numB)) return numA - numB;
+    return (a.plotNumber ?? "").localeCompare(b.plotNumber ?? "");
+  });
 
   return NextResponse.json(JSON.parse(JSON.stringify(site)));
 }

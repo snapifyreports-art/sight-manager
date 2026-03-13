@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useDevDate } from "@/lib/dev-date-context";
 import {
   BarChart,
   Bar,
@@ -32,6 +33,7 @@ import {
   Users,
   BarChart3,
   Filter,
+  CloudRain,
 } from "lucide-react";
 
 // ---------- Types ----------
@@ -87,6 +89,11 @@ interface AnalyticsData {
     totalJobs: number;
     totalOrders: number;
     totalSpend: number;
+  };
+  rainedOffStats?: {
+    totalDays: number;
+    totalJobsAffected: number;
+    bySite: Array<{ siteId: string; siteName: string; days: number }>;
   };
 }
 
@@ -217,6 +224,7 @@ function RAGBadge({ value }: { value: number | null }) {
 // ---------- Component ----------
 
 export function AnalyticsClient() {
+  const { devDate } = useDevDate();
   const [data, setData] = useState<AnalyticsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [siteFilter, setSiteFilter] = useState<string>("");
@@ -231,7 +239,7 @@ export function AnalyticsClient() {
       .then(setData)
       .catch(console.error)
       .finally(() => setLoading(false));
-  }, [siteFilter]);
+  }, [siteFilter, devDate]);
 
   if (loading) {
     return (
@@ -343,6 +351,21 @@ export function AnalyticsClient() {
               : "red"
           }
         />
+        {data.rainedOffStats && (
+          <StatCard
+            icon={CloudRain}
+            label="Rained Off Days"
+            value={data.rainedOffStats.totalDays}
+            sub={
+              data.rainedOffStats.totalJobsAffected > 0
+                ? `${data.rainedOffStats.totalJobsAffected} jobs affected across ${data.rainedOffStats.bySite.length} site${data.rainedOffStats.bySite.length > 1 ? "s" : ""}`
+                : data.rainedOffStats.bySite.length > 0
+                  ? `Across ${data.rainedOffStats.bySite.length} site${data.rainedOffStats.bySite.length > 1 ? "s" : ""}`
+                  : "No rained off days recorded"
+            }
+            color="orange"
+          />
+        )}
       </div>
 
       {/* Row 1: Site Progress + Job Status */}
@@ -355,134 +378,91 @@ export function AnalyticsClient() {
               No sites found.
             </p>
           ) : (
-            <div className="mt-2">
-              <ResponsiveContainer width="100%" height={280}>
-                <BarChart
-                  data={data.siteProgress}
-                  margin={{ top: 10, right: 10, left: 0, bottom: 0 }}
-                >
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                  <XAxis
-                    dataKey="siteName"
-                    tick={{ fontSize: 11 }}
-                    interval={0}
-                    angle={-20}
-                    textAnchor="end"
-                    height={50}
-                  />
-                  <YAxis tick={{ fontSize: 11 }} />
-                  <Tooltip
-                    contentStyle={{ fontSize: 12 }}
-                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                    formatter={(value: any, name: any) => [
-                      value,
-                      name === "completedJobs"
-                        ? "Completed"
-                        : name === "totalJobs"
-                          ? "Total Jobs"
-                          : name === "delayedJobs"
-                            ? "Delayed"
-                            : name,
-                    ]}
-                  />
-                  <Legend
-                    wrapperStyle={{ fontSize: 11 }}
-                    formatter={(value) =>
-                      value === "completedJobs"
-                        ? "Completed"
-                        : value === "totalJobs"
-                          ? "Total"
-                          : value === "delayedJobs"
-                            ? "Delayed"
-                            : value
-                    }
-                  />
-                  <Bar
-                    dataKey="totalJobs"
-                    fill="#e2e8f0"
-                    radius={[4, 4, 0, 0]}
-                  />
-                  <Bar
-                    dataKey="completedJobs"
-                    fill="#22c55e"
-                    radius={[4, 4, 0, 0]}
-                  />
-                  <Bar
-                    dataKey="delayedJobs"
-                    fill="#ef4444"
-                    radius={[4, 4, 0, 0]}
-                  />
-                </BarChart>
-              </ResponsiveContainer>
+            <div className="mt-3 space-y-4">
+              {data.siteProgress.map((site) => {
+                const completedPct = site.totalJobs > 0
+                  ? Math.round((site.completedJobs / site.totalJobs) * 100)
+                  : 0;
+                const inProgressPct = site.totalJobs > 0
+                  ? Math.round(((site.totalJobs - site.completedJobs - site.delayedJobs) / site.totalJobs) * 100)
+                  : 0;
+                const delayedPct = site.totalJobs > 0
+                  ? Math.round((site.delayedJobs / site.totalJobs) * 100)
+                  : 0;
 
-              {/* Site detail table */}
-              <div className="mt-4 overflow-x-auto">
-                <table className="w-full text-[11px]">
-                  <thead>
-                    <tr className="border-b text-left text-muted-foreground">
-                      <th className="pb-2 font-medium">Site</th>
-                      <th className="pb-2 text-center font-medium">Plots</th>
-                      <th className="pb-2 text-center font-medium">Jobs</th>
-                      <th className="pb-2 text-center font-medium">
-                        Complete
-                      </th>
-                      <th className="pb-2 text-center font-medium">
-                        Delayed
-                      </th>
-                      <th className="pb-2 text-center font-medium">
-                        Build %
-                      </th>
-                      <th className="pb-2 text-center font-medium">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {data.siteProgress.map((site) => (
-                      <tr key={site.siteId} className="border-b last:border-0">
-                        <td className="py-2 font-medium">{site.siteName}</td>
-                        <td className="py-2 text-center">{site.totalPlots}</td>
-                        <td className="py-2 text-center">{site.totalJobs}</td>
-                        <td className="py-2 text-center">
-                          {site.completedJobs}
-                        </td>
-                        <td className="py-2 text-center">
-                          {site.delayedJobs > 0 ? (
-                            <span className="text-red-600 font-semibold">
-                              {site.delayedJobs}
-                            </span>
-                          ) : (
-                            <span className="text-green-600">0</span>
+                return (
+                  <div key={site.siteId} className="group">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-semibold">{site.siteName}</span>
+                        {site.onTrack ? (
+                          <span className="inline-flex items-center gap-0.5 rounded-full bg-green-100 px-1.5 py-0.5 text-[10px] font-semibold text-green-700">
+                            <CheckCircle2 className="size-2.5" />
+                            On Track
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-0.5 rounded-full bg-red-100 px-1.5 py-0.5 text-[10px] font-semibold text-red-700">
+                            <AlertTriangle className="size-2.5" />
+                            Delayed
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-xs text-muted-foreground">
+                        {site.completedJobs}/{site.totalJobs} jobs
+                      </span>
+                    </div>
+                    {/* Stacked progress bar */}
+                    <div className="h-6 w-full overflow-hidden rounded-lg bg-slate-100 flex">
+                      {completedPct > 0 && (
+                        <div
+                          className="h-full bg-green-500 flex items-center justify-center transition-all"
+                          style={{ width: `${completedPct}%` }}
+                        >
+                          {completedPct >= 10 && (
+                            <span className="text-[10px] font-bold text-white">{completedPct}%</span>
                           )}
-                        </td>
-                        <td className="py-2 text-center">
-                          <div className="flex items-center justify-center gap-1.5">
-                            <div className="h-1.5 w-16 rounded-full bg-slate-100">
-                              <div
-                                className="h-1.5 rounded-full bg-blue-500"
-                                style={{
-                                  width: `${Math.min(site.avgBuildPercent, 100)}%`,
-                                }}
-                              />
-                            </div>
-                            <span>{site.avgBuildPercent}%</span>
-                          </div>
-                        </td>
-                        <td className="py-2 text-center">
-                          {site.onTrack ? (
-                            <span className="inline-flex items-center gap-0.5 rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-semibold text-green-700">
-                              <CheckCircle2 className="size-3" />
-                              On Track
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-0.5 rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-semibold text-red-700">
-                              <AlertTriangle className="size-3" />
-                              Delayed
-                            </span>
+                        </div>
+                      )}
+                      {delayedPct > 0 && (
+                        <div
+                          className="h-full bg-red-400 flex items-center justify-center transition-all"
+                          style={{ width: `${delayedPct}%` }}
+                        >
+                          {delayedPct >= 8 && (
+                            <span className="text-[10px] font-bold text-white">{delayedPct}%</span>
                           )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                        </div>
+                      )}
+                      <div className="h-full flex-1" />
+                    </div>
+                    {/* Stats row */}
+                    <div className="mt-1 flex gap-4 text-[11px] text-muted-foreground">
+                      <span>{site.totalPlots} plots</span>
+                      <span className="text-green-600">{site.completedJobs} complete</span>
+                      {site.delayedJobs > 0 && (
+                        <span className="text-red-500">{site.delayedJobs} delayed</span>
+                      )}
+                      <span className="ml-auto font-medium text-foreground">
+                        {site.avgBuildPercent}% built
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+              {/* Legend */}
+              <div className="flex items-center gap-4 pt-2 border-t text-[10px] text-muted-foreground">
+                <div className="flex items-center gap-1.5">
+                  <div className="size-2.5 rounded-sm bg-green-500" />
+                  <span>Completed</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <div className="size-2.5 rounded-sm bg-red-400" />
+                  <span>Delayed</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <div className="size-2.5 rounded-sm bg-slate-100" />
+                  <span>Remaining</span>
+                </div>
               </div>
             </div>
           )}

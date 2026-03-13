@@ -61,11 +61,19 @@ export async function PUT(
 
   const { id } = await params;
   const body = await request.json();
-  const { name, description, location, address, status } = body;
+  const { name, description, location, address, postcode, status } = body;
 
   const existing = await prisma.site.findUnique({ where: { id } });
   if (!existing) {
     return NextResponse.json({ error: "Site not found" }, { status: 404 });
+  }
+
+  const validStatuses = ["ACTIVE", "ON_HOLD", "COMPLETED", "ARCHIVED"];
+  if (status !== undefined && !validStatuses.includes(status)) {
+    return NextResponse.json(
+      { error: `Invalid status. Must be one of: ${validStatuses.join(", ")}` },
+      { status: 400 }
+    );
   }
 
   const site = await prisma.site.update({
@@ -80,6 +88,9 @@ export async function PUT(
       }),
       ...(address !== undefined && {
         address: address?.trim() || null,
+      }),
+      ...(postcode !== undefined && {
+        postcode: postcode?.trim() || null,
       }),
       ...(status !== undefined && { status }),
     },

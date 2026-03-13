@@ -1,6 +1,7 @@
 "use client";
 
 import { getPositionForDate, DAY_WIDTH, HEADER_HEIGHT } from "./GanttHelpers";
+import { getCurrentDate } from "@/lib/dev-date";
 
 interface TodayMarkerProps {
   timelineStart: Date;
@@ -8,7 +9,7 @@ interface TodayMarkerProps {
 }
 
 export function TodayMarker({ timelineStart, totalHeight }: TodayMarkerProps) {
-  const today = new Date();
+  const today = getCurrentDate();
   const left = getPositionForDate(today, timelineStart, DAY_WIDTH);
 
   // Don't render if today is off the visible timeline

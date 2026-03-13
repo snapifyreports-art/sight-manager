@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { templateJobsInclude } from "@/lib/template-includes";
 
 // GET /api/plot-templates/[id] — single template with all nested data
 export async function GET(
@@ -17,14 +18,7 @@ export async function GET(
   const template = await prisma.plotTemplate.findUnique({
     where: { id },
     include: {
-      jobs: {
-        orderBy: { sortOrder: "asc" },
-        include: {
-          orders: {
-            include: { items: true, supplier: true },
-          },
-        },
-      },
+      jobs: templateJobsInclude,
     },
   });
 
@@ -72,14 +66,7 @@ export async function PUT(
       }),
     },
     include: {
-      jobs: {
-        orderBy: { sortOrder: "asc" },
-        include: {
-          orders: {
-            include: { items: true, supplier: true },
-          },
-        },
-      },
+      jobs: templateJobsInclude,
     },
   });
 

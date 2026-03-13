@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { addWeeks, addDays } from "date-fns";
+import { templateJobsInclude } from "@/lib/template-includes";
+import { createJobsFromTemplate } from "@/lib/apply-template-helpers";
 
 // POST /api/plots/apply-template-batch — create multiple plots from a template
 export async function POST(request: NextRequest) {
@@ -35,18 +36,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Site not found" }, { status: 404 });
   }
 
-  // Fetch template with all nested data
+  // Fetch template with all nested data including children
   const template = await prisma.plotTemplate.findUnique({
     where: { id: templateId },
     include: {
-      jobs: {
-        orderBy: { sortOrder: "asc" },
-        include: {
-          orders: {
-            include: { items: true },
-          },
-        },
-      },
+      jobs: templateJobsInclude,
     },
   });
 
@@ -105,72 +99,16 @@ export async function POST(request: NextRequest) {
       });
       createdPlots.push(plot.id);
 
-      // 2. Create Jobs from template
-      for (const templateJob of template.jobs) {
-        const jobStartDate = addWeeks(
-          plotStartDate,
-          templateJob.startWeek - 1
-        );
-        const jobEndDate = addDays(
-          addWeeks(plotStartDate, templateJob.endWeek - 1),
-          6
-        );
+      // 2. Create Jobs from template (handles both hierarchical and flat)
+      await createJobsFromTemplate(
+        tx,
+        plot.id,
+        plotStartDate,
+        template.jobs,
+        supplierMappings || null
+      );
 
-        const job = await tx.job.create({
-          data: {
-            name: templateJob.name,
-            description: templateJob.description,
-            plotId: plot.id,
-            startDate: jobStartDate,
-            endDate: jobEndDate,
-            status: "NOT_STARTED",
-            stageCode: templateJob.stageCode || null,
-            sortOrder: templateJob.sortOrder,
-          },
-        });
-
-        // 3. Create Orders from template
-        for (const templateOrder of templateJob.orders) {
-          const supplierId =
-            supplierMappings?.[templateOrder.id] || null;
-
-          if (!supplierId) continue;
-
-          const dateOfOrder = addWeeks(
-            jobStartDate,
-            templateOrder.orderWeekOffset
-          );
-          const expectedDeliveryDate = addWeeks(
-            dateOfOrder,
-            templateOrder.deliveryWeekOffset
-          );
-
-          await tx.materialOrder.create({
-            data: {
-              supplierId,
-              jobId: job.id,
-              itemsDescription: templateOrder.itemsDescription,
-              dateOfOrder,
-              expectedDeliveryDate,
-              status: "PENDING",
-              automated: true,
-              orderItems: templateOrder.items.length
-                ? {
-                    create: templateOrder.items.map((item) => ({
-                      name: item.name,
-                      quantity: item.quantity,
-                      unit: item.unit,
-                      unitCost: item.unitCost,
-                      totalCost: item.quantity * item.unitCost,
-                    })),
-                  }
-                : undefined,
-            },
-          });
-        }
-      }
-
-      // 4. Log event
+      // 3. Log event
       await tx.eventLog.create({
         data: {
           type: "PLOT_CREATED",

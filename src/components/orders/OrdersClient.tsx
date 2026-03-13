@@ -1,7 +1,9 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { format, isPast } from "date-fns";
+import Link from "next/link";
+import { format, isBefore } from "date-fns";
+import { getCurrentDate } from "@/lib/dev-date";
 import {
   ShoppingCart,
   Package,
@@ -185,7 +187,7 @@ const ALL_STATUSES: OrderStatus[] = [
 function isOverdue(order: Order): boolean {
   if (order.status === "DELIVERED" || order.status === "CANCELLED") return false;
   if (!order.expectedDeliveryDate) return false;
-  return isPast(new Date(order.expectedDeliveryDate));
+  return isBefore(new Date(order.expectedDeliveryDate), getCurrentDate());
 }
 
 // ---------- Status Badge ----------
@@ -755,9 +757,9 @@ export function OrdersClient({
                         </div>
                       </TableCell>
                       <TableCell>
-                        <span className="font-medium">
+                        <Link href={`/suppliers/${order.supplier.id}`} className="font-medium text-blue-600 hover:underline">
                           {order.supplier.name}
-                        </span>
+                        </Link>
                       </TableCell>
                       <TableCell>
                         <div>

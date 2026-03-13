@@ -40,8 +40,26 @@ export async function GET(
     orderBy: { name: "asc" },
   });
 
-  // Deduplicate by name (prefer the one with a cost if available)
+  // Get master pricelist items (highest priority)
+  const pricelistItems = await prisma.supplierMaterial.findMany({
+    where: { supplierId: id },
+    select: { name: true, unit: true, unitCost: true },
+    orderBy: { name: "asc" },
+  });
+
+  // Deduplicate by name — pricelist items take priority, then items with a cost
   const seen = new Map<string, { name: string; unit: string; unitCost: number }>();
+
+  // Add pricelist items first (highest priority)
+  for (const item of pricelistItems) {
+    seen.set(item.name.toLowerCase().trim(), {
+      name: item.name,
+      unit: item.unit,
+      unitCost: item.unitCost,
+    });
+  }
+
+  // Add historical items only if not already in pricelist
   for (const item of [...orderItems, ...templateItems]) {
     const key = item.name.toLowerCase().trim();
     if (!seen.has(key) || (item.unitCost > 0 && (seen.get(key)?.unitCost ?? 0) === 0)) {

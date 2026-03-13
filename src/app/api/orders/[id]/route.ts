@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/lib/auth";
+import { getServerCurrentDate } from "@/lib/dev-date";
 
 export async function GET(
   _req: NextRequest,
@@ -95,7 +96,7 @@ export async function PUT(
       existing.status !== "DELIVERED" &&
       !body.deliveredDate
     ) {
-      data.deliveredDate = new Date();
+      data.deliveredDate = getServerCurrentDate(req);
     }
 
     // Create event log for status changes

@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { format } from "date-fns";
+import { useDevDate } from "@/lib/dev-date-context";
 import {
   ChevronRight,
   Plus,
@@ -38,6 +39,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { GanttChart } from "@/components/gantt/GanttChart";
 import { PlotTodoList } from "@/components/plots/PlotTodoList";
+import { HandoverChecklist } from "@/components/handover/HandoverChecklist";
+import { FileCheck } from "lucide-react";
 
 // ---------- Types ----------
 
@@ -243,6 +246,7 @@ function AddJobDialog({
 
 export function PlotDetailClient({ plot }: { plot: PlotData }) {
   const router = useRouter();
+  const { devDate } = useDevDate();
 
   const jobsWithDates = plot.jobs.filter(
     (j) => j.startDate !== null || j.endDate !== null
@@ -307,6 +311,10 @@ export function PlotDetailClient({ plot }: { plot: PlotData }) {
             <List className="size-4" />
             Jobs List
           </TabsTrigger>
+          <TabsTrigger value="handover">
+            <FileCheck className="size-4" />
+            Handover
+          </TabsTrigger>
         </TabsList>
 
         {/* Gantt Chart Tab */}
@@ -323,7 +331,7 @@ export function PlotDetailClient({ plot }: { plot: PlotData }) {
               </CardContent>
             </Card>
           ) : (
-            <GanttChart jobs={plot.jobs} />
+            <GanttChart key={devDate ?? "live"} jobs={plot.jobs} />
           )}
         </TabsContent>
 
@@ -410,6 +418,10 @@ export function PlotDetailClient({ plot }: { plot: PlotData }) {
               </div>
             </div>
           )}
+        </TabsContent>
+
+        <TabsContent value="handover">
+          <HandoverChecklist plotId={plot.id} />
         </TabsContent>
       </Tabs>
     </div>

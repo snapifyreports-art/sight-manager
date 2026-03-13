@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { format, formatDistanceToNow } from "date-fns";
+import { getCurrentDate } from "@/lib/dev-date";
 import {
   ArrowLeft,
   Briefcase,
@@ -138,6 +139,7 @@ interface JobDetail {
     url: string;
     fileName: string | null;
     caption: string | null;
+    tag: string | null;
     createdAt: string;
     uploadedBy?: { id: string; name: string } | null;
   }>;
@@ -335,7 +337,7 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
   const [deliveryDialogOpen, setDeliveryDialogOpen] = useState(false);
   const [deliveryOrderId, setDeliveryOrderId] = useState<string | null>(null);
   const [deliveryDate, setDeliveryDate] = useState(
-    format(new Date(), "yyyy-MM-dd")
+    format(getCurrentDate(), "yyyy-MM-dd")
   );
   const [deliveryNotes, setDeliveryNotes] = useState("");
   const [confirmingDelivery, setConfirmingDelivery] = useState(false);
@@ -790,7 +792,7 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
                               onClick={() => {
                                 setDeliveryOrderId(order.id);
                                 setDeliveryDate(
-                                  format(new Date(), "yyyy-MM-dd")
+                                  format(getCurrentDate(), "yyyy-MM-dd")
                                 );
                                 setDeliveryNotes("");
                                 setDeliveryDialogOpen(true);

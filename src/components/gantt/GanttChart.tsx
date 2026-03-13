@@ -2,6 +2,7 @@
 
 import { useRef, useEffect, useMemo } from "react";
 import { differenceInDays, getMonth } from "date-fns";
+import { getCurrentDate } from "@/lib/dev-date";
 import { cn } from "@/lib/utils";
 import {
   getWeeksBetween,
@@ -86,7 +87,7 @@ export function GanttChart({ jobs }: GanttChartProps) {
     const container = scrollContainerRef.current;
     if (!container) return;
 
-    const today = new Date();
+    const today = getCurrentDate();
     const todayOffset = getPositionForDate(today, timelineStart, DAY_WIDTH);
     const containerWidth = container.clientWidth;
 

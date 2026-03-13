@@ -53,6 +53,20 @@ enum NotificationType {
   NEXT_STAGE_READY
 }
 
+enum SnagPriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum SnagStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
 enum EventType {
   JOB_STARTED
   JOB_COMPLETED
@@ -69,6 +83,8 @@ enum EventType {
   SITE_UPDATED
   PLOT_CREATED
   PLOT_UPDATED
+  SNAG_CREATED
+  SNAG_RESOLVED
   USER_ACTION
   NOTIFICATION
   SYSTEM
@@ -96,6 +112,11 @@ model User {
   pushSubscriptions       PushSubscription[]
   notificationPreferences NotificationPreference[]
   permissions             UserPermission[]
+  snagsAssigned    Snag[]         @relation("SnagAssigned")
+  snagsRaised      Snag[]         @relation("SnagRaised")
+  snagsResolved    Snag[]         @relation("SnagResolved")
+  uploadedDocuments  SiteDocument[]      @relation("UploadedDocuments")
+  checkedHandovers   HandoverChecklist[] @relation("CheckedHandoverItems")
 }
 
 model Site {
@@ -104,14 +125,29 @@ model Site {
   description String?
   location    String?
   address     String?
+  postcode    String?
   status      SiteStatus @default(ACTIVE)
   createdById String
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
 
-  createdBy   User       @relation(fields: [createdById], references: [id])
-  plots       Plot[]
-  events      EventLog[]
+  createdBy     User           @relation(fields: [createdById], references: [id])
+  plots         Plot[]
+  events        EventLog[]
+  rainedOffDays RainedOffDay[]
+  documents     SiteDocument[]
+}
+
+model RainedOffDay {
+  id        String   @id @default(cuid())
+  siteId    String
+  date      DateTime
+  note      String?
+  createdAt DateTime @default(now())
+
+  site Site @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@unique([siteId, date])
 }
 
 model Plot {
@@ -133,9 +169,12 @@ model Plot {
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
 
-  site        Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
-  jobs        Job[]
-  events      EventLog[]
+  site              Site               @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  jobs              Job[]
+  events            EventLog[]
+  snags             Snag[]
+  documents         SiteDocument[]
+  handoverChecklist HandoverChecklist[]
 
   @@unique([siteId, plotNumber])
 }
@@ -158,17 +197,23 @@ model Job {
   signedOffAt     DateTime?
   signOffNotes    String?
   sortOrder       Int       @default(0)
+  weatherAffected Boolean   @default(false)
+  parentId        String?
+  parentStage     String?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
   plot          Plot            @relation(fields: [plotId], references: [id], onDelete: Cascade)
   assignedTo    User?           @relation("AssignedJobs", fields: [assignedToId], references: [id])
   signedOffBy   User?           @relation("SignedOffJobs", fields: [signedOffById], references: [id])
+  parent        Job?            @relation("SubJobs", fields: [parentId], references: [id], onDelete: SetNull)
+  children      Job[]           @relation("SubJobs")
   orders        MaterialOrder[]
   events        EventLog[]
   actions       JobAction[]
   contractors   JobContractor[]
   photos        JobPhoto[]
+  documents     SiteDocument[]
 }
 
 model JobAction {
@@ -201,6 +246,7 @@ model JobPhoto {
   url          String
   fileName     String?
   caption      String?
+  tag          String?  // "before", "after", "progress"
   uploadedById String?
   createdAt    DateTime @default(now())
 
@@ -222,6 +268,23 @@ model Supplier {
 
   orders          MaterialOrder[]
   templateOrders  TemplateOrder[]
+  materials       SupplierMaterial[]
+}
+
+model SupplierMaterial {
+  id         String   @id @default(cuid())
+  supplierId String
+  name       String
+  unit       String   @default("each")
+  unitCost   Float    @default(0)
+  category   String?
+  sku        String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  supplier   Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+
+  @@unique([supplierId, name])
 }
 
 model MaterialOrder {
@@ -289,18 +352,24 @@ model PlotTemplate {
 }
 
 model TemplateJob {
-  id          String   @id @default(cuid())
-  templateId  String
-  name        String
-  description String?
-  stageCode   String?
-  sortOrder   Int      @default(0)
-  startWeek   Int
-  endWeek     Int
-  createdAt   DateTime @default(now())
+  id            String   @id @default(cuid())
+  templateId    String
+  name          String
+  description   String?
+  stageCode     String?
+  sortOrder     Int      @default(0)
+  startWeek     Int
+  endWeek       Int
+  durationWeeks   Int?
+  weatherAffected Boolean  @default(false)
+  parentId        String?
+  createdAt       DateTime @default(now())
 
-  template    PlotTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
-  orders      TemplateOrder[]
+  template    PlotTemplate  @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  parent      TemplateJob?  @relation("SubJobs", fields: [parentId], references: [id], onDelete: Cascade)
+  children    TemplateJob[] @relation("SubJobs")
+  orders         TemplateOrder[]
+  anchoredOrders TemplateOrder[] @relation("OrderAnchorJob")
 }
 
 model TemplateOrder {
@@ -310,10 +379,18 @@ model TemplateOrder {
   itemsDescription     String?
   orderWeekOffset      Int      @default(-2)
   deliveryWeekOffset   Int      @default(0)
+  anchorType           String?
+  anchorAmount         Int?
+  anchorUnit           String?
+  anchorDirection      String?
+  anchorJobId          String?
+  leadTimeAmount       Int?
+  leadTimeUnit         String?
   createdAt            DateTime @default(now())
 
-  templateJob          TemplateJob @relation(fields: [templateJobId], references: [id], onDelete: Cascade)
-  supplier             Supplier?   @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  templateJob          TemplateJob  @relation(fields: [templateJobId], references: [id], onDelete: Cascade)
+  supplier             Supplier?    @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  anchorJob            TemplateJob? @relation("OrderAnchorJob", fields: [anchorJobId], references: [id], onDelete: SetNull)
   items                TemplateOrderItem[]
 }
 
@@ -363,6 +440,84 @@ model UserPermission {
   user       User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, permission])
+}
+
+// ---------- Snagging / Defects ----------
+
+model Snag {
+  id            String       @id @default(cuid())
+  plotId        String
+  description   String
+  location      String?
+  priority      SnagPriority @default(MEDIUM)
+  status        SnagStatus   @default(OPEN)
+  assignedToId  String?
+  raisedById    String
+  resolvedAt    DateTime?
+  resolvedById  String?
+  notes         String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  plot          Plot         @relation(fields: [plotId], references: [id], onDelete: Cascade)
+  assignedTo    User?        @relation("SnagAssigned", fields: [assignedToId], references: [id])
+  raisedBy      User         @relation("SnagRaised", fields: [raisedById], references: [id])
+  resolvedBy    User?        @relation("SnagResolved", fields: [resolvedById], references: [id])
+  photos        SnagPhoto[]
+}
+
+model SnagPhoto {
+  id        String   @id @default(cuid())
+  snagId    String
+  url       String
+  fileName  String?
+  tag       String?  // "before", "after"
+  createdAt DateTime @default(now())
+
+  snag      Snag     @relation(fields: [snagId], references: [id], onDelete: Cascade)
+}
+
+// ---------- Document Storage ----------
+
+model SiteDocument {
+  id           String   @id @default(cuid())
+  name         String
+  url          String
+  fileName     String
+  fileSize     Int?
+  mimeType     String?
+  siteId       String
+  plotId       String?
+  jobId        String?
+  uploadedById String
+  createdAt    DateTime @default(now())
+
+  site           Site               @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  plot           Plot?              @relation(fields: [plotId], references: [id], onDelete: SetNull)
+  job            Job?               @relation(fields: [jobId], references: [id], onDelete: SetNull)
+  uploadedBy     User               @relation("UploadedDocuments", fields: [uploadedById], references: [id])
+  handoverItems  HandoverChecklist[]
+}
+
+// ---------- Handover Pack ----------
+
+model HandoverChecklist {
+  id          String    @id @default(cuid())
+  plotId      String
+  docType     String    // EPC, GAS_SAFE_CERT, ELECTRICAL_CERT, WARRANTY, NHBC_CERT, BUILDING_REGS, USER_MANUAL, FLOOR_PLAN, SNAGGING_SIGNOFF
+  required    Boolean   @default(true)
+  documentId  String?
+  checkedAt   DateTime?
+  checkedById String?
+  notes       String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  plot        Plot           @relation(fields: [plotId], references: [id], onDelete: Cascade)
+  document    SiteDocument?  @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  checkedBy   User?          @relation("CheckedHandoverItems", fields: [checkedById], references: [id])
+
+  @@unique([plotId, docType])
 }
 
 // ---------- Event Log ----------

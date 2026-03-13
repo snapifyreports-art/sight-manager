@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { format } from "date-fns";
-import { Plus, Building2, MapPin, FolderOpen } from "lucide-react";
+import { Plus, Building2, MapPin, FolderOpen, Trash2, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -12,10 +12,6 @@ import {
   CardTitle,
   CardDescription,
 } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
   DialogContent,
@@ -23,9 +19,9 @@ import {
   DialogTitle,
   DialogDescription,
   DialogFooter,
-  DialogTrigger,
   DialogClose,
 } from "@/components/ui/dialog";
+import { CreateSiteWizard } from "./CreateSiteWizard";
 
 // ---------- Types ----------
 
@@ -95,56 +91,50 @@ export function SitesClient({
   const router = useRouter();
   const [sites, setSites] = useState(initialSites);
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [creating, setCreating] = useState(false);
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [location, setLocation] = useState("");
-  const [address, setAddress] = useState("");
 
-  async function handleCreate() {
-    if (!name.trim()) return;
+  // Delete state
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [siteToDelete, setSiteToDelete] = useState<SiteItem | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
-    setCreating(true);
+  function handleSiteCreated(created: Omit<SiteItem, "jobStatusSummary">) {
+    setSites((prev) => [
+      {
+        ...created,
+        jobStatusSummary: {
+          NOT_STARTED: 0,
+          IN_PROGRESS: 0,
+          ON_HOLD: 0,
+          COMPLETED: 0,
+        },
+      },
+      ...prev,
+    ]);
+    router.refresh();
+  }
+
+  async function handleDelete() {
+    if (!siteToDelete) return;
+
+    setDeleting(true);
     try {
-      const res = await fetch("/api/sites", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, description, location, address }),
+      const res = await fetch(`/api/sites/${siteToDelete.id}`, {
+        method: "DELETE",
       });
 
       if (!res.ok) {
         const err = await res.json();
-        throw new Error(err.error || "Failed to create site");
+        throw new Error(err.error || "Failed to delete site");
       }
 
-      const created = await res.json();
-
-      // Add to local state with defaults
-      setSites((prev) => [
-        {
-          ...created,
-          createdAt: created.createdAt,
-          updatedAt: created.updatedAt,
-          jobStatusSummary: {
-            NOT_STARTED: 0,
-            IN_PROGRESS: 0,
-            ON_HOLD: 0,
-            COMPLETED: 0,
-          },
-        },
-        ...prev,
-      ]);
-
-      setName("");
-      setDescription("");
-      setLocation("");
-      setAddress("");
-      setDialogOpen(false);
+      setSites((prev) => prev.filter((s) => s.id !== siteToDelete.id));
+      setDeleteDialogOpen(false);
+      setSiteToDelete(null);
       router.refresh();
     } catch (error) {
-      console.error("Failed to create site:", error);
+      console.error("Failed to delete site:", error);
     } finally {
-      setCreating(false);
+      setDeleting(false);
     }
   }
 
@@ -159,72 +149,15 @@ export function SitesClient({
           </p>
         </div>
 
-        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-          <DialogTrigger render={<Button />}>
-            <Plus className="size-4" />
-            New Site
-          </DialogTrigger>
-          <DialogContent className="sm:max-w-md">
-            <DialogHeader>
-              <DialogTitle>Create Site</DialogTitle>
-              <DialogDescription>
-                Add a new construction site to manage plots and jobs.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4 py-2">
-              <div className="space-y-2">
-                <Label htmlFor="site-name">Name</Label>
-                <Input
-                  id="site-name"
-                  placeholder="e.g. Oakwood Park Development"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="site-description">Description</Label>
-                <Textarea
-                  id="site-description"
-                  placeholder="Brief description of this site..."
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  rows={3}
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="site-location">Location</Label>
-                  <Input
-                    id="site-location"
-                    placeholder="e.g. Manchester"
-                    value={location}
-                    onChange={(e) => setLocation(e.target.value)}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="site-address">Address</Label>
-                  <Input
-                    id="site-address"
-                    placeholder="e.g. 12 Oak Lane"
-                    value={address}
-                    onChange={(e) => setAddress(e.target.value)}
-                  />
-                </div>
-              </div>
-            </div>
-            <DialogFooter>
-              <DialogClose render={<Button variant="outline" />}>
-                Cancel
-              </DialogClose>
-              <Button
-                onClick={handleCreate}
-                disabled={creating || !name.trim()}
-              >
-                {creating ? "Creating..." : "Create Site"}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+        <Button onClick={() => setDialogOpen(true)}>
+          <Plus className="size-4" />
+          New Site
+        </Button>
+        <CreateSiteWizard
+          open={dialogOpen}
+          onOpenChange={setDialogOpen}
+          onCreated={handleSiteCreated}
+        />
       </div>
 
       {/* Sites Grid */}
@@ -261,7 +194,7 @@ export function SitesClient({
             return (
               <Card
                 key={site.id}
-                className="cursor-pointer overflow-hidden border-border/50 bg-white shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md"
+                className="group cursor-pointer overflow-hidden border-border/50 bg-white shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md"
                 onClick={() => router.push(`/sites/${site.id}`)}
               >
                 <CardHeader>
@@ -271,11 +204,24 @@ export function SitesClient({
                         {site.name}
                       </CardTitle>
                     </div>
-                    <span
-                      className={`inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-medium ${statusConfig.className}`}
-                    >
-                      {statusConfig.label}
-                    </span>
+                    <div className="flex shrink-0 items-center gap-1.5">
+                      <span
+                        className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${statusConfig.className}`}
+                      >
+                        {statusConfig.label}
+                      </span>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSiteToDelete(site);
+                          setDeleteDialogOpen(true);
+                        }}
+                        className="rounded-md p-1 text-muted-foreground opacity-0 transition-all hover:bg-red-50 hover:text-red-600 group-hover:opacity-100"
+                        title="Delete site"
+                      >
+                        <Trash2 className="size-3.5" />
+                      </button>
+                    </div>
                   </div>
                   {site.description && (
                     <CardDescription className="line-clamp-2">
@@ -344,6 +290,50 @@ export function SitesClient({
           })}
         </div>
       )}
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={deleteDialogOpen} onOpenChange={(open) => {
+        setDeleteDialogOpen(open);
+        if (!open) setSiteToDelete(null);
+      }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete Site</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete{" "}
+              <span className="font-semibold text-foreground">
+                {siteToDelete?.name}
+              </span>
+              ? This will permanently remove the site and all its plots, jobs,
+              photos, and notes. This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <DialogClose
+              render={<Button variant="outline" />}
+              disabled={deleting}
+            >
+              Cancel
+            </DialogClose>
+            <Button
+              variant="destructive"
+              onClick={handleDelete}
+              disabled={deleting}
+            >
+              {deleting ? (
+                <>
+                  <Loader2 className="size-4 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                <>
+                  <Trash2 className="size-4" />
+                  Delete Site
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

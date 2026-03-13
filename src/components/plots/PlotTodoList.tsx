@@ -10,6 +10,7 @@ import {
   format,
   subWeeks,
 } from "date-fns";
+import { getCurrentDate } from "@/lib/dev-date";
 import {
   Package,
   Truck,
@@ -66,7 +67,7 @@ interface TodoItem {
 
 export function PlotTodoList({ jobs }: { jobs: JobData[] }) {
   const router = useRouter();
-  const now = new Date();
+  const now = getCurrentDate();
   const fourWeeksFromNow = addWeeks(now, 4);
   const twoWeeksAgo = subWeeks(now, 2);
 
@@ -389,7 +390,7 @@ function UpcomingDeliveryCard({
   const expectedDate = item.order.expectedDeliveryDate
     ? new Date(item.order.expectedDeliveryDate)
     : null;
-  const daysUntil = expectedDate ? differenceInDays(expectedDate, new Date()) : null;
+  const daysUntil = expectedDate ? differenceInDays(expectedDate, getCurrentDate()) : null;
 
   return (
     <Card size="sm">

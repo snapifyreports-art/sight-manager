@@ -3,6 +3,7 @@ import "./globals.css";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider } from "@/components/providers/SessionProvider";
 import { ServiceWorkerRegistrar } from "@/components/providers/ServiceWorkerProvider";
+import { DevDateProvider } from "@/lib/dev-date-context";
 
 export const metadata: Metadata = {
   title: "Sight Manager",
@@ -27,9 +28,11 @@ export default function RootLayout({
     <html lang="en">
       <body className="antialiased">
         <AuthProvider>
-          <TooltipProvider>
-            {children}
-          </TooltipProvider>
+          <DevDateProvider>
+            <TooltipProvider>
+              {children}
+            </TooltipProvider>
+          </DevDateProvider>
         </AuthProvider>
         <ServiceWorkerRegistrar />
       </body>

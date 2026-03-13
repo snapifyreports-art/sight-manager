@@ -2,7 +2,9 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { format, isPast, isToday, differenceInDays } from "date-fns";
+import { format, isBefore, isSameDay, differenceInDays } from "date-fns";
+import { getCurrentDate } from "@/lib/dev-date";
+import { useDevDate } from "@/lib/dev-date-context";
 import {
   ClipboardList,
   Truck,
@@ -16,6 +18,8 @@ import {
   Mail,
   CircleCheck,
   Square,
+  Clock,
+  Play,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -84,6 +88,7 @@ interface TaskData {
   sendOrder: OrderTask[];
   signOffJobs: JobTask[];
   overdueJobs: JobTask[];
+  lateStartJobs: JobTask[];
   overdueOrders: OrderTask[];
   upcomingJobs: JobTask[];
   upcomingDeliveries: OrderTask[];
@@ -92,6 +97,7 @@ interface TaskData {
     sendOrder: number;
     signOffJobs: number;
     overdueJobs: number;
+    lateStartJobs: number;
     overdueOrders: number;
     upcoming: number;
   };
@@ -102,14 +108,15 @@ interface TaskData {
 function getUrgency(dateStr: string | null): "overdue" | "today" | "upcoming" {
   if (!dateStr) return "upcoming";
   const d = new Date(dateStr);
-  if (isPast(d) && !isToday(d)) return "overdue";
-  if (isToday(d)) return "today";
+  const now = getCurrentDate();
+  if (isBefore(d, now) && !isSameDay(d, now)) return "overdue";
+  if (isSameDay(d, now)) return "today";
   return "upcoming";
 }
 
 function daysOverdue(dateStr: string | null): number {
   if (!dateStr) return 0;
-  return Math.max(0, differenceInDays(new Date(), new Date(dateStr)));
+  return Math.max(0, differenceInDays(getCurrentDate(), new Date(dateStr)));
 }
 
 const urgencyColors = {
@@ -128,6 +135,7 @@ const urgencyBadge = {
 
 export function TasksClient() {
   const router = useRouter();
+  const { devDate } = useDevDate();
   const [data, setData] = useState<TaskData | null>(null);
   const [loading, setLoading] = useState(true);
   const [confirmingIds, setConfirmingIds] = useState<Set<string>>(new Set());
@@ -138,12 +146,13 @@ export function TasksClient() {
   const [chaseBody, setChaseBody] = useState("");
 
   useEffect(() => {
+    setLoading(true);
     fetch("/api/tasks")
       .then((r) => r.json())
       .then(setData)
       .catch(console.error)
       .finally(() => setLoading(false));
-  }, []);
+  }, [devDate]);
 
   // ── Quick confirm delivery ──
   async function handleQuickConfirm(orderId: string, listKey: "confirmDelivery" | "overdueOrders") {
@@ -269,6 +278,7 @@ export function TasksClient() {
     data.counts.sendOrder +
     data.counts.signOffJobs +
     data.counts.overdueJobs +
+    data.counts.lateStartJobs +
     data.counts.overdueOrders;
 
   return (
@@ -304,6 +314,13 @@ export function TasksClient() {
           count={data.counts.overdueJobs}
           color="text-red-600"
           bgColor="bg-red-50"
+        />
+        <SummaryCard
+          icon={Clock}
+          label="Late Start"
+          count={data.counts.lateStartJobs}
+          color="text-orange-600"
+          bgColor="bg-orange-50"
         />
         <SummaryCard
           icon={CheckCircle}
@@ -477,6 +494,51 @@ export function TasksClient() {
                       Sign Off
                     </Button>
                   </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ── Late Start Jobs Section ── */}
+      {data.lateStartJobs.length > 0 && (
+        <Card className="border-orange-200">
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <Clock className="size-4 text-orange-600" />
+              <CardTitle>Late Start</CardTitle>
+            </div>
+            <CardDescription>
+              Jobs that should have started but haven&apos;t been kicked off yet
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {data.lateStartJobs.map((job) => {
+                const days = daysOverdue(job.startDate);
+                return (
+                  <button
+                    key={job.id}
+                    className="flex w-full items-center justify-between rounded-lg border border-orange-200 bg-orange-50 p-3 text-left transition-colors hover:bg-orange-100/80"
+                    onClick={() => router.push(`/jobs/${job.id}`)}
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-orange-800">
+                        {job.name}
+                      </p>
+                      <p className="text-xs text-orange-600">
+                        {job.plot.site.name} &bull; {job.plot.name}
+                        {job.assignedTo && ` — ${job.assignedTo.name}`}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="shrink-0 rounded-full bg-orange-100 px-2 py-0.5 text-[11px] font-medium text-orange-700">
+                        {days}d late
+                      </span>
+                      <ArrowRight className="size-4 text-orange-400" />
+                    </div>
+                  </button>
                 );
               })}
             </div>

@@ -2,6 +2,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { redirect } from "next/navigation";
 import { SettingsClient } from "@/components/settings/SettingsClient";
+import { templateJobsInclude } from "@/lib/template-includes";
 
 export default async function SettingsPage() {
   const session = await auth();
@@ -10,14 +11,7 @@ export default async function SettingsPage() {
   const templates = await prisma.plotTemplate.findMany({
     orderBy: { createdAt: "desc" },
     include: {
-      jobs: {
-        orderBy: { sortOrder: "asc" },
-        include: {
-          orders: {
-            include: { items: true, supplier: true },
-          },
-        },
-      },
+      jobs: templateJobsInclude,
     },
   });
 

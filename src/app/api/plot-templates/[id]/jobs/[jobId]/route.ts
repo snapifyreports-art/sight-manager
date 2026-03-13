@@ -14,7 +14,7 @@ export async function PUT(
 
   const { id, jobId } = await params;
   const body = await request.json();
-  const { name, description, stageCode, sortOrder, startWeek, endWeek } = body;
+  const { name, description, stageCode, sortOrder, startWeek, endWeek, durationWeeks, parentId, weatherAffected } = body;
 
   const job = await prisma.templateJob.findFirst({
     where: { id: jobId, templateId: id },
@@ -39,10 +39,16 @@ export async function PUT(
       ...(sortOrder !== undefined && { sortOrder }),
       ...(startWeek !== undefined && { startWeek }),
       ...(endWeek !== undefined && { endWeek }),
+      ...(durationWeeks !== undefined && { durationWeeks }),
+      ...(weatherAffected !== undefined && { weatherAffected }),
+      ...(parentId !== undefined && { parentId: parentId || null }),
     },
     include: {
       orders: {
         include: { items: true },
+      },
+      children: {
+        orderBy: { sortOrder: "asc" },
       },
     },
   });
@@ -64,6 +70,7 @@ export async function DELETE(
 
   const job = await prisma.templateJob.findFirst({
     where: { id: jobId, templateId: id },
+    include: { children: { select: { id: true } } },
   });
   if (!job) {
     return NextResponse.json(
@@ -72,7 +79,21 @@ export async function DELETE(
     );
   }
 
-  await prisma.templateJob.delete({ where: { id: jobId } });
+  try {
+    // Delete children first, then parent (avoids FK issues in some DBs)
+    if (job.children.length > 0) {
+      await prisma.templateJob.deleteMany({
+        where: { parentId: jobId },
+      });
+    }
+    await prisma.templateJob.delete({ where: { id: jobId } });
+  } catch (err) {
+    console.error("Failed to delete template job:", err);
+    return NextResponse.json(
+      { error: "Failed to delete template job" },
+      { status: 500 }
+    );
+  }
 
   return NextResponse.json({ success: true });
 }

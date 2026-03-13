@@ -16,7 +16,20 @@ export async function PUT(
 
   const { orderId } = await params;
   const body = await request.json();
-  const { itemsDescription, orderWeekOffset, deliveryWeekOffset, supplierId, items } = body;
+  const {
+    itemsDescription,
+    orderWeekOffset,
+    deliveryWeekOffset,
+    supplierId,
+    items,
+    anchorType,
+    anchorAmount,
+    anchorUnit,
+    anchorDirection,
+    anchorJobId,
+    leadTimeAmount,
+    leadTimeUnit,
+  } = body;
 
   const existing = await prisma.templateOrder.findUnique({
     where: { id: orderId },
@@ -44,6 +57,13 @@ export async function PUT(
       ...(supplierId !== undefined && { supplierId: supplierId || null }),
       ...(orderWeekOffset !== undefined && { orderWeekOffset }),
       ...(deliveryWeekOffset !== undefined && { deliveryWeekOffset }),
+      ...(anchorType !== undefined && { anchorType: anchorType || null }),
+      ...(anchorAmount !== undefined && { anchorAmount: anchorAmount ?? null }),
+      ...(anchorUnit !== undefined && { anchorUnit: anchorUnit || null }),
+      ...(anchorDirection !== undefined && { anchorDirection: anchorDirection || null }),
+      ...(anchorJobId !== undefined && { anchorJobId: anchorJobId || null }),
+      ...(leadTimeAmount !== undefined && { leadTimeAmount: leadTimeAmount ?? null }),
+      ...(leadTimeUnit !== undefined && { leadTimeUnit: leadTimeUnit || null }),
       ...(items && {
         items: {
           create: items.map(
@@ -62,7 +82,13 @@ export async function PUT(
         },
       }),
     },
-    include: { items: true, supplier: true },
+    include: {
+      items: true,
+      supplier: true,
+      anchorJob: {
+        select: { id: true, name: true, startWeek: true, stageCode: true },
+      },
+    },
   });
 
   return NextResponse.json(updated);

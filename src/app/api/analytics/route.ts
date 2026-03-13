@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { differenceInDays } from "date-fns";
+import { getServerCurrentDate } from "@/lib/dev-date";
 
 // GET /api/analytics — aggregated analytics data
 export async function GET(req: NextRequest) {
@@ -18,16 +19,8 @@ export async function GET(req: NextRequest) {
     ? { plot: { siteId } }
     : {};
 
-  const [
-    sites,
-    plots,
-    jobs,
-    orders,
-    orderItems,
-    contractors,
-    events,
-  ] = await Promise.all([
-    // All sites with plot/job counts
+  // Run queries in small batches to avoid exhausting Supabase connection pool
+  const [sites, plots, jobs] = await Promise.all([
     prisma.site.findMany({
       where: siteId ? { id: siteId } : {},
       select: {
@@ -54,11 +47,7 @@ export async function GET(req: NextRequest) {
         },
       },
     }),
-
-    // Plot count
     prisma.plot.count({ where: siteFilter }),
-
-    // All jobs with dates for duration analysis
     prisma.job.findMany({
       where: plotFilter,
       select: {
@@ -78,8 +67,9 @@ export async function GET(req: NextRequest) {
         },
       },
     }),
+  ]);
 
-    // Orders with items for spend analysis
+  const [orders, orderItems] = await Promise.all([
     prisma.materialOrder.findMany({
       where: plotFilter.plot ? { job: plotFilter } : {},
       select: {
@@ -109,8 +99,6 @@ export async function GET(req: NextRequest) {
         },
       },
     }),
-
-    // Order items for total spend
     prisma.orderItem.findMany({
       where: plotFilter.plot
         ? { order: { job: plotFilter } }
@@ -119,8 +107,9 @@ export async function GET(req: NextRequest) {
         totalCost: true,
       },
     }),
+  ]);
 
-    // Contractor assignments
+  const [contractors, events] = await Promise.all([
     prisma.jobContractor.findMany({
       where: plotFilter.plot ? { job: plotFilter } : {},
       select: {
@@ -140,8 +129,6 @@ export async function GET(req: NextRequest) {
         },
       },
     }),
-
-    // Events for timeline
     prisma.eventLog.findMany({
       where: siteId ? { siteId } : {},
       orderBy: { createdAt: "desc" },
@@ -152,6 +139,20 @@ export async function GET(req: NextRequest) {
       },
     }),
   ]);
+
+  // Rained-off days + weather impact (separate small queries)
+  const rainedOffDays = await prisma.rainedOffDay.findMany({
+    where: siteId ? { siteId } : {},
+    select: { siteId: true, date: true },
+  });
+
+  const weatherNotes = await prisma.jobAction.count({
+    where: {
+      action: "note",
+      notes: { startsWith: "\u2614" },
+      ...(plotFilter.plot ? { job: plotFilter } : {}),
+    },
+  });
 
   // ── Site Progress ──
   const siteProgress = sites.map((site) => {
@@ -168,7 +169,7 @@ export async function GET(req: NextRequest) {
         : 0;
 
     // Count delayed jobs (endDate < today and not completed)
-    const now = new Date();
+    const now = getServerCurrentDate(req);
     const delayedJobs = site.plots.reduce(
       (sum, p) =>
         sum +
@@ -387,7 +388,7 @@ export async function GET(req: NextRequest) {
   }
 
   // ── Events over time (last 30 days grouped by day) ──
-  const now = new Date();
+  const now = getServerCurrentDate(req);
   const thirtyDaysAgo = new Date(now);
   thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
@@ -427,6 +428,20 @@ export async function GET(req: NextRequest) {
       totalJobs: jobs.length,
       totalOrders: orders.length,
       totalSpend,
+    },
+    rainedOffStats: {
+      totalDays: rainedOffDays.length,
+      totalJobsAffected: weatherNotes,
+      bySite: Object.entries(
+        rainedOffDays.reduce<Record<string, number>>((acc, d) => {
+          acc[d.siteId] = (acc[d.siteId] || 0) + 1;
+          return acc;
+        }, {})
+      ).map(([sId, count]) => ({
+        siteId: sId,
+        siteName: sites.find((s) => s.id === sId)?.name ?? "Unknown",
+        days: count,
+      })),
     },
   });
 }

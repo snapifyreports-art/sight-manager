@@ -32,7 +32,7 @@ export async function POST(request: NextRequest) {
   }
 
   const body = await request.json();
-  const { name, description, location, address } = body;
+  const { name, description, location, address, postcode } = body;
 
   if (!name || typeof name !== "string" || name.trim().length === 0) {
     return NextResponse.json(
@@ -47,6 +47,7 @@ export async function POST(request: NextRequest) {
       description: description?.trim() || null,
       location: location?.trim() || null,
       address: address?.trim() || null,
+      postcode: postcode?.trim() || null,
       createdById: session.user.id,
     },
     include: {

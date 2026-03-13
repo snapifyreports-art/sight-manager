@@ -128,6 +128,7 @@ export const NAV_PERMISSION_MAP: Record<string, string> = {
   "/tasks": "VIEW_TASKS",
   "/sites": "VIEW_SITES",
   "/orders": "VIEW_ORDERS",
+  "/suppliers": "VIEW_ORDERS",
   "/contacts": "VIEW_CONTACTS",
   "/events-log": "VIEW_EVENTS_LOG",
   "/analytics": "VIEW_ANALYTICS",

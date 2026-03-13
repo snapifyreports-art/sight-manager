@@ -1,39 +1,43 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
-import { Package } from "lucide-react";
+import { useState, useRef, useCallback, useMemo } from "react";
+import { ChevronRight, ChevronDown, Package } from "lucide-react";
 import type { TemplateJobData } from "./types";
 
 const WEEK_WIDTH = 48;
 const ROW_HEIGHT = 40;
 const BAR_HEIGHT = 24;
-const LEFT_PANEL = 180;
+const LEFT_PANEL = 200;
 
-const JOB_COLORS = [
-  "bg-blue-500/80",
-  "bg-indigo-500/80",
-  "bg-violet-500/80",
-  "bg-cyan-500/80",
-  "bg-teal-500/80",
-  "bg-emerald-500/80",
-  "bg-amber-500/80",
-  "bg-rose-500/80",
+// Colors per parent stage group
+const GROUP_COLORS = [
+  { bar: "bg-blue-500/80", bg: "bg-blue-50/30", hex: "rgba(59,130,246,0.8)" },
+  { bar: "bg-indigo-500/80", bg: "bg-indigo-50/30", hex: "rgba(99,102,241,0.8)" },
+  { bar: "bg-violet-500/80", bg: "bg-violet-50/30", hex: "rgba(139,92,246,0.8)" },
+  { bar: "bg-cyan-500/80", bg: "bg-cyan-50/30", hex: "rgba(6,182,212,0.8)" },
+  { bar: "bg-teal-500/80", bg: "bg-teal-50/30", hex: "rgba(20,184,166,0.8)" },
+  { bar: "bg-emerald-500/80", bg: "bg-emerald-50/30", hex: "rgba(16,185,129,0.8)" },
+  { bar: "bg-amber-500/80", bg: "bg-amber-50/30", hex: "rgba(245,158,11,0.8)" },
+  { bar: "bg-rose-500/80", bg: "bg-rose-50/30", hex: "rgba(244,63,94,0.8)" },
 ];
 
-const JOB_COLOR_HEX = [
-  "rgba(59,130,246,0.8)",
-  "rgba(99,102,241,0.8)",
-  "rgba(139,92,246,0.8)",
-  "rgba(6,182,212,0.8)",
-  "rgba(20,184,166,0.8)",
-  "rgba(16,185,129,0.8)",
-  "rgba(245,158,11,0.8)",
-  "rgba(244,63,94,0.8)",
-];
+interface TimelineRow {
+  type: "group-header" | "sub-job" | "flat-job";
+  label: string;
+  stageCode?: string;
+  job?: TemplateJobData;
+  parentJob?: TemplateJobData; // for collapsed group headers that need a bar
+  groupIndex: number;
+  weekRange?: string;
+  orders?: TemplateJobData["orders"];
+  collapsed?: boolean; // true when this group-header is collapsed (show bar)
+}
 
 interface TemplateTimelineProps {
   jobs: TemplateJobData[];
   onJobUpdate?: (jobId: string, startWeek: number, endWeek: number) => void;
+  expandedJobIds?: Set<string>;
+  onToggleExpand?: (jobId: string) => void;
 }
 
 interface DragState {
@@ -44,8 +48,12 @@ interface DragState {
   startX: number;
 }
 
-export function TemplateTimeline({ jobs, onJobUpdate }: TemplateTimelineProps) {
+export function TemplateTimeline({ jobs, onJobUpdate, expandedJobIds, onToggleExpand }: TemplateTimelineProps) {
   if (jobs.length === 0) return null;
+
+  // Use external expand state if provided, otherwise fallback to internal
+  const [internalExpanded, setInternalExpanded] = useState<Set<string>>(new Set());
+  const effectiveExpanded = expandedJobIds ?? internalExpanded;
 
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [dragPreview, setDragPreview] = useState<{
@@ -55,19 +63,93 @@ export function TemplateTimeline({ jobs, onJobUpdate }: TemplateTimelineProps) {
   } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const maxWeek = Math.max(...jobs.map((j) => {
-    const preview = dragPreview?.jobId === j.id ? dragPreview : null;
-    return preview ? preview.endWeek : j.endWeek;
-  }));
+  function toggleGroup(jobId: string) {
+    if (onToggleExpand) {
+      onToggleExpand(jobId);
+    } else {
+      setInternalExpanded((prev) => {
+        const next = new Set(prev);
+        if (next.has(jobId)) next.delete(jobId);
+        else next.add(jobId);
+        return next;
+      });
+    }
+  }
+
+  // Build rows: stages are collapsed by default, expanded on click
+  const rows: TimelineRow[] = useMemo(() => {
+    const result: TimelineRow[] = [];
+    jobs.forEach((parentJob, groupIdx) => {
+      if (parentJob.children && parentJob.children.length > 0) {
+        const isExpanded = effectiveExpanded.has(parentJob.id);
+        // Group header row — always shown
+        result.push({
+          type: "group-header",
+          label: parentJob.name,
+          stageCode: parentJob.stageCode ?? undefined,
+          parentJob,
+          groupIndex: groupIdx,
+          weekRange: `Wk ${parentJob.startWeek}–${parentJob.endWeek}`,
+          collapsed: !isExpanded,
+        });
+        // Sub-job rows — only when expanded
+        if (isExpanded) {
+          parentJob.children.forEach((child) => {
+            result.push({
+              type: "sub-job",
+              label: child.name,
+              stageCode: child.stageCode ?? undefined,
+              job: child,
+              groupIndex: groupIdx,
+              orders: child.orders,
+            });
+          });
+        }
+      } else {
+        // Flat job (legacy/no children)
+        result.push({
+          type: "flat-job",
+          label: parentJob.name,
+          stageCode: parentJob.stageCode ?? undefined,
+          job: parentJob,
+          groupIndex: groupIdx,
+          orders: parentJob.orders,
+        });
+      }
+    });
+    return result;
+  }, [jobs, effectiveExpanded]);
+
+  // Calculate max week and dimensions
+  const allJobs = rows.filter((r) => r.job).map((r) => r.job!);
+  const maxWeek = Math.max(
+    ...allJobs.map((j) => {
+      const preview = dragPreview?.jobId === j.id ? dragPreview : null;
+      return preview ? preview.endWeek : j.endWeek;
+    }),
+    ...jobs.map((j) => j.endWeek) // include parent stage endWeeks
+  );
   const totalWeeks = maxWeek + 1;
   const timelineWidth = totalWeeks * WEEK_WIDTH;
-  const totalHeight = jobs.length * ROW_HEIGHT;
-  const weekHeaders = Array.from({ length: totalWeeks }, (_, i) => i + 1);
 
+  // All rows use ROW_HEIGHT (collapsed group headers need bar space too)
+  const rowHeights = rows.map(() => ROW_HEIGHT);
+  const totalHeight = rowHeights.reduce((sum, h) => sum + h, 0);
+  const rowYPositions = rowHeights.reduce<number[]>((acc, h, i) => {
+    acc.push(i === 0 ? 0 : acc[i - 1] + rowHeights[i - 1]);
+    return acc;
+  }, []);
+
+  const weekHeaders = Array.from({ length: totalWeeks }, (_, i) => i + 1);
   const interactive = !!onJobUpdate;
 
   const handleMouseDown = useCallback(
-    (e: React.MouseEvent, jobId: string, edge: "left" | "right", job: TemplateJobData) => {
+    (
+      e: React.MouseEvent,
+      jobId: string,
+      edge: "left" | "right",
+      job: TemplateJobData
+    ) => {
       if (!interactive) return;
       e.preventDefault();
       e.stopPropagation();
@@ -121,7 +203,11 @@ export function TemplateTimeline({ jobs, onJobUpdate }: TemplateTimelineProps) {
       dragPreview.endWeek !== dragState.originalEndWeek;
 
     if (changed) {
-      onJobUpdate(dragState.jobId, dragPreview.startWeek, dragPreview.endWeek);
+      onJobUpdate(
+        dragState.jobId,
+        dragPreview.startWeek,
+        dragPreview.endWeek
+      );
     }
 
     setDragState(null);
@@ -137,7 +223,7 @@ export function TemplateTimeline({ jobs, onJobUpdate }: TemplateTimelineProps) {
         <p className="text-xs text-muted-foreground">
           {interactive
             ? "Drag bar edges to adjust week ranges"
-            : "Relative week-based schedule"}
+            : "Click stages to expand sub-jobs"}
         </p>
       </div>
 
@@ -150,40 +236,84 @@ export function TemplateTimeline({ jobs, onJobUpdate }: TemplateTimelineProps) {
           onMouseLeave={handleMouseUp}
           ref={containerRef}
         >
-          {/* Left panel - job names */}
+          {/* Left panel - job/stage names */}
           <div
             className="shrink-0 border-r bg-slate-50/50"
             style={{ width: LEFT_PANEL }}
           >
             <div className="flex h-8 items-center border-b px-3">
               <span className="text-[11px] font-medium text-muted-foreground">
-                Job
+                Stage / Sub-Job
               </span>
             </div>
 
-            {jobs.map((job) => {
+            {rows.map((row, idx) => {
+              if (row.type === "group-header") {
+                const isCollapsed = row.collapsed;
+                return (
+                  <div
+                    key={`gh-${idx}`}
+                    className="flex cursor-pointer items-center border-b border-slate-200 bg-slate-100/60 px-2 hover:bg-slate-100"
+                    style={{ height: ROW_HEIGHT }}
+                    onClick={() => toggleGroup(row.parentJob?.id ?? '')}
+                  >
+                    <span className="mr-1 text-slate-400">
+                      {isCollapsed ? (
+                        <ChevronRight className="size-3.5" />
+                      ) : (
+                        <ChevronDown className="size-3.5" />
+                      )}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <span className="block truncate text-[11px] font-semibold text-slate-600">
+                        {row.stageCode && (
+                          <span className="mr-1.5 inline-block rounded bg-slate-200 px-1 py-0.5 font-mono text-[9px]">
+                            {row.stageCode}
+                          </span>
+                        )}
+                        {row.label}
+                      </span>
+                      <span className="text-[9px] text-muted-foreground">
+                        {row.weekRange}
+                        {row.parentJob &&
+                          row.parentJob.children &&
+                          ` · ${row.parentJob.children.length} sub-jobs`}
+                      </span>
+                    </div>
+                  </div>
+                );
+              }
+
+              const job = row.job!;
               const preview =
                 dragPreview?.jobId === job.id ? dragPreview : null;
               const sw = preview ? preview.startWeek : job.startWeek;
               const ew = preview ? preview.endWeek : job.endWeek;
+
               return (
                 <div
                   key={job.id}
-                  className="flex items-center border-b border-slate-100 px-3"
+                  className="flex items-center border-b border-slate-100 px-3 pl-7"
                   style={{ height: ROW_HEIGHT }}
                 >
                   <div className="min-w-0 flex-1">
-                    <span className="block truncate text-xs font-medium">
-                      {job.name}
+                    <span className="block truncate text-xs">
+                      {row.stageCode && (
+                        <span className="mr-1 font-mono text-[10px] font-medium text-slate-500">
+                          {row.stageCode}
+                        </span>
+                      )}
+                      {row.label}
                     </span>
                     <span className="text-[10px] text-muted-foreground">
                       Wk {sw}–{ew}
+                      {job.durationWeeks && ` (${job.durationWeeks}wk)`}
                     </span>
                   </div>
-                  {job.orders.length > 0 && (
+                  {row.orders && row.orders.length > 0 && (
                     <span className="ml-1 flex items-center gap-0.5 text-[10px] text-muted-foreground">
                       <Package className="size-3" />
-                      {job.orders.length}
+                      {row.orders.length}
                     </span>
                   )}
                 </div>
@@ -221,40 +351,86 @@ export function TemplateTimeline({ jobs, onJobUpdate }: TemplateTimelineProps) {
                 />
               ))}
 
-              {/* Horizontal row stripes */}
-              {jobs.map((_, index) => (
-                <div
-                  key={index}
-                  className={`absolute left-0 right-0 border-b border-slate-100 ${
-                    index % 2 === 1 ? "bg-blue-50/20" : ""
-                  }`}
-                  style={{
-                    top: index * ROW_HEIGHT,
-                    height: ROW_HEIGHT,
-                  }}
-                />
-              ))}
+              {/* Row backgrounds */}
+              {rows.map((row, idx) => {
+                const colorSet =
+                  GROUP_COLORS[row.groupIndex % GROUP_COLORS.length];
+                return (
+                  <div
+                    key={idx}
+                    className={`absolute left-0 right-0 border-b border-slate-100 ${
+                      row.type === "group-header" && !row.collapsed
+                        ? "bg-slate-100/40"
+                        : row.type === "group-header" && row.collapsed
+                          ? colorSet.bg
+                          : idx % 2 === 1
+                            ? colorSet.bg
+                            : ""
+                    }`}
+                    style={{
+                      top: rowYPositions[idx],
+                      height: rowHeights[idx],
+                    }}
+                  />
+                );
+              })}
 
               {/* Gantt bars */}
-              {jobs.map((job, index) => {
+              {rows.map((row, idx) => {
+                // Collapsed group-header: render a summary bar for the whole stage
+                if (row.type === "group-header" && row.collapsed && row.parentJob) {
+                  const pj = row.parentJob;
+                  const colorSet =
+                    GROUP_COLORS[row.groupIndex % GROUP_COLORS.length];
+                  const left = (pj.startWeek - 1) * WEEK_WIDTH;
+                  const width = (pj.endWeek - pj.startWeek + 1) * WEEK_WIDTH - 4;
+                  const top = rowYPositions[idx] + (ROW_HEIGHT - BAR_HEIGHT) / 2;
+
+                  return (
+                    <div
+                      key={`collapsed-${idx}`}
+                      className={`absolute rounded-md ${colorSet.bar} flex items-center px-2 shadow-sm cursor-pointer select-none`}
+                      style={{
+                        left: left + 2,
+                        top,
+                        width: Math.max(width, 20),
+                        height: BAR_HEIGHT,
+                      }}
+                      onClick={() => toggleGroup(row.parentJob?.id ?? '')}
+                    >
+                      <span className="truncate text-[10px] font-medium text-white px-1">
+                        {row.stageCode || row.label}
+                      </span>
+                    </div>
+                  );
+                }
+
+                // Expanded group-header: no bar (sub-jobs shown below)
+                if (row.type === "group-header" || !row.job) return null;
+
+                const job = row.job;
                 const preview =
                   dragPreview?.jobId === job.id ? dragPreview : null;
                 const sw = preview ? preview.startWeek : job.startWeek;
                 const ew = preview ? preview.endWeek : job.endWeek;
                 const isDragging = dragState?.jobId === job.id;
+                const colorSet =
+                  GROUP_COLORS[row.groupIndex % GROUP_COLORS.length];
 
                 const left = (sw - 1) * WEEK_WIDTH;
                 const width = (ew - sw + 1) * WEEK_WIDTH - 4;
                 const top =
-                  index * ROW_HEIGHT + (ROW_HEIGHT - BAR_HEIGHT) / 2;
-                const color = JOB_COLORS[index % JOB_COLORS.length];
+                  rowYPositions[idx] +
+                  (ROW_HEIGHT - BAR_HEIGHT) / 2;
 
                 return (
                   <div key={job.id}>
                     {/* Job bar */}
                     <div
-                      className={`absolute rounded-md ${color} flex items-center px-2 shadow-sm ${
-                        isDragging ? "ring-2 ring-blue-400 ring-offset-1" : ""
+                      className={`absolute rounded-md ${colorSet.bar} flex items-center px-2 shadow-sm ${
+                        isDragging
+                          ? "ring-2 ring-blue-400 ring-offset-1"
+                          : ""
                       } ${interactive ? "select-none" : ""}`}
                       style={{
                         left: left + 2,
@@ -276,7 +452,7 @@ export function TemplateTimeline({ jobs, onJobUpdate }: TemplateTimelineProps) {
                       )}
 
                       <span className="truncate text-[10px] font-medium text-white px-1">
-                        {job.name}
+                        {row.stageCode || job.name}
                       </span>
 
                       {/* Right drag handle */}
@@ -293,12 +469,14 @@ export function TemplateTimeline({ jobs, onJobUpdate }: TemplateTimelineProps) {
                     </div>
 
                     {/* Order flag markers */}
-                    {job.orders.map((order) => {
+                    {row.orders?.map((order) => {
                       const orderWeek =
                         job.startWeek + order.orderWeekOffset;
                       const deliveryWeek =
-                        (job.startWeek + order.orderWeekOffset) + order.deliveryWeekOffset;
-                      const rowTop = index * ROW_HEIGHT;
+                        job.startWeek +
+                        order.orderWeekOffset +
+                        order.deliveryWeekOffset;
+                      const rowTop = rowYPositions[idx];
 
                       return (
                         <div key={order.id}>
@@ -356,6 +534,10 @@ export function TemplateTimeline({ jobs, onJobUpdate }: TemplateTimelineProps) {
                   Drag edges to resize
                 </div>
               )}
+              <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                <ChevronRight className="size-3" />
+                Click stage to expand
+              </div>
             </div>
           </div>
         </div>

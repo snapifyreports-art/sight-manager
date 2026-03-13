@@ -15,6 +15,13 @@ export interface SupplierData {
   type: string | null;
 }
 
+export interface AnchorJobData {
+  id: string;
+  name: string;
+  startWeek: number;
+  stageCode: string | null;
+}
+
 export interface TemplateOrderData {
   id: string;
   templateJobId: string;
@@ -23,6 +30,14 @@ export interface TemplateOrderData {
   itemsDescription: string | null;
   orderWeekOffset: number;
   deliveryWeekOffset: number;
+  anchorType: string | null;
+  anchorAmount: number | null;
+  anchorUnit: string | null;
+  anchorDirection: string | null;
+  anchorJobId: string | null;
+  anchorJob: AnchorJobData | null;
+  leadTimeAmount: number | null;
+  leadTimeUnit: string | null;
   items: TemplateOrderItemData[];
 }
 
@@ -35,7 +50,11 @@ export interface TemplateJobData {
   sortOrder: number;
   startWeek: number;
   endWeek: number;
+  durationWeeks: number | null;
+  weatherAffected: boolean;
+  parentId: string | null;
   orders: TemplateOrderData[];
+  children: TemplateJobData[];
 }
 
 export interface TemplateData {

@@ -22,10 +22,13 @@ export async function generateMetadata({
 
 export default async function SiteDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ siteId: string }>;
+  searchParams: Promise<{ tab?: string }>;
 }) {
   const { siteId } = await params;
+  const { tab: initialTab } = await searchParams;
 
   const site = await prisma.site.findUnique({
     where: { id: siteId },
@@ -66,12 +69,18 @@ export default async function SiteDetailPage({
     description: site.description,
     location: site.location,
     address: site.address,
+    postcode: site.postcode,
     status: site.status,
     createdAt: site.createdAt.toISOString(),
     updatedAt: site.updatedAt.toISOString(),
     createdBy: site.createdBy,
     _count: site._count,
-    plots: site.plots.map((plot) => ({
+    plots: site.plots.sort((a, b) => {
+      const numA = parseInt(a.plotNumber ?? "", 10);
+      const numB = parseInt(b.plotNumber ?? "", 10);
+      if (!isNaN(numA) && !isNaN(numB)) return numA - numB;
+      return (a.plotNumber ?? "").localeCompare(b.plotNumber ?? "");
+    }).map((plot) => ({
       id: plot.id,
       name: plot.name,
       description: plot.description,
@@ -88,5 +97,5 @@ export default async function SiteDetailPage({
     })),
   };
 
-  return <SiteDetailClient site={serialized} />;
+  return <SiteDetailClient site={serialized} initialTab={initialTab} />;
 }

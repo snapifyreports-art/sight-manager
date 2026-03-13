@@ -50,6 +50,7 @@ export async function POST(
   const formData = await req.formData();
   const files = formData.getAll("photos") as File[];
   const caption = formData.get("caption") as string | null;
+  const tag = formData.get("tag") as string | null;
 
   if (files.length === 0) {
     return NextResponse.json(
@@ -90,6 +91,7 @@ export async function POST(
         url: publicUrl,
         fileName: file.name,
         caption: caption || null,
+        tag: tag || null,
         uploadedById: session.user.id,
       },
     });
@@ -112,6 +114,40 @@ export async function POST(
   }
 
   return NextResponse.json(createdPhotos, { status: 201 });
+}
+
+// PATCH /api/jobs/[id]/photos — update photo tag/caption
+export async function PATCH(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const session = await auth();
+  if (!session) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const { id } = await params;
+  const body = await req.json();
+  const { photoId, tag, caption } = body;
+
+  if (!photoId) {
+    return NextResponse.json({ error: "photoId required" }, { status: 400 });
+  }
+
+  const photo = await prisma.jobPhoto.findUnique({ where: { id: photoId } });
+  if (!photo || photo.jobId !== id) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
+  const updated = await prisma.jobPhoto.update({
+    where: { id: photoId },
+    data: {
+      ...(tag !== undefined && { tag }),
+      ...(caption !== undefined && { caption }),
+    },
+  });
+
+  return NextResponse.json(updated);
 }
 
 // DELETE /api/jobs/[id]/photos?photoId=xxx — delete a photo

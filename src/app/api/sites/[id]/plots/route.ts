@@ -14,7 +14,7 @@ export async function POST(
 
   const { id: siteId } = await params;
   const body = await request.json();
-  const { name, description } = body;
+  const { name, description, plotNumber, houseType, reservationType } = body;
 
   if (!name || typeof name !== "string" || name.trim().length === 0) {
     return NextResponse.json(
@@ -33,10 +33,26 @@ export async function POST(
     return NextResponse.json({ error: "Site not found" }, { status: 404 });
   }
 
+  // Check for duplicate plot number within site
+  if (plotNumber) {
+    const existing = await prisma.plot.findFirst({
+      where: { siteId, plotNumber: plotNumber.toString().trim() },
+    });
+    if (existing) {
+      return NextResponse.json(
+        { error: `Plot number ${plotNumber} already exists in this site` },
+        { status: 409 }
+      );
+    }
+  }
+
   const plot = await prisma.plot.create({
     data: {
       name: name.trim(),
+      plotNumber: plotNumber?.toString().trim() || null,
       description: description?.trim() || null,
+      houseType: houseType?.trim() || null,
+      reservationType: reservationType?.trim() || null,
       siteId,
     },
     include: {

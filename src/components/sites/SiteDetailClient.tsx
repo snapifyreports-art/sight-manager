@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { format, addWeeks, addDays } from "date-fns";
 import {
+  AlertTriangle,
   ArrowLeft,
   Plus,
   Pencil,
@@ -19,6 +20,7 @@ import {
   Layers,
   Loader2,
   Search,
+  ShoppingCart,
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -48,13 +50,25 @@ import {
   DialogFooter,
   DialogClose,
 } from "@/components/ui/dialog";
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "@/components/ui/tabs";
+// Tabs replaced with custom buttons + conditional rendering (Base UI Tabs click bug)
 import { SiteProgramme } from "@/components/programme/SiteProgramme";
+import { SiteHeatmap } from "@/components/sites/SiteHeatmap";
+import { SnagList } from "@/components/snags/SnagList";
+import { SnagDialog } from "@/components/snags/SnagDialog";
+import { DocumentList } from "@/components/documents/DocumentList";
+import { DocumentUpload } from "@/components/documents/DocumentUpload";
+import { DailySiteBrief } from "@/components/reports/DailySiteBrief";
+import { ContractorDaySheets } from "@/components/reports/ContractorDaySheets";
+import { DelayReport } from "@/components/reports/DelayReport";
+import { BudgetReport } from "@/components/reports/BudgetReport";
+import { SiteCalendar } from "@/components/reports/SiteCalendar";
+import { BatchPlotQR } from "@/components/plots/PlotQRCode";
+import { WeeklySiteReport } from "@/components/reports/WeeklySiteReport";
+import { CriticalPath } from "@/components/reports/CriticalPath";
+import { SiteOrders } from "@/components/orders/SiteOrders";
+import { SnagAgeingReport } from "@/components/snags/SnagAgeingReport";
+import { CashFlowReport } from "@/components/reports/CashFlowReport";
+import { Badge } from "@/components/ui/badge";
 
 // ---------- Types ----------
 
@@ -82,6 +96,7 @@ interface SiteDetail {
   description: string | null;
   location: string | null;
   address: string | null;
+  postcode: string | null;
   status: string;
   createdAt: string;
   updatedAt: string;
@@ -170,12 +185,184 @@ function getSiteStatusConfig(status: string) {
   return SITE_STATUS_CONFIG[status] ?? SITE_STATUS_CONFIG.ACTIVE;
 }
 
+// ---------- Site Snags Sub-Component ----------
+
+function SiteSnags({ siteId, plots }: { siteId: string; plots: Array<{ id: string; name: string; plotNumber: string | null }> }) {
+  const [snags, setSnags] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedSnag, setSelectedSnag] = useState<any>(null);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [users, setUsers] = useState<{ id: string; name: string }[]>([]);
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [snagCreateOpen, setSnagCreateOpen] = useState(false);
+  const [selectedPlotId, setSelectedPlotId] = useState("");
+  const [showAgeingReport, setShowAgeingReport] = useState(false);
+
+  const loadSnags = () => {
+    fetch(`/api/sites/${siteId}/snags`)
+      .then((r) => r.json())
+      .then(setSnags)
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    loadSnags();
+    fetch("/api/users")
+      .then((r) => r.json())
+      .then((data: any[]) =>
+        setUsers(data.map((u: any) => ({ id: u.id, name: u.name })))
+      );
+  }, [siteId]);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-16">
+        <Loader2 className="size-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-semibold">
+          All Snags ({snags.length})
+        </h3>
+        <div className="flex items-center gap-2">
+          <Button
+            variant={showAgeingReport ? "default" : "outline"}
+            size="sm"
+            onClick={() => setShowAgeingReport(!showAgeingReport)}
+          >
+            {showAgeingReport ? "Hide Report" : "Ageing Report"}
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => {
+              setSelectedPlotId(plots[0]?.id || "");
+              setCreateDialogOpen(true);
+            }}
+          >
+            <Plus className="size-4" />
+            Raise Snag
+          </Button>
+        </div>
+      </div>
+
+      {showAgeingReport && <SnagAgeingReport siteId={siteId} />}
+
+      <SnagList snags={snags} onSelect={(s) => { setSelectedSnag(s); setDialogOpen(true); }} showPlot />
+      {selectedSnag && (
+        <SnagDialog
+          open={dialogOpen}
+          onOpenChange={setDialogOpen}
+          snag={selectedSnag}
+          plotId={selectedSnag.plotId}
+          users={users}
+          onSaved={() => { loadSnags(); setSelectedSnag(null); }}
+        />
+      )}
+
+      {/* Plot picker dialog — step 1 of create flow */}
+      <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Select Plot</DialogTitle>
+            <DialogDescription>
+              Choose which plot this snag is on.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <Select value={selectedPlotId} onValueChange={(v) => v && setSelectedPlotId(v)}>
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Select plot" />
+              </SelectTrigger>
+              <SelectContent>
+                {plots.map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.plotNumber ? `Plot ${p.plotNumber}` : p.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <DialogFooter>
+            <DialogClose render={<Button variant="outline" />}>Cancel</DialogClose>
+            <Button
+              disabled={!selectedPlotId}
+              onClick={() => {
+                setCreateDialogOpen(false);
+                setSnagCreateOpen(true);
+              }}
+            >
+              Next
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* SnagDialog for creating — step 2, rendered at top level (not nested) */}
+      {selectedPlotId && (
+        <SnagDialog
+          open={snagCreateOpen}
+          onOpenChange={setSnagCreateOpen}
+          plotId={selectedPlotId}
+          users={users}
+          onSaved={() => {
+            loadSnags();
+            setSnagCreateOpen(false);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ---------- Site Documents Sub-Component ----------
+
+function SiteDocuments({ siteId }: { siteId: string }) {
+  const [docs, setDocs] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const loadDocs = () => {
+    fetch(`/api/sites/${siteId}/documents`)
+      .then((r) => r.json())
+      .then(setDocs)
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    loadDocs();
+  }, [siteId]);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-16">
+        <Loader2 className="size-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <DocumentUpload siteId={siteId} onUploaded={loadDocs} />
+      <DocumentList
+        documents={docs}
+        onDelete={(id) => setDocs((prev) => prev.filter((d) => d.id !== id))}
+        level="site"
+      />
+    </div>
+  );
+}
+
 // ---------- Main Component ----------
 
 export function SiteDetailClient({
   site: initialSite,
+  initialTab,
 }: {
   site: SiteDetail;
+  initialTab?: string;
 }) {
   const router = useRouter();
   const [site, setSite] = useState(initialSite);
@@ -188,6 +375,7 @@ export function SiteDetailClient({
   );
   const [editLocation, setEditLocation] = useState(site.location ?? "");
   const [editAddress, setEditAddress] = useState(site.address ?? "");
+  const [editPostcode, setEditPostcode] = useState(site.postcode ?? "");
   const [editStatus, setEditStatus] = useState(site.status);
   const [saving, setSaving] = useState(false);
 
@@ -217,6 +405,10 @@ export function SiteDetailClient({
   const [bulkRangeStart, setBulkRangeStart] = useState("");
   const [bulkRangeEnd, setBulkRangeEnd] = useState("");
   const [bulkStep, setBulkStep] = useState<"config" | "suppliers">("config");
+
+  // Controlled tabs + overdue alerts (UX #6)
+  const [activeTab, setActiveTab] = useState(initialTab || "plots");
+  const [overdueCount, setOverdueCount] = useState(0);
 
   // Plot tab filter state
   const [plotSearch, setPlotSearch] = useState("");
@@ -252,6 +444,18 @@ export function SiteDetailClient({
   }, [site.plots, plotSearch, plotStatusFilter]);
 
   const hasPlotFilters = plotSearch || plotStatusFilter !== "all";
+
+  // Fetch overdue count on mount (UX #6)
+  useEffect(() => {
+    fetch(`/api/sites/${site.id}/daily-brief`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data?.summary?.overdueJobCount) {
+          setOverdueCount(data.summary.overdueJobCount);
+        }
+      })
+      .catch(() => {});
+  }, [site.id]);
 
   // Fetch templates and suppliers when dialog opens in template/bulk mode
   useEffect(() => {
@@ -300,6 +504,7 @@ export function SiteDetailClient({
           description: editDescription,
           location: editLocation,
           address: editAddress,
+          postcode: editPostcode,
           status: editStatus,
         }),
       });
@@ -316,6 +521,7 @@ export function SiteDetailClient({
         description: updated.description,
         location: updated.location,
         address: updated.address,
+        postcode: updated.postcode,
         status: updated.status,
         updatedAt: updated.updatedAt,
       }));
@@ -1196,6 +1402,16 @@ export function SiteDetailClient({
                     </div>
                   </div>
                   <div className="space-y-2">
+                    <Label htmlFor="edit-postcode">Postcode</Label>
+                    <Input
+                      id="edit-postcode"
+                      value={editPostcode}
+                      onChange={(e) => setEditPostcode(e.target.value.toUpperCase())}
+                      placeholder="e.g. SW1A 1AA"
+                      className="w-40"
+                    />
+                  </div>
+                  <div className="space-y-2">
                     <Label>Status</Label>
                     <Select
                       value={editStatus}
@@ -1231,15 +1447,68 @@ export function SiteDetailClient({
         </div>
       </div>
 
+      {/* Overdue alert banner (UX #6) */}
+      {overdueCount > 0 && (
+        <div className="flex items-center justify-between rounded-lg border border-red-200 bg-red-50 px-4 py-2.5">
+          <span className="flex items-center gap-2 text-sm font-medium text-red-700">
+            <AlertTriangle className="size-4" />
+            {overdueCount} overdue {overdueCount === 1 ? "job" : "jobs"} on this site
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            className="border-red-200 text-red-700 hover:bg-red-100"
+            onClick={() => setActiveTab("daily-brief")}
+          >
+            View Details
+          </Button>
+        </div>
+      )}
+
       {/* Plot Cards + Programme */}
       {site.plots.length > 0 ? (
-        <Tabs defaultValue="plots">
-          <TabsList variant="line">
-            <TabsTrigger value="plots">Plots</TabsTrigger>
-            <TabsTrigger value="programme">Programme</TabsTrigger>
-          </TabsList>
+        <div>
+          <div className="inline-flex w-fit items-center justify-center gap-1 bg-transparent p-[3px] text-muted-foreground h-8" role="tablist">
+            {[
+              { value: "plots", label: "Plots" },
+              { value: "programme", label: "Programme" },
+              { value: "heatmap", label: "Heatmap" },
+              { value: "snags", label: "Snags" },
+              { value: "documents", label: "Documents" },
+              { value: "daily-brief", label: "Daily Brief", badge: overdueCount > 0 ? overdueCount : undefined },
+              { value: "day-sheets", label: "Day Sheets" },
+              { value: "delays", label: "Delays" },
+              { value: "budget", label: "Budget" },
+              { value: "calendar", label: "Calendar" },
+              { value: "weekly-report", label: "Weekly Report" },
+              { value: "orders", label: "Orders", icon: true },
+              { value: "critical-path", label: "Critical Path" },
+              { value: "qr-codes", label: "QR Codes" },
+              { value: "cash-flow", label: "Cash Flow" },
+            ].map((tab) => (
+              <button
+                key={tab.value}
+                role="tab"
+                aria-selected={activeTab === tab.value}
+                onClick={() => setActiveTab(tab.value)}
+                className={`relative inline-flex h-[calc(100%-1px)] flex-1 items-center justify-center gap-1.5 rounded-md border border-transparent px-1.5 py-0.5 text-sm font-medium whitespace-nowrap transition-all after:absolute after:bg-foreground after:opacity-0 after:transition-opacity after:inset-x-0 after:bottom-[-5px] after:h-0.5 ${
+                  activeTab === tab.value
+                    ? "text-foreground after:opacity-100"
+                    : "text-foreground/60 hover:text-foreground"
+                }`}
+              >
+                {tab.icon && <ShoppingCart className="mr-1 size-3.5" />}
+                {tab.label}
+                {tab.badge && (
+                  <Badge className="ml-1.5 h-4 min-w-4 rounded-full bg-red-600 px-1 text-[10px] text-white hover:bg-red-600">
+                    {tab.badge}
+                  </Badge>
+                )}
+              </button>
+            ))}
+          </div>
 
-          <TabsContent value="plots">
+          {activeTab === "plots" && (
         <div className="space-y-4">
           {/* Header + Filters */}
           <div className="flex flex-wrap items-center gap-3">
@@ -1403,12 +1672,73 @@ export function SiteDetailClient({
           </div>
           )}
         </div>
-          </TabsContent>
+          )}
 
-          <TabsContent value="programme">
-            <SiteProgramme siteId={site.id} />
-          </TabsContent>
-        </Tabs>
+          {activeTab === "programme" && (
+            <SiteProgramme siteId={site.id} postcode={site.postcode} />
+          )}
+
+          {activeTab === "heatmap" && (
+            <SiteHeatmap siteId={site.id} />
+          )}
+
+          {activeTab === "snags" && (
+            <SiteSnags siteId={site.id} plots={site.plots.map((p) => ({ id: p.id, name: p.name, plotNumber: p.plotNumber }))} />
+          )}
+
+          {activeTab === "documents" && (
+            <SiteDocuments siteId={site.id} />
+          )}
+
+          {activeTab === "daily-brief" && (
+            <DailySiteBrief siteId={site.id} />
+          )}
+
+          {activeTab === "day-sheets" && (
+            <ContractorDaySheets siteId={site.id} />
+          )}
+
+          {activeTab === "delays" && (
+            <DelayReport siteId={site.id} />
+          )}
+
+          {activeTab === "budget" && (
+            <BudgetReport siteId={site.id} />
+          )}
+
+          {activeTab === "calendar" && (
+            <SiteCalendar siteId={site.id} />
+          )}
+
+          {activeTab === "weekly-report" && (
+            <WeeklySiteReport siteId={site.id} />
+          )}
+
+          {activeTab === "orders" && (
+            <SiteOrders siteId={site.id} />
+          )}
+
+          {activeTab === "critical-path" && (
+            <CriticalPath siteId={site.id} />
+          )}
+
+          {activeTab === "qr-codes" && (
+            <BatchPlotQR
+              siteId={site.id}
+              siteName={site.name}
+              plots={site.plots.map((p) => ({
+                id: p.id,
+                plotNumber: p.plotNumber,
+                name: p.name,
+                houseType: p.houseType ?? null,
+              }))}
+            />
+          )}
+
+          {activeTab === "cash-flow" && (
+            <CashFlowReport siteId={site.id} />
+          )}
+        </div>
       ) : (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-16 text-center">
