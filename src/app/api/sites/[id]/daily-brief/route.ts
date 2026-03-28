@@ -142,6 +142,10 @@ export async function GET(
       where: {
         job: { plot: { siteId: id } },
         status: "PENDING",
+        OR: [
+          { expectedDeliveryDate: { gte: dayStart } },
+          { expectedDeliveryDate: null },
+        ],
       },
       select: {
         id: true, itemsDescription: true, status: true, expectedDeliveryDate: true,
