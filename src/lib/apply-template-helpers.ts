@@ -10,9 +10,12 @@ interface TemplateOrderItem {
 
 interface TemplateOrderWithItems {
   id: string;
+  supplierId: string | null;
   itemsDescription: string | null;
   orderWeekOffset: number;
   deliveryWeekOffset: number;
+  leadTimeAmount?: number | null;
+  leadTimeUnit?: string | null;
   items: TemplateOrderItem[];
 }
 
@@ -25,6 +28,7 @@ interface TemplateJobWithChildren {
   endWeek: number;
   weatherAffected?: boolean;
   parentId: string | null;
+  contactId?: string | null;
   orders: TemplateOrderWithItems[];
   children: Array<{
     name: string;
@@ -35,6 +39,7 @@ interface TemplateJobWithChildren {
     endWeek: number;
     durationWeeks: number | null;
     weatherAffected?: boolean;
+    contactId?: string | null;
     orders: TemplateOrderWithItems[];
   }>;
 }
@@ -81,6 +86,13 @@ export async function createJobsFromTemplate(
             sortOrder: templateJob.sortOrder * 100 + child.sortOrder,
           },
         });
+
+        // Create contractor assignment from template
+        if (child.contactId) {
+          await tx.jobContractor.create({
+            data: { jobId: job.id, contactId: child.contactId },
+          });
+        }
 
         // Create orders from child's template orders
         await createOrdersFromTemplate(
@@ -140,6 +152,13 @@ export async function createJobsFromTemplate(
         },
       });
 
+      // Create contractor assignment from template
+      if (templateJob.contactId) {
+        await tx.jobContractor.create({
+          data: { jobId: job.id, contactId: templateJob.contactId },
+        });
+      }
+
       await createOrdersFromTemplate(
         tx,
         job.id,
@@ -160,14 +179,30 @@ async function createOrdersFromTemplate(
   supplierMappings: Record<string, string> | null
 ) {
   for (const templateOrder of orders) {
-    const supplierId = supplierMappings?.[templateOrder.id] || null;
-    if (!supplierId) continue;
+    // Use explicit mapping if provided, otherwise fall back to template's supplier
+    const supplierId =
+      supplierMappings?.[templateOrder.id] ||
+      templateOrder.supplierId ||
+      null;
+    if (!supplierId) continue; // skip only if no supplier anywhere
 
     const dateOfOrder = addWeeks(jobStartDate, templateOrder.orderWeekOffset);
-    const expectedDeliveryDate = addWeeks(
-      dateOfOrder,
-      templateOrder.deliveryWeekOffset
-    );
+
+    // Calculate lead time in days from template fields
+    let leadTimeDays: number | null = null;
+    if (templateOrder.leadTimeAmount && templateOrder.leadTimeUnit) {
+      leadTimeDays =
+        templateOrder.leadTimeUnit === "weeks"
+          ? templateOrder.leadTimeAmount * 7
+          : templateOrder.leadTimeAmount;
+    } else if (templateOrder.deliveryWeekOffset > 0) {
+      // Fall back to deliveryWeekOffset (legacy: stored in weeks)
+      leadTimeDays = templateOrder.deliveryWeekOffset * 7;
+    }
+
+    const expectedDeliveryDate = leadTimeDays
+      ? addDays(dateOfOrder, leadTimeDays)
+      : addWeeks(dateOfOrder, templateOrder.deliveryWeekOffset);
 
     await tx.materialOrder.create({
       data: {
@@ -176,6 +211,7 @@ async function createOrdersFromTemplate(
         itemsDescription: templateOrder.itemsDescription,
         dateOfOrder,
         expectedDeliveryDate,
+        leadTimeDays,
         status: "PENDING",
         automated: true,
         orderItems: templateOrder.items.length

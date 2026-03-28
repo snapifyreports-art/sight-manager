@@ -28,6 +28,7 @@ import {
   ArrowRight,
   Send,
 } from "lucide-react";
+import { JobSiblingNav } from "@/components/jobs/JobSiblingNav";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -574,6 +575,8 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
           <ArrowLeft className="size-4" data-icon="inline-start" />
           Back to Plot
         </Button>
+
+        <JobSiblingNav jobId={job.id} />
 
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3">
@@ -1248,15 +1251,15 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
                             <span>
                               {ju.originalStart
                                 ? format(new Date(ju.originalStart), "dd MMM")
-                                : "\u2014"}{" "}
-                              \u2013{" "}
+                                : "—"}{" "}
+                              –{" "}
                               {ju.originalEnd
                                 ? format(new Date(ju.originalEnd), "dd MMM")
-                                : "\u2014"}
+                                : "—"}
                             </span>
                             <ArrowRight className="size-3" />
                             <span className="font-medium text-foreground">
-                              {format(new Date(ju.newStart), "dd MMM")} \u2013{" "}
+                              {format(new Date(ju.newStart), "dd MMM")} –{" "}
                               {format(new Date(ju.newEnd), "dd MMM")}
                             </span>
                           </div>

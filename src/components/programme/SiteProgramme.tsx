@@ -44,6 +44,15 @@ const LEFT_PANEL_COLLAPSED = 52;
 
 // ---------- Types ----------
 
+interface ProgrammeOrder {
+  id: string;
+  dateOfOrder: string;
+  expectedDeliveryDate: string | null;
+  leadTimeDays: number | null;
+  status: string;
+  supplier: { name: string };
+}
+
 interface ProgrammeJob {
   id: string;
   name: string;
@@ -55,6 +64,7 @@ interface ProgrammeJob {
   weatherAffected?: boolean;
   parentId: string | null;
   parentStage: string | null;
+  orders?: ProgrammeOrder[];
   _count?: { photos: number; actions: number };
 }
 
@@ -252,7 +262,7 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
       if (!res.ok) throw new Error("Failed");
       const result = await res.json();
       // Refresh programme data
-      const freshData = await fetch(`/api/sites/${siteId}/programme`).then((r) => r.json());
+      const freshData = await fetch(`/api/sites/${siteId}/programme`, { cache: "no-store" }).then((r) => r.json());
       setSite(freshData);
       setDelayDialogOpen(false);
       setSelectedPlots(new Set());
@@ -273,13 +283,14 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
     plotId: string;
     siteName: string;
     siteId: string;
+    childJobIds?: string[];
   } | null>(null);
 
   const selectColWidth = selectMode ? 28 : 0;
   const leftPanelWidth = (expanded ? LEFT_PANEL_EXPANDED : LEFT_PANEL_COLLAPSED) + selectColWidth;
 
-  useEffect(() => {
-    fetch(`/api/sites/${siteId}/programme`)
+  const fetchProgramme = useCallback(() => {
+    fetch(`/api/sites/${siteId}/programme`, { cache: "no-store" })
       .then((r) => r.json())
       .then((data) => {
         setSite(data);
@@ -297,18 +308,40 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
       })
       .catch(console.error)
       .finally(() => setLoading(false));
-  }, [siteId, devDate]);
+  }, [siteId]);
+
+  useEffect(() => {
+    fetchProgramme();
+  }, [fetchProgramme, devDate]);
 
   // Fetch weather when postcode is available
+  // When dev date is active, offset the returned forecast dates to align
+  // with the simulated timeline (Open-Meteo always returns real dates).
   useEffect(() => {
     if (!postcode) { setWeatherData([]); return; }
     fetch(`/api/weather?postcode=${encodeURIComponent(postcode)}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
-        if (data?.forecast) setWeatherData(data.forecast);
+        if (data?.forecast) {
+          const now = getCurrentDate();
+          const realToday = new Date();
+          const diffMs = now.getTime() - realToday.getTime();
+          const diffDays = Math.round(diffMs / 86400000);
+          if (diffDays !== 0) {
+            // Shift forecast dates to match the simulated dev date
+            const shifted = data.forecast.map((day: WeatherDay) => {
+              const d = new Date(day.date + "T00:00:00");
+              d.setDate(d.getDate() + diffDays);
+              return { ...day, date: d.toISOString().split("T")[0] };
+            });
+            setWeatherData(shifted);
+          } else {
+            setWeatherData(data.forecast);
+          }
+        }
       })
       .catch(() => {}); // silently fail — weather is non-critical
-  }, [postcode]);
+  }, [postcode, devDate]);
 
   // Weather lookup by date string
   const weatherMap = useMemo(() => {
@@ -362,7 +395,7 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
 
         // Refresh programme data to reflect any date changes
         if (rainedOffDelay || result.affectedJobs > 0) {
-          const freshData = await fetch(`/api/sites/${siteId}/programme`).then((r) => r.json());
+          const freshData = await fetch(`/api/sites/${siteId}/programme`, { cache: "no-store" }).then((r) => r.json());
           setSite(freshData);
           if (freshData?.rainedOffDays) {
             setRainedOffDates(
@@ -535,6 +568,9 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
           (a, b) => a.sortOrder - b.sortOrder
         )[0];
 
+        const childOrders = children.flatMap((c) => c.orders ?? []);
+        const aggPhotos = children.reduce((sum, c) => sum + (c._count?.photos ?? 0), 0);
+        const aggActions = children.reduce((sum, c) => sum + (c._count?.actions ?? 0), 0);
         synthetic.push({
           id: `synth-${plot.id}-${stage}`,
           name: stage,
@@ -545,7 +581,8 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
           sortOrder: firstChild?.sortOrder ?? 0,
           parentId: null,
           parentStage: null,
-          _count: { photos: 0, actions: 0 },
+          orders: childOrders,
+          _count: { photos: aggPhotos, actions: aggActions },
         });
       }
 
@@ -555,6 +592,21 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
       return { ...plot, jobs: allJobs };
     });
   }, [filteredPlots, jobView]);
+
+  // Keep panelContext in sync when programme data refreshes (e.g. after order status change)
+  const panelJobId = panelContext?.job.id;
+  useEffect(() => {
+    if (!panelOpen || !panelJobId) return;
+    for (const plot of processedPlots) {
+      const freshJob = plot.jobs.find((j) => j.id === panelJobId);
+      if (freshJob) {
+        setPanelContext((prev) =>
+          prev ? { ...prev, job: freshJob } : prev
+        );
+        break;
+      }
+    }
+  }, [processedPlots, panelOpen, panelJobId]);
 
   // Check if any jobs have sub-jobs (parentStage)
   const hasSubJobs = useMemo(() => {
@@ -1371,9 +1423,33 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                       const hasPhotos = (job._count?.photos ?? 0) > 0;
                       const hasNotes = (job._count?.actions ?? 0) > 0;
 
+                      // Check which columns have order/delivery dates
+                      const orders = job.orders ?? [];
+
+                      // Find the first column index where job bar starts
+                      const jobFirstColIdx = columns.findIndex(
+                        (c) => jobStart < c.endDate && jobEnd >= c.date
+                      );
+
                       return columns.map((col, colIdx) => {
                         const overlaps = jobStart < col.endDate && jobEnd >= col.date;
                         if (!overlaps) return null;
+
+                        const isFirstJobCell = colIdx === jobFirstColIdx;
+
+                        // Check if any order dates fall in this cell
+                        // If order date is before job starts, show on first job cell
+                        const hasOrderInCell = orders.some((o) => {
+                          const d = new Date(o.dateOfOrder);
+                          if (d < jobStart && isFirstJobCell) return true;
+                          return d >= col.date && d < col.endDate;
+                        });
+                        const hasDeliveryInCell = orders.some((o) => {
+                          if (!o.expectedDeliveryDate) return false;
+                          const d = new Date(o.expectedDeliveryDate);
+                          if (d < jobStart && isFirstJobCell) return true;
+                          return d >= col.date && d < col.endDate;
+                        });
 
                         return (
                           <div
@@ -1387,12 +1463,23 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                             }}
                             title={`${job.name} (${job.status}) — Click for details`}
                             onClick={() => {
+                              // For synthetic parents, find child job IDs from original site data
+                              let childJobIds: string[] | undefined;
+                              if (job.id.startsWith("synth-")) {
+                                const origPlot = site.plots.find((p) => p.id === plot.id);
+                                if (origPlot) {
+                                  childJobIds = origPlot.jobs
+                                    .filter((j) => j.parentStage === job.name)
+                                    .map((j) => j.id);
+                                }
+                              }
                               setPanelContext({
                                 job,
-                                plotName: plot.plotNumber || plot.name,
+                                plotName: plot.plotNumber ? `Plot ${plot.plotNumber}` : plot.name,
                                 plotId: plot.id,
                                 siteName: site.name,
                                 siteId: site.id,
+                                childJobIds,
                               });
                               setPanelOpen(true);
                             }}
@@ -1417,14 +1504,25 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                               }}
                             >
                               {job.weatherAffected && viewMode === "day" && rainedOffDates.has(format(col.date, "yyyy-MM-dd")) ? "☔" : code}
-                              {/* Photo/note indicators (week view only — too small for day) */}
-                              {viewMode === "week" && (hasPhotos || hasNotes) && (
+                              {/* Photo/note indicators (first cell only, week view only — too small for day) */}
+                              {isFirstJobCell && viewMode === "week" && (hasPhotos || hasNotes) && (
                                 <div className="absolute -right-0.5 -top-0.5 flex gap-px">
                                   {hasPhotos && (
                                     <div className="size-[6px] rounded-full bg-blue-500" title="Has photos" />
                                   )}
                                   {hasNotes && (
                                     <div className="size-[6px] rounded-full bg-amber-500" title="Has notes" />
+                                  )}
+                                </div>
+                              )}
+                              {/* Order/delivery indicators */}
+                              {(hasOrderInCell || hasDeliveryInCell) && (
+                                <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 flex gap-px p-1 cursor-pointer" onClick={(e) => { e.stopPropagation(); window.location.href = "/orders"; }} title="Click to view orders">
+                                  {hasOrderInCell && (
+                                    <div className="size-[5px] rounded-full bg-purple-500" />
+                                  )}
+                                  {hasDeliveryInCell && (
+                                    <div className="size-[5px] rounded-full bg-teal-500" />
                                   )}
                                 </div>
                               )}
@@ -1516,6 +1614,14 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                 <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
                   <div className="size-[6px] rounded-full bg-amber-500" />
                   Notes
+                </div>
+                <div className="ml-2 flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                  <div className="size-[5px] rounded-full bg-purple-500" />
+                  Order
+                </div>
+                <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                  <div className="size-[5px] rounded-full bg-teal-500" />
+                  Delivery
                 </div>
               </div>
             </div>
@@ -1680,6 +1786,7 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
         open={panelOpen}
         onOpenChange={setPanelOpen}
         context={panelContext}
+        onOrderUpdated={fetchProgramme}
       />
 
       {/* Toast notification */}

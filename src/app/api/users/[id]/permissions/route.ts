@@ -3,6 +3,8 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { hasPermission, ALL_PERMISSIONS } from "@/lib/permissions";
 
+export const dynamic = "force-dynamic";
+
 // GET — return user's permissions as string array
 export async function GET(
   _req: NextRequest,

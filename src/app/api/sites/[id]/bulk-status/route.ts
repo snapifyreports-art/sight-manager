@@ -4,6 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { getServerCurrentDate } from "@/lib/dev-date";
 import type { JobStatus } from "@prisma/client";
 
+export const dynamic = "force-dynamic";
+
 const ACTION_STATUS_MAP: Record<string, JobStatus> = {
   start: "IN_PROGRESS",
   complete: "COMPLETED",

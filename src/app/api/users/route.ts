@@ -5,6 +5,8 @@ import { hash } from "bcryptjs";
 import { hasPermission, DEFAULT_PERMISSIONS } from "@/lib/permissions";
 import type { UserRole } from "@prisma/client";
 
+export const dynamic = "force-dynamic";
+
 // GET — list all users
 export async function GET() {
   const session = await auth();

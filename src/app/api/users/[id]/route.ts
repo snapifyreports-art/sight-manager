@@ -4,6 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { hash } from "bcryptjs";
 import { hasPermission } from "@/lib/permissions";
 
+export const dynamic = "force-dynamic";
+
 // GET — single user with permissions
 export async function GET(
   _req: NextRequest,

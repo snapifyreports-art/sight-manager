@@ -4,6 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { addDays } from "date-fns";
 import { getServerCurrentDate } from "@/lib/dev-date";
 
+export const dynamic = "force-dynamic";
+
 export async function GET(req: NextRequest) {
   const session = await auth();
   if (!session) {
@@ -36,13 +38,15 @@ export async function GET(req: NextRequest) {
     orderBy: { expectedDeliveryDate: "asc" },
   });
 
-  // 2. Send Order — orders still PENDING
+  // 2. Send Order — orders still PENDING whose dateOfOrder is within 14 days
+  const sendOrderCutoff = addDays(now, 14);
   const sendOrder = await prisma.materialOrder.findMany({
     where: {
       status: "PENDING",
+      dateOfOrder: { lte: sendOrderCutoff },
     },
     include: {
-      supplier: { select: { id: true, name: true } },
+      supplier: { select: { id: true, name: true, contactEmail: true, contactName: true } },
       job: {
         include: {
           plot: {
@@ -130,6 +134,28 @@ export async function GET(req: NextRequest) {
     orderBy: { expectedDeliveryDate: "asc" },
   });
 
+  // 5b. Waiting on Delivery — ORDERED/CONFIRMED orders with delivery date in the future (beyond 7-day confirm window)
+  const awaitingDelivery = await prisma.materialOrder.findMany({
+    where: {
+      status: { in: ["ORDERED", "CONFIRMED"] },
+      expectedDeliveryDate: { gt: in7Days },
+    },
+    include: {
+      supplier: { select: { id: true, name: true, contactEmail: true, contactName: true } },
+      job: {
+        include: {
+          plot: {
+            include: {
+              site: { select: { id: true, name: true } },
+            },
+          },
+        },
+      },
+      orderItems: true,
+    },
+    orderBy: { expectedDeliveryDate: "asc" },
+  });
+
   // 6. Upcoming — next 7 days of job starts + deliveries
   const upcomingJobs = await prisma.job.findMany({
     where: {
@@ -175,6 +201,7 @@ export async function GET(req: NextRequest) {
     overdueJobs: JSON.parse(JSON.stringify(overdueJobs)),
     lateStartJobs: JSON.parse(JSON.stringify(lateStartJobs)),
     overdueOrders: JSON.parse(JSON.stringify(overdueOrders)),
+    awaitingDelivery: JSON.parse(JSON.stringify(awaitingDelivery)),
     upcomingJobs: JSON.parse(JSON.stringify(upcomingJobs)),
     upcomingDeliveries: JSON.parse(JSON.stringify(upcomingDeliveries)),
     counts: {
@@ -184,6 +211,7 @@ export async function GET(req: NextRequest) {
       overdueJobs: overdueJobs.length,
       lateStartJobs: lateStartJobs.length,
       overdueOrders: overdueOrders.length,
+      awaitingDelivery: awaitingDelivery.length,
       upcoming: upcomingJobs.length + upcomingDeliveries.length,
     },
   });

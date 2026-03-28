@@ -5,6 +5,8 @@ import { sendPushToUser } from "@/lib/push";
 import { getServerCurrentDate } from "@/lib/dev-date";
 import type { EventType, JobStatus } from "@prisma/client";
 
+export const dynamic = "force-dynamic";
+
 const ACTION_STATUS_MAP: Record<string, JobStatus> = {
   start: "IN_PROGRESS",
   stop: "ON_HOLD",

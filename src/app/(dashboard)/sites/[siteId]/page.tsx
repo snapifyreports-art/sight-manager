@@ -2,6 +2,8 @@ import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { SiteDetailClient } from "@/components/sites/SiteDetailClient";
 
+export const dynamic = "force-dynamic";
+
 export async function generateMetadata({
   params,
 }: {
@@ -25,10 +27,10 @@ export default async function SiteDetailPage({
   searchParams,
 }: {
   params: Promise<{ siteId: string }>;
-  searchParams: Promise<{ tab?: string }>;
+  searchParams: Promise<{ tab?: string; snagId?: string }>;
 }) {
   const { siteId } = await params;
-  const { tab: initialTab } = await searchParams;
+  const { tab: initialTab, snagId: initialSnagId } = await searchParams;
 
   const site = await prisma.site.findUnique({
     where: { id: siteId },
@@ -97,5 +99,5 @@ export default async function SiteDetailPage({
     })),
   };
 
-  return <SiteDetailClient site={serialized} initialTab={initialTab} />;
+  return <SiteDetailClient site={serialized} initialTab={initialTab} initialSnagId={initialSnagId} />;
 }

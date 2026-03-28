@@ -8,6 +8,9 @@ export const templateJobsInclude = {
     children: {
       orderBy: { sortOrder: "asc" as const },
       include: {
+        contact: {
+          select: { id: true, name: true, company: true },
+        },
         orders: {
           include: {
             items: true,
@@ -18,6 +21,9 @@ export const templateJobsInclude = {
           },
         },
       },
+    },
+    contact: {
+      select: { id: true, name: true, company: true },
     },
     orders: {
       include: {

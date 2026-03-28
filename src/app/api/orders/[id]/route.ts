@@ -3,6 +3,8 @@ import { prisma } from "@/lib/prisma";
 import { auth } from "@/lib/auth";
 import { getServerCurrentDate } from "@/lib/dev-date";
 
+export const dynamic = "force-dynamic";
+
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }

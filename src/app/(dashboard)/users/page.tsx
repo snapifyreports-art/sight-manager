@@ -4,6 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { hasPermission } from "@/lib/permissions";
 import { UsersClient } from "@/components/users/UsersClient";
 
+export const dynamic = "force-dynamic";
+
 export const metadata = {
   title: "Users | Sight Manager",
 };

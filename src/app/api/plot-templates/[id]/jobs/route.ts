@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
+export const dynamic = "force-dynamic";
+
 // POST /api/plot-templates/[id]/jobs — add a job to a template
 export async function POST(
   request: NextRequest,
@@ -14,7 +16,7 @@ export async function POST(
 
   const { id } = await params;
   const body = await request.json();
-  const { name, description, stageCode, sortOrder, startWeek, endWeek, parentId, durationWeeks } = body;
+  const { name, description, stageCode, sortOrder, startWeek, endWeek, parentId, durationWeeks, contactId } = body;
 
   if (!name || typeof name !== "string" || name.trim().length === 0) {
     return NextResponse.json(
@@ -49,6 +51,7 @@ export async function POST(
       endWeek,
       parentId: parentId || null,
       durationWeeks: durationWeeks ?? null,
+      contactId: contactId || null,
     },
     include: {
       orders: {

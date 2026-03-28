@@ -85,22 +85,24 @@ export function HandoverChecklist({ plotId }: { plotId: string }) {
   }, [plotId]);
 
   const handleCheck = async (itemId: string, checked: boolean) => {
-    await fetch(`/api/plots/${plotId}/handover`, {
+    const res = await fetch(`/api/plots/${plotId}/handover`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ itemId, checked }),
     });
-    fetchData();
+    if (res.ok) fetchData();
   };
 
   const handleLinkDoc = async (itemId: string, documentId: string) => {
-    await fetch(`/api/plots/${plotId}/handover`, {
+    const res = await fetch(`/api/plots/${plotId}/handover`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ itemId, documentId }),
     });
-    setLinkingId(null);
-    fetchData();
+    if (res.ok) {
+      setLinkingId(null);
+      fetchData();
+    }
   };
 
   const handleGeneratePDF = async () => {

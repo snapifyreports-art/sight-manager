@@ -4,6 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { startOfDay, endOfDay } from "date-fns";
 import { getServerCurrentDate } from "@/lib/dev-date";
 
+export const dynamic = "force-dynamic";
+
 // GET /api/sites/[id]/day-sheets?date=YYYY-MM-DD
 // Returns work assignments grouped by contractor/assignee for the given date
 export async function GET(

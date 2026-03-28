@@ -5,6 +5,8 @@ import { startOfDay, endOfDay, subDays } from "date-fns";
 import { getServerCurrentDate } from "@/lib/dev-date";
 import { fetchWeatherForPostcode } from "@/lib/weather";
 
+export const dynamic = "force-dynamic";
+
 // GET /api/sites/[id]/daily-brief?date=YYYY-MM-DD
 export async function GET(
   req: NextRequest,
@@ -95,8 +97,8 @@ export async function GET(
       },
       select: {
         id: true, itemsDescription: true, status: true,
-        supplier: { select: { name: true } },
-        job: { select: { name: true, plot: { select: { plotNumber: true, name: true } } } },
+        supplier: { select: { id: true, name: true } },
+        job: { select: { id: true, name: true, plot: { select: { plotNumber: true, name: true } } } },
       },
     }),
   ]);
@@ -111,8 +113,8 @@ export async function GET(
       },
       select: {
         id: true, itemsDescription: true, expectedDeliveryDate: true,
-        supplier: { select: { name: true } },
-        job: { select: { name: true, plot: { select: { plotNumber: true, name: true } } } },
+        supplier: { select: { id: true, name: true } },
+        job: { select: { id: true, name: true, plot: { select: { plotNumber: true, name: true } } } },
       },
     }),
     prisma.snag.count({

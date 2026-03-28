@@ -3,6 +3,8 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { differenceInDays, addDays, max as dateMax } from "date-fns";
 
+export const dynamic = "force-dynamic";
+
 // GET /api/sites/[id]/critical-path?plotId=xxx (optional filter)
 // Computes the critical path for a site or plot using job dependencies (sortOrder)
 export async function GET(

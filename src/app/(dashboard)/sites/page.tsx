@@ -1,6 +1,8 @@
 import { prisma } from "@/lib/prisma";
 import { SitesClient } from "@/components/sites/SitesClient";
 
+export const dynamic = "force-dynamic";
+
 export const metadata = {
   title: "Sites | Sight Manager",
 };

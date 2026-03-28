@@ -4,6 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { calculateCascade } from "@/lib/cascade";
 import { addDays } from "date-fns";
 
+export const dynamic = "force-dynamic";
+
 // POST /api/sites/[id]/bulk-delay — delay the current job on multiple plots
 export async function POST(
   req: NextRequest,

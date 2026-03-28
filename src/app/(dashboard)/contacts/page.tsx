@@ -1,12 +1,15 @@
 import { prisma } from "@/lib/prisma";
 import { ContactsClient } from "@/components/contacts/ContactsClient";
 
+export const dynamic = "force-dynamic";
+
 export const metadata = {
-  title: "Contacts | Sight Manager",
+  title: "Contractors | Sight Manager",
 };
 
-export default async function ContactsPage() {
+export default async function ContractorsPage() {
   const contacts = await prisma.contact.findMany({
+    where: { type: "CONTRACTOR" },
     orderBy: { name: "asc" },
   });
 

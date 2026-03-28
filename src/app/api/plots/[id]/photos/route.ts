@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
+export const dynamic = "force-dynamic";
+
 // GET /api/plots/[id]/photos — all photos across all jobs in a plot
 export async function GET(
   _req: NextRequest,

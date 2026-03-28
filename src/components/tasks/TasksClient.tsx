@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { format, isBefore, isSameDay, differenceInDays } from "date-fns";
 import { getCurrentDate } from "@/lib/dev-date";
@@ -20,6 +20,7 @@ import {
   Square,
   Clock,
   Play,
+  Package,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -90,6 +91,7 @@ interface TaskData {
   overdueJobs: JobTask[];
   lateStartJobs: JobTask[];
   overdueOrders: OrderTask[];
+  awaitingDelivery: OrderTask[];
   upcomingJobs: JobTask[];
   upcomingDeliveries: OrderTask[];
   counts: {
@@ -99,8 +101,18 @@ interface TaskData {
     overdueJobs: number;
     lateStartJobs: number;
     overdueOrders: number;
+    awaitingDelivery: number;
     upcoming: number;
   };
+}
+
+interface SupplierGroup {
+  supplierId: string;
+  supplierName: string;
+  contactEmail: string | null;
+  contactName: string | null;
+  orders: OrderTask[];
+  sites: string[];
 }
 
 // ---------- Urgency ----------
@@ -144,6 +156,11 @@ export function TasksClient() {
   const [chaseOrder, setChaseOrder] = useState<OrderTask | null>(null);
   const [chaseSubject, setChaseSubject] = useState("");
   const [chaseBody, setChaseBody] = useState("");
+  const [sendOrderDialogOpen, setSendOrderDialogOpen] = useState(false);
+  const [sendOrderGroup, setSendOrderGroup] = useState<SupplierGroup | null>(null);
+  const [sendOrderSubject, setSendOrderSubject] = useState("");
+  const [sendOrderBody, setSendOrderBody] = useState("");
+  const [sendingGroupIds, setSendingGroupIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     setLoading(true);
@@ -154,8 +171,38 @@ export function TasksClient() {
       .finally(() => setLoading(false));
   }, [devDate]);
 
+  // ── Group send orders by supplier ──
+  const supplierGroups = useMemo(() => {
+    if (!data) return [];
+    const map = new Map<string, SupplierGroup>();
+    for (const order of data.sendOrder) {
+      const existing = map.get(order.supplier.id);
+      if (existing) {
+        existing.orders.push(order);
+        const siteName = order.job.plot.site.name;
+        if (!existing.sites.includes(siteName)) {
+          existing.sites.push(siteName);
+        }
+      } else {
+        map.set(order.supplier.id, {
+          supplierId: order.supplier.id,
+          supplierName: order.supplier.name,
+          contactEmail: order.supplier.contactEmail ?? null,
+          contactName: order.supplier.contactName ?? null,
+          orders: [order],
+          sites: [order.job.plot.site.name],
+        });
+      }
+    }
+    return Array.from(map.values()).sort(
+      (a, b) =>
+        new Date(a.orders[0].dateOfOrder).getTime() -
+        new Date(b.orders[0].dateOfOrder).getTime()
+    );
+  }, [data]);
+
   // ── Quick confirm delivery ──
-  async function handleQuickConfirm(orderId: string, listKey: "confirmDelivery" | "overdueOrders") {
+  async function handleQuickConfirm(orderId: string, listKey: "confirmDelivery" | "overdueOrders" | "awaitingDelivery") {
     setConfirmingIds((prev) => new Set(prev).add(orderId));
     try {
       const res = await fetch(`/api/orders/${orderId}`, {
@@ -257,6 +304,118 @@ export function TasksClient() {
     setChaseDialogOpen(false);
   }
 
+  // ── Send order to supplier via email (grouped) ──
+  function openSendOrderDialogForGroup(group: SupplierGroup) {
+    const contactName = group.contactName || group.supplierName;
+    const siteNames = group.sites.join(", ");
+    const plotNames = [...new Set(group.orders.map((o) => o.job.plot.name))].join(", ");
+
+    // Aggregate items: sum quantities for same name+unit
+    const itemMap = new Map<string, { name: string; unit: string; quantity: number }>();
+    for (const order of group.orders) {
+      for (const item of order.orderItems) {
+        const key = `${item.name}|||${item.unit}`;
+        const existing = itemMap.get(key);
+        if (existing) {
+          existing.quantity += item.quantity;
+        } else {
+          itemMap.set(key, { name: item.name, unit: item.unit, quantity: item.quantity });
+        }
+      }
+    }
+    const aggregatedItems = Array.from(itemMap.values());
+    const itemsList = aggregatedItems.length > 0
+      ? aggregatedItems.map((i) => `- ${i.quantity} ${i.unit} ${i.name}`).join("\n")
+      : "Materials as discussed";
+
+    // Delivery dates
+    const deliveryDates = group.orders
+      .filter((o) => o.expectedDeliveryDate)
+      .map((o) => new Date(o.expectedDeliveryDate!).getTime());
+    const uniqueDates = [...new Set(deliveryDates)];
+    let deliveryLine: string;
+    if (uniqueDates.length === 0) {
+      deliveryLine = "Required delivery date: ASAP";
+    } else if (uniqueDates.length === 1) {
+      deliveryLine = `Required delivery date: ${format(new Date(uniqueDates[0]), "dd MMM yyyy")}`;
+    } else {
+      const earliest = format(new Date(Math.min(...uniqueDates)), "dd MMM yyyy");
+      const latest = format(new Date(Math.max(...uniqueDates)), "dd MMM yyyy");
+      deliveryLine = `Required delivery dates: ${earliest} — ${latest}`;
+    }
+
+    setSendOrderGroup(group);
+    setSendOrderSubject(`Material Order — ${siteNames}`);
+    setSendOrderBody(
+      `Hi ${contactName},\n\n` +
+      `Please find below our material order covering plots: ${plotNames}.\n\n` +
+      `${itemsList}\n\n` +
+      `${deliveryLine}\n\n` +
+      `Please confirm receipt and expected delivery.\n\n` +
+      `Regards`
+    );
+    setSendOrderDialogOpen(true);
+  }
+
+  // ── Mark a whole supplier group as ORDERED ──
+  async function handleMarkGroupSent(group: SupplierGroup) {
+    const supplierId = group.supplierId;
+    setSendingGroupIds((prev) => new Set(prev).add(supplierId));
+    try {
+      const orderIds = group.orders.map((o) => o.id);
+      const res = await fetch("/api/orders/bulk-status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orderIds, status: "ORDERED" }),
+      });
+      if (res.ok && data) {
+        const remainingOrders = data.sendOrder.filter(
+          (o) => !orderIds.includes(o.id)
+        );
+        setData({
+          ...data,
+          sendOrder: remainingOrders,
+          counts: {
+            ...data.counts,
+            sendOrder: remainingOrders.length,
+          },
+        });
+      }
+    } catch (err) {
+      console.error("Failed to mark group as sent:", err);
+    } finally {
+      setSendingGroupIds((prev) => {
+        const next = new Set(prev);
+        next.delete(supplierId);
+        return next;
+      });
+    }
+  }
+
+  async function handleSendGroupOrderEmail() {
+    if (!sendOrderGroup) return;
+    const email = sendOrderGroup.contactEmail || "";
+    const mailto = `mailto:${encodeURIComponent(email)}?subject=${encodeURIComponent(sendOrderSubject)}&body=${encodeURIComponent(sendOrderBody)}`;
+    window.open(mailto, "_blank");
+
+    // Mark all orders in group as ORDERED
+    await handleMarkGroupSent(sendOrderGroup);
+
+    // Log event
+    fetch("/api/events", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "USER_ACTION",
+        description: `Sent bulk order to ${sendOrderGroup.supplierName} — ${sendOrderGroup.orders.length} order(s)`,
+        siteId: sendOrderGroup.orders[0].job.plot.site.id,
+        jobId: sendOrderGroup.orders[0].job.id,
+      }),
+    }).catch(() => {});
+
+    setSendOrderDialogOpen(false);
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-16">
@@ -293,7 +452,7 @@ export function TasksClient() {
       </div>
 
       {/* Summary Cards */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid grid-cols-2 gap-2 sm:gap-4 lg:grid-cols-3">
         <SummaryCard
           icon={Truck}
           label="Confirm Delivery"
@@ -335,6 +494,13 @@ export function TasksClient() {
           count={data.counts.sendOrder}
           color="text-blue-600"
           bgColor="bg-blue-50"
+        />
+        <SummaryCard
+          icon={Package}
+          label="Awaiting Delivery"
+          count={data.counts.awaitingDelivery}
+          color="text-purple-600"
+          bgColor="bg-purple-50"
         />
         <SummaryCard
           icon={Calendar}
@@ -402,7 +568,7 @@ export function TasksClient() {
                       ) : (
                         <CircleCheck className="size-3.5" />
                       )}
-                      Confirm
+                      <span className="hidden sm:inline">Confirm</span>
                     </Button>
                     <Button
                       variant="outline"
@@ -415,7 +581,7 @@ export function TasksClient() {
                       title="Chase supplier via email"
                     >
                       <Mail className="size-3.5" />
-                      Chase
+                      <span className="hidden sm:inline">Chase</span>
                     </Button>
                   </div>
                 );
@@ -478,7 +644,7 @@ export function TasksClient() {
                       ) : (
                         <Square className="size-3.5" />
                       )}
-                      Stop
+                      <span className="hidden sm:inline">Stop</span>
                     </Button>
                     <Button
                       variant="outline"
@@ -491,7 +657,7 @@ export function TasksClient() {
                       title="Go to job to sign off"
                     >
                       <CheckCircle className="size-3.5" />
-                      Sign Off
+                      <span className="hidden sm:inline">Sign Off</span>
                     </Button>
                   </div>
                 );
@@ -619,8 +785,8 @@ export function TasksClient() {
         </Card>
       )}
 
-      {/* ── Send Order Section ── */}
-      {data.sendOrder.length > 0 && (
+      {/* ── Send Order Section (grouped by supplier) ── */}
+      {supplierGroups.length > 0 && (
         <Card>
           <CardHeader>
             <div className="flex items-center gap-2">
@@ -628,39 +794,179 @@ export function TasksClient() {
               <CardTitle>Send Orders</CardTitle>
             </div>
             <CardDescription>
-              Pending orders that need to be placed with suppliers
+              {data.counts.sendOrder} order{data.counts.sendOrder !== 1 ? "s" : ""} across {supplierGroups.length} supplier{supplierGroups.length !== 1 ? "s" : ""}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {supplierGroups.map((group) => {
+                const isGroupSending = sendingGroupIds.has(group.supplierId);
+                const plotNames = [...new Set(group.orders.map((o) => o.job.plot.name))];
+                // Aggregate items across all orders in the group
+                const itemMap = new Map<string, { name: string; unit: string; quantity: number }>();
+                for (const order of group.orders) {
+                  for (const item of order.orderItems) {
+                    const key = `${item.name}|||${item.unit}`;
+                    const ex = itemMap.get(key);
+                    if (ex) {
+                      ex.quantity += item.quantity;
+                    } else {
+                      itemMap.set(key, { name: item.name, unit: item.unit, quantity: item.quantity });
+                    }
+                  }
+                }
+                const aggregatedItems = Array.from(itemMap.values());
+
+                return (
+                  <div
+                    key={group.supplierId}
+                    className="rounded-lg border border-blue-200/50 bg-blue-50/50 p-3"
+                  >
+                    {/* Supplier header with actions */}
+                    <div className="flex items-center gap-2">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-semibold">{group.supplierName}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {group.sites.join(", ")} &bull; {plotNames.join(", ")}
+                          {group.orders.length > 1 && (
+                            <span className="ml-1 text-blue-600">
+                              ({group.orders.length} orders)
+                            </span>
+                          )}
+                        </p>
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 shrink-0 border-blue-300 text-blue-700 hover:bg-blue-50 hover:text-blue-800"
+                        onClick={() => openSendOrderDialogForGroup(group)}
+                        title="Send order to supplier via email"
+                      >
+                        <Mail className="size-3.5" />
+                        <span className="hidden sm:inline">Send Order</span>
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 shrink-0 border-green-300 text-green-700 hover:bg-green-50 hover:text-green-800"
+                        disabled={isGroupSending}
+                        onClick={() => handleMarkGroupSent(group)}
+                        title="Mark all as ordered without sending email"
+                      >
+                        {isGroupSending ? (
+                          <Loader2 className="size-3.5 animate-spin" />
+                        ) : (
+                          <CircleCheck className="size-3.5" />
+                        )}
+                        <span className="hidden sm:inline">Mark Sent</span>
+                      </Button>
+                    </div>
+
+                    {/* Aggregated items list */}
+                    {aggregatedItems.length > 0 && (
+                      <div className="mt-2 space-y-0.5">
+                        {aggregatedItems.map((item, idx) => (
+                          <p key={idx} className="text-xs text-muted-foreground">
+                            {item.quantity} {item.unit} {item.name}
+                          </p>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Individual order sub-rows (clickable to job) */}
+                    {group.orders.length > 1 && (
+                      <div className="mt-2 space-y-1 border-t border-blue-200/30 pt-2">
+                        {group.orders.map((order) => (
+                          <div
+                            key={order.id}
+                            className="flex items-center gap-2 rounded px-2 py-1 text-xs cursor-pointer hover:bg-blue-100/50 transition-colors"
+                            onClick={() => router.push(`/jobs/${order.job.id}`)}
+                          >
+                            <span className="min-w-0 flex-1 text-muted-foreground">
+                              {order.job.plot.name} &bull; {order.job.name}
+                            </span>
+                            <span className="shrink-0 text-blue-600">
+                              {format(new Date(order.dateOfOrder), "dd MMM")}
+                            </span>
+                            <ArrowRight className="size-3 text-muted-foreground/50" />
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ── Awaiting Delivery Section ── */}
+      {data.awaitingDelivery.length > 0 && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <Package className="size-4 text-purple-600" />
+              <CardTitle>Awaiting Delivery</CardTitle>
+            </div>
+            <CardDescription>
+              Orders sent to suppliers — waiting for delivery
             </CardDescription>
           </CardHeader>
           <CardContent>
             <div className="space-y-2">
-              {data.sendOrder.map((order) => (
-                <button
-                  key={order.id}
-                  className="flex w-full items-center justify-between rounded-lg border bg-blue-50/50 border-blue-200/50 p-3 text-left transition-colors hover:bg-accent/50"
-                  onClick={() => router.push(`/jobs/${order.job.id}`)}
-                >
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium">
-                      {order.supplier.name}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {order.job.plot.site.name} &bull; {order.job.plot.name}{" "}
-                      &bull; {order.job.name}
-                    </p>
-                    {order.orderItems.length > 0 && (
-                      <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                        {order.orderItems
-                          .map((item) => `${item.quantity} ${item.unit} ${item.name}`)
-                          .join(", ")}
+              {data.awaitingDelivery.map((order) => {
+                const isConfirming = confirmingIds.has(order.id);
+                return (
+                  <div
+                    key={order.id}
+                    className="flex w-full items-center gap-2 rounded-lg border bg-purple-50/50 border-purple-200/50 p-3"
+                  >
+                    <div
+                      className="min-w-0 flex-1 cursor-pointer"
+                      onClick={() => router.push(`/jobs/${order.job.id}`)}
+                    >
+                      <p className="text-sm font-medium">
+                        {order.supplier.name}
                       </p>
-                    )}
+                      <p className="text-xs text-muted-foreground">
+                        {order.job.plot.site.name} &bull; {order.job.plot.name}{" "}
+                        &bull; {order.job.name}
+                      </p>
+                      {order.orderItems.length > 0 && (
+                        <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                          {order.orderItems
+                            .map((item) => `${item.quantity} ${item.unit} ${item.name}`)
+                            .join(", ")}
+                        </p>
+                      )}
+                    </div>
+                    <span className="shrink-0 rounded-full bg-purple-100 px-2 py-0.5 text-[11px] font-medium text-purple-700">
+                      {order.expectedDeliveryDate
+                        ? format(new Date(order.expectedDeliveryDate), "dd MMM")
+                        : "No date"}
+                    </span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 shrink-0 border-green-300 text-green-700 hover:bg-green-50 hover:text-green-800"
+                      disabled={isConfirming}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleQuickConfirm(order.id, "awaitingDelivery");
+                      }}
+                      title="Confirm delivery received"
+                    >
+                      {isConfirming ? (
+                        <Loader2 className="size-3.5 animate-spin" />
+                      ) : (
+                        <CircleCheck className="size-3.5" />
+                      )}
+                      <span className="hidden sm:inline">Confirm</span>
+                    </Button>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <Badge variant="outline">Pending</Badge>
-                    <ArrowRight className="size-4 text-muted-foreground/40" />
-                  </div>
-                </button>
-              ))}
+                );
+              })}
             </div>
           </CardContent>
         </Card>
@@ -842,6 +1148,59 @@ export function TasksClient() {
             >
               <Mail className="size-4" />
               Open in Email
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Send Order Email Dialog (grouped) ── */}
+      <Dialog open={sendOrderDialogOpen} onOpenChange={setSendOrderDialogOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Send Order</DialogTitle>
+            <DialogDescription>
+              Email order to {sendOrderGroup?.supplierName}
+              {sendOrderGroup && sendOrderGroup.orders.length > 1 && (
+                <> — {sendOrderGroup.orders.length} orders will be marked as Ordered</>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label>To</Label>
+              <Input
+                value={sendOrderGroup?.contactEmail || "No email on file"}
+                disabled
+                className="bg-muted"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Subject</Label>
+              <Input
+                value={sendOrderSubject}
+                onChange={(e) => setSendOrderSubject(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Message</Label>
+              <Textarea
+                value={sendOrderBody}
+                onChange={(e) => setSendOrderBody(e.target.value)}
+                rows={10}
+                className="text-sm"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <DialogClose render={<Button variant="outline" />}>
+              Cancel
+            </DialogClose>
+            <Button
+              onClick={handleSendGroupOrderEmail}
+              disabled={!sendOrderGroup?.contactEmail}
+            >
+              <Send className="size-4" />
+              Send &amp; Mark Ordered
             </Button>
           </DialogFooter>
         </DialogContent>

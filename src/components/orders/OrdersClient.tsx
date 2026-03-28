@@ -1,8 +1,10 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { format, isBefore } from "date-fns";
+import { OrderDetailSheet } from "./OrderDetailSheet";
 import { getCurrentDate } from "@/lib/dev-date";
 import {
   ShoppingCart,
@@ -252,7 +254,11 @@ function OrderFormFields({
           }}
         >
           <SelectTrigger className="w-full">
-            <SelectValue placeholder="Select supplier" />
+            <span className="flex flex-1 truncate text-left" data-slot="select-value">
+              {form.supplierId
+                ? (suppliers.find((s) => s.id === form.supplierId)?.name ?? "Select supplier")
+                : <span className="text-muted-foreground">Select supplier</span>}
+            </span>
           </SelectTrigger>
           <SelectContent>
             {suppliers.map((s) => (
@@ -274,7 +280,11 @@ function OrderFormFields({
           }}
         >
           <SelectTrigger className="w-full">
-            <SelectValue placeholder="Select job" />
+            <span className="flex flex-1 truncate text-left" data-slot="select-value">
+              {form.jobId
+                ? ((() => { const j = jobs.find((j) => j.id === form.jobId); return j ? `${j.name} — ${j.plot.site.name} > ${j.plot.name}` : "Select job"; })())
+                : <span className="text-muted-foreground">Select job</span>}
+            </span>
           </SelectTrigger>
           <SelectContent>
             {jobs.map((j) => (
@@ -439,13 +449,17 @@ function EditOrderDialog({
   suppliers,
   jobs,
   onUpdated,
+  initialOpen = false,
+  onClose,
 }: {
   order: Order;
   suppliers: Supplier[];
   jobs: Job[];
   onUpdated: (order: Order) => void;
+  initialOpen?: boolean;
+  onClose?: () => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(initialOpen);
   const [form, setForm] = useState<OrderFormData>({
     supplierId: order.supplierId,
     jobId: order.jobId,
@@ -482,15 +496,17 @@ function EditOrderDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger
-        render={
-          <button className="flex w-full cursor-default items-center gap-1.5 rounded-md px-1.5 py-1 text-sm outline-hidden select-none hover:bg-accent hover:text-accent-foreground">
-            <Pencil className="size-4" />
-            Edit
-          </button>
-        }
-      />
+    <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v && onClose) onClose(); }}>
+      {!initialOpen && (
+        <DialogTrigger
+          render={
+            <button className="flex w-full cursor-default items-center gap-1.5 rounded-md px-1.5 py-1 text-sm outline-hidden select-none hover:bg-accent hover:text-accent-foreground">
+              <Pencil className="size-4" />
+              Edit
+            </button>
+          }
+        />
+      )}
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Edit Order</DialogTitle>
@@ -524,9 +540,21 @@ export function OrdersClient({
   suppliers,
   jobs,
 }: OrdersClientProps) {
+  const searchParams = useSearchParams();
   const [orders, setOrders] = useState<Order[]>(initialOrders);
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
   const [supplierFilter, setSupplierFilter] = useState<string>("ALL");
+  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+  const [editingOrder, setEditingOrder] = useState<Order | null>(null);
+
+  // Auto-open order from URL param ?orderId=XXX
+  useEffect(() => {
+    const orderId = searchParams.get("orderId");
+    if (orderId && !selectedOrder) {
+      const order = orders.find((o) => o.id === orderId);
+      if (order) setSelectedOrder(order);
+    }
+  }, [searchParams, orders, selectedOrder]);
 
   const filteredOrders = useMemo(() => {
     return orders.filter((order) => {
@@ -554,6 +582,9 @@ export function OrdersClient({
     setOrders((prev) =>
       prev.map((o) => (o.id === updated.id ? updated : o))
     );
+    if (selectedOrder?.id === updated.id) {
+      setSelectedOrder(updated);
+    }
   }
 
   async function handleStatusChange(orderId: string, newStatus: OrderStatus) {
@@ -647,12 +678,12 @@ export function OrdersClient({
       </div>
 
       {/* Filters */}
-      <div className="flex flex-wrap items-center gap-3">
+      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3">
         <Select
           value={statusFilter}
           onValueChange={(val) => { if (val !== null) setStatusFilter(val as string); }}
         >
-          <SelectTrigger>
+          <SelectTrigger className="w-full sm:w-auto">
             <SelectValue placeholder="Filter by status" />
           </SelectTrigger>
           <SelectContent>
@@ -669,7 +700,7 @@ export function OrdersClient({
           value={supplierFilter}
           onValueChange={(val) => { if (val !== null) setSupplierFilter(val as string); }}
         >
-          <SelectTrigger>
+          <SelectTrigger className="w-full sm:w-auto">
             <SelectValue placeholder="Filter by supplier" />
           </SelectTrigger>
           <SelectContent>
@@ -724,8 +755,8 @@ export function OrdersClient({
                   <TableHead>Job</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Order Date</TableHead>
-                  <TableHead>Expected Delivery</TableHead>
-                  <TableHead>Lead Time</TableHead>
+                  <TableHead className="hidden md:table-cell">Expected Delivery</TableHead>
+                  <TableHead className="hidden md:table-cell">Lead Time</TableHead>
                   <TableHead className="w-10" />
                 </TableRow>
               </TableHeader>
@@ -733,18 +764,13 @@ export function OrdersClient({
                 {filteredOrders.map((order) => {
                   const overdue = isOverdue(order);
                   return (
-                    <TableRow key={order.id}>
+                    <TableRow key={order.id} className="cursor-pointer hover:bg-muted/50" onClick={() => setSelectedOrder(order)}>
                       <TableCell>
                         <div className="max-w-[200px]">
                           <p className="truncate font-medium">
-                            {order.orderDetails || "No details"}
+                            {order.orderDetails || order.orderType || order.itemsDescription || "Untitled Order"}
                           </p>
-                          {order.orderType && (
-                            <p className="truncate text-xs text-muted-foreground">
-                              {order.orderType}
-                            </p>
-                          )}
-                          {order.itemsDescription && (
+                          {order.itemsDescription && order.orderDetails !== order.itemsDescription && (
                             <p className="mt-0.5 truncate text-xs text-muted-foreground">
                               {order.itemsDescription}
                             </p>
@@ -756,16 +782,24 @@ export function OrdersClient({
                           )}
                         </div>
                       </TableCell>
-                      <TableCell>
+                      <TableCell onClick={(e) => e.stopPropagation()}>
                         <Link href={`/suppliers/${order.supplier.id}`} className="font-medium text-blue-600 hover:underline">
                           {order.supplier.name}
                         </Link>
                       </TableCell>
-                      <TableCell>
+                      <TableCell onClick={(e) => e.stopPropagation()}>
                         <div>
-                          <p className="text-sm">{order.job.name}</p>
+                          <Link href={`/jobs/${order.job.id}`} className="text-sm text-blue-600 hover:underline">
+                            {order.job.name}
+                          </Link>
                           <p className="text-xs text-muted-foreground">
-                            {order.job.plot.site.name} &gt; {order.job.plot.name}
+                            <Link href={`/sites/${order.job.plot.siteId}`} className="hover:underline hover:text-blue-600">
+                              {order.job.plot.site.name}
+                            </Link>
+                            {" > "}
+                            <Link href={`/sites/${order.job.plot.siteId}/plots/${order.job.plot.id}`} className="hover:underline hover:text-blue-600">
+                              {order.job.plot.name}
+                            </Link>
                           </p>
                         </div>
                       </TableCell>
@@ -780,7 +814,7 @@ export function OrdersClient({
                       <TableCell>
                         {format(new Date(order.dateOfOrder), "dd MMM yyyy")}
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="hidden md:table-cell">
                         {order.expectedDeliveryDate ? (
                           <span
                             className={
@@ -807,14 +841,14 @@ export function OrdersClient({
                           </p>
                         )}
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="hidden md:table-cell">
                         {order.leadTimeDays != null ? (
                           <span>{order.leadTimeDays} days</span>
                         ) : (
                           <span className="text-muted-foreground">--</span>
                         )}
                       </TableCell>
-                      <TableCell>
+                      <TableCell onClick={(e) => e.stopPropagation()}>
                         <DropdownMenu>
                           <DropdownMenuTrigger
                             render={
@@ -894,6 +928,38 @@ export function OrdersClient({
           )}
         </CardContent>
       </Card>
+
+      {/* Order Detail Sheet */}
+      <OrderDetailSheet
+        order={selectedOrder}
+        open={!!selectedOrder}
+        onOpenChange={(open) => { if (!open) setSelectedOrder(null); }}
+        onUpdated={handleUpdated}
+        onDeleted={(orderId) => {
+          setOrders((prev) => prev.filter((o) => o.id !== orderId));
+          setSelectedOrder(null);
+        }}
+        onEditClick={(order) => {
+          setEditingOrder(order);
+          setSelectedOrder(null);
+        }}
+      />
+
+      {/* Standalone Edit Dialog (triggered from sheet) */}
+      {editingOrder && (
+        <EditOrderDialog
+          key={editingOrder.id}
+          order={editingOrder}
+          suppliers={suppliers}
+          jobs={jobs}
+          initialOpen
+          onUpdated={(updated) => {
+            handleUpdated(updated);
+            setEditingOrder(null);
+          }}
+          onClose={() => setEditingOrder(null)}
+        />
+      )}
     </div>
   );
 }

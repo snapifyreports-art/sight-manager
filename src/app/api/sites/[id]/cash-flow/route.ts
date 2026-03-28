@@ -50,8 +50,8 @@ export async function GET(
   for (const o of orderValues) {
     if (o.total === 0) continue;
 
-    // Committed spend: orders that are ORDERED, CONFIRMED, or DELIVERED
-    if (["ORDERED", "CONFIRMED", "DELIVERED"].includes(o.status)) {
+    // Committed spend: orders that are ORDERED or CONFIRMED (not yet delivered)
+    if (["ORDERED", "CONFIRMED"].includes(o.status)) {
       const month = format(new Date(o.dateOfOrder), "yyyy-MM");
       const entry = monthMap.get(month) || { committed: 0, forecast: 0, actual: 0 };
       entry.committed += o.total;
@@ -67,9 +67,10 @@ export async function GET(
       monthMap.set(month, entry);
     }
 
-    // Actual delivered: by delivered date
-    if (o.status === "DELIVERED" && o.deliveredDate) {
-      const month = format(new Date(o.deliveredDate), "yyyy-MM");
+    // Actual delivered: by delivered date (fall back to expected/order date)
+    if (o.status === "DELIVERED") {
+      const actualDate = o.deliveredDate || o.expectedDeliveryDate || o.dateOfOrder;
+      const month = format(new Date(actualDate), "yyyy-MM");
       const entry = monthMap.get(month) || { committed: 0, forecast: 0, actual: 0 };
       entry.actual += o.total;
       monthMap.set(month, entry);
@@ -100,7 +101,7 @@ export async function GET(
   });
 
   const totalCommitted = orderValues
-    .filter((o) => ["ORDERED", "CONFIRMED", "DELIVERED"].includes(o.status))
+    .filter((o) => ["ORDERED", "CONFIRMED"].includes(o.status))
     .reduce((s, o) => s + o.total, 0);
   const totalForecast = orderValues
     .filter((o) => o.status === "PENDING")

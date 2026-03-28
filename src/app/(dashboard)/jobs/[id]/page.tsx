@@ -2,6 +2,8 @@ import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { JobDetailClient } from "@/components/jobs/JobDetailClient";
 
+export const dynamic = "force-dynamic";
+
 export async function generateMetadata({
   params,
 }: {

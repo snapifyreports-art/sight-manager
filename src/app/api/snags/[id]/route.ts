@@ -5,6 +5,8 @@ import { getSupabase, PHOTOS_BUCKET } from "@/lib/supabase";
 import { getServerCurrentDate } from "@/lib/dev-date";
 import { addDays, format } from "date-fns";
 
+export const dynamic = "force-dynamic";
+
 // GET /api/snags/[id] — get a single snag
 export async function GET(
   _req: NextRequest,
@@ -22,8 +24,10 @@ export async function GET(
     include: {
       photos: true,
       assignedTo: { select: { id: true, name: true } },
+      contact: { select: { id: true, name: true, email: true, company: true } },
       raisedBy: { select: { id: true, name: true } },
       resolvedBy: { select: { id: true, name: true } },
+      job: { select: { id: true, name: true, parent: { select: { name: true } } } },
       plot: { select: { id: true, name: true, plotNumber: true, siteId: true } },
     },
   });
@@ -48,7 +52,7 @@ export async function PATCH(
   const { id } = await params;
   const now = getServerCurrentDate(req);
   const body = await req.json();
-  const { status, priority, assignedToId, notes, location, description } = body;
+  const { status, priority, assignedToId, contactId, jobId, notes, location, description } = body;
 
   const existing = await prisma.snag.findUnique({
     where: { id },
@@ -68,9 +72,11 @@ export async function PATCH(
       ...(status !== undefined && { status }),
       ...(priority !== undefined && { priority }),
       ...(assignedToId !== undefined && { assignedToId: assignedToId || null }),
+      ...(contactId !== undefined && { contactId: contactId || null }),
       ...(notes !== undefined && { notes }),
       ...(location !== undefined && { location }),
       ...(description !== undefined && { description }),
+      ...(jobId !== undefined && { jobId: jobId || null }),
       ...(isResolving && {
         resolvedAt: now,
         resolvedById: session.user.id,
@@ -78,7 +84,9 @@ export async function PATCH(
     },
     include: {
       assignedTo: { select: { id: true, name: true } },
+      contact: { select: { id: true, name: true, email: true, company: true } },
       raisedBy: { select: { id: true, name: true } },
+      job: { select: { id: true, name: true, parent: { select: { name: true } } } },
       photos: { select: { id: true, url: true }, take: 3 },
       _count: { select: { photos: true } },
     },
@@ -106,6 +114,35 @@ export async function PATCH(
         siteId: existing.plot.siteId,
         plotId: existing.plotId,
         userId: session.user.id,
+      },
+    });
+
+    // Log to the linked job
+    if (existing.jobId) {
+      await prisma.jobAction.create({
+        data: {
+          jobId: existing.jobId,
+          userId: session.user.id,
+          action: "note",
+          notes: `✅ Snag resolved: "${existing.description.slice(0, 80)}". ${reinspectNote}`,
+        },
+      });
+    }
+  }
+
+  // Log to linked job when snag is closed
+  const isClosing = status === "CLOSED" && existing.status !== "CLOSED";
+  if (isClosing && existing.jobId) {
+    const closeNoteText = notes
+      ? `🔒 Snag closed: "${existing.description.slice(0, 80)}" — ${notes}`
+      : `🔒 Snag closed: "${existing.description.slice(0, 80)}"`;
+
+    await prisma.jobAction.create({
+      data: {
+        jobId: existing.jobId,
+        userId: session.user.id,
+        action: "note",
+        notes: closeNoteText,
       },
     });
   }

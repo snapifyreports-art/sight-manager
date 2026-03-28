@@ -4,6 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { calculateCascade } from "@/lib/cascade";
 import { differenceInDays } from "date-fns";
 
+export const dynamic = "force-dynamic";
+
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }

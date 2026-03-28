@@ -4,6 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { templateJobsInclude } from "@/lib/template-includes";
 import { createJobsFromTemplate } from "@/lib/apply-template-helpers";
 
+export const dynamic = "force-dynamic";
+
 // POST /api/plots/apply-template — create a plot from a template
 export async function POST(request: NextRequest) {
   const session = await auth();

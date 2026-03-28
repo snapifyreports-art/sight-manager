@@ -43,7 +43,7 @@ const navItems = [
   { label: "Sites", href: "/sites", icon: Building2 },
   { label: "Orders", href: "/orders", icon: ShoppingCart },
   { label: "Suppliers", href: "/suppliers", icon: Package },
-  { label: "Contacts", href: "/contacts", icon: Users },
+  { label: "Contractors", href: "/contacts", icon: HardHat },
   { label: "Events Log", href: "/events-log", icon: ScrollText },
   { label: "Analytics", href: "/analytics", icon: BarChart3 },
   { label: "Users", href: "/users", icon: UserCog },

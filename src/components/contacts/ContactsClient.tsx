@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import {
-  Users,
+  HardHat,
   Building,
   Phone,
   Mail,
@@ -18,7 +18,6 @@ import {
   Card,
   CardContent,
 } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -31,18 +30,7 @@ import {
   DialogFooter,
   DialogClose,
 } from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  Tabs,
-  TabsList,
-  TabsTrigger,
-} from "@/components/ui/tabs";
+import { ContractorDetailSheet } from "@/components/contacts/ContractorDetailSheet";
 
 // ---------- Types ----------
 
@@ -62,7 +50,6 @@ type ContactFormData = {
   name: string;
   email: string;
   phone: string;
-  type: "SUPPLIER" | "CONTRACTOR";
   company: string;
   notes: string;
 };
@@ -71,7 +58,6 @@ const EMPTY_FORM: ContactFormData = {
   name: "",
   email: "",
   phone: "",
-  type: "SUPPLIER",
   company: "",
   notes: "",
 };
@@ -86,7 +72,6 @@ export function ContactsClient({
   const router = useRouter();
   const [contacts, setContacts] = useState(initialContacts);
   const [search, setSearch] = useState("");
-  const [activeTab, setActiveTab] = useState("all");
 
   // Dialog state
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -97,18 +82,15 @@ export function ContactsClient({
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
+  // Detail sheet state
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [selectedContractor, setSelectedContractor] = useState<any>(null);
+  const [sheetOpen, setSheetOpen] = useState(false);
+
   // Filtered contacts
   const filteredContacts = useMemo(() => {
     let result = contacts;
 
-    // Tab filter
-    if (activeTab === "suppliers") {
-      result = result.filter((c) => c.type === "SUPPLIER");
-    } else if (activeTab === "contractors") {
-      result = result.filter((c) => c.type === "CONTRACTOR");
-    }
-
-    // Search filter
     if (search.trim()) {
       const q = search.toLowerCase();
       result = result.filter(
@@ -120,7 +102,7 @@ export function ContactsClient({
     }
 
     return result;
-  }, [contacts, activeTab, search]);
+  }, [contacts, search]);
 
   // Open create dialog
   function handleOpenCreate() {
@@ -136,7 +118,6 @@ export function ContactsClient({
       name: contact.name,
       email: contact.email || "",
       phone: contact.phone || "",
-      type: contact.type,
       company: contact.company || "",
       notes: contact.notes || "",
     });
@@ -149,9 +130,23 @@ export function ContactsClient({
     setDeleteDialogOpen(true);
   }
 
+  // Open detail sheet
+  const handleOpenDetail = useCallback(async (contactId: string) => {
+    try {
+      const res = await fetch(`/api/contacts/${contactId}`, { cache: "no-store" });
+      if (res.ok) {
+        const data = await res.json();
+        setSelectedContractor(data);
+        setSheetOpen(true);
+      }
+    } catch (err) {
+      console.error("Failed to fetch contractor detail:", err);
+    }
+  }, []);
+
   // Save (create or update)
   async function handleSave() {
-    if (!form.name.trim() || !form.type) return;
+    if (!form.name.trim()) return;
 
     setSaving(true);
     try {
@@ -160,12 +155,12 @@ export function ContactsClient({
         const res = await fetch(`/api/contacts/${editingContact.id}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(form),
+          body: JSON.stringify({ ...form, type: "CONTRACTOR" }),
         });
 
         if (!res.ok) {
           const err = await res.json();
-          throw new Error(err.error || "Failed to update contact");
+          throw new Error(err.error || "Failed to update contractor");
         }
 
         const updated = await res.json();
@@ -182,12 +177,12 @@ export function ContactsClient({
         const res = await fetch("/api/contacts", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(form),
+          body: JSON.stringify({ ...form, type: "CONTRACTOR" }),
         });
 
         if (!res.ok) {
           const err = await res.json();
-          throw new Error(err.error || "Failed to create contact");
+          throw new Error(err.error || "Failed to create contractor");
         }
 
         const created = await res.json();
@@ -197,7 +192,7 @@ export function ContactsClient({
             ...created,
             createdAt: created.createdAt,
             updatedAt: created.updatedAt,
-          }].sort((a, b) => a.name.localeCompare(b.name))
+          }].sort((a: Contact, b: Contact) => a.name.localeCompare(b.name))
         );
       }
 
@@ -206,7 +201,7 @@ export function ContactsClient({
       setForm(EMPTY_FORM);
       router.refresh();
     } catch (error) {
-      console.error("Failed to save contact:", error);
+      console.error("Failed to save contractor:", error);
     } finally {
       setSaving(false);
     }
@@ -224,7 +219,7 @@ export function ContactsClient({
 
       if (!res.ok) {
         const err = await res.json();
-        throw new Error(err.error || "Failed to delete contact");
+        throw new Error(err.error || "Failed to delete contractor");
       }
 
       setContacts((prev) => prev.filter((c) => c.id !== deletingContact.id));
@@ -232,51 +227,34 @@ export function ContactsClient({
       setDeletingContact(null);
       router.refresh();
     } catch (error) {
-      console.error("Failed to delete contact:", error);
+      console.error("Failed to delete contractor:", error);
     } finally {
       setDeleting(false);
     }
   }
-
-  const supplierCount = contacts.filter((c) => c.type === "SUPPLIER").length;
-  const contractorCount = contacts.filter((c) => c.type === "CONTRACTOR").length;
 
   return (
     <div className="space-y-6">
       {/* Page Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Contacts</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Contractors</h1>
           <p className="text-sm text-muted-foreground">
-            Manage your suppliers and contractors
+            Manage your contractors and their assignments
           </p>
         </div>
         <Button onClick={handleOpenCreate}>
           <Plus className="size-4" />
-          Add Contact
+          Add Contractor
         </Button>
       </div>
 
-      {/* Filter Bar */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList>
-            <TabsTrigger value="all">
-              All ({contacts.length})
-            </TabsTrigger>
-            <TabsTrigger value="suppliers">
-              Suppliers ({supplierCount})
-            </TabsTrigger>
-            <TabsTrigger value="contractors">
-              Contractors ({contractorCount})
-            </TabsTrigger>
-          </TabsList>
-        </Tabs>
-
+      {/* Search */}
+      <div className="flex items-center">
         <div className="relative w-full sm:max-w-xs">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
-            placeholder="Search contacts..."
+            placeholder="Search contractors..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="pl-9"
@@ -284,31 +262,29 @@ export function ContactsClient({
         </div>
       </div>
 
-      {/* Contact Grid */}
+      {/* Contractor Grid */}
       {filteredContacts.length === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-16 text-center">
             <div className="mb-4 rounded-full bg-muted p-4">
-              <Users className="size-8 text-muted-foreground" />
+              <HardHat className="size-8 text-muted-foreground" />
             </div>
             {contacts.length === 0 ? (
               <>
-                <h3 className="text-lg font-semibold">No contacts yet</h3>
+                <h3 className="text-lg font-semibold">No contractors yet</h3>
                 <p className="mt-1 max-w-sm text-sm text-muted-foreground">
-                  Add your first supplier or contractor to start building your
-                  contacts directory.
+                  Add your first contractor to start assigning them to jobs.
                 </p>
                 <Button className="mt-4" onClick={handleOpenCreate}>
                   <UserPlus className="size-4" />
-                  Add Contact
+                  Add Contractor
                 </Button>
               </>
             ) : (
               <>
                 <h3 className="text-lg font-semibold">No results found</h3>
                 <p className="mt-1 max-w-sm text-sm text-muted-foreground">
-                  No contacts match your current search or filter. Try adjusting
-                  your criteria.
+                  No contractors match your search. Try adjusting your criteria.
                 </p>
               </>
             )}
@@ -319,32 +295,21 @@ export function ContactsClient({
           {filteredContacts.map((contact) => (
             <Card
               key={contact.id}
-              className="group relative transition-shadow hover:shadow-md"
+              className="group relative cursor-pointer transition-shadow hover:shadow-md"
+              onClick={() => handleOpenDetail(contact.id)}
             >
               <CardContent className="pt-4">
-                {/* Header row: name + badge */}
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-semibold">
-                      {contact.name}
-                    </p>
-                    {contact.company && (
-                      <div className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
-                        <Building className="size-3 shrink-0" />
-                        <span className="truncate">{contact.company}</span>
-                      </div>
-                    )}
-                  </div>
-                  <Badge
-                    variant={contact.type === "SUPPLIER" ? "default" : "outline"}
-                    className={
-                      contact.type === "SUPPLIER"
-                        ? "bg-blue-500/10 text-blue-700 dark:text-blue-400"
-                        : "bg-orange-500/10 text-orange-700 border-orange-200 dark:text-orange-400 dark:border-orange-800"
-                    }
-                  >
-                    {contact.type === "SUPPLIER" ? "Supplier" : "Contractor"}
-                  </Badge>
+                {/* Header row: name */}
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold">
+                    {contact.name}
+                  </p>
+                  {contact.company && (
+                    <div className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <Building className="size-3 shrink-0" />
+                      <span className="truncate">{contact.company}</span>
+                    </div>
+                  )}
                 </div>
 
                 {/* Contact details */}
@@ -368,19 +333,25 @@ export function ContactsClient({
                   <Button
                     variant="ghost"
                     size="xs"
-                    onClick={() => handleOpenEdit(contact)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleOpenEdit(contact);
+                    }}
                   >
                     <Pencil className="size-3" />
-                    Edit
+                    <span className="hidden sm:inline">Edit</span>
                   </Button>
                   <Button
                     variant="ghost"
                     size="xs"
                     className="text-destructive hover:text-destructive"
-                    onClick={() => handleOpenDelete(contact)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleOpenDelete(contact);
+                    }}
                   >
                     <Trash2 className="size-3" />
-                    Delete
+                    <span className="hidden sm:inline">Delete</span>
                   </Button>
                 </div>
               </CardContent>
@@ -389,17 +360,34 @@ export function ContactsClient({
         </div>
       )}
 
+      {/* Contractor Detail Sheet */}
+      <ContractorDetailSheet
+        contractor={selectedContractor}
+        open={sheetOpen}
+        onOpenChange={(o) => {
+          setSheetOpen(o);
+          if (!o) setSelectedContractor(null);
+        }}
+        onEditClick={() => {
+          setSheetOpen(false);
+          if (selectedContractor) {
+            const contact = contacts.find((c) => c.id === selectedContractor.id);
+            if (contact) handleOpenEdit(contact);
+          }
+        }}
+      />
+
       {/* Create / Edit Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>
-              {editingContact ? "Edit Contact" : "Add Contact"}
+              {editingContact ? "Edit Contractor" : "Add Contractor"}
             </DialogTitle>
             <DialogDescription>
               {editingContact
-                ? "Update the contact details below."
-                : "Add a new supplier or contractor to your directory."}
+                ? "Update the contractor details below."
+                : "Add a new contractor to your directory."}
             </DialogDescription>
           </DialogHeader>
 
@@ -414,27 +402,6 @@ export function ContactsClient({
                   setForm((prev) => ({ ...prev, name: e.target.value }))
                 }
               />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="contact-type">Type *</Label>
-              <Select
-                value={form.type}
-                onValueChange={(val) => {
-                  if (val !== null) setForm((prev) => ({
-                    ...prev,
-                    type: val as "SUPPLIER" | "CONTRACTOR",
-                  }));
-                }}
-              >
-                <SelectTrigger className="w-full" id="contact-type">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="SUPPLIER">Supplier</SelectItem>
-                  <SelectItem value="CONTRACTOR">Contractor</SelectItem>
-                </SelectContent>
-              </Select>
             </div>
 
             <div className="space-y-2">
@@ -503,7 +470,7 @@ export function ContactsClient({
                 ? "Saving..."
                 : editingContact
                   ? "Save Changes"
-                  : "Add Contact"}
+                  : "Add Contractor"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -513,7 +480,7 @@ export function ContactsClient({
       <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
-            <DialogTitle>Delete Contact</DialogTitle>
+            <DialogTitle>Delete Contractor</DialogTitle>
             <DialogDescription>
               Are you sure you want to delete{" "}
               <span className="font-medium text-foreground">

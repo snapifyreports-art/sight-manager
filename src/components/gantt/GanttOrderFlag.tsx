@@ -19,6 +19,7 @@ interface GanttOrderFlagProps {
   timelineStart: Date;
   type: "order" | "delivery";
   rowIndex: number;
+  jobId?: string;
 }
 
 export function GanttOrderFlag({
@@ -26,6 +27,7 @@ export function GanttOrderFlag({
   timelineStart,
   type,
   rowIndex,
+  jobId,
 }: GanttOrderFlagProps) {
   const [showTooltip, setShowTooltip] = useState(false);
 
@@ -50,6 +52,11 @@ export function GanttOrderFlag({
   const statusLabel = order.status.replace(/_/g, " ");
   const tooltipAbove = rowIndex >= 2;
 
+  const handleClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    window.location.href = `/orders?orderId=${order.id}`;
+  };
+
   return (
     <div
       className="absolute z-20"
@@ -59,6 +66,7 @@ export function GanttOrderFlag({
       }}
       onMouseEnter={() => setShowTooltip(true)}
       onMouseLeave={() => setShowTooltip(false)}
+      onClick={handleClick}
     >
       {/* Flag icon */}
       {isOrderType ? (

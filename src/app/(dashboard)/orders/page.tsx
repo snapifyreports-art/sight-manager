@@ -1,6 +1,8 @@
 import { prisma } from "@/lib/prisma";
 import { OrdersClient } from "@/components/orders/OrdersClient";
 
+export const dynamic = "force-dynamic";
+
 export const metadata = {
   title: "Orders | Sight Manager",
 };

@@ -4,6 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { differenceInDays, differenceInBusinessDays } from "date-fns";
 import { getServerCurrentDate } from "@/lib/dev-date";
 
+export const dynamic = "force-dynamic";
+
 // GET /api/sites/[id]/delay-report
 // Returns overdue/delayed jobs with justifications, rained-off days impact, delivery delays
 export async function GET(

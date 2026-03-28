@@ -10,6 +10,8 @@ import {
 } from "date-fns";
 import { getServerCurrentDate } from "@/lib/dev-date";
 
+export const dynamic = "force-dynamic";
+
 // GET /api/sites/[id]/weekly-report?weekOf=YYYY-MM-DD
 // Generates a comprehensive weekly site report
 export async function GET(
@@ -176,6 +178,7 @@ export async function GET(
       startDate: { gte: nextWeekStart, lte: nextWeekEnd },
     },
     select: {
+      id: true,
       name: true,
       startDate: true,
       plot: { select: { plotNumber: true, name: true } },
@@ -256,6 +259,7 @@ export async function GET(
 
     nextWeek: {
       jobsStarting: jobsStartingNextWeek.map((j) => ({
+        id: j.id,
         name: j.name,
         startDate: j.startDate?.toISOString() ?? null,
         plot: j.plot,

@@ -1,7 +1,13 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  experimental: {
+    // Disable client-side router cache to prevent stale data on navigation
+    staleTimes: {
+      dynamic: 0,
+      static: 0,
+    },
+  },
 };
 
 export default nextConfig;

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   differenceInDays,
@@ -260,11 +261,12 @@ export function PlotTodoList({ jobs }: { jobs: JobData[] }) {
 // ---------- API Helper ----------
 
 async function updateOrderStatus(orderId: string, status: string) {
-  await fetch(`/api/orders/${orderId}`, {
+  const res = await fetch(`/api/orders/${orderId}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ status }),
   });
+  if (!res.ok) throw new Error("Failed to update order");
 }
 
 // ---------- Section Wrapper ----------
@@ -320,7 +322,9 @@ function OrderToPlaceCard({ item }: { item: TodoItem }) {
             <Package className="size-4 text-blue-500" />
           </div>
           <div className="min-w-0 flex-1">
-            <p className="text-sm font-medium">{item.jobName}</p>
+            <p className="text-sm font-medium">
+              <Link href={`/jobs/${item.jobId}`} className="hover:underline hover:text-blue-600">{item.jobName}</Link>
+            </p>
             <p className="text-xs text-muted-foreground">
               Job starts in {item.daysUntilStart} day
               {item.daysUntilStart !== 1 ? "s" : ""} -- no orders placed yet
@@ -343,7 +347,9 @@ function OrderToPlaceCard({ item }: { item: TodoItem }) {
         </div>
         <div className="min-w-0 flex-1">
           <p className="text-sm font-medium">
-            {item.order?.supplier.name}
+            {item.order?.supplier.id ? (
+              <Link href={`/suppliers/${item.order.supplier.id}`} className="hover:underline hover:text-blue-600">{item.order.supplier.name}</Link>
+            ) : item.order?.supplier.name}
             {item.order?.orderDetails && (
               <span className="font-normal text-muted-foreground">
                 {" "}
@@ -353,7 +359,7 @@ function OrderToPlaceCard({ item }: { item: TodoItem }) {
           </p>
           <p className="text-xs text-muted-foreground">
             Pending order for{" "}
-            <span className="font-medium text-foreground">{item.jobName}</span>
+            <Link href={`/jobs/${item.jobId}`} className="font-medium text-foreground hover:underline hover:text-blue-600">{item.jobName}</Link>
           </p>
         </div>
         <Button variant="outline" size="xs">
@@ -400,7 +406,7 @@ function UpcomingDeliveryCard({
         </div>
         <div className="min-w-0 flex-1">
           <p className="text-sm font-medium">
-            {item.order.supplier.name}
+            <Link href={`/suppliers/${item.order.supplier.id}`} className="hover:underline hover:text-blue-600">{item.order.supplier.name}</Link>
             {item.order.orderDetails && (
               <span className="font-normal text-muted-foreground">
                 {" "}
@@ -411,9 +417,9 @@ function UpcomingDeliveryCard({
           <div className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
             <span>
               For{" "}
-              <span className="font-medium text-foreground">
+              <Link href={`/jobs/${item.jobId}`} className="font-medium text-foreground hover:underline hover:text-blue-600">
                 {item.jobName}
-              </span>
+              </Link>
             </span>
             {expectedDate && (
               <>
@@ -474,7 +480,7 @@ function OverdueCard({
         </div>
         <div className="min-w-0 flex-1">
           <p className="text-sm font-medium">
-            {item.order.supplier.name}
+            <Link href={`/suppliers/${item.order.supplier.id}`} className="hover:underline hover:text-blue-600">{item.order.supplier.name}</Link>
             {item.order.orderDetails && (
               <span className="font-normal text-muted-foreground">
                 {" "}
@@ -489,9 +495,9 @@ function OverdueCard({
             <span className="text-border">&middot;</span>
             <span className="text-muted-foreground">
               For{" "}
-              <span className="font-medium text-foreground">
+              <Link href={`/jobs/${item.jobId}`} className="font-medium text-foreground hover:underline hover:text-blue-600">
                 {item.jobName}
-              </span>
+              </Link>
             </span>
           </div>
         </div>
@@ -530,7 +536,7 @@ function CompletedCard({ item }: { item: TodoItem }) {
         </div>
         <div className="min-w-0 flex-1">
           <p className="text-sm font-medium">
-            {item.order.supplier.name}
+            <Link href={`/suppliers/${item.order.supplier.id}`} className="hover:underline hover:text-blue-600">{item.order.supplier.name}</Link>
             {item.order.orderDetails && (
               <span className="font-normal text-muted-foreground">
                 {" "}
@@ -541,9 +547,9 @@ function CompletedCard({ item }: { item: TodoItem }) {
           <div className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
             <span>
               For{" "}
-              <span className="font-medium text-foreground">
+              <Link href={`/jobs/${item.jobId}`} className="font-medium text-foreground hover:underline hover:text-blue-600">
                 {item.jobName}
-              </span>
+              </Link>
             </span>
             {deliveredDate && (
               <>

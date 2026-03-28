@@ -4,6 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { calculateCascade } from "@/lib/cascade";
 import { addDays, format } from "date-fns";
 
+export const dynamic = "force-dynamic";
+
 // GET /api/sites/[id]/rained-off — list all rained-off dates for a site
 export async function GET(
   _req: NextRequest,

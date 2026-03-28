@@ -3,6 +3,8 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getSupabase, PHOTOS_BUCKET } from "@/lib/supabase";
 
+export const dynamic = "force-dynamic";
+
 // DELETE /api/documents/[id] — delete a document
 export async function DELETE(
   _req: NextRequest,

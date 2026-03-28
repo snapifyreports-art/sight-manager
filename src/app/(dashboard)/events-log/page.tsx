@@ -1,6 +1,8 @@
 import { prisma } from "@/lib/prisma";
 import { EventsClient } from "@/components/events/EventsClient";
 
+export const dynamic = "force-dynamic";
+
 export const metadata = {
   title: "Events Log | Sight Manager",
 };

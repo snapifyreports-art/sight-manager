@@ -3,6 +3,28 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getSupabase, PHOTOS_BUCKET } from "@/lib/supabase";
 
+export const dynamic = "force-dynamic";
+
+// GET /api/snags/[id]/photos — list all photos for a snag
+export async function GET(
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const session = await auth();
+  if (!session) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const { id } = await params;
+
+  const photos = await prisma.snagPhoto.findMany({
+    where: { snagId: id },
+    orderBy: { createdAt: "desc" },
+  });
+
+  return NextResponse.json(photos);
+}
+
 // POST /api/snags/[id]/photos — upload photos for a snag
 export async function POST(
   req: NextRequest,
@@ -20,6 +42,70 @@ export async function POST(
     return NextResponse.json({ error: "Snag not found" }, { status: 404 });
   }
 
+  const contentType = req.headers.get("content-type") || "";
+
+  // JSON body: copy an existing photo by URL (e.g. from a job photo)
+  if (contentType.includes("application/json")) {
+    const body = await req.json();
+    const { copyFromUrl, fileName: srcName, tag } = body;
+
+    if (!copyFromUrl) {
+      return NextResponse.json({ error: "copyFromUrl is required" }, { status: 400 });
+    }
+
+    // Fetch the image from the public URL
+    const imgRes = await fetch(copyFromUrl);
+    if (!imgRes.ok) {
+      return NextResponse.json({ error: "Failed to fetch source image" }, { status: 400 });
+    }
+
+    const arrayBuffer = await imgRes.arrayBuffer();
+    const ext = (srcName || "photo.jpg").split(".").pop() || "jpg";
+    const storagePath = `snags/${id}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+
+    const { error: uploadError } = await getSupabase()
+      .storage.from(PHOTOS_BUCKET)
+      .upload(storagePath, arrayBuffer, {
+        contentType: imgRes.headers.get("content-type") || "image/jpeg",
+        upsert: false,
+      });
+
+    if (uploadError) {
+      console.error("Copy upload error:", uploadError);
+      return NextResponse.json({ error: "Upload failed" }, { status: 500 });
+    }
+
+    const {
+      data: { publicUrl },
+    } = getSupabase().storage.from(PHOTOS_BUCKET).getPublicUrl(storagePath);
+
+    const photo = await prisma.snagPhoto.create({
+      data: {
+        snagId: id,
+        url: publicUrl,
+        fileName: srcName || "photo.jpg",
+        tag: tag || null,
+      },
+    });
+
+    // Also add photo to the linked job
+    if (snag.jobId) {
+      await prisma.jobPhoto.create({
+        data: {
+          jobId: snag.jobId,
+          url: publicUrl,
+          fileName: srcName || "photo.jpg",
+          caption: `Snag photo (${tag || "untagged"})`,
+          tag: tag || null,
+          uploadedById: session.user.id,
+        },
+      });
+    }
+
+    return NextResponse.json([photo], { status: 201 });
+  }
+
+  // FormData body: direct file upload
   const formData = await req.formData();
   const files = formData.getAll("photos") as File[];
   const tag = formData.get("tag") as string | null; // "before" | "after" | null
@@ -59,6 +145,20 @@ export async function POST(
         tag: tag || null,
       },
     });
+
+    // Also add photo to the linked job so it shows in the job panel
+    if (snag.jobId) {
+      await prisma.jobPhoto.create({
+        data: {
+          jobId: snag.jobId,
+          url: publicUrl,
+          fileName: file.name,
+          caption: `Snag photo (${tag || "untagged"})`,
+          tag: tag || null,
+          uploadedById: session.user.id,
+        },
+      });
+    }
 
     createdPhotos.push(photo);
   }

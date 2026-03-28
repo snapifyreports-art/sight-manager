@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import {
   Building2,
   Briefcase,
@@ -9,6 +10,10 @@ import {
   Activity,
   CircleDot,
   TrendingUp,
+  Package,
+  Truck,
+  PackageCheck,
+  Send,
 } from "lucide-react";
 import {
   Card,
@@ -37,8 +42,12 @@ import { formatDistanceToNow } from "date-fns";
 
 interface StatsData {
   totalSites: number;
-  activeJobs: number;
-  pendingOrders: number;
+  totalJobs: number;
+  inProgressJobs: number;
+  totalOrders: number;
+  ordersToSend: number;
+  awaitingDelivery: number;
+  deliveredOrders: number;
   totalContacts: number;
 }
 
@@ -55,8 +64,8 @@ interface EventLogEntry {
   description: string;
   createdAt: string;
   user: { name: string } | null;
-  site: { name: string } | null;
-  job: { name: string } | null;
+  site: { id: string; name: string } | null;
+  job: { id: string; name: string } | null;
 }
 
 interface TrafficLightJob {
@@ -144,23 +153,48 @@ function StatsCards({ stats }: { stats: StatsData }) {
       icon: Building2,
       gradient: "from-blue-500 to-blue-600",
       shadow: "shadow-blue-500/20",
-      lightBg: "bg-blue-50",
     },
     {
-      title: "Active Jobs",
-      value: stats.activeJobs,
+      title: "Total Jobs",
+      value: stats.totalJobs,
       icon: Briefcase,
+      gradient: "from-slate-500 to-slate-600",
+      shadow: "shadow-slate-500/20",
+    },
+    {
+      title: "Jobs In Progress",
+      value: stats.inProgressJobs,
+      icon: Activity,
       gradient: "from-emerald-500 to-emerald-600",
       shadow: "shadow-emerald-500/20",
-      lightBg: "bg-emerald-50",
     },
     {
-      title: "Pending Orders",
-      value: stats.pendingOrders,
-      icon: ShoppingCart,
+      title: "Total Orders",
+      value: stats.totalOrders,
+      icon: Package,
+      gradient: "from-indigo-500 to-indigo-600",
+      shadow: "shadow-indigo-500/20",
+    },
+    {
+      title: "Future Orders",
+      value: stats.ordersToSend,
+      icon: Send,
       gradient: "from-amber-500 to-orange-500",
       shadow: "shadow-amber-500/20",
-      lightBg: "bg-amber-50",
+    },
+    {
+      title: "Awaiting Delivery",
+      value: stats.awaitingDelivery,
+      icon: Truck,
+      gradient: "from-cyan-500 to-teal-500",
+      shadow: "shadow-cyan-500/20",
+    },
+    {
+      title: "Delivered",
+      value: stats.deliveredOrders,
+      icon: PackageCheck,
+      gradient: "from-green-500 to-green-600",
+      shadow: "shadow-green-500/20",
     },
     {
       title: "Total Contacts",
@@ -168,7 +202,6 @@ function StatsCards({ stats }: { stats: StatsData }) {
       icon: Users,
       gradient: "from-violet-500 to-purple-600",
       shadow: "shadow-violet-500/20",
-      lightBg: "bg-violet-50",
     },
   ];
 
@@ -230,14 +263,14 @@ function TrafficLightSection({
       </div>
 
       {/* Summary pills */}
-      <div className="flex flex-wrap gap-2.5">
+      <div className="flex flex-wrap gap-1.5 sm:gap-2.5">
         {statusOrder.map((status) => {
           const config = STATUS_CONFIG[status];
           const count = jobsByStatus[status];
           return (
             <div
               key={status}
-              className={`flex items-center gap-2 rounded-full border border-border/40 px-4 py-2 text-[13px] font-medium ${config.bgColor}`}
+              className={`flex items-center gap-1.5 rounded-full border border-border/40 px-2.5 py-1.5 text-[11px] font-medium sm:gap-2 sm:px-4 sm:py-2 sm:text-[13px] ${config.bgColor}`}
             >
               <CircleDot className={`size-3.5 ${config.dotColor}`} />
               <span className="text-slate-700">
@@ -254,9 +287,10 @@ function TrafficLightSection({
           {trafficLightJobs.map((job) => {
             const config = STATUS_CONFIG[job.status] ?? STATUS_CONFIG.NOT_STARTED;
             return (
-              <div
+              <Link
+                href={`/jobs/${job.id}`}
                 key={job.id}
-                className={`rounded-xl border border-border/40 border-l-[3px] bg-white p-4 shadow-sm transition-all hover:shadow-md ${config.borderColor}`}
+                className={`block rounded-xl border border-border/40 border-l-[3px] bg-white p-4 shadow-sm transition-all hover:shadow-md cursor-pointer ${config.borderColor}`}
               >
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0 flex-1">
@@ -275,7 +309,7 @@ function TrafficLightSection({
                     Assigned to <span className="font-medium text-slate-500">{job.assignedTo.name}</span>
                   </p>
                 )}
-              </div>
+              </Link>
             );
           })}
         </div>
@@ -438,18 +472,20 @@ function RecentActivity({ events }: { events: EventLogEntry[] }) {
                       {formatEventType(event.type)}
                     </Badge>
                     {event.job && (
-                      <span className="text-xs font-medium text-slate-500">
+                      <Link href={`/jobs/${event.job.id}`} className="text-xs font-medium text-blue-600 hover:underline">
                         {event.job.name}
-                      </span>
+                      </Link>
                     )}
                   </div>
-                  <p className="mt-1.5 text-sm text-slate-700">{event.description}</p>
+                  <p className="mt-1.5 line-clamp-1 text-sm text-slate-700 sm:line-clamp-none">{event.description}</p>
                   <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px] text-slate-400">
-                    {event.user && <span className="font-medium">{event.user.name}</span>}
+                    {event.user && <span className="hidden font-medium sm:inline">{event.user.name}</span>}
                     {event.site && (
                       <>
-                        <span>&middot;</span>
-                        <span>{event.site.name}</span>
+                        <span className="hidden sm:inline">&middot;</span>
+                        <Link href={`/sites/${event.site.id}`} className="hidden sm:inline hover:underline hover:text-blue-600">
+                          {event.site.name}
+                        </Link>
                       </>
                     )}
                     <span>&middot;</span>
@@ -484,7 +520,7 @@ export function DashboardClient({ data }: { data: DashboardData }) {
         </div>
         <div className="hidden items-center gap-2 rounded-full bg-blue-50 px-4 py-2 text-[13px] font-medium text-blue-700 sm:flex">
           <TrendingUp className="size-4" />
-          <span>{data.stats.activeJobs} active jobs</span>
+          <span>{data.stats.inProgressJobs} in progress</span>
         </div>
       </div>
 

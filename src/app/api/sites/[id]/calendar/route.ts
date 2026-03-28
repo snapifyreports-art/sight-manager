@@ -4,6 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { startOfMonth, endOfMonth, subMonths, addMonths } from "date-fns";
 import { getServerCurrentDate } from "@/lib/dev-date";
 
+export const dynamic = "force-dynamic";
+
 // GET /api/sites/[id]/calendar?month=YYYY-MM
 // Returns jobs, deliveries, and rained-off days for the calendar view
 export async function GET(

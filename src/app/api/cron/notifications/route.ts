@@ -3,6 +3,8 @@ import { prisma } from "@/lib/prisma";
 import { sendPushToAll } from "@/lib/push";
 import { addDays } from "date-fns";
 
+export const dynamic = "force-dynamic";
+
 export async function GET(req: NextRequest) {
   // Verify cron secret (Vercel sends this header automatically)
   const authHeader = req.headers.get("authorization");

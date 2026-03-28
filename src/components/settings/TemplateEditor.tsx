@@ -91,6 +91,7 @@ export function TemplateEditor({
   const [jobEndWeek, setJobEndWeek] = useState(2);
   const [jobStageCode, setJobStageCode] = useState("");
   const [jobWeatherAffected, setJobWeatherAffected] = useState(false);
+  const [jobContractorId, setJobContractorId] = useState("");
   const [savingJob, setSavingJob] = useState(false);
 
   // Add Stage dialog
@@ -115,6 +116,7 @@ export function TemplateEditor({
   const [subJobName, setSubJobName] = useState("");
   const [subJobCode, setSubJobCode] = useState("");
   const [subJobDuration, setSubJobDuration] = useState(1);
+  const [subJobContractorId, setSubJobContractorId] = useState("");
   const [savingSubJob, setSavingSubJob] = useState(false);
 
   // Order dialog
@@ -136,10 +138,15 @@ export function TemplateEditor({
     Array<{ name: string; quantity: number; unit: string; unitCost: number }>
   >([]);
   const [savingOrder, setSavingOrder] = useState(false);
+  const [orderError, setOrderError] = useState<string | null>(null);
 
   // Suppliers
   const [suppliers, setSuppliers] = useState<SupplierData[]>([]);
   const [suppliersLoaded, setSuppliersLoaded] = useState(false);
+
+  // Contractors (for assigning to template jobs)
+  const [contractors, setContractors] = useState<Array<{ id: string; name: string; company: string | null }>>([]);
+  const [contractorsLoaded, setContractorsLoaded] = useState(false);
   const [materialSuggestions, setMaterialSuggestions] = useState<
     MaterialSuggestion[]
   >([]);
@@ -180,6 +187,19 @@ export function TemplateEditor({
         .catch(console.error);
     }
   }, [suppliersLoaded]);
+
+  // Load contractors once
+  useEffect(() => {
+    if (!contractorsLoaded) {
+      fetch("/api/contacts?type=CONTRACTOR")
+        .then((r) => r.json())
+        .then((data) => {
+          setContractors(data);
+          setContractorsLoaded(true);
+        })
+        .catch(console.error);
+    }
+  }, [contractorsLoaded]);
 
   // Load materials when supplier changes
   useEffect(() => {
@@ -315,7 +335,7 @@ export function TemplateEditor({
           );
         }
 
-        const tplRes = await fetch(`/api/plot-templates/${template.id}`);
+        const tplRes = await fetch(`/api/plot-templates/${template.id}`, { cache: "no-store" });
         const updated = await tplRes.json();
         onUpdate(updated);
       } catch (error) {
@@ -457,7 +477,7 @@ export function TemplateEditor({
         if (!res.ok) throw new Error("Failed to add stages");
       }
 
-      const tplRes = await fetch(`/api/plot-templates/${template.id}`);
+      const tplRes = await fetch(`/api/plot-templates/${template.id}`, { cache: "no-store" });
       const updated = await tplRes.json();
       onUpdate(updated);
       setStageDialogOpen(false);
@@ -478,6 +498,7 @@ export function TemplateEditor({
     setJobEndWeek(job.endWeek);
     setJobStageCode(job.stageCode ?? "");
     setJobWeatherAffected(job.weatherAffected ?? false);
+    setJobContractorId(job.contactId ?? "");
     setJobDialogOpen(true);
   }
 
@@ -502,6 +523,7 @@ export function TemplateEditor({
               startWeek: jobStartWeek,
               endWeek: jobEndWeek,
               weatherAffected: jobWeatherAffected,
+              contactId: jobContractorId && jobContractorId !== "__none__" ? jobContractorId : null,
               ...(isSubJob && { durationWeeks }),
             }),
           }
@@ -525,7 +547,7 @@ export function TemplateEditor({
         }
       }
 
-      const tplRes = await fetch(`/api/plot-templates/${template.id}`);
+      const tplRes = await fetch(`/api/plot-templates/${template.id}`, { cache: "no-store" });
       const updated = await tplRes.json();
       onUpdate(updated);
       setJobDialogOpen(false);
@@ -548,7 +570,7 @@ export function TemplateEditor({
         throw new Error(errData.error || "Failed to delete job");
       }
 
-      const tplRes = await fetch(`/api/plot-templates/${template.id}`);
+      const tplRes = await fetch(`/api/plot-templates/${template.id}`, { cache: "no-store" });
       const updated = await tplRes.json();
       onUpdate(updated);
       setDeleteJobDialogOpen(false);
@@ -568,6 +590,7 @@ export function TemplateEditor({
     setSubJobName("");
     setSubJobCode("");
     setSubJobDuration(1);
+    setSubJobContractorId("");
     setSubJobDialogOpen(true);
   }
 
@@ -586,6 +609,7 @@ export function TemplateEditor({
           stageCode: subJobCode,
           durationWeeks: subJobDuration,
           parentId: subJobParentId,
+          contactId: subJobContractorId && subJobContractorId !== "__none__" ? subJobContractorId : null,
           startWeek,
           endWeek,
           sortOrder: subJobParentChildren,
@@ -599,7 +623,7 @@ export function TemplateEditor({
         { method: "POST" }
       );
 
-      const tplRes = await fetch(`/api/plot-templates/${template.id}`);
+      const tplRes = await fetch(`/api/plot-templates/${template.id}`, { cache: "no-store" });
       const updated = await tplRes.json();
       onUpdate(updated);
       setSubJobDialogOpen(false);
@@ -643,7 +667,7 @@ export function TemplateEditor({
         { method: "POST" }
       );
 
-      const tplRes = await fetch(`/api/plot-templates/${template.id}`);
+      const tplRes = await fetch(`/api/plot-templates/${template.id}`, { cache: "no-store" });
       const updated = await tplRes.json();
       onUpdate(updated);
     } catch (error) {
@@ -729,6 +753,7 @@ export function TemplateEditor({
     setOrderSupplierId(null);
     setOrderItems([]);
     setMaterialSuggestions([]);
+    setOrderError(null);
     setOrderDialogOpen(true);
   }
 
@@ -769,6 +794,7 @@ export function TemplateEditor({
 
   async function handleSaveOrder() {
     setSavingOrder(true);
+    setOrderError(null);
     try {
       // Find the owning job to compute offsets relative to its startWeek
       const allJobs = getAllJobsFlat();
@@ -813,12 +839,13 @@ export function TemplateEditor({
         if (!res.ok) throw new Error("Failed to create order");
       }
 
-      const tplRes = await fetch(`/api/plot-templates/${template.id}`);
+      const tplRes = await fetch(`/api/plot-templates/${template.id}`, { cache: "no-store" });
       const updated = await tplRes.json();
       onUpdate(updated);
       setOrderDialogOpen(false);
     } catch (error) {
       console.error("Failed to save order:", error);
+      setOrderError(error instanceof Error ? error.message : "Failed to save order. Please try again.");
     } finally {
       setSavingOrder(false);
     }
@@ -833,7 +860,7 @@ export function TemplateEditor({
       );
       if (!res.ok) throw new Error("Failed to delete order");
 
-      const tplRes = await fetch(`/api/plot-templates/${template.id}`);
+      const tplRes = await fetch(`/api/plot-templates/${template.id}`, { cache: "no-store" });
       const updated = await tplRes.json();
       onUpdate(updated);
       setDeleteOrderDialogOpen(false);
@@ -1038,7 +1065,7 @@ export function TemplateEditor({
                       className="flex cursor-pointer items-center gap-3 px-4 py-3 hover:bg-slate-50/50"
                       onClick={() => toggleJobExpand(job.id)}
                     >
-                      <GripVertical className="size-4 shrink-0 text-muted-foreground/40" />
+                      <GripVertical className="hidden size-4 shrink-0 text-muted-foreground/40 sm:block" />
                       {isExpanded ? (
                         <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
                       ) : (
@@ -1047,7 +1074,7 @@ export function TemplateEditor({
 
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
-                          <span className="text-xs font-medium text-muted-foreground">
+                          <span className="hidden text-xs font-medium text-muted-foreground sm:inline">
                             {index + 1}.
                           </span>
                           <span className="font-medium">{job.name}</span>
@@ -1241,7 +1268,7 @@ export function TemplateEditor({
                     className="flex cursor-pointer items-center gap-3 px-4 py-3 hover:bg-slate-50/50"
                     onClick={() => toggleJobExpand(job.id)}
                   >
-                    <GripVertical className="size-4 shrink-0 text-muted-foreground/40" />
+                    <GripVertical className="hidden size-4 shrink-0 text-muted-foreground/40 sm:block" />
                     {isExpanded ? (
                       <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
                     ) : (
@@ -1252,7 +1279,7 @@ export function TemplateEditor({
                       <div className="flex items-center gap-2">
                         <Layers className="size-4 shrink-0 text-blue-500" />
                         <span className="font-semibold">
-                          Stage: {job.name}
+                          <span className="hidden sm:inline">Stage: </span>{job.name}
                         </span>
                         {job.stageCode && (
                           <Badge
@@ -1316,59 +1343,129 @@ export function TemplateEditor({
                               editingDurations[child.id] !== undefined
                                 ? editingDurations[child.id]
                                 : (child.durationWeeks ?? 1);
+                            const isChildExpanded = expandedJobs.has(child.id);
                             return (
-                              <div
-                                key={child.id}
-                                className="flex items-center gap-2 rounded-md border bg-white px-3 py-2"
-                              >
-                                <Badge
-                                  variant="secondary"
-                                  className="shrink-0 font-mono text-[10px]"
+                              <div key={child.id} className="space-y-0">
+                                <div
+                                  className={`flex items-center gap-2 rounded-md border bg-white px-3 py-2 ${child.orders.length > 0 ? "cursor-pointer hover:bg-slate-50" : ""}`}
+                                  onClick={() => {
+                                    if (child.orders.length > 0) toggleJobExpand(child.id);
+                                  }}
                                 >
-                                  {child.stageCode}
-                                </Badge>
-                                <span className="min-w-0 flex-1 text-sm">
-                                  {child.name}
-                                </span>
-                                <div className="flex shrink-0 items-center gap-1">
-                                  <Input
-                                    type="number"
-                                    min={1}
-                                    value={durationValue}
-                                    onChange={(e) => {
-                                      const val =
-                                        parseInt(e.target.value) || 1;
-                                      setEditingDurations((prev) => ({
-                                        ...prev,
-                                        [child.id]: val,
-                                      }));
-                                    }}
-                                    onBlur={() =>
-                                      handleDurationBlur(child, job.id)
-                                    }
-                                    className="h-7 w-16 text-center text-xs"
-                                  />
-                                  <span className="text-xs text-muted-foreground">
-                                    wk
+                                  <Badge
+                                    variant="secondary"
+                                    className="shrink-0 font-mono text-[10px]"
+                                  >
+                                    {child.stageCode}
+                                  </Badge>
+                                  <span className="min-w-0 flex-1 truncate text-sm">
+                                    {child.name}
                                   </span>
+                                  {child.orders.length > 0 && (
+                                    <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                                      <Package className="size-3" />
+                                      {child.orders.length}
+                                    </span>
+                                  )}
+                                  <div className="hidden shrink-0 items-center gap-1 sm:flex">
+                                    <Input
+                                      type="number"
+                                      min={1}
+                                      value={durationValue}
+                                      onClick={(e) => e.stopPropagation()}
+                                      onChange={(e) => {
+                                        const val =
+                                          parseInt(e.target.value) || 1;
+                                        setEditingDurations((prev) => ({
+                                          ...prev,
+                                          [child.id]: val,
+                                        }));
+                                      }}
+                                      onBlur={() =>
+                                        handleDurationBlur(child, job.id)
+                                      }
+                                      className="h-7 w-16 text-center text-xs"
+                                    />
+                                    <span className="text-xs text-muted-foreground">
+                                      wk
+                                    </span>
+                                  </div>
+                                  <div className="flex shrink-0 items-center gap-0.5">
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); openEditJob(child); }}
+                                      className="rounded p-1 text-muted-foreground hover:bg-slate-100 hover:text-slate-700"
+                                    >
+                                      <Pencil className="size-3" />
+                                    </button>
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setDeletingJobId(child.id);
+                                        setDeleteJobDialogOpen(true);
+                                      }}
+                                      className="rounded p-1 text-muted-foreground hover:bg-red-50 hover:text-red-600"
+                                    >
+                                      <Trash2 className="size-3" />
+                                    </button>
+                                  </div>
                                 </div>
-                                <div className="flex shrink-0 items-center gap-0.5">
-                                  <button
-                                    onClick={() => openEditJob(child)}
-                                    className="rounded p-1 text-muted-foreground hover:bg-slate-100 hover:text-slate-700"
-                                  >
-                                    <Pencil className="size-3" />
-                                  </button>
-                                  <button
-                                    onClick={() => {
-                                      setDeletingJobId(child.id);
-                                      setDeleteJobDialogOpen(true);
-                                    }}
-                                    className="rounded p-1 text-muted-foreground hover:bg-red-50 hover:text-red-600"
-                                  >
-                                    <Trash2 className="size-3" />
-                                  </button>
-                                </div>
+                                {isChildExpanded && child.orders.length > 0 && (
+                                  <div className="ml-8 space-y-1.5 border-l-2 border-slate-200 py-2 pl-3">
+                                    {child.orders.map((order) => (
+                                      <div
+                                        key={order.id}
+                                        className="rounded-lg border bg-white p-2.5"
+                                      >
+                                        <div className="flex items-start justify-between gap-2">
+                                          <div className="min-w-0 flex-1">
+                                            <div className="flex items-center gap-2">
+                                              <p className="text-xs font-medium">
+                                                {order.itemsDescription || "Material Order"}
+                                              </p>
+                                              {order.supplier && (
+                                                <Badge variant="outline" className="text-[10px]">
+                                                  {order.supplier.name}
+                                                </Badge>
+                                              )}
+                                            </div>
+                                            {order.items.length > 0 && (
+                                              <p className="mt-1 text-[10px] text-muted-foreground">
+                                                {order.items.map((it) => it.name).join(", ")}
+                                              </p>
+                                            )}
+                                          </div>
+                                          <div className="flex shrink-0 items-center gap-0.5">
+                                            <button
+                                              onClick={() => openEditOrder(child.id, order)}
+                                              className="rounded p-1 text-muted-foreground hover:bg-slate-100"
+                                            >
+                                              <Pencil className="size-3" />
+                                            </button>
+                                            <button
+                                              onClick={() => {
+                                                setDeletingOrderId(order.id);
+                                                setOrderJobId(child.id);
+                                                setDeleteOrderDialogOpen(true);
+                                              }}
+                                              className="rounded p-1 text-muted-foreground hover:bg-red-50 hover:text-red-600"
+                                            >
+                                              <Trash2 className="size-3" />
+                                            </button>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    ))}
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      className="h-6 text-[10px] text-muted-foreground"
+                                      onClick={() => openAddOrder(child.id)}
+                                    >
+                                      <Plus className="size-3" />
+                                      Add Order
+                                    </Button>
+                                  </div>
+                                )}
                               </div>
                             );
                           })}
@@ -1387,7 +1484,7 @@ export function TemplateEditor({
                         <div className="space-y-2">
                           <div className="flex items-center justify-between">
                             <span className="text-xs font-medium text-muted-foreground uppercase">
-                              Material Orders
+                              Stage-Level Orders
                             </span>
                             <Button
                               size="sm"
@@ -1401,9 +1498,18 @@ export function TemplateEditor({
                           </div>
 
                           {job.orders.length === 0 ? (
-                            <p className="text-xs text-muted-foreground">
-                              No orders for this stage.
-                            </p>
+                            (() => {
+                              const childOrderCount = job.children.reduce((sum, c) => sum + c.orders.length, 0);
+                              return childOrderCount > 0 ? (
+                                <p className="text-xs text-muted-foreground">
+                                  {childOrderCount} order{childOrderCount !== 1 ? "s" : ""} on sub-jobs above. Click a sub-job to view.
+                                </p>
+                              ) : (
+                                <p className="text-xs text-muted-foreground">
+                                  No orders for this stage.
+                                </p>
+                              );
+                            })()
                           ) : (
                             job.orders.map((order) => (
                               <div
@@ -1798,6 +1904,24 @@ export function TemplateEditor({
                 className="w-28"
               />
             </div>
+            {contractors.length > 0 && (
+              <div className="space-y-2">
+                <Label>Contractor</Label>
+                <Select value={subJobContractorId} onValueChange={(v) => setSubJobContractorId(v ?? "")}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="No contractor assigned" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">No contractor</SelectItem>
+                    {contractors.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>
+                        {c.company ? `${c.company} (${c.name})` : c.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
           </div>
           <DialogFooter>
             <DialogClose render={<Button variant="outline" />}>
@@ -1879,6 +2003,24 @@ export function TemplateEditor({
               <span className="text-sm font-medium">Weather Affected</span>
               <span className="text-[11px] text-muted-foreground">— can be delayed by bad weather</span>
             </label>
+            {contractors.length > 0 && (
+              <div className="space-y-2">
+                <Label>Contractor</Label>
+                <Select value={jobContractorId} onValueChange={(v) => setJobContractorId(v ?? "")}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="No contractor assigned" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">No contractor</SelectItem>
+                    {contractors.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>
+                        {c.company ? `${c.company} (${c.name})` : c.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>Start Week</Label>
@@ -2210,6 +2352,9 @@ export function TemplateEditor({
               )}
             </div>
           </div>
+          {orderError && (
+            <p className="text-sm text-red-600 px-6 pb-2">{orderError}</p>
+          )}
           <DialogFooter>
             <DialogClose render={<Button variant="outline" />}>
               Cancel

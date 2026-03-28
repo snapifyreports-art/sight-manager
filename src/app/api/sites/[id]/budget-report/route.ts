@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
+export const dynamic = "force-dynamic";
+
 // GET /api/sites/[id]/budget-report
 // Compares template (budgeted) costs vs actual order costs per plot & job
 export async function GET(

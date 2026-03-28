@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
+export const dynamic = "force-dynamic";
+
 // PUT /api/plot-templates/[id]/jobs/[jobId] — update a template job
 export async function PUT(
   request: NextRequest,
@@ -14,7 +16,7 @@ export async function PUT(
 
   const { id, jobId } = await params;
   const body = await request.json();
-  const { name, description, stageCode, sortOrder, startWeek, endWeek, durationWeeks, parentId, weatherAffected } = body;
+  const { name, description, stageCode, sortOrder, startWeek, endWeek, durationWeeks, parentId, weatherAffected, contactId } = body;
 
   const job = await prisma.templateJob.findFirst({
     where: { id: jobId, templateId: id },
@@ -41,6 +43,7 @@ export async function PUT(
       ...(endWeek !== undefined && { endWeek }),
       ...(durationWeeks !== undefined && { durationWeeks }),
       ...(weatherAffected !== undefined && { weatherAffected }),
+      ...(contactId !== undefined && { contactId: contactId || null }),
       ...(parentId !== undefined && { parentId: parentId || null }),
     },
     include: {

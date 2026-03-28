@@ -3,8 +3,9 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_DATABASE_URL")
 }
 
 enum UserRole {
@@ -214,6 +215,7 @@ model Job {
   contractors   JobContractor[]
   photos        JobPhoto[]
   documents     SiteDocument[]
+  snags         Snag[]
 }
 
 model JobAction {
@@ -336,6 +338,8 @@ model Contact {
 
   orders          MaterialOrder[]
   jobContractors  JobContractor[]
+  templateJobs    TemplateJob[]
+  snags           Snag[]
 }
 
 // ---------- Plot Templates ----------
@@ -363,11 +367,13 @@ model TemplateJob {
   durationWeeks   Int?
   weatherAffected Boolean  @default(false)
   parentId        String?
+  contactId       String?
   createdAt       DateTime @default(now())
 
   template    PlotTemplate  @relation(fields: [templateId], references: [id], onDelete: Cascade)
   parent      TemplateJob?  @relation("SubJobs", fields: [parentId], references: [id], onDelete: Cascade)
   children    TemplateJob[] @relation("SubJobs")
+  contact     Contact?      @relation(fields: [contactId], references: [id], onDelete: SetNull)
   orders         TemplateOrder[]
   anchoredOrders TemplateOrder[] @relation("OrderAnchorJob")
 }
@@ -447,11 +453,13 @@ model UserPermission {
 model Snag {
   id            String       @id @default(cuid())
   plotId        String
+  jobId         String?
   description   String
   location      String?
   priority      SnagPriority @default(MEDIUM)
   status        SnagStatus   @default(OPEN)
   assignedToId  String?
+  contactId     String?
   raisedById    String
   resolvedAt    DateTime?
   resolvedById  String?
@@ -460,7 +468,9 @@ model Snag {
   updatedAt     DateTime     @updatedAt
 
   plot          Plot         @relation(fields: [plotId], references: [id], onDelete: Cascade)
+  job           Job?         @relation(fields: [jobId], references: [id], onDelete: SetNull)
   assignedTo    User?        @relation("SnagAssigned", fields: [assignedToId], references: [id])
+  contact       Contact?     @relation(fields: [contactId], references: [id])
   raisedBy      User         @relation("SnagRaised", fields: [raisedById], references: [id])
   resolvedBy    User?        @relation("SnagResolved", fields: [resolvedById], references: [id])
   photos        SnagPhoto[]

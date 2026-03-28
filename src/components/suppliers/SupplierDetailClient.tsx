@@ -275,13 +275,13 @@ export function SupplierDetailClient({ supplier: initial }: { supplier: Supplier
               <span className="flex items-center gap-1"><User className="size-3" /> {supplier.contactName}</span>
             )}
             {supplier.contactEmail && (
-              <span className="flex items-center gap-1"><Mail className="size-3" /> {supplier.contactEmail}</span>
+              <span className="hidden items-center gap-1 sm:flex"><Mail className="size-3" /> {supplier.contactEmail}</span>
             )}
             {supplier.contactNumber && (
-              <span className="flex items-center gap-1"><Phone className="size-3" /> {supplier.contactNumber}</span>
+              <span className="hidden items-center gap-1 sm:flex"><Phone className="size-3" /> {supplier.contactNumber}</span>
             )}
             {supplier.accountNumber && (
-              <span className="flex items-center gap-1"><Hash className="size-3" /> {supplier.accountNumber}</span>
+              <span className="hidden items-center gap-1 sm:flex"><Hash className="size-3" /> {supplier.accountNumber}</span>
             )}
           </div>
         </div>
@@ -314,13 +314,13 @@ export function SupplierDetailClient({ supplier: initial }: { supplier: Supplier
               onChange={(e) => setSearch(e.target.value)}
             />
           </div>
-          <Button size="sm" variant="outline" className="h-8" onClick={handleDownload}>
+          <Button size="sm" variant="outline" className="hidden h-8 sm:inline-flex" onClick={handleDownload}>
             <Download className="mr-1 size-3.5" /> Download Template
           </Button>
           <Button
             size="sm"
             variant="outline"
-            className="h-8"
+            className="hidden h-8 sm:inline-flex"
             disabled={uploading}
             onClick={() => fileInputRef.current?.click()}
           >
@@ -359,7 +359,7 @@ export function SupplierDetailClient({ supplier: initial }: { supplier: Supplier
                   <th className="px-3 py-2 w-20">Unit</th>
                   <th className="px-3 py-2 w-28 text-right">Unit Cost</th>
                   <th className="px-3 py-2 w-32">Category</th>
-                  <th className="px-3 py-2 w-28">SKU</th>
+                  <th className="hidden px-3 py-2 w-28 sm:table-cell">SKU</th>
                   <th className="px-3 py-2 w-20 text-right">Actions</th>
                 </tr>
               </thead>
@@ -397,7 +397,7 @@ export function SupplierDetailClient({ supplier: initial }: { supplier: Supplier
                           onChange={(e) => setEditForm((f) => ({ ...f, category: e.target.value }))}
                         />
                       </td>
-                      <td className="px-2 py-1.5">
+                      <td className="hidden px-2 py-1.5 sm:table-cell">
                         <Input
                           className="h-7 text-sm"
                           value={editForm.sku}
@@ -428,7 +428,7 @@ export function SupplierDetailClient({ supplier: initial }: { supplier: Supplier
                       <td className="px-3 py-2 text-muted-foreground">{item.unit}</td>
                       <td className="px-3 py-2 text-right tabular-nums">{formatCurrency(item.unitCost)}</td>
                       <td className="px-3 py-2 text-muted-foreground">{item.category || "—"}</td>
-                      <td className="px-3 py-2 text-muted-foreground text-xs">{item.sku || "—"}</td>
+                      <td className="hidden px-3 py-2 text-muted-foreground text-xs sm:table-cell">{item.sku || "—"}</td>
                       <td className="px-3 py-2 text-right">
                         <div className="flex items-center justify-end gap-1">
                           <button

@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { fetchWeatherForPostcode } from "@/lib/weather";
 
+export const dynamic = "force-dynamic";
+
 // GET /api/weather?postcode=SW1A+1AA
 export async function GET(req: NextRequest) {
   const session = await auth();

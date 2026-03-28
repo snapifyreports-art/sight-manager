@@ -53,6 +53,8 @@ export interface TemplateJobData {
   durationWeeks: number | null;
   weatherAffected: boolean;
   parentId: string | null;
+  contactId: string | null;
+  contact: { id: string; name: string; company: string | null } | null;
   orders: TemplateOrderData[];
   children: TemplateJobData[];
 }

@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
+export const dynamic = "force-dynamic";
+
 // POST /api/plot-templates/[id]/jobs/[jobId]/orders — add an order to a template job
 export async function POST(
   request: NextRequest,

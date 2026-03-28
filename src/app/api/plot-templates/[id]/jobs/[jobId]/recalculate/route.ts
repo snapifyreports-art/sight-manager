@@ -3,6 +3,8 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { templateJobsInclude } from "@/lib/template-includes";
 
+export const dynamic = "force-dynamic";
+
 // POST /api/plot-templates/[id]/jobs/[jobId]/recalculate
 // Recalculates sibling sub-job weeks after a duration change
 // jobId should be the PARENT stage ID

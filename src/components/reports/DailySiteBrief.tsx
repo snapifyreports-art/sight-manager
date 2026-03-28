@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { format } from "date-fns";
+import Link from "next/link";
+import { format, addDays, differenceInCalendarDays } from "date-fns";
 import { getCurrentDate } from "@/lib/dev-date";
 import { useDevDate } from "@/lib/dev-date-context";
 import {
@@ -36,6 +37,12 @@ import {
   CardDescription,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Calendar } from "@/components/ui/calendar";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import {
   Dialog,
   DialogContent,
@@ -46,6 +53,7 @@ import {
   DialogClose,
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
 interface DailySiteBriefProps {
@@ -100,15 +108,15 @@ interface BriefData {
     id: string;
     itemsDescription: string | null;
     status: string;
-    supplier: { name: string };
-    job: { name: string; plot: { plotNumber: string | null; name: string } };
+    supplier: { id: string; name: string };
+    job: { id: string; name: string; plot: { plotNumber: string | null; name: string } };
   }>;
   overdueDeliveries: Array<{
     id: string;
     itemsDescription: string | null;
     expectedDeliveryDate: string | null;
-    supplier: { name: string };
-    job: { name: string; plot: { plotNumber: string | null; name: string } };
+    supplier: { id: string; name: string };
+    job: { id: string; name: string; plot: { plotNumber: string | null; name: string } };
   }>;
   recentEvents: Array<{
     id: string;
@@ -154,11 +162,13 @@ function JobActionButton({
   status,
   pending,
   onAction,
+  onExtend,
 }: {
   jobId: string;
   status: string;
   pending: boolean;
   onAction: (jobId: string, action: "start" | "complete") => void;
+  onExtend?: (jobId: string) => void;
 }) {
   if (status === "COMPLETED") {
     return (
@@ -174,33 +184,63 @@ function JobActionButton({
 
   if (status === "NOT_STARTED") {
     return (
-      <Button
-        variant="outline"
-        size="sm"
-        className="h-6 gap-1 border-green-200 px-2 text-[10px] text-green-700 hover:bg-green-50"
-        onClick={(e) => {
-          e.stopPropagation();
-          onAction(jobId, "start");
-        }}
-      >
-        <Play className="size-2.5" /> Start
-      </Button>
+      <div className="flex items-center gap-1">
+        {onExtend && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-6 gap-1 border-orange-200 px-2 text-[10px] text-orange-700 hover:bg-orange-50"
+            onClick={(e) => {
+              e.stopPropagation();
+              onExtend(jobId);
+            }}
+          >
+            <Clock className="size-2.5" /> Extend
+          </Button>
+        )}
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-6 gap-1 border-green-200 px-2 text-[10px] text-green-700 hover:bg-green-50"
+          onClick={(e) => {
+            e.stopPropagation();
+            onAction(jobId, "start");
+          }}
+        >
+          <Play className="size-2.5" /> Start
+        </Button>
+      </div>
     );
   }
 
   if (status === "IN_PROGRESS") {
     return (
-      <Button
-        variant="outline"
-        size="sm"
-        className="h-6 gap-1 border-blue-200 px-2 text-[10px] text-blue-700 hover:bg-blue-50"
-        onClick={(e) => {
-          e.stopPropagation();
-          onAction(jobId, "complete");
-        }}
-      >
-        <CheckCircle2 className="size-2.5" /> Complete
-      </Button>
+      <div className="flex items-center gap-1">
+        {onExtend && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-6 gap-1 border-orange-200 px-2 text-[10px] text-orange-700 hover:bg-orange-50"
+            onClick={(e) => {
+              e.stopPropagation();
+              onExtend(jobId);
+            }}
+          >
+            <Clock className="size-2.5" /> Extend
+          </Button>
+        )}
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-6 gap-1 border-blue-200 px-2 text-[10px] text-blue-700 hover:bg-blue-50"
+          onClick={(e) => {
+            e.stopPropagation();
+            onAction(jobId, "complete");
+          }}
+        >
+          <CheckCircle2 className="size-2.5" /> Complete
+        </Button>
+      </div>
     );
   }
 
@@ -212,10 +252,22 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
   const [data, setData] = useState<BriefData | null>(null);
   const [loading, setLoading] = useState(true);
   const [date, setDate] = useState(getCurrentDate());
+  const [calendarOpen, setCalendarOpen] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
 
   // Quick action state (UX #1)
   const [pendingActions, setPendingActions] = useState<Set<string>>(new Set());
+
+  // Extend dialog state
+  const [extendTarget, setExtendTarget] = useState<{ id: string; name: string; endDate: string | null } | null>(null);
+  const [extendDays, setExtendDays] = useState(1);
+  const [extendPreview, setExtendPreview] = useState<{ deltaDays: number; jobUpdates: { jobId: string; jobName?: string }[]; orderUpdates: unknown[] } | null>(null);
+  const [extendLoading, setExtendLoading] = useState(false);
+
+  // Cascade-on-complete dialog state
+  const [cascadeTarget, setCascadeTarget] = useState<{ jobId: string; jobName: string; deltaDays: number; endDate: string; actualEndDate: string } | null>(null);
+  const [cascadePreview, setCascadePreview] = useState<{ deltaDays: number; jobUpdates: { jobId: string; jobName?: string }[]; orderUpdates: unknown[] } | null>(null);
+  const [cascadeLoading, setCascadeLoading] = useState(false);
 
   // Rained off state (UX #4)
   const [rainedOffDialogOpen, setRainedOffDialogOpen] = useState(false);
@@ -255,7 +307,37 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
         body: JSON.stringify({ action }),
       });
       if (res.ok) {
+        const result = await res.json();
         setRefreshKey((k) => k + 1);
+
+        // After completing, check if dates differ and prompt cascade
+        if (action === "complete" && result.endDate && result.actualEndDate) {
+          const delta = differenceInCalendarDays(
+            new Date(result.actualEndDate),
+            new Date(result.endDate)
+          );
+          if (delta !== 0) {
+            setCascadeTarget({
+              jobId,
+              jobName: result.name || "Job",
+              deltaDays: delta,
+              endDate: result.endDate,
+              actualEndDate: result.actualEndDate,
+            });
+            try {
+              const previewRes = await fetch(`/api/jobs/${jobId}/cascade`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ newEndDate: result.actualEndDate }),
+              });
+              if (previewRes.ok) {
+                setCascadePreview(await previewRes.json());
+              }
+            } catch {
+              // ignore preview failure
+            }
+          }
+        }
       }
     } catch {
       // ignore
@@ -265,6 +347,85 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
         next.delete(jobId);
         return next;
       });
+    }
+  };
+
+  // Extend dialog handlers
+  const handleExtendOpen = async (jobId: string) => {
+    // Fetch the job directly to get its endDate reliably
+    try {
+      const res = await fetch(`/api/jobs/${jobId}`);
+      if (res.ok) {
+        const job = await res.json();
+        setExtendTarget({ id: job.id, name: job.name, endDate: job.endDate || null });
+        setExtendDays(1);
+        setExtendPreview(null);
+      }
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleExtendPreview = async () => {
+    if (!extendTarget || !extendTarget.endDate) return;
+    setExtendLoading(true);
+    try {
+      const newEndDate = addDays(new Date(extendTarget.endDate), extendDays);
+      const res = await fetch(`/api/jobs/${extendTarget.id}/cascade`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ newEndDate: newEndDate.toISOString() }),
+      });
+      if (res.ok) {
+        setExtendPreview(await res.json());
+      }
+    } catch {
+      // ignore
+    } finally {
+      setExtendLoading(false);
+    }
+  };
+
+  const handleExtendConfirm = async () => {
+    if (!extendTarget || !extendTarget.endDate) return;
+    setExtendLoading(true);
+    try {
+      const newEndDate = addDays(new Date(extendTarget.endDate), extendDays);
+      const res = await fetch(`/api/jobs/${extendTarget.id}/cascade`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ newEndDate: newEndDate.toISOString(), confirm: true }),
+      });
+      if (res.ok) {
+        setExtendTarget(null);
+        setExtendPreview(null);
+        setRefreshKey((k) => k + 1);
+      }
+    } catch {
+      // ignore
+    } finally {
+      setExtendLoading(false);
+    }
+  };
+
+  const handleCascadeConfirm = async () => {
+    if (!cascadeTarget) return;
+    setCascadeLoading(true);
+    try {
+      const res = await fetch(`/api/jobs/${cascadeTarget.jobId}/cascade`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ newEndDate: cascadeTarget.actualEndDate, confirm: true }),
+      });
+      if (res.ok) {
+        setCascadeTarget(null);
+        setCascadePreview(null);
+        setRefreshKey((k) => k + 1);
+      }
+    } catch {
+      // ignore
+    } finally {
+      setCascadeLoading(false);
     }
   };
 
@@ -298,6 +459,24 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
       method: "DELETE",
     });
     setRefreshKey((k) => k + 1);
+  };
+
+  // One-click bulk action (no bulk mode required)
+  const handleQuickBulk = async (jobIds: string[], action: "start" | "complete") => {
+    if (jobIds.length === 0) return;
+    setBulkProcessing(true);
+    try {
+      const res = await fetch(`/api/sites/${siteId}/bulk-status`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jobIds, action }),
+      });
+      if (res.ok) setRefreshKey((k) => k + 1);
+    } catch {
+      // ignore
+    } finally {
+      setBulkProcessing(false);
+    }
   };
 
   // Bulk action handler (UX #3)
@@ -371,7 +550,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
       )}
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          <p className="truncate font-medium">{j.name}</p>
+          <Link href={`/jobs/${j.id}`} className="truncate font-medium text-blue-600 hover:underline">{j.name}</Link>
           {j.status && j.status !== "NOT_STARTED" && (
             <Badge variant={j.status === "IN_PROGRESS" ? "default" : "secondary"} className="shrink-0 text-[10px]">
               {j.status.replace("_", " ")}
@@ -380,9 +559,9 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
         </div>
         <p className="text-xs text-muted-foreground">
           {j.plot.plotNumber ? `Plot ${j.plot.plotNumber}` : j.plot.name}
-          {j.assignedTo && ` · ${j.assignedTo.name}`}
-          {j.contractors?.[0] && ` · ${j.contractors[0].contact.company || j.contractors[0].contact.name}`}
-          {j.endDate && ` · Due ${format(new Date(j.endDate), "dd MMM")}`}
+          {j.assignedTo && <span className="hidden sm:inline"> · {j.assignedTo.name}</span>}
+          {j.contractors?.[0] && <span className="hidden sm:inline"> · {j.contractors[0].contact.company || j.contractors[0].contact.name}</span>}
+          {j.endDate && <span className="hidden sm:inline"> · Due {format(new Date(j.endDate), "dd MMM")}</span>}
         </p>
       </div>
       {showAction && !bulkMode && (
@@ -391,6 +570,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
           status={j.status}
           pending={pendingActions.has(j.id)}
           onAction={handleJobAction}
+          onExtend={handleExtendOpen}
         />
       )}
     </div>
@@ -399,14 +579,29 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
   return (
     <div className="space-y-4">
       {/* Date nav + actions */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <Button variant="outline" size="icon" onClick={prevDay}>
             <ChevronLeft className="size-4" />
           </Button>
-          <h3 className="text-lg font-semibold">
-            {format(date, "EEEE, d MMMM yyyy")}
-          </h3>
+          <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
+            <PopoverTrigger className="text-sm font-semibold sm:text-lg hover:text-primary hover:underline underline-offset-4 transition-colors cursor-pointer">
+              {format(date, "EEEE, d MMMM yyyy")}
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0" align="center">
+              <Calendar
+                mode="single"
+                selected={date}
+                onSelect={(d) => {
+                  if (d) {
+                    setDate(d);
+                    setCalendarOpen(false);
+                  }
+                }}
+                autoFocus
+              />
+            </PopoverContent>
+          </Popover>
           <Button variant="outline" size="icon" onClick={nextDay}>
             <ChevronRight className="size-4" />
           </Button>
@@ -416,6 +611,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
           <Button
             variant={bulkMode ? "default" : "outline"}
             size="sm"
+            className="hidden sm:inline-flex"
             onClick={() => {
               setBulkMode(!bulkMode);
               setSelectedJobIds(new Set());
@@ -430,7 +626,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
             <Button
               variant="outline"
               size="sm"
-              className="border-blue-200 text-blue-700"
+              className="hidden border-blue-200 text-blue-700 sm:inline-flex"
               onClick={handleUndoRainedOff}
             >
               <CloudRain className="mr-1 size-3.5" />
@@ -440,6 +636,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
             <Button
               variant="outline"
               size="sm"
+              className="hidden sm:inline-flex"
               onClick={() => setRainedOffDialogOpen(true)}
             >
               <CloudRain className="mr-1 size-3.5" />
@@ -569,10 +766,10 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
               </div>
 
               {/* Divider */}
-              <div className="h-10 border-l" />
+              <div className="hidden h-10 border-l sm:block" />
 
               {/* 3-day forecast */}
-              <div className="flex gap-4">
+              <div className="hidden gap-4 sm:flex">
                 {data.weather.forecast.map((day) => (
                   <div key={day.date} className="flex flex-col items-center gap-0.5 text-center">
                     <span className="text-[10px] font-medium text-muted-foreground">
@@ -612,6 +809,21 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
             <CardTitle className="flex items-center gap-2 text-sm">
               <Briefcase className="size-4 text-green-600" />
               Starting Today ({data.jobsStartingToday.length})
+              {!bulkMode && (() => {
+                const startable = data.jobsStartingToday.filter((j) => j.status === "NOT_STARTED");
+                return startable.length > 1 ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="ml-auto h-6 gap-1 border-green-200 px-2 text-[10px] text-green-700 hover:bg-green-50"
+                    disabled={bulkProcessing}
+                    onClick={() => handleQuickBulk(startable.map((j) => j.id), "start")}
+                  >
+                    {bulkProcessing ? <Loader2 className="size-3 animate-spin" /> : <Play className="size-2.5" />}
+                    Start All ({startable.length})
+                  </Button>
+                ) : null;
+              })()}
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -631,6 +843,21 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
             <CardTitle className="flex items-center gap-2 text-sm">
               <Clock className="size-4 text-orange-600" />
               Due Today ({data.jobsDueToday.length})
+              {!bulkMode && (() => {
+                const completable = data.jobsDueToday.filter((j) => j.status === "IN_PROGRESS");
+                return completable.length > 1 ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="ml-auto h-6 gap-1 border-blue-200 px-2 text-[10px] text-blue-700 hover:bg-blue-50"
+                    disabled={bulkProcessing}
+                    onClick={() => handleQuickBulk(completable.map((j) => j.id), "complete")}
+                  >
+                    {bulkProcessing ? <Loader2 className="size-3 animate-spin" /> : <CheckCircle2 className="size-2.5" />}
+                    Complete All ({completable.length})
+                  </Button>
+                ) : null;
+              })()}
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -659,12 +886,12 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
               <div className="space-y-2">
                 {data.deliveriesToday.map((d) => (
                   <div key={d.id} className="rounded border p-2 text-sm">
-                    <p className="font-medium">{d.supplier.name}</p>
+                    <Link href={`/suppliers/${d.supplier.id}`} className="font-medium text-blue-600 hover:underline">{d.supplier.name}</Link>
                     <p className="text-xs text-muted-foreground">
                       {d.itemsDescription || "\u2014"}
                     </p>
                     <p className="text-xs text-muted-foreground">
-                      For: {d.job.name} · {d.job.plot.plotNumber ? `Plot ${d.job.plot.plotNumber}` : d.job.plot.name}
+                      For: <Link href={`/jobs/${d.job.id}`} className="hover:underline hover:text-blue-600">{d.job.name}</Link> · {d.job.plot.plotNumber ? `Plot ${d.job.plot.plotNumber}` : d.job.plot.name}
                     </p>
                   </div>
                 ))}
@@ -680,6 +907,21 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
               <CardTitle className="flex items-center gap-2 text-sm text-red-700">
                 <AlertTriangle className="size-4" />
                 Overdue ({data.overdueJobs.length} jobs, {data.overdueDeliveries.length} deliveries)
+                {!bulkMode && (() => {
+                  const completable = data.overdueJobs.filter((j) => j.status === "IN_PROGRESS");
+                  return completable.length > 1 ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="ml-auto h-6 gap-1 border-red-200 px-2 text-[10px] text-red-700 hover:bg-red-50"
+                      disabled={bulkProcessing}
+                      onClick={() => handleQuickBulk(completable.map((j) => j.id), "complete")}
+                    >
+                      {bulkProcessing ? <Loader2 className="size-3 animate-spin" /> : <CheckCircle2 className="size-2.5" />}
+                      Complete All ({completable.length})
+                    </Button>
+                  ) : null;
+                })()}
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -771,6 +1013,86 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
               ) : (
                 "Confirm Rained Off"
               )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Extend Job Dialog */}
+      <Dialog open={!!extendTarget} onOpenChange={(open) => { if (!open) { setExtendTarget(null); setExtendPreview(null); } }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Extend Job</DialogTitle>
+            <DialogDescription>
+              Extend &ldquo;{extendTarget?.name}&rdquo; and shift all downstream jobs on this plot.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <label className="text-xs font-medium text-muted-foreground">Extend by (days)</label>
+              <Input
+                type="number"
+                min={1}
+                value={extendDays}
+                onChange={(e) => { setExtendDays(Math.max(1, parseInt(e.target.value) || 1)); setExtendPreview(null); }}
+                className="mt-1"
+              />
+            </div>
+            {extendTarget?.endDate && (
+              <p className="text-xs text-muted-foreground">
+                Current end: {format(new Date(extendTarget.endDate), "d MMM yyyy")} → New end: {format(addDays(new Date(extendTarget.endDate), extendDays), "d MMM yyyy")}
+              </p>
+            )}
+            {extendPreview && (
+              <div className="rounded bg-orange-50 p-2 text-xs">
+                <p className="font-medium text-orange-800">
+                  +{extendPreview.deltaDays} day{extendPreview.deltaDays !== 1 ? "s" : ""} — {extendPreview.jobUpdates.length} downstream job{extendPreview.jobUpdates.length !== 1 ? "s" : ""} and {extendPreview.orderUpdates.length} order{extendPreview.orderUpdates.length !== 1 ? "s" : ""} will shift
+                </p>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            {!extendPreview ? (
+              <Button onClick={handleExtendPreview} disabled={extendLoading} size="sm">
+                {extendLoading ? <Loader2 className="mr-1 size-3.5 animate-spin" /> : null}
+                Preview
+              </Button>
+            ) : (
+              <Button onClick={handleExtendConfirm} disabled={extendLoading} size="sm">
+                {extendLoading ? <Loader2 className="mr-1 size-3.5 animate-spin" /> : null}
+                Confirm Extension
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Cascade after Complete Dialog */}
+      <Dialog open={!!cascadeTarget} onOpenChange={(open) => { if (!open) { setCascadeTarget(null); setCascadePreview(null); } }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Shift Plot Programme?</DialogTitle>
+            <DialogDescription>
+              &ldquo;{cascadeTarget?.jobName}&rdquo; finished{" "}
+              {cascadeTarget && Math.abs(cascadeTarget.deltaDays)} day{cascadeTarget && Math.abs(cascadeTarget.deltaDays) !== 1 ? "s" : ""}{" "}
+              {cascadeTarget && cascadeTarget.deltaDays > 0 ? "late" : "early"}.
+              Would you like to shift the remaining jobs on this plot?
+            </DialogDescription>
+          </DialogHeader>
+          {cascadePreview && (
+            <div className="rounded bg-blue-50 p-2 text-xs">
+              <p className="font-medium text-blue-800">
+                {cascadePreview.deltaDays > 0 ? "+" : ""}{cascadePreview.deltaDays} day{Math.abs(cascadePreview.deltaDays) !== 1 ? "s" : ""} — {cascadePreview.jobUpdates.length} job{cascadePreview.jobUpdates.length !== 1 ? "s" : ""} and {cascadePreview.orderUpdates.length} order{cascadePreview.orderUpdates.length !== 1 ? "s" : ""} will shift
+              </p>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => { setCascadeTarget(null); setCascadePreview(null); }}>
+              No, Keep As Is
+            </Button>
+            <Button onClick={handleCascadeConfirm} disabled={cascadeLoading || !cascadePreview} size="sm">
+              {cascadeLoading ? <Loader2 className="mr-1 size-3.5 animate-spin" /> : null}
+              Yes, Shift Programme
             </Button>
           </DialogFooter>
         </DialogContent>

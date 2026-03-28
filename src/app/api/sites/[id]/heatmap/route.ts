@@ -4,6 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { differenceInDays } from "date-fns";
 import { getServerCurrentDate } from "@/lib/dev-date";
 
+export const dynamic = "force-dynamic";
+
 // GET /api/sites/[id]/heatmap — RAG status per plot
 export async function GET(
   req: NextRequest,

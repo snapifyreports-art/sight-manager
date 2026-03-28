@@ -3,6 +3,8 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { templateJobsInclude } from "@/lib/template-includes";
 
+export const dynamic = "force-dynamic";
+
 // GET /api/plot-templates/[id] — single template with all nested data
 export async function GET(
   _request: NextRequest,

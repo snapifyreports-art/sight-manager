@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Link from "next/link";
 import { format, startOfWeek, subWeeks, addWeeks } from "date-fns";
 import { getCurrentDate } from "@/lib/dev-date";
 import { useDevDate } from "@/lib/dev-date-context";
@@ -77,6 +78,7 @@ interface ReportData {
   }>;
   nextWeek: {
     jobsStarting: Array<{
+      id: string;
       name: string;
       startDate: string | null;
       plot: { plotNumber: string | null; name: string };
@@ -343,9 +345,9 @@ export function WeeklySiteReport({ siteId }: WeeklySiteReportProps) {
                     <h5 className="mb-1 text-xs font-semibold text-muted-foreground">
                       Jobs Starting ({data.nextWeek.jobsStarting.length})
                     </h5>
-                    {data.nextWeek.jobsStarting.slice(0, 5).map((j, i) => (
-                      <div key={i} className="rounded border px-2 py-1.5 text-sm mb-1">
-                        <span className="font-medium">{j.name}</span>
+                    {data.nextWeek.jobsStarting.slice(0, 5).map((j) => (
+                      <div key={j.id} className="rounded border px-2 py-1.5 text-sm mb-1">
+                        <Link href={`/jobs/${j.id}`} className="font-medium text-blue-600 hover:underline">{j.name}</Link>
                         <span className="ml-2 text-xs text-muted-foreground">
                           {j.plot.plotNumber ? `Plot ${j.plot.plotNumber}` : j.plot.name}
                           {j.assignee && ` · ${j.assignee}`}

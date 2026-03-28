@@ -1,6 +1,8 @@
 import { prisma } from "@/lib/prisma";
 import { DashboardClient, type DashboardData } from "@/components/dashboard/DashboardClient";
 
+export const dynamic = "force-dynamic";
+
 export const metadata = {
   title: "Dashboard | Sight Manager",
 };
@@ -10,7 +12,7 @@ export default async function DashboardPage() {
   const [
     totalSites,
     totalContacts,
-    pendingOrders,
+    orderStatusCounts,
     jobStatusCounts,
     recentEvents,
     trafficLightJobs,
@@ -21,9 +23,10 @@ export default async function DashboardPage() {
     // Total contacts
     prisma.contact.count(),
 
-    // Pending orders
-    prisma.materialOrder.count({
-      where: { status: "PENDING" },
+    // Orders grouped by status
+    prisma.materialOrder.groupBy({
+      by: ["status"],
+      _count: { status: true },
     }),
 
     // Jobs grouped by status
@@ -38,8 +41,8 @@ export default async function DashboardPage() {
       orderBy: { createdAt: "desc" },
       include: {
         user: { select: { name: true } },
-        site: { select: { name: true } },
-        job: { select: { name: true } },
+        site: { select: { id: true, name: true } },
+        job: { select: { id: true, name: true } },
       },
     }),
 
@@ -77,14 +80,28 @@ export default async function DashboardPage() {
     jobsByStatus[row.status] = row._count.status;
   }
 
-  const activeJobs = jobsByStatus.IN_PROGRESS + jobsByStatus.NOT_STARTED;
+  const totalJobs = jobsByStatus.NOT_STARTED + jobsByStatus.IN_PROGRESS + jobsByStatus.ON_HOLD + jobsByStatus.COMPLETED;
+
+  // Build order status counts
+  const ordersByStatus: Record<string, number> = {};
+  for (const row of orderStatusCounts) {
+    ordersByStatus[row.status] = row._count.status;
+  }
+  const totalOrders = Object.values(ordersByStatus).reduce((a, b) => a + b, 0);
+  const ordersToSend = ordersByStatus["PENDING"] ?? 0;
+  const awaitingDelivery = (ordersByStatus["ORDERED"] ?? 0) + (ordersByStatus["CONFIRMED"] ?? 0);
+  const deliveredOrders = ordersByStatus["DELIVERED"] ?? 0;
 
   // Serialize dates for client component
   const data: DashboardData = {
     stats: {
       totalSites,
-      activeJobs,
-      pendingOrders,
+      totalJobs,
+      inProgressJobs: jobsByStatus.IN_PROGRESS,
+      totalOrders,
+      ordersToSend,
+      awaitingDelivery,
+      deliveredOrders,
       totalContacts,
     },
     jobsByStatus,

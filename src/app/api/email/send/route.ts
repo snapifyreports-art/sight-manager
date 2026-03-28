@@ -5,7 +5,10 @@ import {
   sendEmail,
   deliveryConfirmedEmail,
   nextStageReadyEmail,
+  snagRaisedEmail,
 } from "@/lib/email";
+
+export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
   const session = await auth();
@@ -15,10 +18,10 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json();
   const { type, to, recipientName, data } = body as {
-    type: "delivery_confirmed" | "next_stage_ready";
+    type: "delivery_confirmed" | "next_stage_ready" | "snag_raised";
     to: string;
     recipientName: string;
-    data: Record<string, string>;
+    data: Record<string, string | string[]>;
   };
 
   if (!type || !to || !recipientName || !data) {
@@ -34,20 +37,32 @@ export async function POST(req: NextRequest) {
   if (type === "delivery_confirmed") {
     const template = deliveryConfirmedEmail({
       contractorName: recipientName,
-      jobName: data.jobName || "",
-      supplierName: data.supplierName || "",
-      siteName: data.siteName || "",
-      plotName: data.plotName || "",
+      jobName: (data.jobName as string) || "",
+      supplierName: (data.supplierName as string) || "",
+      siteName: (data.siteName as string) || "",
+      plotName: (data.plotName as string) || "",
     });
     subject = template.subject;
     html = template.html;
   } else if (type === "next_stage_ready") {
     const template = nextStageReadyEmail({
       contractorName: recipientName,
-      completedJobName: data.completedJobName || "",
-      nextJobName: data.nextJobName || "",
-      siteName: data.siteName || "",
-      plotName: data.plotName || "",
+      completedJobName: (data.completedJobName as string) || "",
+      nextJobName: (data.nextJobName as string) || "",
+      siteName: (data.siteName as string) || "",
+      plotName: (data.plotName as string) || "",
+    });
+    subject = template.subject;
+    html = template.html;
+  } else if (type === "snag_raised") {
+    const template = snagRaisedEmail({
+      contractorName: recipientName,
+      description: (data.description as string) || "",
+      priority: (data.priority as string) || "MEDIUM",
+      location: (data.location as string) || "",
+      plotName: (data.plotName as string) || "",
+      siteName: (data.siteName as string) || "",
+      photoUrls: (data.photoUrls as string[]) || [],
     });
     subject = template.subject;
     html = template.html;

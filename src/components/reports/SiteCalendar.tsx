@@ -23,6 +23,7 @@ import {
   Package,
   CloudRain,
 } from "lucide-react";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -333,7 +334,7 @@ export function SiteCalendar({ siteId }: SiteCalendarProps) {
                           className="flex items-center justify-between rounded border px-2 py-1.5 text-sm"
                         >
                           <div>
-                            <span className="font-medium">{j.name}</span>
+                            <Link href={`/jobs/${j.id}`} className="font-medium text-blue-600 hover:underline">{j.name}</Link>
                             <span className="ml-2 text-xs text-muted-foreground">
                               {j.plot.plotNumber ? `Plot ${j.plot.plotNumber}` : j.plot.name}
                             </span>
@@ -360,7 +361,7 @@ export function SiteCalendar({ siteId }: SiteCalendarProps) {
                           className="flex items-center justify-between rounded border px-2 py-1.5 text-sm"
                         >
                           <div>
-                            <span className="font-medium">{j.name}</span>
+                            <Link href={`/jobs/${j.id}`} className="font-medium text-blue-600 hover:underline">{j.name}</Link>
                             <span className="ml-2 text-xs text-muted-foreground">
                               {j.plot.plotNumber ? `Plot ${j.plot.plotNumber}` : j.plot.name}
                               {j.assignee && ` · ${j.assignee}`}

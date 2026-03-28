@@ -9,6 +9,7 @@ import {
   Truck,
   ShoppingCart,
 } from "lucide-react";
+import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -33,6 +34,7 @@ interface SiteOrder {
   dateOfOrder: string;
   expectedDeliveryDate: string | null;
   deliveredDate: string | null;
+  leadTimeDays: number | null;
   automated: boolean;
   supplier: { id: string; name: string };
   job: {
@@ -240,7 +242,9 @@ export function SiteOrders({ siteId }: SiteOrdersProps) {
                 <CardHeader className="pb-2">
                   <div className="flex items-start justify-between gap-2">
                     <CardTitle className="text-sm">
-                      {order.supplier.name}
+                      <Link href={`/suppliers/${order.supplier.id}`} className="hover:underline hover:text-blue-600">
+                        {order.supplier.name}
+                      </Link>
                     </CardTitle>
                     <span
                       className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${config.className}`}
@@ -249,10 +253,15 @@ export function SiteOrders({ siteId }: SiteOrdersProps) {
                     </span>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    {order.job.plot.plotNumber
-                      ? `Plot ${order.job.plot.plotNumber}`
-                      : order.job.plot.name}{" "}
-                    &middot; {order.job.name}
+                    <Link href={`/sites/${siteId}/plots/${order.job.plot.id}`} className="hover:underline hover:text-blue-600">
+                      {order.job.plot.plotNumber
+                        ? `Plot ${order.job.plot.plotNumber}`
+                        : order.job.plot.name}
+                    </Link>
+                    {" · "}
+                    <Link href={`/jobs/${order.job.id}`} className="hover:underline hover:text-blue-600">
+                      {order.job.name}
+                    </Link>
                   </p>
                 </CardHeader>
                 <CardContent className="space-y-1.5 text-xs">
@@ -280,6 +289,9 @@ export function SiteOrders({ siteId }: SiteOrdersProps) {
                     <span>
                       Ordered {format(new Date(order.dateOfOrder), "d MMM yyyy")}
                     </span>
+                    {order.leadTimeDays != null && (
+                      <span>{order.leadTimeDays}d lead</span>
+                    )}
                     {order.expectedDeliveryDate && (
                       <span className={isOverdue ? "font-medium text-red-600" : ""}>
                         {isOverdue && (

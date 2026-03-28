@@ -98,6 +98,67 @@ export function deliveryConfirmedEmail({
   };
 }
 
+export function snagRaisedEmail({
+  contractorName,
+  description,
+  priority,
+  location,
+  plotName,
+  siteName,
+  photoUrls,
+}: {
+  contractorName: string;
+  description: string;
+  priority: string;
+  location: string;
+  plotName: string;
+  siteName: string;
+  photoUrls: string[];
+}) {
+  const priorityColors: Record<string, string> = {
+    LOW: "#64748b",
+    MEDIUM: "#d97706",
+    HIGH: "#ea580c",
+    CRITICAL: "#dc2626",
+  };
+  const color = priorityColors[priority] || "#d97706";
+
+  const photosHtml =
+    photoUrls.length > 0
+      ? `<div style="margin:16px 0;">
+          ${photoUrls
+            .map(
+              (url) =>
+                `<img src="${url}" alt="Snag photo" style="max-width:200px;max-height:150px;border-radius:6px;margin:4px;border:1px solid #e2e8f0;" />`
+            )
+            .join("")}
+        </div>`
+      : "";
+
+  return {
+    subject: `Snag Raised — ${siteName}, ${plotName}`,
+    html: baseTemplate(`
+      <h2 style="margin:0 0 16px;color:#0f172a;font-size:20px;">Snag Raised</h2>
+      <p style="margin:0 0 16px;color:#475569;font-size:14px;line-height:1.6;">
+        Hi ${contractorName},
+      </p>
+      <p style="margin:0 0 24px;color:#475569;font-size:14px;line-height:1.6;">
+        A snag has been raised that requires your attention:
+      </p>
+      <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:16px;margin:0 0 16px;">
+        <p style="margin:0 0 8px;color:#0f172a;font-size:15px;font-weight:600;">${description}</p>
+        <p style="margin:0 0 4px;color:#64748b;font-size:13px;">${siteName} &mdash; ${plotName}</p>
+        ${location ? `<p style="margin:0 0 4px;color:#64748b;font-size:13px;">Location: ${location}</p>` : ""}
+        <p style="margin:0;"><span style="display:inline-block;background:${color};color:#fff;font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px;">${priority}</span></p>
+      </div>
+      ${photosHtml}
+      <p style="margin:0;color:#475569;font-size:14px;line-height:1.6;">
+        Please review and address this issue at your earliest convenience.
+      </p>
+    `),
+  };
+}
+
 export function nextStageReadyEmail({
   contractorName,
   completedJobName,

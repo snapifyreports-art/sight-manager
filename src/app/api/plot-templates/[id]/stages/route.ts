@@ -4,6 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { UK_HOUSEBUILDING_STAGES } from "@/lib/stage-library";
 import { templateJobsInclude } from "@/lib/template-includes";
 
+export const dynamic = "force-dynamic";
+
 // POST /api/plot-templates/[id]/stages — add a stage with sub-jobs from library
 export async function POST(
   request: NextRequest,

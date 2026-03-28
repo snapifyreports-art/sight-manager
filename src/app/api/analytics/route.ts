@@ -4,6 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { differenceInDays } from "date-fns";
 import { getServerCurrentDate } from "@/lib/dev-date";
 
+export const dynamic = "force-dynamic";
+
 // GET /api/analytics — aggregated analytics data
 export async function GET(req: NextRequest) {
   const session = await auth();

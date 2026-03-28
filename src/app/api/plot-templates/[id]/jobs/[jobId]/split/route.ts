@@ -3,6 +3,8 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { templateJobsInclude } from "@/lib/template-includes";
 
+export const dynamic = "force-dynamic";
+
 // POST /api/plot-templates/[id]/jobs/[jobId]/split — convert flat job into a stage with sub-jobs
 export async function POST(
   request: NextRequest,

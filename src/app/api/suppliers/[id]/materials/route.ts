@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
+export const dynamic = "force-dynamic";
+
 // GET /api/suppliers/[id]/materials — get unique materials historically ordered from this supplier
 export async function GET(
   _request: NextRequest,

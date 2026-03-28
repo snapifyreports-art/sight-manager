@@ -187,7 +187,7 @@ function getSiteStatusConfig(status: string) {
 
 // ---------- Site Snags Sub-Component ----------
 
-function SiteSnags({ siteId, plots }: { siteId: string; plots: Array<{ id: string; name: string; plotNumber: string | null }> }) {
+function SiteSnags({ siteId, plots, initialSnagId }: { siteId: string; plots: Array<{ id: string; name: string; plotNumber: string | null }>; initialSnagId?: string }) {
   const [snags, setSnags] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedSnag, setSelectedSnag] = useState<any>(null);
@@ -251,7 +251,7 @@ function SiteSnags({ siteId, plots }: { siteId: string; plots: Array<{ id: strin
 
       {showAgeingReport && <SnagAgeingReport siteId={siteId} />}
 
-      <SnagList snags={snags} onSelect={(s) => { setSelectedSnag(s); setDialogOpen(true); }} showPlot />
+      <SnagList snags={snags} onSelect={(s) => { setSelectedSnag(s); setDialogOpen(true); }} onRefresh={loadSnags} showPlot highlightId={initialSnagId} />
       {selectedSnag && (
         <SnagDialog
           open={dialogOpen}
@@ -273,18 +273,17 @@ function SiteSnags({ siteId, plots }: { siteId: string; plots: Array<{ id: strin
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3 py-2">
-            <Select value={selectedPlotId} onValueChange={(v) => v && setSelectedPlotId(v)}>
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="Select plot" />
-              </SelectTrigger>
-              <SelectContent>
-                {plots.map((p) => (
-                  <SelectItem key={p.id} value={p.id}>
-                    {p.plotNumber ? `Plot ${p.plotNumber}` : p.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <select
+              value={selectedPlotId}
+              onChange={(e) => setSelectedPlotId(e.target.value)}
+              className="w-full rounded-md border bg-white px-3 py-2 text-sm"
+            >
+              {plots.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.plotNumber ? `Plot ${p.plotNumber}` : p.name}
+                </option>
+              ))}
+            </select>
           </div>
           <DialogFooter>
             <DialogClose render={<Button variant="outline" />}>Cancel</DialogClose>
@@ -360,12 +359,19 @@ function SiteDocuments({ siteId }: { siteId: string }) {
 export function SiteDetailClient({
   site: initialSite,
   initialTab,
+  initialSnagId,
 }: {
   site: SiteDetail;
   initialTab?: string;
+  initialSnagId?: string;
 }) {
   const router = useRouter();
   const [site, setSite] = useState(initialSite);
+
+  // Sync site state when server re-renders (e.g. after router.refresh())
+  useEffect(() => {
+    setSite(initialSite);
+  }, [initialSite]);
 
   // Edit site state
   const [editDialogOpen, setEditDialogOpen] = useState(false);
@@ -408,7 +414,18 @@ export function SiteDetailClient({
 
   // Controlled tabs + overdue alerts (UX #6)
   const [activeTab, setActiveTab] = useState(initialTab || "plots");
+  const [visitedTabs, setVisitedTabs] = useState<Set<string>>(
+    new Set([initialTab || "plots"])
+  );
   const [overdueCount, setOverdueCount] = useState(0);
+
+  const handleTabChange = (tab: string) => {
+    setActiveTab(tab);
+    setVisitedTabs((prev) => {
+      if (prev.has(tab)) return prev;
+      return new Set(prev).add(tab);
+    });
+  };
 
   // Plot tab filter state
   const [plotSearch, setPlotSearch] = useState("");
@@ -478,6 +495,26 @@ export function SiteDetailClient({
     }
   }, [addPlotDialogOpen, plotMode, templates.length]);
 
+  // Calculate the next available plot number/name
+  const nextPlotName = useMemo(() => {
+    const existingNumbers = site.plots
+      .map((p) => {
+        const match = (p.plotNumber || p.name).match(/(\d+)/);
+        return match ? parseInt(match[1], 10) : 0;
+      })
+      .filter((n) => !isNaN(n));
+    const maxNum = existingNumbers.length > 0 ? Math.max(...existingNumbers) : 0;
+    return `Plot ${maxNum + 1}`;
+  }, [site.plots]);
+
+  // Check for duplicate plot names
+  const isDuplicatePlotName = useMemo(() => {
+    if (!plotName.trim()) return false;
+    return site.plots.some(
+      (p) => p.name.toLowerCase() === plotName.trim().toLowerCase()
+    );
+  }, [plotName, site.plots]);
+
   function resetAddPlotDialog() {
     setPlotMode("choose");
     setPlotName("");
@@ -544,6 +581,7 @@ export function SiteDetailClient({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: plotName,
+          plotNumber: plotName.match(/(\d+)/)?.[1] || null,
           description: plotDescription || null,
         }),
       });
@@ -574,6 +612,7 @@ export function SiteDetailClient({
         body: JSON.stringify({
           siteId: site.id,
           plotName,
+          plotNumber: plotName.match(/(\d+)/)?.[1] || null,
           plotDescription: plotDescription || null,
           templateId: selectedTemplateId,
           startDate,
@@ -668,10 +707,10 @@ export function SiteDetailClient({
           Back to Sites
         </Button>
 
-        <div className="flex items-start justify-between gap-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-3">
-              <h1 className="text-2xl font-bold tracking-tight">
+              <h1 className="text-xl font-bold tracking-tight sm:text-2xl">
                 {site.name}
               </h1>
               <span
@@ -685,24 +724,22 @@ export function SiteDetailClient({
                 {site.description}
               </p>
             )}
-            <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+            <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground sm:gap-3">
               {(site.location || site.address) && (
-                <>
-                  <span className="flex items-center gap-1">
-                    <MapPin className="size-3" />
-                    {[site.location, site.address]
-                      .filter(Boolean)
-                      .join(", ")}
-                  </span>
-                  <span className="text-border">&middot;</span>
-                </>
+                <span className="flex items-center gap-1">
+                  <MapPin className="size-3" />
+                  {[site.location, site.address]
+                    .filter(Boolean)
+                    .join(", ")}
+                </span>
               )}
-              <span>Created by {site.createdBy.name}</span>
-              <span className="text-border">&middot;</span>
-              <span>
+              <span className="hidden text-border sm:inline">&middot;</span>
+              <span className="hidden sm:inline">Created by {site.createdBy.name}</span>
+              <span className="hidden text-border sm:inline">&middot;</span>
+              <span className="hidden sm:inline">
                 {format(new Date(site.createdAt), "d MMM yyyy")}
               </span>
-              <span className="text-border">&middot;</span>
+              <span className="hidden text-border sm:inline">&middot;</span>
               <span>{site._count.plots} {site._count.plots === 1 ? "plot" : "plots"}</span>
             </div>
           </div>
@@ -758,7 +795,7 @@ export function SiteDetailClient({
                   <div className="grid grid-cols-3 gap-3 py-4">
                     <button
                       className="flex flex-col items-center gap-3 rounded-xl border-2 border-border/50 p-5 text-center transition-all hover:border-blue-300 hover:bg-blue-50/50"
-                      onClick={() => setPlotMode("blank")}
+                      onClick={() => { setPlotMode("blank"); setPlotName(nextPlotName); }}
                     >
                       <div className="rounded-lg bg-slate-100 p-3">
                         <FolderOpen className="size-6 text-slate-600" />
@@ -772,7 +809,7 @@ export function SiteDetailClient({
                     </button>
                     <button
                       className="flex flex-col items-center gap-3 rounded-xl border-2 border-border/50 p-5 text-center transition-all hover:border-blue-300 hover:bg-blue-50/50"
-                      onClick={() => setPlotMode("template")}
+                      onClick={() => { setPlotMode("template"); setPlotName(nextPlotName); }}
                     >
                       <div className="rounded-lg bg-blue-100 p-3">
                         <LayoutTemplate className="size-6 text-blue-600" />
@@ -813,6 +850,9 @@ export function SiteDetailClient({
                           value={plotName}
                           onChange={(e) => setPlotName(e.target.value)}
                         />
+                        {isDuplicatePlotName && (
+                          <p className="text-xs text-amber-600">⚠ A plot with this name already exists</p>
+                        )}
                       </div>
                       <div className="space-y-2">
                         <Label htmlFor="plot-description">Description</Label>
@@ -869,7 +909,13 @@ export function SiteDetailClient({
                               }
                             >
                               <SelectTrigger className="w-full">
-                                <SelectValue placeholder="Select a template" />
+                                {selectedTemplate ? (
+                                  <span data-slot="select-value" className="flex flex-1 text-left line-clamp-1">
+                                    {selectedTemplate.name}{selectedTemplate.typeLabel ? ` (${selectedTemplate.typeLabel})` : ""}
+                                  </span>
+                                ) : (
+                                  <SelectValue placeholder="Select a template" />
+                                )}
                               </SelectTrigger>
                               <SelectContent>
                                 {templates.map((tpl) => (
@@ -926,6 +972,9 @@ export function SiteDetailClient({
                               value={plotName}
                               onChange={(e) => setPlotName(e.target.value)}
                             />
+                            {isDuplicatePlotName && (
+                              <p className="text-xs text-amber-600">⚠ A plot with this name already exists</p>
+                            )}
                           </div>
 
                           <div className="space-y-2">
@@ -1072,7 +1121,11 @@ export function SiteDetailClient({
                               }
                             >
                               <SelectTrigger className="h-8 w-full text-xs">
-                                <SelectValue placeholder="Select supplier (optional)" />
+                                <SelectValue placeholder="Select supplier (optional)">
+                                  {supplierMappings[order.id]
+                                    ? suppliers.find((s) => s.id === supplierMappings[order.id])?.name || "Select supplier (optional)"
+                                    : "Select supplier (optional)"}
+                                </SelectValue>
                               </SelectTrigger>
                               <SelectContent>
                                 {suppliers.map((sup) => (
@@ -1128,7 +1181,13 @@ export function SiteDetailClient({
                               }
                             >
                               <SelectTrigger className="w-full">
-                                <SelectValue placeholder="Select a template" />
+                                {selectedTemplate ? (
+                                  <span data-slot="select-value" className="flex flex-1 text-left line-clamp-1">
+                                    {selectedTemplate.name}{selectedTemplate.typeLabel ? ` (${selectedTemplate.typeLabel})` : ""}
+                                  </span>
+                                ) : (
+                                  <SelectValue placeholder="Select a template" />
+                                )}
                               </SelectTrigger>
                               <SelectContent>
                                 {templates.map((tpl) => (
@@ -1298,7 +1357,11 @@ export function SiteDetailClient({
                             }
                           >
                             <SelectTrigger className="h-8 w-full text-xs">
-                              <SelectValue placeholder="Select supplier (optional)" />
+                              <SelectValue placeholder="Select supplier (optional)">
+                                {supplierMappings[order.id]
+                                  ? suppliers.find((s) => s.id === supplierMappings[order.id])?.name || "Select supplier (optional)"
+                                  : "Select supplier (optional)"}
+                              </SelectValue>
                             </SelectTrigger>
                             <SelectContent>
                               {suppliers.map((sup) => (
@@ -1458,7 +1521,7 @@ export function SiteDetailClient({
             variant="outline"
             size="sm"
             className="border-red-200 text-red-700 hover:bg-red-100"
-            onClick={() => setActiveTab("daily-brief")}
+            onClick={() => handleTabChange("daily-brief")}
           >
             View Details
           </Button>
@@ -1468,6 +1531,10 @@ export function SiteDetailClient({
       {/* Plot Cards + Programme */}
       {site.plots.length > 0 ? (
         <div>
+          <div
+            className="-mx-4 overflow-x-auto px-4 md:mx-0 md:px-0"
+            style={{ WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none' }}
+          >
           <div className="inline-flex w-fit items-center justify-center gap-1 bg-transparent p-[3px] text-muted-foreground h-8" role="tablist">
             {[
               { value: "plots", label: "Plots" },
@@ -1490,8 +1557,8 @@ export function SiteDetailClient({
                 key={tab.value}
                 role="tab"
                 aria-selected={activeTab === tab.value}
-                onClick={() => setActiveTab(tab.value)}
-                className={`relative inline-flex h-[calc(100%-1px)] flex-1 items-center justify-center gap-1.5 rounded-md border border-transparent px-1.5 py-0.5 text-sm font-medium whitespace-nowrap transition-all after:absolute after:bg-foreground after:opacity-0 after:transition-opacity after:inset-x-0 after:bottom-[-5px] after:h-0.5 ${
+                onClick={() => handleTabChange(tab.value)}
+                className={`relative inline-flex h-[calc(100%-1px)] flex-1 items-center justify-center gap-1.5 rounded-md border border-transparent px-1.5 py-0.5 text-xs font-medium whitespace-nowrap transition-all sm:text-sm after:absolute after:bg-foreground after:opacity-0 after:transition-opacity after:inset-x-0 after:bottom-[-5px] after:h-0.5 ${
                   activeTab === tab.value
                     ? "text-foreground after:opacity-100"
                     : "text-foreground/60 hover:text-foreground"
@@ -1507,8 +1574,10 @@ export function SiteDetailClient({
               </button>
             ))}
           </div>
+          </div>
 
-          {activeTab === "plots" && (
+          <div className={activeTab !== "plots" ? "hidden" : undefined}>
+          {visitedTabs.has("plots") && (
         <div className="space-y-4">
           {/* Header + Filters */}
           <div className="flex flex-wrap items-center gap-3">
@@ -1520,7 +1589,7 @@ export function SiteDetailClient({
               </span>
             </div>
 
-            <div className="ml-auto flex flex-wrap items-center gap-2">
+            <div className="ml-auto flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center">
               {/* Search */}
               <div className="relative">
                 <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -1528,7 +1597,7 @@ export function SiteDetailClient({
                   placeholder="Search plots..."
                   value={plotSearch}
                   onChange={(e) => setPlotSearch(e.target.value)}
-                  className="h-8 w-44 pl-7 text-sm"
+                  className="h-8 w-full pl-7 text-sm sm:w-44"
                 />
                 {plotSearch && (
                   <button
@@ -1673,71 +1742,100 @@ export function SiteDetailClient({
           )}
         </div>
           )}
+          </div>
 
-          {activeTab === "programme" && (
-            <SiteProgramme siteId={site.id} postcode={site.postcode} />
-          )}
+          <div className={activeTab !== "programme" ? "hidden" : undefined}>
+            {visitedTabs.has("programme") && (
+              <SiteProgramme siteId={site.id} postcode={site.postcode} />
+            )}
+          </div>
 
-          {activeTab === "heatmap" && (
-            <SiteHeatmap siteId={site.id} />
-          )}
+          <div className={activeTab !== "heatmap" ? "hidden" : undefined}>
+            {visitedTabs.has("heatmap") && (
+              <SiteHeatmap siteId={site.id} />
+            )}
+          </div>
 
-          {activeTab === "snags" && (
-            <SiteSnags siteId={site.id} plots={site.plots.map((p) => ({ id: p.id, name: p.name, plotNumber: p.plotNumber }))} />
-          )}
+          <div className={activeTab !== "snags" ? "hidden" : undefined}>
+            {visitedTabs.has("snags") && (
+              <SiteSnags siteId={site.id} plots={site.plots.map((p) => ({ id: p.id, name: p.name, plotNumber: p.plotNumber }))} initialSnagId={initialSnagId} />
+            )}
+          </div>
 
-          {activeTab === "documents" && (
-            <SiteDocuments siteId={site.id} />
-          )}
+          <div className={activeTab !== "documents" ? "hidden" : undefined}>
+            {visitedTabs.has("documents") && (
+              <SiteDocuments siteId={site.id} />
+            )}
+          </div>
 
-          {activeTab === "daily-brief" && (
-            <DailySiteBrief siteId={site.id} />
-          )}
+          <div className={activeTab !== "daily-brief" ? "hidden" : undefined}>
+            {visitedTabs.has("daily-brief") && (
+              <DailySiteBrief siteId={site.id} />
+            )}
+          </div>
 
-          {activeTab === "day-sheets" && (
-            <ContractorDaySheets siteId={site.id} />
-          )}
+          <div className={activeTab !== "day-sheets" ? "hidden" : undefined}>
+            {visitedTabs.has("day-sheets") && (
+              <ContractorDaySheets siteId={site.id} />
+            )}
+          </div>
 
-          {activeTab === "delays" && (
-            <DelayReport siteId={site.id} />
-          )}
+          <div className={activeTab !== "delays" ? "hidden" : undefined}>
+            {visitedTabs.has("delays") && (
+              <DelayReport siteId={site.id} />
+            )}
+          </div>
 
-          {activeTab === "budget" && (
-            <BudgetReport siteId={site.id} />
-          )}
+          <div className={activeTab !== "budget" ? "hidden" : undefined}>
+            {visitedTabs.has("budget") && (
+              <BudgetReport siteId={site.id} />
+            )}
+          </div>
 
-          {activeTab === "calendar" && (
-            <SiteCalendar siteId={site.id} />
-          )}
+          <div className={activeTab !== "calendar" ? "hidden" : undefined}>
+            {visitedTabs.has("calendar") && (
+              <SiteCalendar siteId={site.id} />
+            )}
+          </div>
 
-          {activeTab === "weekly-report" && (
-            <WeeklySiteReport siteId={site.id} />
-          )}
+          <div className={activeTab !== "weekly-report" ? "hidden" : undefined}>
+            {visitedTabs.has("weekly-report") && (
+              <WeeklySiteReport siteId={site.id} />
+            )}
+          </div>
 
-          {activeTab === "orders" && (
-            <SiteOrders siteId={site.id} />
-          )}
+          <div className={activeTab !== "orders" ? "hidden" : undefined}>
+            {visitedTabs.has("orders") && (
+              <SiteOrders siteId={site.id} />
+            )}
+          </div>
 
-          {activeTab === "critical-path" && (
-            <CriticalPath siteId={site.id} />
-          )}
+          <div className={activeTab !== "critical-path" ? "hidden" : undefined}>
+            {visitedTabs.has("critical-path") && (
+              <CriticalPath siteId={site.id} />
+            )}
+          </div>
 
-          {activeTab === "qr-codes" && (
-            <BatchPlotQR
-              siteId={site.id}
-              siteName={site.name}
-              plots={site.plots.map((p) => ({
-                id: p.id,
-                plotNumber: p.plotNumber,
-                name: p.name,
-                houseType: p.houseType ?? null,
-              }))}
-            />
-          )}
+          <div className={activeTab !== "qr-codes" ? "hidden" : undefined}>
+            {visitedTabs.has("qr-codes") && (
+              <BatchPlotQR
+                siteId={site.id}
+                siteName={site.name}
+                plots={site.plots.map((p) => ({
+                  id: p.id,
+                  plotNumber: p.plotNumber,
+                  name: p.name,
+                  houseType: p.houseType ?? null,
+                }))}
+              />
+            )}
+          </div>
 
-          {activeTab === "cash-flow" && (
-            <CashFlowReport siteId={site.id} />
-          )}
+          <div className={activeTab !== "cash-flow" ? "hidden" : undefined}>
+            {visitedTabs.has("cash-flow") && (
+              <CashFlowReport siteId={site.id} />
+            )}
+          </div>
         </div>
       ) : (
         <Card>

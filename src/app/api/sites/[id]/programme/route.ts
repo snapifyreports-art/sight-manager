@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
+export const dynamic = "force-dynamic";
+
 // GET /api/sites/[id]/programme — full programme data for a site
 export async function GET(
   _req: NextRequest,
@@ -33,7 +35,10 @@ export async function GET(
                 },
               },
               _count: {
-                select: { photos: true, actions: true },
+                select: {
+                  photos: true,
+                  actions: { where: { action: "note" } },
+                },
               },
             },
           },
@@ -58,5 +63,7 @@ export async function GET(
     return (a.plotNumber ?? "").localeCompare(b.plotNumber ?? "");
   });
 
-  return NextResponse.json(JSON.parse(JSON.stringify(site)));
+  const response = NextResponse.json(JSON.parse(JSON.stringify(site)));
+  response.headers.set("Cache-Control", "no-store, no-cache, must-revalidate");
+  return response;
 }

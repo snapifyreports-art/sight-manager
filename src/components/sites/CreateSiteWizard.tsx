@@ -304,8 +304,59 @@ export function CreateSiteWizard({
     (t) => t.id === batchTemplateId
   );
 
+  // Build a pending batch from the open form (if valid), or return null
+  function buildPendingBatch(): PlotBatch | null {
+    if (!showAddForm) return null;
+
+    const start = parseInt(batchRangeStart);
+    const end = batchRangeEnd ? parseInt(batchRangeEnd) : start;
+
+    if (isNaN(start) || start < 1) return null;
+    if (isNaN(end) || end < start) return null;
+
+    if (batchMode === "template" && (!batchTemplateId || !batchStartDate)) {
+      return null;
+    }
+
+    const tpl = templates.find((t) => t.id === batchTemplateId);
+    return {
+      id: crypto.randomUUID(),
+      mode: batchMode,
+      rangeStart: String(start),
+      rangeEnd: String(end),
+      startDate: batchStartDate,
+      templateId: batchTemplateId,
+      templateName: tpl?.name ?? "",
+    };
+  }
+
   // Handle next from step 2
   function handleStep2Next() {
+    // Auto-add any pending batch from the open form
+    const pending = buildPendingBatch();
+    if (pending) {
+      const allBatches = [...plotBatches, pending];
+      setPlotBatches(allBatches);
+      resetBatchForm();
+      setShowAddForm(false);
+      // Check if any template batch has orders needing supplier mapping
+      const needsSupplierMapping = allBatches.some((b) => {
+        if (b.mode !== "template") return false;
+        const tpl = templates.find((t) => t.id === b.templateId);
+        return tpl?.jobs.some((j) => j.orders.length > 0);
+      });
+      if (needsSupplierMapping) {
+        setStep("supplier-mapping");
+      } else {
+        handleSubmit(allBatches);
+      }
+      return;
+    }
+    if (showAddForm) {
+      // Form is open but incomplete
+      setBatchError("Please complete the plot group or cancel the form.");
+      return;
+    }
     if (hasTemplateOrders) {
       setStep("supplier-mapping");
     } else {
@@ -314,7 +365,8 @@ export function CreateSiteWizard({
   }
 
   // Submit
-  const handleSubmit = useCallback(async () => {
+  const handleSubmit = useCallback(async (batchesOverride?: PlotBatch[]) => {
+    const batches = batchesOverride ?? plotBatches;
     setSubmitting(true);
     setError("");
 
@@ -343,8 +395,8 @@ export function CreateSiteWizard({
       // Phase 2: Create plot batches
       const batchErrors: string[] = [];
 
-      for (let i = 0; i < plotBatches.length; i++) {
-        const batch = plotBatches[i];
+      for (let i = 0; i < batches.length; i++) {
+        const batch = batches[i];
         const rangeLabel =
           batch.rangeStart === batch.rangeEnd
             ? `Plot ${batch.rangeStart}`
@@ -820,7 +872,25 @@ export function CreateSiteWizard({
               </Button>
               <div className="flex gap-2">
                 {plotBatches.length === 0 ? (
-                  <Button onClick={handleSubmit} disabled={submitting}>
+                  <Button
+                    onClick={() => {
+                      // Check if the form has a valid pending batch to auto-add
+                      const pending = buildPendingBatch();
+                      if (pending) {
+                        const allBatches = [pending];
+                        setPlotBatches(allBatches);
+                        resetBatchForm();
+                        setShowAddForm(false);
+                        handleSubmit(allBatches);
+                      } else if (showAddForm) {
+                        // Form is open but incomplete
+                        setBatchError("Please complete the plot group or cancel the form.");
+                      } else {
+                        handleSubmit();
+                      }
+                    }}
+                    disabled={submitting}
+                  >
                     {submitting ? (
                       <>
                         <Loader2 className="size-4 animate-spin" />
@@ -836,7 +906,23 @@ export function CreateSiteWizard({
                     <ChevronRight className="size-4" />
                   </Button>
                 ) : (
-                  <Button onClick={handleSubmit} disabled={submitting}>
+                  <Button
+                    onClick={() => {
+                      const pending = buildPendingBatch();
+                      if (pending) {
+                        const allBatches = [...plotBatches, pending];
+                        setPlotBatches(allBatches);
+                        resetBatchForm();
+                        setShowAddForm(false);
+                        handleSubmit(allBatches);
+                      } else if (showAddForm) {
+                        setBatchError("Please complete the plot group or cancel the form.");
+                      } else {
+                        handleSubmit();
+                      }
+                    }}
+                    disabled={submitting}
+                  >
                     {submitting ? (
                       <>
                         <Loader2 className="size-4 animate-spin" />
@@ -934,7 +1020,7 @@ export function CreateSiteWizard({
                 <ChevronLeft className="size-4" />
                 Back
               </Button>
-              <Button onClick={handleSubmit} disabled={submitting}>
+              <Button onClick={() => handleSubmit()} disabled={submitting}>
                 {submitting ? (
                   <>
                     <Loader2 className="size-4 animate-spin" />

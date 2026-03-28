@@ -539,7 +539,7 @@ export function UsersClient({
                     onClick={() => handleOpenEdit(user)}
                   >
                     <Pencil className="size-3" />
-                    Edit
+                    <span className="hidden sm:inline">Edit</span>
                   </Button>
                   <Button
                     variant="ghost"
@@ -547,7 +547,7 @@ export function UsersClient({
                     onClick={() => handleOpenPermissions(user)}
                   >
                     <Shield className="size-3" />
-                    Permissions
+                    <span className="hidden sm:inline">Permissions</span>
                   </Button>
                   {user.id !== currentUserId && (
                     <Button

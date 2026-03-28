@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
+export const dynamic = "force-dynamic";
+
 // GET /api/plots/[id]/snags — list snags for a plot
 export async function GET(
   req: NextRequest,
@@ -25,7 +27,9 @@ export async function GET(
     },
     include: {
       assignedTo: { select: { id: true, name: true } },
+      contact: { select: { id: true, name: true, email: true, company: true } },
       raisedBy: { select: { id: true, name: true } },
+      job: { select: { id: true, name: true, parent: { select: { name: true } } } },
       photos: { select: { id: true, url: true }, take: 3 },
       _count: { select: { photos: true } },
     },
@@ -47,7 +51,7 @@ export async function POST(
 
   const { id } = await params;
   const body = await req.json();
-  const { description, location, priority, assignedToId, notes } = body;
+  const { description, location, priority, assignedToId, contactId, jobId, notes } = body;
 
   if (!description?.trim()) {
     return NextResponse.json({ error: "Description required" }, { status: 400 });
@@ -74,23 +78,27 @@ export async function POST(
   const snag = await prisma.snag.create({
     data: {
       plotId: id,
+      jobId: jobId || null,
       description: description.trim(),
       location: location || null,
       priority: priority || "MEDIUM",
       assignedToId: assignedToId || null,
+      contactId: contactId || null,
       raisedById: session.user.id,
       notes: notes || null,
     },
     include: {
       assignedTo: { select: { id: true, name: true } },
+      contact: { select: { id: true, name: true, email: true, company: true } },
       raisedBy: { select: { id: true, name: true } },
+      job: { select: { id: true, name: true, parent: { select: { name: true } } } },
       photos: true,
       _count: { select: { photos: true } },
     },
   });
 
   // Log event
-  await prisma.eventLog.create({
+  const eventLogPromise = prisma.eventLog.create({
     data: {
       type: "SNAG_CREATED",
       description: `Snag raised on Plot ${plot.plotNumber || plot.name}: "${description.trim().slice(0, 60)}"`,
@@ -99,6 +107,20 @@ export async function POST(
       userId: session.user.id,
     },
   });
+
+  // Link snag to job's notes/actions if a job was specified
+  const jobActionPromise = jobId
+    ? prisma.jobAction.create({
+        data: {
+          jobId,
+          userId: session.user.id,
+          action: "note",
+          notes: `⚠️ Snag raised: "${description.trim().slice(0, 80)}"${location ? ` — ${location}` : ""}`,
+        },
+      })
+    : Promise.resolve(null);
+
+  await Promise.all([eventLogPromise, jobActionPromise]);
 
   return NextResponse.json(snag, { status: 201 });
 }

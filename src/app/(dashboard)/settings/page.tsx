@@ -4,6 +4,8 @@ import { redirect } from "next/navigation";
 import { SettingsClient } from "@/components/settings/SettingsClient";
 import { templateJobsInclude } from "@/lib/template-includes";
 
+export const dynamic = "force-dynamic";
+
 export default async function SettingsPage() {
   const session = await auth();
   if (!session) redirect("/login");

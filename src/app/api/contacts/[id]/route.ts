@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
+export const dynamic = "force-dynamic";
+
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -15,6 +17,58 @@ export async function GET(
 
   const contact = await prisma.contact.findUnique({
     where: { id },
+    include: {
+      jobContractors: {
+        include: {
+          job: {
+            select: {
+              id: true,
+              name: true,
+              status: true,
+              startDate: true,
+              endDate: true,
+              plot: {
+                select: {
+                  id: true,
+                  name: true,
+                  site: { select: { id: true, name: true } },
+                },
+              },
+            },
+          },
+        },
+        orderBy: { createdAt: "desc" },
+      },
+      snags: {
+        select: {
+          id: true,
+          description: true,
+          status: true,
+          priority: true,
+          createdAt: true,
+          plot: { select: { id: true, name: true, siteId: true } },
+          job: { select: { id: true, name: true } },
+        },
+        orderBy: { createdAt: "desc" },
+      },
+      orders: {
+        select: {
+          id: true,
+          orderDetails: true,
+          status: true,
+          dateOfOrder: true,
+          supplier: { select: { id: true, name: true } },
+          job: {
+            select: {
+              id: true,
+              name: true,
+              plot: { select: { name: true } },
+            },
+          },
+        },
+        orderBy: { dateOfOrder: "desc" },
+      },
+    },
   });
 
   if (!contact) {
