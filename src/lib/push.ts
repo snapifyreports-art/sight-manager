@@ -2,12 +2,13 @@ import webpush from "web-push";
 import { prisma } from "./prisma";
 import type { NotificationType } from "@prisma/client";
 
-// Configure web-push with VAPID keys
-webpush.setVapidDetails(
-  process.env.VAPID_SUBJECT!,
-  process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!,
-  process.env.VAPID_PRIVATE_KEY!
-);
+function configureWebPush() {
+  webpush.setVapidDetails(
+    process.env.VAPID_SUBJECT!,
+    process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!,
+    process.env.VAPID_PRIVATE_KEY!
+  );
+}
 
 interface PushPayload {
   title: string;
@@ -27,6 +28,7 @@ export async function sendPushToUser(
   type: NotificationType,
   payload: PushPayload
 ) {
+  configureWebPush();
   // Check if user has this notification type enabled
   const pref = await prisma.notificationPreference.findUnique({
     where: { userId_type: { userId, type } },
@@ -79,6 +81,7 @@ export async function sendPushToAll(
   type: NotificationType,
   payload: PushPayload
 ) {
+  configureWebPush();
   // Get user IDs that have explicitly disabled this notification type
   const disabledPrefs = await prisma.notificationPreference.findMany({
     where: { type, enabled: false },
