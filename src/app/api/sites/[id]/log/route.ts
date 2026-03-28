@@ -1,0 +1,113 @@
+import { NextRequest, NextResponse } from "next/server";
+import { auth } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
+import { EventType, Prisma } from "@prisma/client";
+
+export const dynamic = "force-dynamic";
+
+const CATEGORY_TYPES: Record<string, EventType[]> = {
+  jobs: ["JOB_STARTED", "JOB_COMPLETED", "JOB_STOPPED", "JOB_EDITED", "JOB_SIGNED_OFF"],
+  orders: ["ORDER_PLACED", "ORDER_DELIVERED", "ORDER_CANCELLED", "DELIVERY_CONFIRMED"],
+  snags: ["SNAG_CREATED", "SNAG_RESOLVED"],
+  photos: ["PHOTO_UPLOADED"],
+  weather: ["SYSTEM"],
+  notes: ["USER_ACTION"],
+  schedule: ["SCHEDULE_CASCADED"],
+  system: ["SITE_CREATED", "SITE_UPDATED", "PLOT_CREATED", "PLOT_UPDATED", "NOTIFICATION"],
+};
+
+// GET /api/sites/[id]/log?plotId=&category=&page=
+export async function GET(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const session = await auth();
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const { id } = await params;
+  const { searchParams } = req.nextUrl;
+  const page = Math.max(1, parseInt(searchParams.get("page") || "1", 10));
+  const limit = 30;
+  const plotId = searchParams.get("plotId");
+  const category = searchParams.get("category");
+
+  const where: Prisma.EventLogWhereInput = { siteId: id };
+
+  if (plotId && plotId !== "all") {
+    where.plotId = plotId;
+  }
+
+  if (category && category !== "all" && CATEGORY_TYPES[category]) {
+    const types = CATEGORY_TYPES[category];
+    if (category === "weather") {
+      // Weather entries are SYSTEM type with "🌤 Weather:" prefix
+      where.type = "SYSTEM";
+      where.description = { startsWith: "🌤 Weather:" };
+    } else if (category === "system") {
+      // System excludes weather entries
+      where.type = { in: types };
+      where.NOT = { description: { startsWith: "🌤 Weather:" } };
+    } else {
+      where.type = { in: types };
+    }
+  }
+
+  const [events, total] = await Promise.all([
+    prisma.eventLog.findMany({
+      where,
+      select: {
+        id: true,
+        type: true,
+        description: true,
+        createdAt: true,
+        siteId: true,
+        plotId: true,
+        jobId: true,
+        user: { select: { id: true, name: true } },
+        plot: { select: { id: true, name: true, plotNumber: true } },
+        job: { select: { id: true, name: true } },
+      },
+      orderBy: { createdAt: "desc" },
+      skip: (page - 1) * limit,
+      take: limit,
+    }),
+    prisma.eventLog.count({ where }),
+  ]);
+
+  return NextResponse.json({
+    events: events.map((e) => ({ ...e, createdAt: e.createdAt.toISOString() })),
+    total,
+    page,
+    totalPages: Math.ceil(total / limit),
+    limit,
+  });
+}
+
+// POST /api/sites/[id]/log — add a manual note
+export async function POST(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const session = await auth();
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const { id } = await params;
+  const body = await req.json();
+  const { description, plotId } = body;
+
+  if (!description?.trim()) {
+    return NextResponse.json({ error: "Description is required" }, { status: 400 });
+  }
+
+  const event = await prisma.eventLog.create({
+    data: {
+      type: "USER_ACTION",
+      description: description.trim(),
+      siteId: id,
+      plotId: plotId || null,
+      userId: session.user.id,
+    },
+  });
+
+  return NextResponse.json({ ...event, createdAt: event.createdAt.toISOString() }, { status: 201 });
+}

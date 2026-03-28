@@ -66,6 +66,7 @@ import { BatchPlotQR } from "@/components/plots/PlotQRCode";
 import { WeeklySiteReport } from "@/components/reports/WeeklySiteReport";
 import { CriticalPath } from "@/components/reports/CriticalPath";
 import { SiteOrders } from "@/components/orders/SiteOrders";
+import { SiteLogClient } from "@/components/sites/SiteLogClient";
 import { SnagAgeingReport } from "@/components/snags/SnagAgeingReport";
 import { CashFlowReport } from "@/components/reports/CashFlowReport";
 import { Badge } from "@/components/ui/badge";
@@ -1549,6 +1550,7 @@ export function SiteDetailClient({
               { value: "calendar", label: "Calendar" },
               { value: "weekly-report", label: "Weekly Report" },
               { value: "orders", label: "Orders", icon: true },
+              { value: "log", label: "Site Log" },
               { value: "critical-path", label: "Critical Path" },
               { value: "qr-codes", label: "QR Codes" },
               { value: "cash-flow", label: "Cash Flow" },
@@ -1807,6 +1809,15 @@ export function SiteDetailClient({
           <div className={activeTab !== "orders" ? "hidden" : undefined}>
             {visitedTabs.has("orders") && (
               <SiteOrders siteId={site.id} />
+            )}
+          </div>
+
+          <div className={activeTab !== "log" ? "hidden" : undefined}>
+            {visitedTabs.has("log") && (
+              <SiteLogClient
+                siteId={site.id}
+                plots={site.plots.map((p) => ({ id: p.id, name: p.name, plotNumber: p.plotNumber }))}
+              />
             )}
           </div>
 
