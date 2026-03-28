@@ -5,9 +5,11 @@ import {
   AlertTriangle,
   Camera,
   CheckCircle,
+  CheckCircle2,
   Clock,
   HardHat,
   MapPin,
+  Play,
   User,
   Download,
   Loader2,
@@ -80,6 +82,24 @@ export function SnagList({ snags, onSelect, onRefresh, showPlot, highlightId }: 
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [filterPriority, setFilterPriority] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState("");
+
+  // Quick status action state
+  const [pendingSnagActions, setPendingSnagActions] = useState<Set<string>>(new Set());
+
+  const handleQuickStatus = async (e: React.MouseEvent, snagId: string, status: string) => {
+    e.stopPropagation();
+    setPendingSnagActions((prev) => new Set(prev).add(snagId));
+    try {
+      await fetch(`/api/snags/${snagId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+      onRefresh?.();
+    } finally {
+      setPendingSnagActions((prev) => { const n = new Set(prev); n.delete(snagId); return n; });
+    }
+  };
 
   // Close snag dialog state
   const [closeSnag, setCloseSnag] = useState<Snag | null>(null);
@@ -384,18 +404,59 @@ export function SnagList({ snags, onSelect, onRefresh, showPlot, highlightId }: 
                   )}
                 </button>
 
-                {/* Close Snag button — only for non-closed snags */}
+                {/* Inline quick actions */}
                 {snag.status !== "CLOSED" && (
-                  <div className="mt-2 border-t pt-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-6 w-full gap-1 text-[11px] text-green-700 border-green-200 hover:bg-green-50"
-                      onClick={(e) => handleOpenCloseDialog(e, snag)}
-                    >
-                      <CheckCircle className="size-3" />
-                      Close Snag
-                    </Button>
+                  <div className="mt-2 flex gap-1.5 border-t pt-2">
+                    {pendingSnagActions.has(snag.id) ? (
+                      <Loader2 className="size-4 animate-spin text-muted-foreground" />
+                    ) : (
+                      <>
+                        {snag.status === "OPEN" && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-6 flex-1 gap-1 text-[11px] text-blue-700 border-blue-200 hover:bg-blue-50"
+                            onClick={(e) => handleQuickStatus(e, snag.id, "IN_PROGRESS")}
+                          >
+                            <Play className="size-3" />
+                            Start
+                          </Button>
+                        )}
+                        {snag.status === "IN_PROGRESS" && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-6 flex-1 gap-1 text-[11px] text-green-700 border-green-200 hover:bg-green-50"
+                            onClick={(e) => handleQuickStatus(e, snag.id, "RESOLVED")}
+                          >
+                            <CheckCircle2 className="size-3" />
+                            Resolve
+                          </Button>
+                        )}
+                        {snag.status === "RESOLVED" && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-6 flex-1 gap-1 text-[11px] text-slate-600 border-slate-200 hover:bg-slate-50"
+                            onClick={(e) => handleOpenCloseDialog(e, snag)}
+                          >
+                            <CheckCircle className="size-3" />
+                            Close
+                          </Button>
+                        )}
+                        {snag.status !== "RESOLVED" && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-6 flex-1 gap-1 text-[11px] text-slate-500 border-slate-200 hover:bg-slate-50"
+                            onClick={(e) => handleOpenCloseDialog(e, snag)}
+                          >
+                            <CheckCircle className="size-3" />
+                            Close
+                          </Button>
+                        )}
+                      </>
+                    )}
                   </div>
                 )}
               </div>

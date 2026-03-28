@@ -27,6 +27,7 @@ import {
   Pause,
   TrendingUp,
   Truck,
+  Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -269,6 +270,22 @@ function PlotOverview({
   snagSummary: Record<string, number>;
 }) {
   const today = getCurrentDate();
+  const router = useRouter();
+  const [pendingOrderActions, setPendingOrderActions] = useState<Set<string>>(new Set());
+
+  async function handleOrderStatus(orderId: string, status: string) {
+    setPendingOrderActions((prev) => new Set(prev).add(orderId));
+    try {
+      await fetch(`/api/orders/${orderId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+      router.refresh();
+    } finally {
+      setPendingOrderActions((prev) => { const n = new Set(prev); n.delete(orderId); return n; });
+    }
+  }
 
   const stats = useMemo(() => {
     const allJobs = plot.jobs;
@@ -531,41 +548,51 @@ function PlotOverview({
                 {stats.overdueDeliveries.map((order) => (
                   <div
                     key={order.id}
-                    className="flex items-center justify-between rounded-lg border border-red-200 bg-red-50 p-2.5 dark:border-red-900 dark:bg-red-950/30"
+                    className="flex items-center justify-between gap-2 rounded-lg border border-red-200 bg-red-50 p-2.5 dark:border-red-900 dark:bg-red-950/30"
                   >
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-medium">
                         {order.supplier.name}
                       </p>
                       <p className="text-xs text-red-600">
                         Overdue —{" "}
-                        {format(
-                          new Date(order.expectedDeliveryDate!),
-                          "d MMM"
-                        )}
+                        {format(new Date(order.expectedDeliveryDate!), "d MMM")}
                       </p>
                     </div>
-                    <AlertTriangle className="size-4 shrink-0 text-red-500" />
+                    {pendingOrderActions.has(order.id) ? (
+                      <Loader2 className="size-4 shrink-0 animate-spin text-muted-foreground" />
+                    ) : (
+                      <Button variant="outline" size="sm"
+                        className="h-6 shrink-0 border-green-200 px-2 text-[10px] text-green-700 hover:bg-green-50"
+                        onClick={() => handleOrderStatus(order.id, "DELIVERED")}>
+                        <CheckCircle2 className="mr-1 size-2.5" />Received
+                      </Button>
+                    )}
                   </div>
                 ))}
                 {stats.upcomingDeliveries.map((order) => (
                   <div
                     key={order.id}
-                    className="flex items-center justify-between rounded-lg border p-2.5"
+                    className="flex items-center justify-between gap-2 rounded-lg border p-2.5"
                   >
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-medium">
                         {order.supplier.name}
                       </p>
                       <p className="text-xs text-muted-foreground">
                         Due{" "}
-                        {format(
-                          new Date(order.expectedDeliveryDate!),
-                          "d MMM"
-                        )}
+                        {format(new Date(order.expectedDeliveryDate!), "d MMM")}
                       </p>
                     </div>
-                    <Truck className="size-4 shrink-0 text-muted-foreground" />
+                    {pendingOrderActions.has(order.id) ? (
+                      <Loader2 className="size-4 shrink-0 animate-spin text-muted-foreground" />
+                    ) : (
+                      <Button variant="outline" size="sm"
+                        className="h-6 shrink-0 border-green-200 px-2 text-[10px] text-green-700 hover:bg-green-50"
+                        onClick={() => handleOrderStatus(order.id, "DELIVERED")}>
+                        <CheckCircle2 className="mr-1 size-2.5" />Received
+                      </Button>
+                    )}
                   </div>
                 ))}
               </div>

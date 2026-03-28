@@ -8,7 +8,10 @@ import {
   AlertTriangle,
   Truck,
   ShoppingCart,
+  Check,
+  CheckCircle2,
 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -84,6 +87,23 @@ export function SiteOrders({ siteId }: SiteOrdersProps) {
   const [orders, setOrders] = useState<SiteOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("all");
+  const [pendingActions, setPendingActions] = useState<Set<string>>(new Set());
+
+  const handleOrderStatus = async (orderId: string, status: string) => {
+    setPendingActions((prev) => new Set(prev).add(orderId));
+    try {
+      const res = await fetch(`/api/orders/${orderId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+      if (res.ok) {
+        setOrders((prev) => prev.map((o) => o.id === orderId ? { ...o, status } : o));
+      }
+    } finally {
+      setPendingActions((prev) => { const n = new Set(prev); n.delete(orderId); return n; });
+    }
+  };
 
   useEffect(() => {
     fetch(`/api/sites/${siteId}/orders`)
@@ -314,6 +334,37 @@ export function SiteOrders({ siteId }: SiteOrdersProps) {
                     </Badge>
                   )}
                 </CardContent>
+                {order.status !== "DELIVERED" && order.status !== "CANCELLED" && (
+                  <div className="flex gap-1.5 border-t px-3 pb-3 pt-2">
+                    {pendingActions.has(order.id) ? (
+                      <Loader2 className="size-4 animate-spin text-muted-foreground" />
+                    ) : (
+                      <>
+                        {order.status === "PENDING" && (
+                          <Button variant="outline" size="sm"
+                            className="h-6 flex-1 gap-1 border-blue-200 text-[11px] text-blue-700 hover:bg-blue-50"
+                            onClick={() => handleOrderStatus(order.id, "ORDERED")}>
+                            <Package className="size-2.5" />Place Order
+                          </Button>
+                        )}
+                        {order.status === "ORDERED" && (
+                          <Button variant="outline" size="sm"
+                            className="h-6 flex-1 gap-1 border-purple-200 text-[11px] text-purple-700 hover:bg-purple-50"
+                            onClick={() => handleOrderStatus(order.id, "CONFIRMED")}>
+                            <Check className="size-2.5" />Confirm
+                          </Button>
+                        )}
+                        {(order.status === "ORDERED" || order.status === "CONFIRMED") && (
+                          <Button variant="outline" size="sm"
+                            className="h-6 flex-1 gap-1 border-green-200 text-[11px] text-green-700 hover:bg-green-50"
+                            onClick={() => handleOrderStatus(order.id, "DELIVERED")}>
+                            <CheckCircle2 className="size-2.5" />Delivered
+                          </Button>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
               </Card>
             );
           })}

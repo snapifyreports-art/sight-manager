@@ -27,6 +27,10 @@ import {
   CloudLightning,
   CloudFog,
   Thermometer,
+  Bug,
+  ShoppingCart,
+  MapPin,
+  CalendarClock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -124,6 +128,33 @@ interface BriefData {
     description: string;
     createdAt: string;
     user: { name: string } | null;
+  }>;
+  openSnagsList: Array<{
+    id: string;
+    description: string;
+    status: string;
+    priority: string;
+    location: string | null;
+    plotId: string;
+    plot: { plotNumber: string | null; name: string; siteId: string };
+    assignedTo: { name: string } | null;
+    contact: { name: string; company: string | null } | null;
+  }>;
+  outstandingOrders: Array<{
+    id: string;
+    itemsDescription: string | null;
+    status: string;
+    expectedDeliveryDate: string | null;
+    supplier: { id: string; name: string };
+    job: { id: string; name: string; plot: { plotNumber: string | null; name: string } };
+  }>;
+  jobsStartingTomorrow: Array<{
+    id: string;
+    name: string;
+    status: string;
+    plot: { plotNumber: string | null; name: string };
+    assignedTo: { name: string } | null;
+    contractors: Array<{ contact: { name: string; company: string | null } }>;
   }>;
   weather: {
     today: { date: string; category: string; tempMax: number; tempMin: number };
@@ -279,6 +310,10 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
   const [bulkMode, setBulkMode] = useState(false);
   const [selectedJobIds, setSelectedJobIds] = useState<Set<string>>(new Set());
   const [bulkProcessing, setBulkProcessing] = useState(false);
+
+  // Snag & order inline actions
+  const [pendingSnagActions, setPendingSnagActions] = useState<Set<string>>(new Set());
+  const [pendingOrderActions, setPendingOrderActions] = useState<Set<string>>(new Set());
 
   const fetchData = useCallback(() => {
     setLoading(true);
@@ -461,6 +496,34 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
     setRefreshKey((k) => k + 1);
   };
 
+  const handleSnagAction = async (snagId: string, status: string) => {
+    setPendingSnagActions((prev) => new Set(prev).add(snagId));
+    try {
+      const res = await fetch(`/api/snags/${snagId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+      if (res.ok) setRefreshKey((k) => k + 1);
+    } catch { /* ignore */ } finally {
+      setPendingSnagActions((prev) => { const n = new Set(prev); n.delete(snagId); return n; });
+    }
+  };
+
+  const handleOrderAction = async (orderId: string, status: string) => {
+    setPendingOrderActions((prev) => new Set(prev).add(orderId));
+    try {
+      const res = await fetch(`/api/orders/${orderId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+      if (res.ok) setRefreshKey((k) => k + 1);
+    } catch { /* ignore */ } finally {
+      setPendingOrderActions((prev) => { const n = new Set(prev); n.delete(orderId); return n; });
+    }
+  };
+
   // One-click bulk action (no bulk mode required)
   const handleQuickBulk = async (jobIds: string[], action: "start" | "complete") => {
     if (jobIds.length === 0) return;
@@ -611,14 +674,14 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
           <Button
             variant={bulkMode ? "default" : "outline"}
             size="sm"
-            className="hidden sm:inline-flex"
             onClick={() => {
               setBulkMode(!bulkMode);
               setSelectedJobIds(new Set());
             }}
           >
             <ListChecks className="mr-1 size-3.5" />
-            {bulkMode ? "Exit Bulk" : "Bulk Actions"}
+            <span className="hidden sm:inline">{bulkMode ? "Exit Bulk" : "Bulk Actions"}</span>
+            <span className="sm:hidden">{bulkMode ? "Exit" : "Bulk"}</span>
           </Button>
 
           {/* Rained Off button (UX #4) */}
@@ -626,7 +689,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
             <Button
               variant="outline"
               size="sm"
-              className="hidden border-blue-200 text-blue-700 sm:inline-flex"
+              className="border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100"
               onClick={handleUndoRainedOff}
             >
               <CloudRain className="mr-1 size-3.5" />
@@ -636,11 +699,11 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
             <Button
               variant="outline"
               size="sm"
-              className="hidden sm:inline-flex"
+              className="border-slate-200"
               onClick={() => setRainedOffDialogOpen(true)}
             >
               <CloudRain className="mr-1 size-3.5" />
-              Mark Rained Off
+              <span className="hidden sm:inline">Mark </span>Rained Off
             </Button>
           )}
 
@@ -744,63 +807,124 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
         </Card>
       </div>
 
-      {/* Weather forecast widget (Feature A) */}
-      {data.weather && (
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center gap-4">
-              {/* Today's weather */}
-              <div className="flex items-center gap-3">
-                <div className="rounded-lg bg-blue-50 p-2.5">
-                  <WeatherIcon category={data.weather.today.category} className="size-7 text-blue-600" />
-                </div>
-                <div>
-                  <p className="text-sm font-semibold">
-                    {CATEGORY_LABELS[data.weather.today.category] || data.weather.today.category}
-                  </p>
-                  <p className="flex items-center gap-1 text-xs text-muted-foreground">
-                    <Thermometer className="size-3" />
-                    {Math.round(data.weather.today.tempMin)}° – {Math.round(data.weather.today.tempMax)}°C
-                  </p>
-                </div>
-              </div>
-
-              {/* Divider */}
-              <div className="hidden h-10 border-l sm:block" />
-
-              {/* 3-day forecast */}
-              <div className="hidden gap-4 sm:flex">
-                {data.weather.forecast.map((day) => (
-                  <div key={day.date} className="flex flex-col items-center gap-0.5 text-center">
-                    <span className="text-[10px] font-medium text-muted-foreground">
-                      {format(new Date(day.date + "T12:00:00"), "EEE")}
-                    </span>
-                    <WeatherIcon category={day.category} className="size-4 text-slate-500" />
-                    <span className="text-[10px] text-muted-foreground">
-                      {Math.round(day.tempMax)}°
-                    </span>
+      {/* Weather forecast widget */}
+      {data.weather && (() => {
+        const tomorrow = data.weather.forecast[0];
+        const tomorrowIsBad = tomorrow && ["rain", "snow", "thunder"].includes(tomorrow.category);
+        const todayIsBad = ["rain", "snow", "thunder"].includes(data.weather.today.category);
+        const allDays = [data.weather.today, ...data.weather.forecast];
+        const badDays = allDays.filter((d) => ["rain", "snow", "thunder"].includes(d.category));
+        return (
+          <Card className={todayIsBad ? "border-blue-300 bg-blue-50/40" : ""}>
+            <CardContent className="p-4">
+              <div className="flex flex-wrap items-start gap-4">
+                {/* Today's weather — main */}
+                <div className="flex items-center gap-3">
+                  <div className={`rounded-lg p-2.5 ${todayIsBad ? "bg-blue-100" : "bg-blue-50"}`}>
+                    <WeatherIcon category={data.weather.today.category} className="size-8 text-blue-600" />
                   </div>
-                ))}
-              </div>
-            </div>
+                  <div>
+                    <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Today</p>
+                    <p className="text-base font-semibold">
+                      {CATEGORY_LABELS[data.weather.today.category] || data.weather.today.category}
+                    </p>
+                    <p className="flex items-center gap-1 text-xs text-muted-foreground">
+                      <Thermometer className="size-3" />
+                      {Math.round(data.weather.today.tempMin)}° – {Math.round(data.weather.today.tempMax)}°C
+                    </p>
+                  </div>
+                </div>
 
-            {/* Weather warning */}
-            {(data.weather.forecast.some((d) => ["rain", "snow", "thunder"].includes(d.category)) ||
-              ["rain", "snow", "thunder"].includes(data.weather.today.category)) && (
-              <div className="mt-3 flex items-center gap-2 rounded border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-700">
-                <AlertTriangle className="size-3.5 shrink-0" />
-                <span>
-                  Outdoor jobs may be affected —{" "}
-                  {[data.weather.today, ...data.weather.forecast]
-                    .filter((d) => ["rain", "snow", "thunder"].includes(d.category))
-                    .map((d) => format(new Date(d.date + "T12:00:00"), "EEE"))
-                    .join(", ")}
-                </span>
+                {/* Tomorrow — highlighted */}
+                {tomorrow && (
+                  <>
+                    <div className="h-14 border-l" />
+                    <div className={`flex items-center gap-3 rounded-lg px-3 py-2 ${tomorrowIsBad ? "bg-amber-50 ring-1 ring-amber-200" : "bg-slate-50"}`}>
+                      <div className={`rounded-lg p-2 ${tomorrowIsBad ? "bg-amber-100" : "bg-slate-100"}`}>
+                        <WeatherIcon category={tomorrow.category} className={`size-7 ${tomorrowIsBad ? "text-amber-600" : "text-slate-500"}`} />
+                      </div>
+                      <div>
+                        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Tomorrow</p>
+                        <p className={`text-sm font-semibold ${tomorrowIsBad ? "text-amber-700" : ""}`}>
+                          {CATEGORY_LABELS[tomorrow.category] || tomorrow.category}
+                        </p>
+                        <p className="flex items-center gap-1 text-xs text-muted-foreground">
+                          <Thermometer className="size-3" />
+                          {Math.round(tomorrow.tempMin)}° – {Math.round(tomorrow.tempMax)}°C
+                        </p>
+                      </div>
+                      {tomorrowIsBad && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="ml-2 h-7 border-amber-300 bg-white px-2 text-[10px] text-amber-700 hover:bg-amber-50"
+                          onClick={() => {
+                            setDate(addDays(date, 1));
+                            setTimeout(() => setRainedOffDialogOpen(true), 50);
+                          }}
+                        >
+                          <CloudRain className="mr-1 size-3" />
+                          Pre-mark
+                        </Button>
+                      )}
+                    </div>
+                  </>
+                )}
+
+                {/* Remaining forecast days */}
+                {data.weather.forecast.length > 1 && (
+                  <>
+                    <div className="hidden h-14 border-l sm:block" />
+                    <div className="hidden gap-4 sm:flex">
+                      {data.weather.forecast.slice(1).map((day) => (
+                        <div key={day.date} className="flex flex-col items-center gap-1 text-center">
+                          <span className="text-[10px] font-medium text-muted-foreground">
+                            {format(new Date(day.date + "T12:00:00"), "EEE")}
+                          </span>
+                          <WeatherIcon category={day.category} className="size-4 text-slate-500" />
+                          <span className="text-[10px] text-muted-foreground">
+                            {Math.round(day.tempMax)}°
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
               </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
+
+              {/* Rain day action banner */}
+              {todayIsBad && !data.isRainedOff && (
+                <div className="mt-3 flex items-center justify-between gap-2 rounded-lg border border-blue-200 bg-blue-100 px-3 py-2">
+                  <div className="flex items-center gap-2 text-sm text-blue-800">
+                    <CloudRain className="size-4 shrink-0" />
+                    <span className="font-medium">Rain today — do you want to mark this as a rained off day?</span>
+                  </div>
+                  <Button
+                    size="sm"
+                    className="shrink-0 bg-blue-600 text-white hover:bg-blue-700"
+                    onClick={() => setRainedOffDialogOpen(true)}
+                  >
+                    Mark Rained Off
+                  </Button>
+                </div>
+              )}
+
+              {/* General weather warning */}
+              {!todayIsBad && badDays.length > 0 && (
+                <div className="mt-3 flex items-center gap-2 rounded border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-700">
+                  <AlertTriangle className="size-3.5 shrink-0" />
+                  <span>
+                    Outdoor jobs may be affected —{" "}
+                    {badDays
+                      .map((d) => format(new Date(d.date + "T12:00:00"), "EEE"))
+                      .join(", ")}
+                  </span>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        );
+      })()}
 
       <div className="grid gap-4 md:grid-cols-2">
         {/* Jobs starting today */}
@@ -885,14 +1009,25 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
             ) : (
               <div className="space-y-2">
                 {data.deliveriesToday.map((d) => (
-                  <div key={d.id} className="rounded border p-2 text-sm">
-                    <Link href={`/suppliers/${d.supplier.id}`} className="font-medium text-blue-600 hover:underline">{d.supplier.name}</Link>
-                    <p className="text-xs text-muted-foreground">
-                      {d.itemsDescription || "\u2014"}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      For: <Link href={`/jobs/${d.job.id}`} className="hover:underline hover:text-blue-600">{d.job.name}</Link> · {d.job.plot.plotNumber ? `Plot ${d.job.plot.plotNumber}` : d.job.plot.name}
-                    </p>
+                  <div key={d.id} className="flex items-start justify-between gap-2 rounded border p-2 text-sm">
+                    <div className="min-w-0 flex-1">
+                      <Link href={`/suppliers/${d.supplier.id}`} className="font-medium text-blue-600 hover:underline">{d.supplier.name}</Link>
+                      <p className="text-xs text-muted-foreground">{d.itemsDescription || "—"}</p>
+                      <p className="text-xs text-muted-foreground">
+                        <Link href={`/jobs/${d.job.id}`} className="hover:underline hover:text-blue-600">{d.job.name}</Link>
+                        {" · "}{d.job.plot.plotNumber ? `Plot ${d.job.plot.plotNumber}` : d.job.plot.name}
+                      </p>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 shrink-0 border-green-200 px-2 text-[10px] text-green-700 hover:bg-green-50"
+                      disabled={pendingOrderActions.has(d.id)}
+                      onClick={() => handleOrderAction(d.id, "DELIVERED")}
+                    >
+                      {pendingOrderActions.has(d.id) ? <Loader2 className="size-3 animate-spin" /> : <CheckCircle2 className="size-3" />}
+                      <span className="ml-1">Received</span>
+                    </Button>
                   </div>
                 ))}
               </div>
@@ -932,11 +1067,227 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                     +{data.overdueJobs.length - 10} more overdue jobs
                   </p>
                 )}
+                {data.overdueDeliveries.length > 0 && (
+                  <>
+                    {data.overdueJobs.length > 0 && <div className="border-t pt-2" />}
+                    {data.overdueDeliveries.map((d) => (
+                      <div key={d.id} className="flex items-start justify-between gap-2 rounded border border-red-100 bg-red-50/40 p-2 text-sm">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5">
+                            <Package className="size-3 shrink-0 text-red-600" />
+                            <Link href={`/suppliers/${d.supplier.id}`} className="font-medium text-blue-600 hover:underline">{d.supplier.name}</Link>
+                          </div>
+                          <p className="text-xs text-muted-foreground">{d.itemsDescription || "—"}</p>
+                          <p className="text-xs text-muted-foreground">
+                            <Link href={`/jobs/${d.job.id}`} className="hover:underline hover:text-blue-600">{d.job.name}</Link>
+                            {" · "}{d.job.plot.plotNumber ? `Plot ${d.job.plot.plotNumber}` : d.job.plot.name}
+                            {d.expectedDeliveryDate && (
+                              <span className="ml-1 font-medium text-red-600">
+                                · Due {format(new Date(d.expectedDeliveryDate), "dd MMM")}
+                              </span>
+                            )}
+                          </p>
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-7 shrink-0 border-green-200 px-2 text-[10px] text-green-700 hover:bg-green-50"
+                          disabled={pendingOrderActions.has(d.id)}
+                          onClick={() => handleOrderAction(d.id, "DELIVERED")}
+                        >
+                          {pendingOrderActions.has(d.id) ? <Loader2 className="size-3 animate-spin" /> : <CheckCircle2 className="size-3" />}
+                          <span className="ml-1">Received</span>
+                        </Button>
+                      </div>
+                    ))}
+                  </>
+                )}
               </div>
             </CardContent>
           </Card>
         )}
+
+        {/* Jobs starting tomorrow */}
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-sm">
+              <CalendarClock className="size-4 text-indigo-600" />
+              Starting Tomorrow ({data.jobsStartingTomorrow.length})
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {data.jobsStartingTomorrow.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No jobs starting tomorrow</p>
+            ) : (
+              <div className="space-y-2">
+                {data.jobsStartingTomorrow.map((j) => renderJobRow(j, false))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
+
+      {/* Outstanding orders - v2 */}
+      {data.outstandingOrders.length > 0 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-sm">
+              <ShoppingCart className="size-4 text-violet-600" />
+              Outstanding Orders ({data.outstandingOrders.length})
+            </CardTitle>
+            <CardDescription className="text-xs">Pending, ordered and confirmed material orders</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {data.outstandingOrders.map((o) => {
+                const isPending = o.status === "PENDING";
+                const isOrdered = o.status === "ORDERED";
+                const isConfirmed = o.status === "CONFIRMED";
+                const isPendingAction = pendingOrderActions.has(o.id);
+                return (
+                  <div key={o.id} className="flex items-start justify-between gap-2 rounded border p-2 text-sm">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <Link href={`/suppliers/${o.supplier.id}`} className="truncate font-medium text-blue-600 hover:underline">
+                          {o.supplier.name}
+                        </Link>
+                        <Badge
+                          variant="outline"
+                          className={`shrink-0 text-[10px] ${
+                            isConfirmed ? "border-green-200 text-green-700" :
+                            isOrdered ? "border-blue-200 text-blue-700" :
+                            "border-slate-200 text-slate-600"
+                          }`}
+                        >
+                          {o.status}
+                        </Badge>
+                        {o.expectedDeliveryDate && (() => {
+                          const isLate = new Date(o.expectedDeliveryDate) < new Date();
+                          return (
+                            <span className={`text-[10px] ${isLate ? "font-semibold text-red-600" : "text-muted-foreground"}`}>
+                              {isLate ? "⚠ " : ""}{format(new Date(o.expectedDeliveryDate), "dd MMM")}
+                            </span>
+                          );
+                        })()}
+                      </div>
+                      <p className="text-xs text-muted-foreground">{o.itemsDescription || "—"}</p>
+                      <p className="text-xs text-muted-foreground">
+                        <Link href={`/jobs/${o.job.id}`} className="hover:underline hover:text-blue-600">{o.job.name}</Link>
+                        {" · "}{o.job.plot.plotNumber ? `Plot ${o.job.plot.plotNumber}` : o.job.plot.name}
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 flex-col items-end gap-1">
+                      {isPendingAction ? (
+                        <Loader2 className="size-4 animate-spin text-muted-foreground" />
+                      ) : (
+                        <>
+                          {isPending && (
+                            <Button variant="outline" size="sm" className="h-6 border-blue-200 px-2 text-[10px] text-blue-700 hover:bg-blue-50"
+                              onClick={() => handleOrderAction(o.id, "ORDERED")}>
+                              <Package className="mr-1 size-2.5" />Place Order
+                            </Button>
+                          )}
+                          {isOrdered && (
+                            <Button variant="outline" size="sm" className="h-6 border-green-200 px-2 text-[10px] text-green-700 hover:bg-green-50"
+                              onClick={() => handleOrderAction(o.id, "CONFIRMED")}>
+                              <Check className="mr-1 size-2.5" />Confirm
+                            </Button>
+                          )}
+                          {(isOrdered || isConfirmed) && (
+                            <Button variant="outline" size="sm" className="h-6 border-violet-200 px-2 text-[10px] text-violet-700 hover:bg-violet-50"
+                              onClick={() => handleOrderAction(o.id, "DELIVERED")}>
+                              <CheckCircle2 className="mr-1 size-2.5" />Delivered
+                            </Button>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Open snags */}
+      {data.openSnagsList.length > 0 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-sm">
+              <Bug className="size-4 text-orange-600" />
+              Open Snags ({data.summary.openSnagCount})
+              {data.summary.openSnagCount > 20 && (
+                <span className="ml-auto text-[10px] font-normal text-muted-foreground">Showing top 20</span>
+              )}
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {data.openSnagsList.map((snag) => {
+                const isPendingSnag = pendingSnagActions.has(snag.id);
+                return (
+                  <div
+                    key={snag.id}
+                    className={`rounded border p-2 text-sm ${
+                      snag.priority === "CRITICAL" ? "border-red-200 bg-red-50" :
+                      snag.priority === "HIGH" ? "border-orange-200 bg-orange-50/60" :
+                      ""
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <Link
+                          href={`/sites/${snag.plot.siteId}/plots/${snag.plotId}`}
+                          className="font-medium leading-snug text-blue-600 hover:underline"
+                        >
+                          {snag.description}
+                        </Link>
+                        <p className="mt-0.5 text-xs text-muted-foreground">
+                          <Link href={`/sites/${snag.plot.siteId}/plots/${snag.plotId}`} className="hover:underline hover:text-blue-600">
+                            {snag.plot.plotNumber ? `Plot ${snag.plot.plotNumber}` : snag.plot.name}
+                          </Link>
+                          {snag.location && (
+                            <span> · <MapPin className="inline size-3" /> {snag.location}</span>
+                          )}
+                          {snag.assignedTo && <span> · {snag.assignedTo.name}</span>}
+                          {snag.contact && <span> · {snag.contact.company || snag.contact.name}</span>}
+                        </p>
+                      </div>
+                      <div className="flex shrink-0 flex-col items-end gap-1">
+                        <Badge
+                          variant="outline"
+                          className={`text-[10px] ${
+                            snag.priority === "CRITICAL" ? "border-red-300 text-red-700" :
+                            snag.priority === "HIGH" ? "border-orange-300 text-orange-700" :
+                            snag.priority === "MEDIUM" ? "border-yellow-300 text-yellow-700" :
+                            "border-slate-200 text-slate-600"
+                          }`}
+                        >
+                          {snag.priority}
+                        </Badge>
+                        {isPendingSnag ? (
+                          <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
+                        ) : snag.status === "OPEN" ? (
+                          <Button variant="outline" size="sm" className="h-6 border-blue-200 px-2 text-[10px] text-blue-700 hover:bg-blue-50"
+                            onClick={() => handleSnagAction(snag.id, "IN_PROGRESS")}>
+                            <Play className="mr-1 size-2.5" />Start
+                          </Button>
+                        ) : (
+                          <Button variant="outline" size="sm" className="h-6 border-green-200 px-2 text-[10px] text-green-700 hover:bg-green-50"
+                            onClick={() => handleSnagAction(snag.id, "RESOLVED")}>
+                            <CheckCircle2 className="mr-1 size-2.5" />Resolve
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Recent activity */}
       {data.recentEvents.length > 0 && (

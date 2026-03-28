@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { startOfDay, endOfDay, subDays } from "date-fns";
+import { startOfDay, endOfDay, subDays, addDays } from "date-fns";
 import { getServerCurrentDate } from "@/lib/dev-date";
 import { fetchWeatherForPostcode } from "@/lib/weather";
 
@@ -104,7 +104,10 @@ export async function GET(
   ]);
 
   // Batch 3
-  const [overdueDeliveries, openSnags, rainedOff] = await Promise.all([
+  const tomorrowStart = startOfDay(addDays(targetDate, 1));
+  const tomorrowEnd = endOfDay(addDays(targetDate, 1));
+
+  const [overdueDeliveries, openSnags, openSnagsList, rainedOff, outstandingOrders, jobsStartingTomorrow] = await Promise.all([
     prisma.materialOrder.findMany({
       where: {
         job: { plot: { siteId: id } },
@@ -120,8 +123,45 @@ export async function GET(
     prisma.snag.count({
       where: { plot: { siteId: id }, status: { in: ["OPEN", "IN_PROGRESS"] } },
     }),
+    prisma.snag.findMany({
+      where: { plot: { siteId: id }, status: { in: ["OPEN", "IN_PROGRESS"] } },
+      select: {
+        id: true, description: true, status: true, priority: true, location: true,
+        plotId: true,
+        plot: { select: { plotNumber: true, name: true, siteId: true } },
+        assignedTo: { select: { name: true } },
+        contact: { select: { name: true, company: true } },
+      },
+      orderBy: [{ priority: "desc" }, { createdAt: "asc" }],
+      take: 20,
+    }),
     prisma.rainedOffDay.findFirst({
       where: { siteId: id, date: { gte: dayStart, lte: dayEnd } },
+    }),
+    prisma.materialOrder.findMany({
+      where: {
+        job: { plot: { siteId: id } },
+        status: { in: ["PENDING", "ORDERED", "CONFIRMED"] },
+      },
+      select: {
+        id: true, itemsDescription: true, status: true, expectedDeliveryDate: true,
+        supplier: { select: { id: true, name: true } },
+        job: { select: { id: true, name: true, plot: { select: { plotNumber: true, name: true } } } },
+      },
+      orderBy: { expectedDeliveryDate: "asc" },
+      take: 30,
+    }),
+    prisma.job.findMany({
+      where: {
+        plot: { siteId: id },
+        startDate: { gte: tomorrowStart, lte: tomorrowEnd },
+      },
+      select: {
+        id: true, name: true, status: true,
+        plot: { select: { plotNumber: true, name: true } },
+        assignedTo: { select: { name: true } },
+        contractors: { include: { contact: { select: { name: true, company: true } } } },
+      },
     }),
   ]);
 
@@ -171,6 +211,7 @@ export async function GET(
       openSnagCount: openSnags,
     },
     jobsStartingToday,
+    jobsStartingTomorrow,
     jobsDueToday,
     overdueJobs: overdueJobs.map((j) => ({
       ...j,
@@ -184,6 +225,11 @@ export async function GET(
     overdueDeliveries: overdueDeliveries.map((d) => ({
       ...d,
       expectedDeliveryDate: d.expectedDeliveryDate?.toISOString() ?? null,
+    })),
+    openSnagsList,
+    outstandingOrders: outstandingOrders.map((o) => ({
+      ...o,
+      expectedDeliveryDate: o.expectedDeliveryDate?.toISOString() ?? null,
     })),
     recentEvents: recentEvents.map((e) => ({
       ...e,
