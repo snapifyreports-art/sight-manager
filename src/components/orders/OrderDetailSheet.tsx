@@ -16,6 +16,7 @@ import {
   CalendarDays,
   Truck,
   AlertTriangle,
+  Mail,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -336,10 +337,25 @@ export function OrderDetailSheet({
           </div>
 
           {/* Status Actions */}
-          {statusActions.length > 0 && (
+          {(statusActions.length > 0 || (order.status === "PENDING" && order.supplier.contactEmail)) && (
             <div className="space-y-1.5">
               <p className="text-xs font-medium text-muted-foreground">Actions</p>
               <div className="flex flex-wrap gap-1.5">
+                {order.status === "PENDING" && order.supplier.contactEmail && (() => {
+                  const mailto = `mailto:${encodeURIComponent(order.supplier.contactEmail!)}?subject=${encodeURIComponent(`Material Order — ${order.job.name}`)}&body=${encodeURIComponent(`Hi ${order.supplier.contactName || order.supplier.name},\n\nPlease supply the following for ${order.job.name} at ${order.job.plot.name}:\n\n${order.itemsDescription || "Materials as discussed"}${order.expectedDeliveryDate ? `\n\nRequired by: ${format(new Date(order.expectedDeliveryDate), "dd MMM yyyy")}` : ""}\n\nPlease confirm receipt.\n\nRegards`)}`;
+                  return (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      className="gap-1.5 text-xs"
+                      disabled={statusLoading !== null}
+                      onClick={() => { window.open(mailto, "_blank"); handleStatusChange("ORDERED"); }}
+                    >
+                      <Mail className="size-3.5" />
+                      Send Order to Supplier
+                    </Button>
+                  );
+                })()}
                 {statusActions.map((action) => (
                   <Button
                     key={action.status}

@@ -10,6 +10,7 @@ import {
   ShoppingCart,
   Check,
   CheckCircle2,
+  Mail,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
@@ -39,7 +40,7 @@ interface SiteOrder {
   deliveredDate: string | null;
   leadTimeDays: number | null;
   automated: boolean;
-  supplier: { id: string; name: string };
+  supplier: { id: string; name: string; contactEmail: string | null; contactName: string | null };
   job: {
     id: string;
     name: string;
@@ -340,13 +341,27 @@ export function SiteOrders({ siteId }: SiteOrdersProps) {
                       <Loader2 className="size-4 animate-spin text-muted-foreground" />
                     ) : (
                       <>
-                        {order.status === "PENDING" && (
-                          <Button variant="outline" size="sm"
-                            className="h-6 flex-1 gap-1 border-blue-200 text-[11px] text-blue-700 hover:bg-blue-50"
-                            onClick={() => handleOrderStatus(order.id, "ORDERED")}>
-                            <Package className="size-2.5" />Place Order
-                          </Button>
-                        )}
+                        {order.status === "PENDING" && (() => {
+                          const mailto = order.supplier.contactEmail
+                            ? `mailto:${encodeURIComponent(order.supplier.contactEmail)}?subject=${encodeURIComponent(`Material Order — ${order.job.plot.plotNumber ? `Plot ${order.job.plot.plotNumber}` : order.job.plot.name}`)}&body=${encodeURIComponent(`Hi ${order.supplier.contactName || order.supplier.name},\n\nPlease supply the following for ${order.job.name}:\n\n${order.itemsDescription || "Materials as discussed"}${order.expectedDeliveryDate ? `\n\nRequired by: ${format(new Date(order.expectedDeliveryDate), "dd MMM yyyy")}` : ""}\n\nPlease confirm receipt.\n\nRegards`)}`
+                            : null;
+                          return (
+                            <>
+                              {mailto && (
+                                <Button variant="outline" size="sm"
+                                  className="h-6 flex-1 gap-1 border-violet-200 text-[11px] text-violet-700 hover:bg-violet-50"
+                                  onClick={() => { window.open(mailto, "_blank"); handleOrderStatus(order.id, "ORDERED"); }}>
+                                  <Mail className="size-2.5" />Send Order
+                                </Button>
+                              )}
+                              <Button variant="outline" size="sm"
+                                className="h-6 flex-1 gap-1 border-blue-200 text-[11px] text-blue-700 hover:bg-blue-50"
+                                onClick={() => handleOrderStatus(order.id, "ORDERED")}>
+                                <Package className="size-2.5" />{mailto ? "Mark Sent" : "Place Order"}
+                              </Button>
+                            </>
+                          );
+                        })()}
                         {order.status === "ORDERED" && (
                           <Button variant="outline" size="sm"
                             className="h-6 flex-1 gap-1 border-purple-200 text-[11px] text-purple-700 hover:bg-purple-50"

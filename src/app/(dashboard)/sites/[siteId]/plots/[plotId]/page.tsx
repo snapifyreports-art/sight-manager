@@ -47,7 +47,7 @@ export default async function PlotDetailPage({
             },
             orders: {
               include: {
-                supplier: { select: { id: true, name: true } },
+                supplier: { select: { id: true, name: true, contactEmail: true, contactName: true } },
                 orderItems: {
                   select: {
                     id: true,
@@ -104,6 +104,7 @@ export default async function PlotDetailPage({
       orders: job.orders.map((order) => ({
         id: order.id,
         orderDetails: order.orderDetails,
+        itemsDescription: order.itemsDescription,
         dateOfOrder: order.dateOfOrder.toISOString(),
         expectedDeliveryDate:
           order.expectedDeliveryDate?.toISOString() ?? null,

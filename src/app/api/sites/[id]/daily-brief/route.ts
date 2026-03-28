@@ -141,14 +141,14 @@ export async function GET(
     prisma.materialOrder.findMany({
       where: {
         job: { plot: { siteId: id } },
-        status: { in: ["PENDING", "ORDERED", "CONFIRMED"] },
+        status: "PENDING",
       },
       select: {
         id: true, itemsDescription: true, status: true, expectedDeliveryDate: true,
-        supplier: { select: { id: true, name: true } },
+        supplier: { select: { id: true, name: true, contactEmail: true, contactName: true } },
         job: { select: { id: true, name: true, plot: { select: { plotNumber: true, name: true } } } },
       },
-      orderBy: { expectedDeliveryDate: "asc" },
+      orderBy: { dateOfOrder: "asc" },
       take: 30,
     }),
     prisma.job.findMany({
@@ -227,7 +227,7 @@ export async function GET(
       expectedDeliveryDate: d.expectedDeliveryDate?.toISOString() ?? null,
     })),
     openSnagsList,
-    outstandingOrders: outstandingOrders.map((o) => ({
+    ordersToPlace: outstandingOrders.map((o) => ({
       ...o,
       expectedDeliveryDate: o.expectedDeliveryDate?.toISOString() ?? null,
     })),

@@ -78,12 +78,13 @@ interface PlotData {
     orders: Array<{
       id: string;
       orderDetails: string | null;
+      itemsDescription: string | null;
       dateOfOrder: string;
       expectedDeliveryDate: string | null;
       deliveredDate: string | null;
       status: string;
       leadTimeDays: number | null;
-      supplier: { id: string; name: string };
+      supplier: { id: string; name: string; contactEmail: string | null; contactName: string | null };
       orderItems: Array<{
         id: string;
         name: string;

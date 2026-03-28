@@ -18,7 +18,7 @@ import {
   AlertTriangle,
   CheckCircle,
   Clock,
-  ArrowRight,
+  Mail,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -28,12 +28,13 @@ import { Card, CardContent } from "@/components/ui/card";
 interface OrderData {
   id: string;
   orderDetails: string | null;
+  itemsDescription: string | null;
   dateOfOrder: string;
   expectedDeliveryDate: string | null;
   deliveredDate: string | null;
   status: string;
   leadTimeDays: number | null;
-  supplier: { id: string; name: string };
+  supplier: { id: string; name: string; contactEmail: string | null; contactName: string | null };
   orderItems: Array<{
     id: string;
     name: string;
@@ -339,6 +340,11 @@ function OrderToPlaceCard({ item }: { item: TodoItem }) {
   }
 
   // Pending order
+  const order = item.order!;
+  const mailto = order.supplier.contactEmail
+    ? `mailto:${encodeURIComponent(order.supplier.contactEmail)}?subject=${encodeURIComponent(`Material Order — ${item.jobName}`)}&body=${encodeURIComponent(`Hi ${order.supplier.contactName || order.supplier.name},\n\nPlease supply the following for ${item.jobName}:\n\n${order.itemsDescription || "Materials as discussed"}${order.expectedDeliveryDate ? `\n\nRequired by: ${format(new Date(order.expectedDeliveryDate), "dd MMM yyyy")}` : ""}\n\nPlease confirm receipt.\n\nRegards`)}`
+    : null;
+
   return (
     <Card size="sm">
       <CardContent className="flex items-center gap-3">
@@ -347,13 +353,13 @@ function OrderToPlaceCard({ item }: { item: TodoItem }) {
         </div>
         <div className="min-w-0 flex-1">
           <p className="text-sm font-medium">
-            {item.order?.supplier.id ? (
-              <Link href={`/suppliers/${item.order.supplier.id}`} className="hover:underline hover:text-blue-600">{item.order.supplier.name}</Link>
-            ) : item.order?.supplier.name}
-            {item.order?.orderDetails && (
+            {order.supplier.id ? (
+              <Link href={`/suppliers/${order.supplier.id}`} className="hover:underline hover:text-blue-600">{order.supplier.name}</Link>
+            ) : order.supplier.name}
+            {order.orderDetails && (
               <span className="font-normal text-muted-foreground">
                 {" "}
-                -- {item.order.orderDetails}
+                -- {order.orderDetails}
               </span>
             )}
           </p>
@@ -362,10 +368,22 @@ function OrderToPlaceCard({ item }: { item: TodoItem }) {
             <Link href={`/jobs/${item.jobId}`} className="font-medium text-foreground hover:underline hover:text-blue-600">{item.jobName}</Link>
           </p>
         </div>
-        <Button variant="outline" size="xs">
-          Send Order
-          <ArrowRight className="size-3" data-icon="inline-end" />
-        </Button>
+        <div className="flex shrink-0 gap-1.5">
+          {mailto && (
+            <Button variant="outline" size="xs"
+              onClick={async () => { window.open(mailto, "_blank"); await updateOrderStatus(order.id, "ORDERED"); }}>
+              <Mail className="size-3" />
+              <span className="hidden sm:inline">Send Order</span>
+            </Button>
+          )}
+          {!mailto && (
+            <Button variant="outline" size="xs"
+              onClick={async () => { await updateOrderStatus(order.id, "ORDERED"); }}>
+              <Package className="size-3" />
+              <span className="hidden sm:inline">Place Order</span>
+            </Button>
+          )}
+        </div>
       </CardContent>
     </Card>
   );

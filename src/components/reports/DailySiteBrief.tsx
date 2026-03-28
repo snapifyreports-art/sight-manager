@@ -31,6 +31,7 @@ import {
   ShoppingCart,
   MapPin,
   CalendarClock,
+  Mail,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -140,12 +141,12 @@ interface BriefData {
     assignedTo: { name: string } | null;
     contact: { name: string; company: string | null } | null;
   }>;
-  outstandingOrders: Array<{
+  ordersToPlace: Array<{
     id: string;
     itemsDescription: string | null;
     status: string;
     expectedDeliveryDate: string | null;
-    supplier: { id: string; name: string };
+    supplier: { id: string; name: string; contactEmail: string | null; contactName: string | null };
     job: { id: string; name: string; plot: { plotNumber: string | null; name: string } };
   }>;
   jobsStartingTomorrow: Array<{
@@ -1127,23 +1128,23 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
         </Card>
       </div>
 
-      {/* Outstanding orders - v2 */}
-      {data.outstandingOrders.length > 0 && (
+      {/* Orders to Place */}
+      {data.ordersToPlace.length > 0 && (
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-sm">
               <ShoppingCart className="size-4 text-violet-600" />
-              Outstanding Orders ({data.outstandingOrders.length})
+              Orders to Place ({data.ordersToPlace.length})
             </CardTitle>
-            <CardDescription className="text-xs">Pending, ordered and confirmed material orders</CardDescription>
+            <CardDescription className="text-xs">Orders created but not yet sent to supplier</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="space-y-2">
-              {data.outstandingOrders.map((o) => {
-                const isPending = o.status === "PENDING";
-                const isOrdered = o.status === "ORDERED";
-                const isConfirmed = o.status === "CONFIRMED";
+              {data.ordersToPlace.map((o) => {
                 const isPendingAction = pendingOrderActions.has(o.id);
+                const mailto = o.supplier.contactEmail
+                  ? `mailto:${encodeURIComponent(o.supplier.contactEmail)}?subject=${encodeURIComponent(`Material Order — ${o.job.plot.plotNumber ? `Plot ${o.job.plot.plotNumber}` : o.job.plot.name}`)}&body=${encodeURIComponent(`Hi ${o.supplier.contactName || o.supplier.name},\n\nPlease supply the following for ${o.job.name}:\n\n${o.itemsDescription || "Materials as discussed"}${o.expectedDeliveryDate ? `\n\nRequired by: ${format(new Date(o.expectedDeliveryDate), "dd MMM yyyy")}` : ""}\n\nPlease confirm receipt.\n\nRegards`)}`
+                  : null;
                 return (
                   <div key={o.id} className="flex items-start justify-between gap-2 rounded border p-2 text-sm">
                     <div className="min-w-0 flex-1">
@@ -1151,24 +1152,11 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                         <Link href={`/suppliers/${o.supplier.id}`} className="truncate font-medium text-blue-600 hover:underline">
                           {o.supplier.name}
                         </Link>
-                        <Badge
-                          variant="outline"
-                          className={`shrink-0 text-[10px] ${
-                            isConfirmed ? "border-green-200 text-green-700" :
-                            isOrdered ? "border-blue-200 text-blue-700" :
-                            "border-slate-200 text-slate-600"
-                          }`}
-                        >
-                          {o.status}
-                        </Badge>
-                        {o.expectedDeliveryDate && (() => {
-                          const isLate = new Date(o.expectedDeliveryDate) < new Date();
-                          return (
-                            <span className={`text-[10px] ${isLate ? "font-semibold text-red-600" : "text-muted-foreground"}`}>
-                              {isLate ? "⚠ " : ""}{format(new Date(o.expectedDeliveryDate), "dd MMM")}
-                            </span>
-                          );
-                        })()}
+                        {o.expectedDeliveryDate && (
+                          <span className="text-[10px] text-muted-foreground">
+                            needed {format(new Date(o.expectedDeliveryDate), "dd MMM")}
+                          </span>
+                        )}
                       </div>
                       <p className="text-xs text-muted-foreground">{o.itemsDescription || "—"}</p>
                       <p className="text-xs text-muted-foreground">
@@ -1181,24 +1169,16 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                         <Loader2 className="size-4 animate-spin text-muted-foreground" />
                       ) : (
                         <>
-                          {isPending && (
-                            <Button variant="outline" size="sm" className="h-6 border-blue-200 px-2 text-[10px] text-blue-700 hover:bg-blue-50"
-                              onClick={() => handleOrderAction(o.id, "ORDERED")}>
-                              <Package className="mr-1 size-2.5" />Place Order
-                            </Button>
-                          )}
-                          {isOrdered && (
-                            <Button variant="outline" size="sm" className="h-6 border-green-200 px-2 text-[10px] text-green-700 hover:bg-green-50"
-                              onClick={() => handleOrderAction(o.id, "CONFIRMED")}>
-                              <Check className="mr-1 size-2.5" />Confirm
-                            </Button>
-                          )}
-                          {(isOrdered || isConfirmed) && (
+                          {mailto && (
                             <Button variant="outline" size="sm" className="h-6 border-violet-200 px-2 text-[10px] text-violet-700 hover:bg-violet-50"
-                              onClick={() => handleOrderAction(o.id, "DELIVERED")}>
-                              <CheckCircle2 className="mr-1 size-2.5" />Delivered
+                              onClick={() => { window.open(mailto, "_blank"); handleOrderAction(o.id, "ORDERED"); }}>
+                              <Mail className="mr-1 size-2.5" />Send Order
                             </Button>
                           )}
+                          <Button variant="outline" size="sm" className="h-6 border-blue-200 px-2 text-[10px] text-blue-700 hover:bg-blue-50"
+                            onClick={() => handleOrderAction(o.id, "ORDERED")}>
+                            <Package className="mr-1 size-2.5" />{mailto ? "Mark Sent" : "Place Order"}
+                          </Button>
                         </>
                       )}
                     </div>

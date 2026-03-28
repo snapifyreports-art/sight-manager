@@ -31,7 +31,7 @@ export async function GET(
           orders: {
             include: {
               supplier: {
-                select: { id: true, name: true },
+                select: { id: true, name: true, contactEmail: true, contactName: true },
               },
               orderItems: true,
             },
@@ -94,7 +94,7 @@ export async function PUT(
           orders: {
             include: {
               supplier: {
-                select: { id: true, name: true },
+                select: { id: true, name: true, contactEmail: true, contactName: true },
               },
               orderItems: true,
             },

@@ -25,7 +25,7 @@ export async function GET(
       },
     },
     include: {
-      supplier: { select: { id: true, name: true } },
+      supplier: { select: { id: true, name: true, contactEmail: true, contactName: true } },
       job: {
         select: {
           id: true,
