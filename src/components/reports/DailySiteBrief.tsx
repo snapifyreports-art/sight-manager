@@ -149,6 +149,14 @@ interface BriefData {
     supplier: { id: string; name: string; contactEmail: string | null; contactName: string | null };
     job: { id: string; name: string; plot: { plotNumber: string | null; name: string } };
   }>;
+  upcomingOrders: Array<{
+    id: string;
+    itemsDescription: string | null;
+    status: string;
+    expectedDeliveryDate: string | null;
+    supplier: { id: string; name: string; contactEmail: string | null; contactName: string | null };
+    job: { id: string; name: string; plot: { plotNumber: string | null; name: string } };
+  }>;
   jobsStartingTomorrow: Array<{
     id: string;
     name: string;
@@ -1141,6 +1149,68 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
           <CardContent>
             <div className="space-y-2">
               {data.ordersToPlace.map((o) => {
+                const isPendingAction = pendingOrderActions.has(o.id);
+                const mailto = o.supplier.contactEmail
+                  ? `mailto:${encodeURIComponent(o.supplier.contactEmail)}?subject=${encodeURIComponent(`Material Order — ${o.job.plot.plotNumber ? `Plot ${o.job.plot.plotNumber}` : o.job.plot.name}`)}&body=${encodeURIComponent(`Hi ${o.supplier.contactName || o.supplier.name},\n\nPlease supply the following for ${o.job.name}:\n\n${o.itemsDescription || "Materials as discussed"}${o.expectedDeliveryDate ? `\n\nRequired by: ${format(new Date(o.expectedDeliveryDate), "dd MMM yyyy")}` : ""}\n\nPlease confirm receipt.\n\nRegards`)}`
+                  : null;
+                return (
+                  <div key={o.id} className="flex items-start justify-between gap-2 rounded border p-2 text-sm">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <Link href={`/suppliers/${o.supplier.id}`} className="truncate font-medium text-blue-600 hover:underline">
+                          {o.supplier.name}
+                        </Link>
+                        {o.expectedDeliveryDate && (
+                          <span className="text-[10px] text-muted-foreground">
+                            needed {format(new Date(o.expectedDeliveryDate), "dd MMM")}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground">{o.itemsDescription || "—"}</p>
+                      <p className="text-xs text-muted-foreground">
+                        <Link href={`/jobs/${o.job.id}`} className="hover:underline hover:text-blue-600">{o.job.name}</Link>
+                        {" · "}{o.job.plot.plotNumber ? `Plot ${o.job.plot.plotNumber}` : o.job.plot.name}
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 flex-col items-end gap-1">
+                      {isPendingAction ? (
+                        <Loader2 className="size-4 animate-spin text-muted-foreground" />
+                      ) : (
+                        <>
+                          {mailto && (
+                            <Button variant="outline" size="sm" className="h-6 border-violet-200 px-2 text-[10px] text-violet-700 hover:bg-violet-50"
+                              onClick={() => { window.open(mailto, "_blank"); handleOrderAction(o.id, "ORDERED"); }}>
+                              <Mail className="mr-1 size-2.5" />Send Order
+                            </Button>
+                          )}
+                          <Button variant="outline" size="sm" className="h-6 border-blue-200 px-2 text-[10px] text-blue-700 hover:bg-blue-50"
+                            onClick={() => handleOrderAction(o.id, "ORDERED")}>
+                            <Package className="mr-1 size-2.5" />{mailto ? "Mark Sent" : "Place Order"}
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Upcoming Orders (future, scheduled) */}
+      {data.upcomingOrders.length > 0 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-sm">
+              <ShoppingCart className="size-4 text-slate-500" />
+              Upcoming Orders ({data.upcomingOrders.length})
+            </CardTitle>
+            <CardDescription className="text-xs">Orders scheduled for future placement</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {data.upcomingOrders.map((o) => {
                 const isPendingAction = pendingOrderActions.has(o.id);
                 const mailto = o.supplier.contactEmail
                   ? `mailto:${encodeURIComponent(o.supplier.contactEmail)}?subject=${encodeURIComponent(`Material Order — ${o.job.plot.plotNumber ? `Plot ${o.job.plot.plotNumber}` : o.job.plot.name}`)}&body=${encodeURIComponent(`Hi ${o.supplier.contactName || o.supplier.name},\n\nPlease supply the following for ${o.job.name}:\n\n${o.itemsDescription || "Materials as discussed"}${o.expectedDeliveryDate ? `\n\nRequired by: ${format(new Date(o.expectedDeliveryDate), "dd MMM yyyy")}` : ""}\n\nPlease confirm receipt.\n\nRegards`)}`

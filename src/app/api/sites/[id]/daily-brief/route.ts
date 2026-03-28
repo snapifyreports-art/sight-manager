@@ -107,7 +107,7 @@ export async function GET(
   const tomorrowStart = startOfDay(addDays(targetDate, 1));
   const tomorrowEnd = endOfDay(addDays(targetDate, 1));
 
-  const [overdueDeliveries, openSnags, openSnagsList, rainedOff, outstandingOrders, jobsStartingTomorrow] = await Promise.all([
+  const [overdueDeliveries, openSnags, openSnagsList, rainedOff, outstandingOrders, upcomingOrders, jobsStartingTomorrow] = await Promise.all([
     prisma.materialOrder.findMany({
       where: {
         job: { plot: { siteId: id } },
@@ -138,14 +138,12 @@ export async function GET(
     prisma.rainedOffDay.findFirst({
       where: { siteId: id, date: { gte: dayStart, lte: dayEnd } },
     }),
+    // Orders to Place: PENDING where dateOfOrder is today or past (should have been sent by now)
     prisma.materialOrder.findMany({
       where: {
         job: { plot: { siteId: id } },
         status: "PENDING",
-        OR: [
-          { expectedDeliveryDate: { gte: dayStart } },
-          { expectedDeliveryDate: null },
-        ],
+        dateOfOrder: { lte: dayEnd },
       },
       select: {
         id: true, itemsDescription: true, status: true, expectedDeliveryDate: true,
@@ -154,6 +152,21 @@ export async function GET(
       },
       orderBy: { dateOfOrder: "asc" },
       take: 30,
+    }),
+    // Upcoming Orders: PENDING where dateOfOrder is in the future (scheduled, not yet due)
+    prisma.materialOrder.findMany({
+      where: {
+        job: { plot: { siteId: id } },
+        status: "PENDING",
+        dateOfOrder: { gt: dayEnd },
+      },
+      select: {
+        id: true, itemsDescription: true, status: true, expectedDeliveryDate: true,
+        supplier: { select: { id: true, name: true, contactEmail: true, contactName: true } },
+        job: { select: { id: true, name: true, plot: { select: { plotNumber: true, name: true } } } },
+      },
+      orderBy: { dateOfOrder: "asc" },
+      take: 20,
     }),
     prisma.job.findMany({
       where: {
@@ -232,6 +245,10 @@ export async function GET(
     })),
     openSnagsList,
     ordersToPlace: outstandingOrders.map((o) => ({
+      ...o,
+      expectedDeliveryDate: o.expectedDeliveryDate?.toISOString() ?? null,
+    })),
+    upcomingOrders: upcomingOrders.map((o) => ({
       ...o,
       expectedDeliveryDate: o.expectedDeliveryDate?.toISOString() ?? null,
     })),
