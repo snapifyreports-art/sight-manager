@@ -556,14 +556,16 @@ export function OrdersClient({
     }
   }, [searchParams, orders, selectedOrder]);
 
+  const siteFilter = searchParams.get("site") ?? "";
+
   const filteredOrders = useMemo(() => {
     return orders.filter((order) => {
       if (statusFilter !== "ALL" && order.status !== statusFilter) return false;
-      if (supplierFilter !== "ALL" && order.supplierId !== supplierFilter)
-        return false;
+      if (supplierFilter !== "ALL" && order.supplierId !== supplierFilter) return false;
+      if (siteFilter && order.job.plot.siteId !== siteFilter) return false;
       return true;
     });
-  }, [orders, statusFilter, supplierFilter]);
+  }, [orders, statusFilter, supplierFilter, siteFilter]);
 
   // Stats
   const stats = useMemo(() => {

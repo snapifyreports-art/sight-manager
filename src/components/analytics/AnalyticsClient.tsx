@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useSearchParams } from "next/navigation";
 import { useDevDate } from "@/lib/dev-date-context";
 import {
   BarChart,
@@ -32,7 +33,6 @@ import {
   Truck,
   Users,
   BarChart3,
-  Filter,
   CloudRain,
 } from "lucide-react";
 
@@ -225,9 +225,10 @@ function RAGBadge({ value }: { value: number | null }) {
 
 export function AnalyticsClient() {
   const { devDate } = useDevDate();
+  const searchParams = useSearchParams();
+  const siteFilter = searchParams.get("site") ?? "";
   const [data, setData] = useState<AnalyticsData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [siteFilter, setSiteFilter] = useState<string>("");
 
   useEffect(() => {
     const url = siteFilter
@@ -283,23 +284,6 @@ export function AnalyticsClient() {
             Performance insights across your sites and teams
           </p>
         </div>
-        {data.siteProgress.length > 1 && (
-          <div className="flex items-center gap-2">
-            <Filter className="size-4 text-muted-foreground" />
-            <select
-              className="rounded-lg border bg-white px-3 py-1.5 text-sm"
-              value={siteFilter}
-              onChange={(e) => setSiteFilter(e.target.value)}
-            >
-              <option value="">All Sites</option>
-              {data.siteProgress.map((s) => (
-                <option key={s.siteId} value={s.siteId}>
-                  {s.siteName}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
       </div>
 
       {/* Summary Cards */}

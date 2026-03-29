@@ -1,23 +1,22 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams, useRouter } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
+import { useEffect, useState, Suspense } from "react";
 import {
   HardHat,
   LayoutDashboard,
-  ClipboardList,
   Building2,
   ShoppingCart,
   Package,
-  Users,
-  ScrollText,
   BarChart3,
   Settings,
   LogOut,
   ChevronLeft,
+  ChevronDown,
   Menu,
-  UserCog,
+  CalendarDays,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { NAV_PERMISSION_MAP } from "@/lib/permissions";
@@ -35,20 +34,57 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { useState } from "react";
 
+// Site sub-nav tabs grouped into sections
+const SITE_TAB_GROUPS = [
+  {
+    label: "Manage Site",
+    tabs: [
+      { label: "Daily Brief",  tab: "daily-brief" },
+      { label: "Programme",    tab: "programme" },
+      { label: "Plots",        tab: "plots" },
+      { label: "Snags",        tab: "snags" },
+      { label: "Day Sheets",   tab: "day-sheets" },
+    ],
+  },
+  {
+    label: "Site Reporting",
+    tabs: [
+      { label: "Heatmap",        tab: "heatmap" },
+      { label: "Weekly Report",  tab: "weekly-report" },
+      { label: "Budget",         tab: "budget" },
+      { label: "Cash Flow",      tab: "cash-flow" },
+      { label: "Orders",         tab: "orders" },
+      { label: "Delays",         tab: "delays" },
+      { label: "Calendar",       tab: "calendar" },
+      { label: "Site Log",       tab: "log" },
+    ],
+  },
+  {
+    label: "Site Admin",
+    tabs: [
+      { label: "Documents",     tab: "documents" },
+      { label: "Critical Path", tab: "critical-path" },
+      { label: "QR Codes",      tab: "qr-codes" },
+    ],
+  },
+];
+
+// Main nav items (site-contextual)
 const navItems = [
   { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-  { label: "Tasks", href: "/tasks", icon: ClipboardList },
-  { label: "Sites", href: "/sites", icon: Building2 },
+  { label: "Daily Brief", href: "/daily-brief", icon: CalendarDays },
   { label: "Orders", href: "/orders", icon: ShoppingCart },
   { label: "Suppliers", href: "/suppliers", icon: Package },
   { label: "Contractors", href: "/contacts", icon: HardHat },
-  { label: "Events Log", href: "/events-log", icon: ScrollText },
   { label: "Analytics", href: "/analytics", icon: BarChart3 },
-  { label: "Users", href: "/users", icon: UserCog },
+];
+
+// Truly global items — always at the bottom
+const adminNavItems = [
   { label: "Settings", href: "/settings", icon: Settings },
 ];
+
 
 function formatRole(role: string) {
   return role
@@ -69,15 +105,75 @@ function getInitials(name: string | null | undefined) {
 
 function SidebarNav({ collapsed = false }: { collapsed?: boolean }) {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const currentTab = searchParams.get("tab") || "plots";
   const { data: session } = useSession();
+
+  // Detect current site from URL
+  const siteMatch = pathname.match(/^\/sites\/([^/]+)/);
+  const siteIdFromPath = siteMatch?.[1];
+
+  // Only navigate to /sites/[id] if already on a site page; everywhere else update ?site= in-place
+  const isOnSitePage = !!siteIdFromPath;
+
+  const [selectedSiteId, setSelectedSiteId] = useState(siteIdFromPath || "");
+  const [sites, setSites] = useState<{ id: string; name: string; status: string }[]>([]);
+
+  // Which group label is open — auto-open the one containing the active tab
+  const activeGroupLabel = SITE_TAB_GROUPS.find((g) =>
+    g.tabs.some((t) => t.tab === currentTab)
+  )?.label ?? null;
+  const [openGroups, setOpenGroups] = useState<Set<string>>(
+    () => new Set(activeGroupLabel ? [activeGroupLabel] : [])
+  );
+  const toggleGroup = (label: string) =>
+    setOpenGroups((prev) => {
+      const next = new Set(prev);
+      next.has(label) ? next.delete(label) : next.add(label);
+      return next;
+    });
+
+  // Fetch sites list for the picker
+  useEffect(() => {
+    fetch("/api/sites")
+      .then((r) => r.json())
+      .then((data) => {
+        if (Array.isArray(data)) {
+          setSites(data.map((s: { id: string; name: string; status: string }) => ({
+            id: s.id,
+            name: s.name,
+            status: s.status,
+          })));
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  // Auto-select site from URL — either from /sites/[id] path or ?site= param
+  useEffect(() => {
+    if (siteIdFromPath) {
+      setSelectedSiteId(siteIdFromPath);
+    } else {
+      setSelectedSiteId(searchParams.get("site") ?? "");
+    }
+  }, [siteIdFromPath, searchParams]);
+
+  // Context-aware daily brief href
+  const getNavHref = (href: string) => {
+    if (href === "/daily-brief" && siteIdFromPath) {
+      return `/daily-brief?site=${siteIdFromPath}`;
+    }
+    return href;
+  };
 
   return (
     <div className="flex h-full flex-col">
       {/* Logo */}
-      <div className={cn("flex h-16 items-center gap-3 px-4", collapsed && "justify-center px-2")}>
+      <div className={cn("flex h-14 items-center gap-3 border-b border-border/40 px-4", collapsed && "justify-center px-2")}>
         <Link href="/dashboard" className="flex items-center gap-3">
-          <div className="flex size-9 items-center justify-center rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-600/25">
-            <HardHat className="size-5" />
+          <div className="flex size-8 items-center justify-center rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-600/25">
+            <HardHat className="size-4" />
           </div>
           {!collapsed && (
             <span className="text-[15px] font-bold tracking-tight text-foreground">
@@ -87,54 +183,141 @@ function SidebarNav({ collapsed = false }: { collapsed?: boolean }) {
         </Link>
       </div>
 
+      {/* Site navigation block */}
+      {!collapsed && (
+        <div className="border-b border-border/40 px-3 pb-3 pt-2">
+          <p className="mb-1.5 px-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50">
+            Site Navigation
+          </p>
+          <select
+            value={selectedSiteId}
+            onChange={(e) => {
+              const id = e.target.value;
+              setSelectedSiteId(id);
+              if (isOnSitePage) {
+                // On a site page, navigate to the same tab on the new site
+                if (id) {
+                  window.location.href = `/sites/${id}?tab=${currentTab}`;
+                } else {
+                  window.location.href = "/sites";
+                }
+              } else {
+                // Everywhere else, update ?site= in-place (never navigate away)
+                const params = new URLSearchParams(searchParams.toString());
+                if (id) { params.set("site", id); } else { params.delete("site"); }
+                router.push(`${pathname}?${params.toString()}`);
+              }
+            }}
+            className="w-full rounded-md border border-border/60 bg-background px-2 py-1.5 text-[12px] text-foreground shadow-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+          >
+            <option value="">— All sites —</option>
+            {sites.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+                {s.status === "ON_HOLD" ? " (on hold)" : s.status === "COMPLETED" ? " ✓" : ""}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
       {/* Nav Links */}
-      <ScrollArea className="flex-1 py-2">
+      <ScrollArea className="flex-1 overflow-hidden py-2">
         <nav className={cn("flex flex-col gap-0.5", collapsed ? "px-2" : "px-3")}>
-          {navItems.filter((item) => {
-            const requiredPermission = NAV_PERMISSION_MAP[item.href];
-            if (!requiredPermission) return true;
-            const userPermissions = (session?.user as { permissions?: string[] })?.permissions;
-            if (!userPermissions) return true;
-            return userPermissions.includes(requiredPermission);
-          }).map((item) => {
-            const isActive =
-              pathname === item.href ||
-              (item.href !== "/dashboard" && pathname.startsWith(item.href));
-            const Icon = item.icon;
 
-            const linkContent = (
-              <Link
-                href={item.href}
-                className={cn(
-                  "group flex items-center gap-3 rounded-lg px-3 py-2.5 text-[13px] font-medium transition-all duration-150",
-                  isActive
-                    ? "bg-gradient-to-r from-blue-600/[0.12] to-blue-600/[0.04] text-blue-700 shadow-sm shadow-blue-600/5"
-                    : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
-                  collapsed && "justify-center px-2"
+          {/* Site section groups — styled like regular nav, shown when site selected */}
+          {!collapsed && selectedSiteId && SITE_TAB_GROUPS.map((group) => {
+            const isOpen = openGroups.has(group.label);
+            const hasActive = siteIdFromPath === selectedSiteId &&
+              group.tabs.some((t) => t.tab === currentTab);
+            return (
+              <div key={group.label} className="relative">
+                {hasActive && (
+                  <div className="absolute left-0 h-6 w-[3px] rounded-r-full bg-blue-600 top-[10px]" />
                 )}
-              >
-                {isActive && !collapsed && (
-                  <div className="absolute left-0 h-6 w-[3px] rounded-r-full bg-blue-600" />
+                <button
+                  onClick={() => toggleGroup(group.label)}
+                  className={cn(
+                    "group flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-[13px] font-medium transition-all duration-150",
+                    hasActive
+                      ? "bg-gradient-to-r from-blue-600/[0.12] to-blue-600/[0.04] text-blue-700"
+                      : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+                  )}
+                >
+                  <Building2 className={cn(
+                    "size-[18px] shrink-0",
+                    hasActive ? "text-blue-600" : "text-muted-foreground/70 group-hover:text-foreground"
+                  )} />
+                  <span className="flex-1 text-left">{group.label}</span>
+                  <ChevronDown className={cn(
+                    "size-3.5 shrink-0 transition-transform duration-200",
+                    isOpen && "rotate-180"
+                  )} />
+                </button>
+                {isOpen && (
+                  <div className="mb-1 pl-9">
+                    {group.tabs.map((t) => {
+                      const href = `/sites/${selectedSiteId}?tab=${t.tab}`;
+                      const isActive = siteIdFromPath === selectedSiteId && currentTab === t.tab;
+                      return (
+                        <Link
+                          key={t.tab}
+                          href={href}
+                          className={cn(
+                            "flex items-center rounded-md px-2 py-1 text-[12px] transition-colors",
+                            isActive
+                              ? "font-medium text-blue-700"
+                              : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+                          )}
+                        >
+                          {t.label}
+                        </Link>
+                      );
+                    })}
+                  </div>
                 )}
-                <Icon className={cn(
-                  "size-[18px] shrink-0 transition-colors",
-                  isActive ? "text-blue-600" : "text-muted-foreground/70 group-hover:text-foreground"
-                )} />
-                {!collapsed && <span>{item.label}</span>}
-              </Link>
+              </div>
             );
-
-            if (collapsed) {
-              return (
-                <Tooltip key={item.href}>
-                  <TooltipTrigger render={linkContent} />
-                  <TooltipContent side="right">{item.label}</TooltipContent>
-                </Tooltip>
-              );
-            }
-
-            return <div key={item.href} className="relative">{linkContent}</div>;
           })}
+
+          {/* Main nav items — site-contextual */}
+          {navItems.filter((item) => {
+            const req = NAV_PERMISSION_MAP[item.href];
+            if (!req) return true;
+            const perms = (session?.user as { permissions?: string[] })?.permissions;
+            return !perms || perms.includes(req);
+          }).map((item) => renderNavItem(item, pathname, collapsed, getNavHref))}
+
+          {/* Admin items — truly global, separated */}
+          {!collapsed && <div className="my-1 border-t border-border/40" />}
+          {adminNavItems.filter((item) => {
+            const req = NAV_PERMISSION_MAP[item.href];
+            if (!req) return true;
+            const perms = (session?.user as { permissions?: string[] })?.permissions;
+            return !perms || perms.includes(req);
+          }).map((item) => renderNavItem(item, pathname, collapsed, getNavHref))}
+
+          {/* Collapsed: Sites icon link */}
+          {collapsed && (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Link
+                    href="/sites"
+                    className={cn(
+                      "flex items-center justify-center rounded-lg px-2 py-2.5 transition-all duration-150",
+                      siteIdFromPath
+                        ? "bg-gradient-to-r from-blue-600/[0.12] to-blue-600/[0.04] text-blue-700"
+                        : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+                    )}
+                  />
+                }
+              >
+                <Building2 className={cn("size-[18px]", siteIdFromPath ? "text-blue-600" : "text-muted-foreground/70")} />
+              </TooltipTrigger>
+              <TooltipContent side="right">Sites</TooltipContent>
+            </Tooltip>
+          )}
         </nav>
       </ScrollArea>
 
@@ -194,6 +377,52 @@ function SidebarNav({ collapsed = false }: { collapsed?: boolean }) {
   );
 }
 
+// Shared nav item renderer
+function renderNavItem(
+  item: { label: string; href: string; icon: React.ElementType },
+  pathname: string,
+  collapsed: boolean,
+  getNavHref: (href: string) => string
+) {
+  const isActive =
+    pathname === item.href ||
+    (item.href !== "/dashboard" && pathname.startsWith(item.href));
+  const Icon = item.icon;
+
+  const linkContent = (
+    <Link
+      href={getNavHref(item.href)}
+      className={cn(
+        "group flex items-center gap-3 rounded-lg px-3 py-2.5 text-[13px] font-medium transition-all duration-150",
+        isActive
+          ? "bg-gradient-to-r from-blue-600/[0.12] to-blue-600/[0.04] text-blue-700 shadow-sm shadow-blue-600/5"
+          : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
+        collapsed && "justify-center px-2"
+      )}
+    >
+      {isActive && !collapsed && (
+        <div className="absolute left-0 h-6 w-[3px] rounded-r-full bg-blue-600" />
+      )}
+      <Icon className={cn(
+        "size-[18px] shrink-0 transition-colors",
+        isActive ? "text-blue-600" : "text-muted-foreground/70 group-hover:text-foreground"
+      )} />
+      {!collapsed && <span>{item.label}</span>}
+    </Link>
+  );
+
+  if (collapsed) {
+    return (
+      <Tooltip key={item.href}>
+        <TooltipTrigger render={linkContent} />
+        <TooltipContent side="right">{item.label}</TooltipContent>
+      </Tooltip>
+    );
+  }
+
+  return <div key={item.href} className="relative">{linkContent}</div>;
+}
+
 export function Sidebar() {
   const [collapsed, setCollapsed] = useState(false);
 
@@ -205,7 +434,9 @@ export function Sidebar() {
       )}
     >
       <div className="relative flex-1 overflow-hidden">
-        <SidebarNav collapsed={collapsed} />
+        <Suspense fallback={null}>
+          <SidebarNav collapsed={collapsed} />
+        </Suspense>
         <Button
           variant="outline"
           size="icon-xs"
@@ -225,8 +456,27 @@ export function Sidebar() {
 }
 
 export function MobileSidebar() {
+  const [open, setOpen] = useState(false);
+
+  // Swipe right from left edge to open, swipe left to close
+  useEffect(() => {
+    let startX = 0;
+    const onTouchStart = (e: TouchEvent) => { startX = e.touches[0].clientX; };
+    const onTouchEnd = (e: TouchEvent) => {
+      const dx = e.changedTouches[0].clientX - startX;
+      if (dx > 60 && startX < 48) setOpen(true);
+      if (dx < -60) setOpen(false);
+    };
+    document.addEventListener("touchstart", onTouchStart, { passive: true });
+    document.addEventListener("touchend", onTouchEnd, { passive: true });
+    return () => {
+      document.removeEventListener("touchstart", onTouchStart);
+      document.removeEventListener("touchend", onTouchEnd);
+    };
+  }, []);
+
   return (
-    <Sheet>
+    <Sheet open={open} onOpenChange={setOpen}>
       <SheetTrigger
         render={
           <Button variant="ghost" size="icon" className="md:hidden" />
@@ -237,8 +487,61 @@ export function MobileSidebar() {
       </SheetTrigger>
       <SheetContent side="left" className="w-[260px] p-0" showCloseButton={false}>
         <SheetTitle className="sr-only">Navigation</SheetTitle>
-        <SidebarNav />
+        <Suspense fallback={null}>
+          <SidebarNav />
+        </Suspense>
       </SheetContent>
     </Sheet>
+  );
+}
+
+export function MobileSiteBar() {
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const [sites, setSites] = useState<{ id: string; name: string }[]>([]);
+
+  const siteMatch = pathname.match(/^\/sites\/([^/]+)/);
+  const siteIdFromPath = siteMatch?.[1] ?? "";
+  const siteParam = searchParams.get("site") ?? "";
+  const selectedSiteId = siteIdFromPath || siteParam;
+
+  useEffect(() => {
+    fetch("/api/sites")
+      .then((r) => r.json())
+      .then((data) => { if (Array.isArray(data)) setSites(data); })
+      .catch(() => {});
+  }, []);
+
+  const isOnSitePage = !!siteMatch?.[1];
+  const currentTab = searchParams.get("tab") || "daily-brief";
+
+  const handleChange = (id: string) => {
+    if (isOnSitePage) {
+      if (id) { window.location.href = `/sites/${id}?tab=${currentTab}`; }
+      else { window.location.href = "/sites"; }
+    } else {
+      const params = new URLSearchParams(searchParams.toString());
+      if (id) { params.set("site", id); } else { params.delete("site"); }
+      router.push(`${pathname}?${params.toString()}`);
+    }
+  };
+
+  return (
+    <Suspense fallback={null}>
+      <div className="flex items-center gap-2 border-b border-border/40 bg-slate-50 px-3 py-1.5 md:hidden">
+        <Building2 className="size-3.5 shrink-0 text-muted-foreground" />
+        <select
+          value={selectedSiteId}
+          onChange={(e) => handleChange(e.target.value)}
+          className="flex-1 bg-transparent text-[12px] text-foreground focus:outline-none"
+        >
+          <option value="">— All sites —</option>
+          {sites.map((s) => (
+            <option key={s.id} value={s.id}>{s.name}</option>
+          ))}
+        </select>
+      </div>
+    </Suspense>
   );
 }

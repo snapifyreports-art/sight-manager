@@ -32,7 +32,11 @@ import {
   MapPin,
   CalendarClock,
   Mail,
+  Camera,
+  FileCheck,
+  ChevronDown,
 } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -294,6 +298,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
   const [date, setDate] = useState(getCurrentDate());
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [upcomingOrdersOpen, setUpcomingOrdersOpen] = useState(false);
 
   // Quick action state (UX #1)
   const [pendingActions, setPendingActions] = useState<Set<string>>(new Set());
@@ -323,6 +328,18 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
   // Snag & order inline actions
   const [pendingSnagActions, setPendingSnagActions] = useState<Set<string>>(new Set());
   const [pendingOrderActions, setPendingOrderActions] = useState<Set<string>>(new Set());
+
+  // Sign-off dialog state
+  const [signOffTarget, setSignOffTarget] = useState<{
+    id: string;
+    name: string;
+    plot: { plotNumber: string | null; name: string };
+    assignedTo: { name: string } | null;
+  } | null>(null);
+  const [signOffNotes, setSignOffNotes] = useState("");
+  const [signOffPhotos, setSignOffPhotos] = useState<File[]>([]);
+  const [signOffPreviews, setSignOffPreviews] = useState<string[]>([]);
+  const [signOffSubmitting, setSignOffSubmitting] = useState(false);
 
   const fetchData = useCallback(() => {
     setLoading(true);
@@ -530,6 +547,63 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
       if (res.ok) setRefreshKey((k) => k + 1);
     } catch { /* ignore */ } finally {
       setPendingOrderActions((prev) => { const n = new Set(prev); n.delete(orderId); return n; });
+    }
+  };
+
+  // Sign-off dialog handlers
+  const handleOpenSignOff = (job: { id: string; name: string; plot: { plotNumber: string | null; name: string }; assignedTo: { name: string } | null }) => {
+    setSignOffTarget(job);
+    setSignOffNotes("");
+    setSignOffPhotos([]);
+    setSignOffPreviews([]);
+  };
+
+  const handleSignOffPhotosChange = (files: FileList | null) => {
+    if (!files) return;
+    const arr = Array.from(files);
+    setSignOffPhotos((prev) => [...prev, ...arr]);
+    setSignOffPreviews((prev) => [...prev, ...arr.map((f) => URL.createObjectURL(f))]);
+  };
+
+  const removeSignOffPhoto = (index: number) => {
+    URL.revokeObjectURL(signOffPreviews[index]);
+    setSignOffPhotos((prev) => prev.filter((_, i) => i !== index));
+    setSignOffPreviews((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const handleSignOffSubmit = async () => {
+    if (!signOffTarget) return;
+    setSignOffSubmitting(true);
+    try {
+      if (signOffPhotos.length > 0) {
+        const fd = new FormData();
+        signOffPhotos.forEach((f) => fd.append("photos", f));
+        fd.append("tag", "after");
+        await fetch(`/api/jobs/${signOffTarget.id}/photos`, { method: "POST", body: fd });
+      }
+      const res = await fetch(`/api/jobs/${signOffTarget.id}/actions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "complete", signOffNotes: signOffNotes.trim() || undefined }),
+      });
+      if (res.ok) {
+        const result = await res.json();
+        signOffPreviews.forEach((url) => URL.revokeObjectURL(url));
+        setSignOffTarget(null);
+        setRefreshKey((k) => k + 1);
+        if (result.endDate && result.actualEndDate) {
+          const delta = differenceInCalendarDays(new Date(result.actualEndDate), new Date(result.endDate));
+          if (delta !== 0) {
+            setCascadeTarget({ jobId: signOffTarget.id, jobName: signOffTarget.name, deltaDays: delta, endDate: result.endDate, actualEndDate: result.actualEndDate });
+            try {
+              const previewRes = await fetch(`/api/jobs/${signOffTarget.id}/cascade`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ newEndDate: result.actualEndDate }) });
+              if (previewRes.ok) setCascadePreview(await previewRes.json());
+            } catch { /* ignore */ }
+          }
+        }
+      }
+    } catch { /* ignore */ } finally {
+      setSignOffSubmitting(false);
     }
   };
 
@@ -970,35 +1044,54 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
           </CardContent>
         </Card>
 
-        {/* Jobs due today */}
+        {/* Jobs finishing today — sign-off */}
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-sm">
-              <Clock className="size-4 text-orange-600" />
-              Due Today ({data.jobsDueToday.length})
-              {!bulkMode && (() => {
-                const completable = data.jobsDueToday.filter((j) => j.status === "IN_PROGRESS");
-                return completable.length > 1 ? (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="ml-auto h-6 gap-1 border-blue-200 px-2 text-[10px] text-blue-700 hover:bg-blue-50"
-                    disabled={bulkProcessing}
-                    onClick={() => handleQuickBulk(completable.map((j) => j.id), "complete")}
-                  >
-                    {bulkProcessing ? <Loader2 className="size-3 animate-spin" /> : <CheckCircle2 className="size-2.5" />}
-                    Complete All ({completable.length})
-                  </Button>
-                ) : null;
-              })()}
+              <FileCheck className="size-4 text-emerald-600" />
+              Finishing Today ({data.jobsDueToday.length})
             </CardTitle>
+            <CardDescription className="text-xs">Jobs scheduled to complete — sign off with notes &amp; photos</CardDescription>
           </CardHeader>
           <CardContent>
             {data.jobsDueToday.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No jobs due today</p>
+              <p className="text-sm text-muted-foreground">No jobs finishing today</p>
             ) : (
               <div className="space-y-2">
-                {data.jobsDueToday.map((j) => renderJobRow(j))}
+                {data.jobsDueToday.map((j) => (
+                  <div key={j.id} className="flex items-center gap-2 rounded border p-2 text-sm">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <Link href={`/jobs/${j.id}`} className="truncate font-medium text-blue-600 hover:underline">{j.name}</Link>
+                        {j.status !== "NOT_STARTED" && (
+                          <Badge variant={j.status === "IN_PROGRESS" ? "default" : j.status === "COMPLETED" ? "secondary" : "outline"} className="shrink-0 text-[10px]">
+                            {j.status.replace(/_/g, " ")}
+                          </Badge>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        {j.plot.plotNumber ? `Plot ${j.plot.plotNumber}` : j.plot.name}
+                        {j.assignedTo && <span className="hidden sm:inline"> · {j.assignedTo.name}</span>}
+                      </p>
+                    </div>
+                    {j.status === "COMPLETED" ? (
+                      <span className="flex shrink-0 items-center gap-0.5 text-[10px] text-emerald-600">
+                        <Check className="size-3" /> Signed Off
+                      </span>
+                    ) : pendingActions.has(j.id) ? (
+                      <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
+                    ) : (
+                      <Button
+                        size="sm"
+                        className="h-7 shrink-0 gap-1 bg-emerald-600 px-2.5 text-[11px] text-white hover:bg-emerald-700"
+                        onClick={() => handleOpenSignOff(j)}
+                      >
+                        <FileCheck className="size-3" />
+                        Sign Off
+                      </Button>
+                    )}
+                  </div>
+                ))}
               </div>
             )}
           </CardContent>
@@ -1198,16 +1291,18 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
         </Card>
       )}
 
-      {/* Upcoming Orders (future, scheduled) */}
+      {/* Upcoming Orders (future, scheduled) — collapsible */}
       {data.upcomingOrders.length > 0 && (
         <Card>
-          <CardHeader className="pb-2">
+          <CardHeader className="cursor-pointer select-none pb-2" onClick={() => setUpcomingOrdersOpen((o) => !o)}>
             <CardTitle className="flex items-center gap-2 text-sm">
               <ShoppingCart className="size-4 text-slate-500" />
               Upcoming Orders ({data.upcomingOrders.length})
+              <ChevronDown className={cn("ml-auto size-4 text-muted-foreground transition-transform duration-200", upcomingOrdersOpen && "rotate-180")} />
             </CardTitle>
-            <CardDescription className="text-xs">Orders scheduled for future placement</CardDescription>
+            <CardDescription className="text-xs">Orders scheduled for future placement — click to expand</CardDescription>
           </CardHeader>
+          {upcomingOrdersOpen && (
           <CardContent>
             <div className="space-y-2">
               {data.upcomingOrders.map((o) => {
@@ -1257,6 +1352,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
               })}
             </div>
           </CardContent>
+          )}
         </Card>
       )}
 
@@ -1273,7 +1369,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="space-y-2">
+            <div className="max-h-[400px] overflow-y-auto space-y-2">
               {data.openSnagsList.map((snag) => {
                 const isPendingSnag = pendingSnagActions.has(snag.id);
                 return (
@@ -1464,6 +1560,94 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                 Confirm Extension
               </Button>
             )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Sign Off Dialog */}
+      <Dialog
+        open={!!signOffTarget}
+        onOpenChange={(open) => {
+          if (!open) {
+            signOffPreviews.forEach((url) => URL.revokeObjectURL(url));
+            setSignOffTarget(null);
+            setSignOffPhotos([]);
+            setSignOffPreviews([]);
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileCheck className="size-5 text-emerald-600" />
+              Sign Off Job
+            </DialogTitle>
+            <DialogDescription>
+              <span className="font-medium text-foreground">{signOffTarget?.name}</span>
+              {" — "}
+              {signOffTarget?.plot.plotNumber ? `Plot ${signOffTarget.plot.plotNumber}` : signOffTarget?.plot.name}
+              {signOffTarget?.assignedTo && ` · ${signOffTarget.assignedTo.name}`}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <Label>Sign-off Notes (optional)</Label>
+              <Textarea
+                placeholder="Describe work completed, any issues, or handover notes..."
+                value={signOffNotes}
+                onChange={(e) => setSignOffNotes(e.target.value)}
+                rows={3}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Photos (optional)</Label>
+              <label className="flex cursor-pointer items-center gap-2 rounded-lg border-2 border-dashed border-slate-200 p-3 transition-colors hover:border-slate-300 hover:bg-slate-50">
+                <Camera className="size-4 shrink-0 text-muted-foreground" />
+                <div>
+                  <p className="text-sm text-muted-foreground">Tap to take a photo or choose from gallery</p>
+                  <p className="text-[11px] text-muted-foreground/70">Tagged as &ldquo;after&rdquo; on the job</p>
+                </div>
+                <input
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  capture="environment"
+                  className="hidden"
+                  onChange={(e) => handleSignOffPhotosChange(e.target.files)}
+                />
+              </label>
+              {signOffPreviews.length > 0 && (
+                <div className="flex flex-wrap gap-2 pt-1">
+                  {signOffPreviews.map((url, i) => (
+                    <div key={i} className="relative">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={url} alt="" className="size-16 rounded object-cover ring-1 ring-slate-200" />
+                      <button
+                        type="button"
+                        className="absolute -right-1.5 -top-1.5 flex size-5 items-center justify-center rounded-full bg-red-600 text-white hover:bg-red-700"
+                        onClick={() => removeSignOffPhoto(i)}
+                      >
+                        <X className="size-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+          <DialogFooter>
+            <DialogClose render={<Button variant="outline" size="sm" disabled={signOffSubmitting} />}>Cancel</DialogClose>
+            <Button
+              size="sm"
+              className="bg-emerald-600 hover:bg-emerald-700"
+              disabled={signOffSubmitting}
+              onClick={handleSignOffSubmit}
+            >
+              {signOffSubmitting
+                ? <Loader2 className="mr-1.5 size-3.5 animate-spin" />
+                : <CheckCircle2 className="mr-1.5 size-3.5" />}
+              Sign Off Job
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

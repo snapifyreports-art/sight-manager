@@ -12,14 +12,28 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { Settings, User, Bell, Shield, LayoutTemplate } from "lucide-react";
+import { Settings, User, Bell, Shield, LayoutTemplate, Users } from "lucide-react";
 import { PlotTemplatesSection } from "./PlotTemplatesSection";
 import { NotificationsSection } from "./NotificationsSection";
+import { UsersClient } from "@/components/users/UsersClient";
 import type { TemplateData } from "./types";
+
+interface UserData {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  jobTitle: string | null;
+  company: string | null;
+  phone: string | null;
+  createdAt: string;
+}
 
 interface SettingsClientProps {
   user: { name: string; email: string; role: string };
   templates: TemplateData[];
+  users: UserData[];
+  currentUserId: string;
 }
 
 function formatRole(role: string) {
@@ -29,7 +43,7 @@ function formatRole(role: string) {
     .join(" ");
 }
 
-export function SettingsClient({ user, templates }: SettingsClientProps) {
+export function SettingsClient({ user, templates, users, currentUserId }: SettingsClientProps) {
   const [activeTab, setActiveTab] = useState("general");
 
   return (
@@ -64,6 +78,10 @@ export function SettingsClient({ user, templates }: SettingsClientProps) {
           <TabsTrigger value="security">
             <Shield className="size-4" />
             Security
+          </TabsTrigger>
+          <TabsTrigger value="users">
+            <Users className="size-4" />
+            Users
           </TabsTrigger>
         </TabsList>
 
@@ -130,6 +148,11 @@ export function SettingsClient({ user, templates }: SettingsClientProps) {
               </div>
             </CardContent>
           </Card>
+        </TabsContent>
+
+        {/* Users Tab */}
+        <TabsContent value="users">
+          <UsersClient users={users} currentUserId={currentUserId} />
         </TabsContent>
       </Tabs>
     </div>

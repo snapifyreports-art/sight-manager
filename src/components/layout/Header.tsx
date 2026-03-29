@@ -14,7 +14,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
-import { MobileSidebar } from "./Sidebar";
+import { MobileSidebar, MobileSiteBar } from "./Sidebar";
 import { DevModeToolbar } from "@/components/dev/DevModeToolbar";
 
 const pageTitles: Record<string, string> = {
@@ -60,7 +60,8 @@ export function Header() {
   const pageTitle = getPageTitle(pathname);
 
   return (
-    <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border/50 bg-white px-4">
+    <header className="shrink-0">
+    <div className="flex h-14 items-center gap-3 border-b border-border/50 bg-white px-4">
       <MobileSidebar />
 
       <h1 className="text-sm font-semibold text-slate-700">{pageTitle}</h1>
@@ -112,6 +113,8 @@ export function Header() {
           </DropdownMenu>
         )}
       </div>
+    </div>
+    <MobileSiteBar />
     </header>
   );
 }

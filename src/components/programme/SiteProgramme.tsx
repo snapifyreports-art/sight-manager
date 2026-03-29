@@ -17,7 +17,7 @@ import {
 } from "date-fns";
 import { getCurrentDate } from "@/lib/dev-date";
 import { useDevDate } from "@/lib/dev-date-context";
-import { Loader2, Columns3, ChevronRight, Download, FileText, Search, X, Camera, StickyNote, CalendarDays, Calendar, Layers, List, CheckSquare, Clock } from "lucide-react";
+import { Loader2, Columns3, ChevronRight, Download, FileText, Search, X, Camera, StickyNote, CalendarDays, Calendar, Layers, List, CheckSquare, Clock, ZoomIn, ZoomOut, Maximize2, Minimize2 } from "lucide-react";
 import Link from "next/link";
 import { getStageCode, getStageColor } from "@/lib/stage-codes";
 import { Input } from "@/components/ui/input";
@@ -66,6 +66,9 @@ interface ProgrammeJob {
   parentStage: string | null;
   orders?: ProgrammeOrder[];
   _count?: { photos: number; actions: number };
+  // For synthetic parent jobs: all calendar positions where dots should appear
+  // (one per child with photos/notes — keeps Jobs and Sub-Jobs views consistent)
+  _dotStartDates?: string[];
 }
 
 interface ProgrammePlot {
@@ -197,6 +200,8 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
   // View mode state
   const [viewMode, setViewMode] = useState<"week" | "day">("week");
   const [jobView, setJobView] = useState<"jobs" | "subjobs">("jobs");
+  const [zoomLevel, setZoomLevel] = useState(1);
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   // Filter state
   const [searchTerm, setSearchTerm] = useState("");
@@ -520,7 +525,7 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
   const hasFilters = searchTerm || houseTypeFilter !== "all" || stageFilter !== "all" || statusFilter !== "all";
 
   // Derived constants
-  const cellWidth = viewMode === "week" ? CELL_WIDTH_WEEK : CELL_WIDTH_DAY;
+  const cellWidth = (viewMode === "week" ? CELL_WIDTH_WEEK : CELL_WIDTH_DAY) * zoomLevel;
   const baseHeaderHeight = viewMode === "day" ? HEADER_HEIGHT_DAY : HEADER_HEIGHT;
   const headerHeight = baseHeaderHeight + (hasWeather ? WEATHER_ROW_HEIGHT : 0);
 
@@ -571,6 +576,16 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
         const childOrders = children.flatMap((c) => c.orders ?? []);
         const aggPhotos = children.reduce((sum, c) => sum + (c._count?.photos ?? 0), 0);
         const aggActions = children.reduce((sum, c) => sum + (c._count?.actions ?? 0), 0);
+
+        // Collect the startDate of every child that has photos or notes — this
+        // pins dots to their exact calendar weeks in both Jobs and Sub-Jobs views.
+        const childrenWithDots = children.filter(
+          (c) => (c._count?.photos ?? 0) > 0 || (c._count?.actions ?? 0) > 0
+        );
+        const dotStartDates = childrenWithDots
+          .map((c) => c.startDate)
+          .filter(Boolean) as string[];
+
         synthetic.push({
           id: `synth-${plot.id}-${stage}`,
           name: stage,
@@ -583,6 +598,7 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
           parentStage: null,
           orders: childOrders,
           _count: { photos: aggPhotos, actions: aggActions },
+          _dotStartDates: dotStartDates,
         });
       }
 
@@ -961,7 +977,7 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
   const timelineWidth = columns.length * cellWidth;
 
   return (
-    <div className="rounded-lg border bg-white">
+    <div className={isFullscreen ? "fixed inset-0 z-50 flex flex-col overflow-hidden bg-white" : "rounded-lg border bg-white"}>
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-2 border-b px-3 py-2">
         <button
@@ -1037,6 +1053,36 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
             Sub-Jobs
           </button>
         </div>
+
+        {/* Zoom controls */}
+        <div className="flex items-center overflow-hidden rounded-md border">
+          <button
+            onClick={() => setZoomLevel((z) => Math.max(0.5, parseFloat((z - 0.25).toFixed(2))))}
+            disabled={zoomLevel <= 0.5}
+            className="flex items-center px-2 py-1.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-slate-50 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+            title="Zoom out"
+          >
+            <ZoomOut className="size-3" />
+          </button>
+          <span className="border-x px-1.5 text-[11px] text-muted-foreground">{Math.round(zoomLevel * 100)}%</span>
+          <button
+            onClick={() => setZoomLevel((z) => Math.min(3, parseFloat((z + 0.25).toFixed(2))))}
+            disabled={zoomLevel >= 3}
+            className="flex items-center px-2 py-1.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-slate-50 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+            title="Zoom in"
+          >
+            <ZoomIn className="size-3" />
+          </button>
+        </div>
+
+        {/* Fullscreen toggle */}
+        <button
+          onClick={() => setIsFullscreen((f) => !f)}
+          className="flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-slate-50 hover:text-foreground"
+          title={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
+        >
+          {isFullscreen ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
+        </button>
 
         {/* Select mode toggle */}
         <button
@@ -1165,7 +1211,7 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
           </div>
         )}
 
-        {/* Spacer */}
+        {/* Export buttons — pushed to the right */}
         <div className="ml-auto flex items-center gap-1.5">
           <button
             onClick={handleExportExcel}
@@ -1201,7 +1247,7 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
           </button>
         </div>
       ) : (
-        <div className="overflow-x-auto" ref={scrollRef}>
+        <div className={isFullscreen ? "flex-1 overflow-x-auto overflow-y-auto" : "overflow-x-auto"} ref={scrollRef}>
           <div
             className="flex"
             style={{ minWidth: leftPanelWidth + timelineWidth }}
@@ -1437,6 +1483,19 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
 
                         const isFirstJobCell = colIdx === jobFirstColIdx;
 
+                        // Dots: for synthetic parents check each child's dot date;
+                        // for individual jobs use the job's own first column.
+                        // Use string comparison (YYYY-MM-DD) to avoid UTC vs local timezone
+                        // mismatch that can shift dots by one week.
+                        const colDateStr = format(col.date, "yyyy-MM-dd");
+                        const colEndStr = format(col.endDate, "yyyy-MM-dd");
+                        const isDotCol = job._dotStartDates
+                          ? job._dotStartDates.some((d) => {
+                              const ds = d.slice(0, 10);
+                              return ds >= colDateStr && ds < colEndStr;
+                            })
+                          : isFirstJobCell;
+
                         // Check if any order dates fall in this cell
                         // If order date is before job starts, show on first job cell
                         const hasOrderInCell = orders.some((o) => {
@@ -1504,8 +1563,11 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                               }}
                             >
                               {job.weatherAffected && viewMode === "day" && rainedOffDates.has(format(col.date, "yyyy-MM-dd")) ? "☔" : code}
-                              {/* Photo/note indicators (first cell only, week view only — too small for day) */}
-                              {isFirstJobCell && viewMode === "week" && (hasPhotos || hasNotes) && (
+                              {/* Photo/note indicators (week view only — too small for day).
+                                  isDotCol is true for every column where a child job (or this
+                                  job itself) has photos/notes, keeping dots identical between
+                                  Jobs and Sub-Jobs views. */}
+                              {isDotCol && viewMode === "week" && (hasPhotos || hasNotes) && (
                                 <div className="absolute -right-0.5 -top-0.5 flex gap-px">
                                   {hasPhotos && (
                                     <div className="size-[6px] rounded-full bg-blue-500" title="Has photos" />

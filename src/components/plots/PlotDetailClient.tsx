@@ -273,6 +273,7 @@ function PlotOverview({
   const today = getCurrentDate();
   const router = useRouter();
   const [pendingOrderActions, setPendingOrderActions] = useState<Set<string>>(new Set());
+  const [pendingJobActions, setPendingJobActions] = useState<Set<string>>(new Set());
 
   async function handleOrderStatus(orderId: string, status: string) {
     setPendingOrderActions((prev) => new Set(prev).add(orderId));
@@ -285,6 +286,20 @@ function PlotOverview({
       router.refresh();
     } finally {
       setPendingOrderActions((prev) => { const n = new Set(prev); n.delete(orderId); return n; });
+    }
+  }
+
+  async function handleJobAction(jobId: string, action: "start" | "complete") {
+    setPendingJobActions((prev) => new Set(prev).add(jobId));
+    try {
+      await fetch(`/api/jobs/${jobId}/actions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action }),
+      });
+      router.refresh();
+    } finally {
+      setPendingJobActions((prev) => { const n = new Set(prev); n.delete(jobId); return n; });
     }
   }
 
@@ -350,6 +365,16 @@ function PlotOverview({
   const activeJobs = useMemo(
     () => plot.jobs.filter((j) => j.status === "IN_PROGRESS"),
     [plot.jobs]
+  );
+
+  // Jobs that haven't started yet but are overdue (startDate < today)
+  const overdueStartJobs = useMemo(
+    () => plot.jobs.filter((j) => {
+      if (j.status !== "NOT_STARTED") return false;
+      if (!j.startDate) return false;
+      return new Date(j.startDate) < today;
+    }),
+    [plot.jobs, today]
   );
 
   return (
@@ -483,46 +508,78 @@ function PlotOverview({
             <CardTitle className="text-base">Active Work</CardTitle>
           </CardHeader>
           <CardContent>
-            {activeJobs.length === 0 ? (
+            {activeJobs.length === 0 && overdueStartJobs.length === 0 ? (
               <p className="text-sm text-muted-foreground">
                 No jobs currently in progress
               </p>
             ) : (
-              <div className="space-y-3">
+              <div className="space-y-2">
+                {/* Overdue-start jobs — should have been started */}
+                {overdueStartJobs.map((job) => {
+                  const isPending = pendingJobActions.has(job.id);
+                  return (
+                    <div key={job.id} className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50/60 p-2.5">
+                      <div className="min-w-0 flex-1">
+                        <Link href={`/jobs/${job.id}`} className="truncate text-sm font-medium text-blue-600 hover:underline">
+                          {job.name}
+                        </Link>
+                        <p className="text-xs text-amber-700">
+                          Should have started {format(new Date(job.startDate!), "d MMM")}
+                        </p>
+                      </div>
+                      {isPending ? (
+                        <Loader2 className="size-4 shrink-0 animate-spin text-muted-foreground" />
+                      ) : (
+                        <Button variant="outline" size="sm"
+                          className="h-7 shrink-0 gap-1 border-green-200 px-2 text-[11px] text-green-700 hover:bg-green-50"
+                          onClick={() => handleJobAction(job.id, "start")}>
+                          <Play className="size-3" /> Start
+                        </Button>
+                      )}
+                    </div>
+                  );
+                })}
+
+                {/* Active in-progress jobs */}
                 {activeJobs.map((job) => {
                   const contractor = job.contractors?.[0]?.contact;
+                  const isPending = pendingJobActions.has(job.id);
+                  const isOverdue = job.endDate && new Date(job.endDate) < today;
                   return (
-                    <Link
+                    <div
                       key={job.id}
-                      href={`/jobs/${job.id}`}
-                      className="block rounded-lg border p-3 transition-colors hover:bg-muted/50"
+                      className={`flex items-center gap-2 rounded-lg border p-2.5 ${isOverdue ? "border-red-200 bg-red-50/40" : ""}`}
                     >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-medium">
-                            {job.name}
-                          </p>
-                          <div className="mt-1 flex flex-wrap items-center gap-x-3 text-xs text-muted-foreground">
-                            {(job.assignedTo || contractor) && (
-                              <span className="inline-flex items-center gap-1">
-                                <User className="size-3" />
-                                {job.assignedTo?.name ||
-                                  (contractor?.company
-                                    ? `${contractor.company}`
-                                    : contractor?.name)}
-                              </span>
-                            )}
-                            {job.endDate && (
-                              <span className="inline-flex items-center gap-1">
-                                <CalendarDays className="size-3" />
-                                Due {format(new Date(job.endDate), "d MMM")}
-                              </span>
-                            )}
-                          </div>
+                      <div className="min-w-0 flex-1">
+                        <Link href={`/jobs/${job.id}`} className="truncate text-sm font-medium text-blue-600 hover:underline">
+                          {job.name}
+                        </Link>
+                        <div className="flex flex-wrap items-center gap-x-3 text-xs text-muted-foreground">
+                          {(job.assignedTo || contractor) && (
+                            <span className="inline-flex items-center gap-1">
+                              <User className="size-3" />
+                              {job.assignedTo?.name || (contractor?.company ? contractor.company : contractor?.name)}
+                            </span>
+                          )}
+                          {job.endDate && (
+                            <span className={`inline-flex items-center gap-1 ${isOverdue ? "font-medium text-red-600" : ""}`}>
+                              <CalendarDays className="size-3" />
+                              {isOverdue ? "Overdue — " : "Due "}
+                              {format(new Date(job.endDate), "d MMM")}
+                            </span>
+                          )}
                         </div>
-                        <StatusBadge status={job.status} />
                       </div>
-                    </Link>
+                      {isPending ? (
+                        <Loader2 className="size-4 shrink-0 animate-spin text-muted-foreground" />
+                      ) : (
+                        <Button variant="outline" size="sm"
+                          className="h-7 shrink-0 gap-1 border-blue-200 px-2 text-[11px] text-blue-700 hover:bg-blue-50"
+                          onClick={() => handleJobAction(job.id, "complete")}>
+                          <CheckCircle2 className="size-3" /> Complete
+                        </Button>
+                      )}
+                    </div>
                   );
                 })}
               </div>
@@ -604,7 +661,23 @@ function PlotOverview({
         {/* Snag Summary */}
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">Snags</CardTitle>
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base">Snags</CardTitle>
+              <div className="flex items-center gap-2">
+                <Link
+                  href={`/sites/${plot.site.id}?tab=snags`}
+                  className="text-xs text-blue-600 hover:underline"
+                >
+                  View all
+                </Link>
+                <Link
+                  href={`/sites/${plot.site.id}?tab=snags&action=new&plotId=${plot.id}`}
+                  className="inline-flex h-7 items-center gap-1 rounded-md border border-orange-200 px-2 text-[11px] text-orange-700 transition-colors hover:bg-orange-50"
+                >
+                  <Plus className="size-3" /> Add Snag
+                </Link>
+              </div>
+            </div>
           </CardHeader>
           <CardContent>
             {stats.openSnags === 0 &&
@@ -641,9 +714,10 @@ function PlotOverview({
                     bg: "bg-slate-500/10",
                   },
                 ].map((item) => (
-                  <div
+                  <Link
                     key={item.label}
-                    className={`rounded-lg p-3 ${item.bg}`}
+                    href={`/sites/${plot.site.id}?tab=snags`}
+                    className={`rounded-lg p-3 transition-opacity hover:opacity-80 ${item.bg}`}
                   >
                     <p className={`text-xl font-bold ${item.color}`}>
                       {item.count}
@@ -651,7 +725,7 @@ function PlotOverview({
                     <p className="text-xs text-muted-foreground">
                       {item.label}
                     </p>
-                  </div>
+                  </Link>
                 ))}
               </div>
             )}

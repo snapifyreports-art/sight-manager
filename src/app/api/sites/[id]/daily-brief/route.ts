@@ -213,23 +213,6 @@ export async function GET(
     };
   }
 
-  // Auto-save daily weather log entry (fire-and-forget, non-blocking)
-  if (weather) {
-    const w = weather.today;
-    const catLabel: Record<string, string> = {
-      clear: "Clear", partly_cloudy: "Partly Cloudy", cloudy: "Cloudy",
-      fog: "Foggy", rain: "Rain", snow: "Snow", thunder: "Thunderstorms",
-    };
-    const desc = `🌤 Weather: ${catLabel[w.category] ?? w.category}, ${w.tempMin}°C–${w.tempMax}°C`;
-    prisma.eventLog.findFirst({
-      where: { siteId: id, type: "SYSTEM", description: { startsWith: "🌤 Weather:" }, createdAt: { gte: dayStart, lte: dayEnd } },
-    }).then((existing) => {
-      if (!existing) {
-        return prisma.eventLog.create({ data: { type: "SYSTEM", description: desc, siteId: id } });
-      }
-    }).catch(() => { /* silent */ });
-  }
-
   return NextResponse.json({
     site,
     date: dayStart.toISOString(),

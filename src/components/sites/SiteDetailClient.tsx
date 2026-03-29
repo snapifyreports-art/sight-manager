@@ -420,6 +420,13 @@ export function SiteDetailClient({
   );
   const [overdueCount, setOverdueCount] = useState(0);
 
+  // Sync tab when navigating via sidebar links (prop changes on client-side nav)
+  useEffect(() => {
+    const tab = initialTab || "plots";
+    setActiveTab(tab);
+    setVisitedTabs((prev) => (prev.has(tab) ? prev : new Set(prev).add(tab)));
+  }, [initialTab]);
+
   const handleTabChange = (tab: string) => {
     setActiveTab(tab);
     setVisitedTabs((prev) => {
@@ -1532,51 +1539,6 @@ export function SiteDetailClient({
       {/* Plot Cards + Programme */}
       {site.plots.length > 0 ? (
         <div>
-          <div
-            className="-mx-4 overflow-x-auto px-4 md:mx-0 md:px-0"
-            style={{ WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none' }}
-          >
-          <div className="inline-flex w-fit items-center justify-center gap-1 bg-transparent p-[3px] text-muted-foreground h-8" role="tablist">
-            {[
-              { value: "plots", label: "Plots" },
-              { value: "programme", label: "Programme" },
-              { value: "heatmap", label: "Heatmap" },
-              { value: "snags", label: "Snags" },
-              { value: "documents", label: "Documents" },
-              { value: "daily-brief", label: "Daily Brief", badge: overdueCount > 0 ? overdueCount : undefined },
-              { value: "day-sheets", label: "Day Sheets" },
-              { value: "delays", label: "Delays" },
-              { value: "budget", label: "Budget" },
-              { value: "calendar", label: "Calendar" },
-              { value: "weekly-report", label: "Weekly Report" },
-              { value: "orders", label: "Orders", icon: true },
-              { value: "log", label: "Site Log" },
-              { value: "critical-path", label: "Critical Path" },
-              { value: "qr-codes", label: "QR Codes" },
-              { value: "cash-flow", label: "Cash Flow" },
-            ].map((tab) => (
-              <button
-                key={tab.value}
-                role="tab"
-                aria-selected={activeTab === tab.value}
-                onClick={() => handleTabChange(tab.value)}
-                className={`relative inline-flex h-[calc(100%-1px)] flex-1 items-center justify-center gap-1.5 rounded-md border border-transparent px-1.5 py-0.5 text-xs font-medium whitespace-nowrap transition-all sm:text-sm after:absolute after:bg-foreground after:opacity-0 after:transition-opacity after:inset-x-0 after:bottom-[-5px] after:h-0.5 ${
-                  activeTab === tab.value
-                    ? "text-foreground after:opacity-100"
-                    : "text-foreground/60 hover:text-foreground"
-                }`}
-              >
-                {tab.icon && <ShoppingCart className="mr-1 size-3.5" />}
-                {tab.label}
-                {tab.badge && (
-                  <Badge className="ml-1.5 h-4 min-w-4 rounded-full bg-red-600 px-1 text-[10px] text-white hover:bg-red-600">
-                    {tab.badge}
-                  </Badge>
-                )}
-              </button>
-            ))}
-          </div>
-          </div>
 
           <div className={activeTab !== "plots" ? "hidden" : undefined}>
           {visitedTabs.has("plots") && (
@@ -1746,7 +1708,7 @@ export function SiteDetailClient({
           )}
           </div>
 
-          <div className={activeTab !== "programme" ? "hidden" : undefined}>
+          <div className={activeTab !== "programme" ? "hidden" : "min-w-0 overflow-hidden"}>
             {visitedTabs.has("programme") && (
               <SiteProgramme siteId={site.id} postcode={site.postcode} />
             )}

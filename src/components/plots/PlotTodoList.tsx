@@ -19,6 +19,11 @@ import {
   CheckCircle,
   Clock,
   Mail,
+  Play,
+  CheckCircle2,
+  Briefcase,
+  Loader2,
+  Check,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -72,6 +77,40 @@ export function PlotTodoList({ jobs }: { jobs: JobData[] }) {
   const now = getCurrentDate();
   const fourWeeksFromNow = addWeeks(now, 4);
   const twoWeeksAgo = subWeeks(now, 2);
+  const [pendingJobActions, setPendingJobActions] = useState<Set<string>>(new Set());
+  const [completedJobIds, setCompletedJobIds] = useState<Set<string>>(new Set());
+
+  async function handleJobAction(jobId: string, action: "start" | "complete") {
+    setPendingJobActions((prev) => new Set(prev).add(jobId));
+    try {
+      const res = await fetch(`/api/jobs/${jobId}/actions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action }),
+      });
+      if (res.ok) {
+        if (action === "complete") {
+          setCompletedJobIds((prev) => new Set(prev).add(jobId));
+        }
+        router.refresh();
+      }
+    } finally {
+      setPendingJobActions((prev) => { const n = new Set(prev); n.delete(jobId); return n; });
+    }
+  }
+
+  // Derive job sections
+  const activeJobs = jobs.filter((j) => j.status === "IN_PROGRESS");
+  const overdueStartJobs = jobs.filter((j) => {
+    if (j.status !== "NOT_STARTED" || !j.startDate) return false;
+    return new Date(j.startDate) < now;
+  });
+  const overdueEndJobs = jobs.filter((j) => {
+    if (j.status === "COMPLETED" || j.status === "NOT_STARTED") return false;
+    if (!j.endDate) return false;
+    return new Date(j.endDate) < now;
+  });
+  const hasJobItems = activeJobs.length > 0 || overdueStartJobs.length > 0;
 
   // Derive todo items from jobs and orders
   const ordersToPlace: TodoItem[] = [];
@@ -185,6 +224,88 @@ export function PlotTodoList({ jobs }: { jobs: JobData[] }) {
 
   return (
     <div className="space-y-6">
+      {/* Section 0: Active Jobs */}
+      {hasJobItems && (
+        <TodoSection
+          title="Jobs to Action"
+          icon={Briefcase}
+          iconColor="text-blue-600"
+          count={activeJobs.length + overdueStartJobs.length}
+          emptyMessage=""
+        >
+          {/* Jobs that should have started */}
+          {overdueStartJobs.map((job) => {
+            const isPending = pendingJobActions.has(job.id);
+            const isDone = completedJobIds.has(job.id);
+            return (
+              <Card key={job.id} size="sm" className="border-amber-200">
+                <CardContent className="flex items-center gap-3">
+                  <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-amber-500/10">
+                    <Briefcase className="size-4 text-amber-500" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium">
+                      <Link href={`/jobs/${job.id}`} className="hover:underline hover:text-blue-600">{job.name}</Link>
+                    </p>
+                    <p className="text-xs text-amber-700">
+                      Should have started {job.startDate ? format(new Date(job.startDate), "d MMM") : "—"}
+                      {job.assignedTo && <span className="text-muted-foreground"> · {job.assignedTo.name}</span>}
+                    </p>
+                  </div>
+                  {isDone ? (
+                    <span className="flex items-center gap-1 text-xs text-green-600"><Check className="size-3" /> Started</span>
+                  ) : isPending ? (
+                    <Loader2 className="size-4 animate-spin text-muted-foreground" />
+                  ) : (
+                    <Button variant="outline" size="xs" className="border-green-200 text-green-700 hover:bg-green-50"
+                      onClick={() => handleJobAction(job.id, "start")}>
+                      <Play className="size-3" /> Start
+                    </Button>
+                  )}
+                </CardContent>
+              </Card>
+            );
+          })}
+
+          {/* Active in-progress jobs */}
+          {activeJobs.map((job) => {
+            const isPending = pendingJobActions.has(job.id);
+            const isDone = completedJobIds.has(job.id);
+            const isOverdue = job.endDate && new Date(job.endDate) < now;
+            return (
+              <Card key={job.id} size="sm" className={isOverdue ? "border-red-200" : ""}>
+                <CardContent className="flex items-center gap-3">
+                  <div className={`flex size-8 shrink-0 items-center justify-center rounded-lg ${isOverdue ? "bg-red-500/10" : "bg-blue-500/10"}`}>
+                    <Briefcase className={`size-4 ${isOverdue ? "text-red-500" : "text-blue-500"}`} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium">
+                      <Link href={`/jobs/${job.id}`} className="hover:underline hover:text-blue-600">{job.name}</Link>
+                    </p>
+                    <p className={`text-xs ${isOverdue ? "text-red-600" : "text-muted-foreground"}`}>
+                      {isOverdue
+                        ? `Overdue — due ${job.endDate ? format(new Date(job.endDate), "d MMM") : "—"}`
+                        : job.endDate ? `Due ${format(new Date(job.endDate), "d MMM")}` : "In Progress"}
+                      {job.assignedTo && <span className="text-muted-foreground"> · {job.assignedTo.name}</span>}
+                    </p>
+                  </div>
+                  {isDone ? (
+                    <span className="flex items-center gap-1 text-xs text-green-600"><Check className="size-3" /> Complete</span>
+                  ) : isPending ? (
+                    <Loader2 className="size-4 animate-spin text-muted-foreground" />
+                  ) : (
+                    <Button variant="outline" size="xs" className="border-blue-200 text-blue-700 hover:bg-blue-50"
+                      onClick={() => handleJobAction(job.id, "complete")}>
+                      <CheckCircle2 className="size-3" /> Complete
+                    </Button>
+                  )}
+                </CardContent>
+              </Card>
+            );
+          })}
+        </TodoSection>
+      )}
+
       {/* Section 1: Orders to Place */}
       <TodoSection
         title="Orders to Place"
@@ -197,6 +318,7 @@ export function PlotTodoList({ jobs }: { jobs: JobData[] }) {
           <OrderToPlaceCard
             key={`place-${idx}`}
             item={item}
+            onUpdate={() => router.refresh()}
           />
         ))}
       </TodoSection>
@@ -314,7 +436,22 @@ function TodoSection({
 
 // ---------- Orders to Place Card ----------
 
-function OrderToPlaceCard({ item }: { item: TodoItem }) {
+function OrderToPlaceCard({ item, onUpdate }: { item: TodoItem; onUpdate: () => void }) {
+  const [pending, setPending] = useState(false);
+  const [sent, setSent] = useState(false);
+
+  async function markSent() {
+    if (!item.order) return;
+    setPending(true);
+    try {
+      await updateOrderStatus(item.order.id, "ORDERED");
+      setSent(true);
+      onUpdate();
+    } finally {
+      setPending(false);
+    }
+  }
+
   if (item.type === "order-needed") {
     return (
       <Card size="sm">
@@ -369,19 +506,27 @@ function OrderToPlaceCard({ item }: { item: TodoItem }) {
           </p>
         </div>
         <div className="flex shrink-0 gap-1.5">
-          {mailto && (
-            <Button variant="outline" size="xs"
-              onClick={async () => { window.open(mailto, "_blank"); await updateOrderStatus(order.id, "ORDERED"); }}>
-              <Mail className="size-3" />
-              <span className="hidden sm:inline">Send Order</span>
-            </Button>
-          )}
-          {!mailto && (
-            <Button variant="outline" size="xs"
-              onClick={async () => { await updateOrderStatus(order.id, "ORDERED"); }}>
-              <Package className="size-3" />
-              <span className="hidden sm:inline">Place Order</span>
-            </Button>
+          {sent ? (
+            <span className="flex items-center gap-1 text-xs text-green-600">
+              <Check className="size-3" /> Sent
+            </span>
+          ) : pending ? (
+            <Loader2 className="size-4 animate-spin text-muted-foreground" />
+          ) : (
+            <>
+              {mailto && (
+                <Button variant="outline" size="xs"
+                  onClick={() => { window.open(mailto, "_blank"); markSent(); }}>
+                  <Mail className="size-3" />
+                  <span className="hidden sm:inline">Send Order</span>
+                </Button>
+              )}
+              <Button variant="outline" size="xs"
+                onClick={markSent}>
+                <Package className="size-3" />
+                <span className="hidden sm:inline">{mailto ? "Mark Sent" : "Place Order"}</span>
+              </Button>
+            </>
           )}
         </div>
       </CardContent>
