@@ -90,7 +90,20 @@ interface BriefData {
     lateStartCount: number;
     blockedCount: number;
     openSnagCount: number;
+    awaitingRestartCount: number;
   };
+  awaitingRestartPlots: Array<{
+    id: string;
+    plotNumber: string | null;
+    name: string;
+    nextJob: {
+      id: string;
+      name: string;
+      startDate: string | null;
+      contractorName: string | null;
+      assignedToName: string | null;
+    } | null;
+  }>;
   blockedJobs: Array<{
     id: string;
     name: string;

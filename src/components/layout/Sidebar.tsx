@@ -108,7 +108,7 @@ function getInitials(name: string | null | undefined) {
     .slice(0, 2);
 }
 
-function SidebarNav({ collapsed = false }: { collapsed?: boolean }) {
+function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: boolean; onNavigate?: () => void }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -268,6 +268,7 @@ function SidebarNav({ collapsed = false }: { collapsed?: boolean }) {
                         <Link
                           key={t.tab}
                           href={href}
+                          onClick={onNavigate}
                           className={cn(
                             "flex items-center gap-1.5 rounded-md px-2 py-1 text-[12px] transition-colors",
                             isActive
@@ -295,6 +296,7 @@ function SidebarNav({ collapsed = false }: { collapsed?: boolean }) {
                 )}
                 <Link
                   href={`/sites/${selectedSiteId}/walkthrough`}
+                  onClick={onNavigate}
                   className={cn(
                     "group flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-[13px] font-semibold transition-all duration-150",
                     isActive
@@ -321,7 +323,7 @@ function SidebarNav({ collapsed = false }: { collapsed?: boolean }) {
             if (!req) return true;
             const perms = (session?.user as { permissions?: string[] })?.permissions;
             return !perms || perms.includes(req);
-          }).map((item) => renderNavItem(item, pathname, collapsed, getNavHref))}
+          }).map((item) => renderNavItem(item, pathname, collapsed, getNavHref, onNavigate))}
 
           {/* Admin items — truly global, separated */}
           {!collapsed && <div className="my-1 border-t border-border/40" />}
@@ -330,7 +332,7 @@ function SidebarNav({ collapsed = false }: { collapsed?: boolean }) {
             if (!req) return true;
             const perms = (session?.user as { permissions?: string[] })?.permissions;
             return !perms || perms.includes(req);
-          }).map((item) => renderNavItem(item, pathname, collapsed, getNavHref))}
+          }).map((item) => renderNavItem(item, pathname, collapsed, getNavHref, onNavigate))}
 
           {/* Collapsed: Sites icon link */}
           {collapsed && (
@@ -417,7 +419,8 @@ function renderNavItem(
   item: { label: string; href: string; icon: React.ElementType },
   pathname: string,
   collapsed: boolean,
-  getNavHref: (href: string) => string
+  getNavHref: (href: string) => string,
+  onNavigate?: () => void
 ) {
   const isActive =
     pathname === item.href ||
@@ -427,6 +430,7 @@ function renderNavItem(
   const linkContent = (
     <Link
       href={getNavHref(item.href)}
+      onClick={onNavigate}
       className={cn(
         "group flex items-center gap-3 rounded-lg px-3 py-2.5 text-[13px] font-medium transition-all duration-150",
         isActive
@@ -523,7 +527,7 @@ export function MobileSidebar() {
       <SheetContent side="left" className="w-[260px] p-0" showCloseButton={false}>
         <SheetTitle className="sr-only">Navigation</SheetTitle>
         <Suspense fallback={null}>
-          <SidebarNav />
+          <SidebarNav onNavigate={() => setOpen(false)} />
         </Suspense>
       </SheetContent>
     </Sheet>
