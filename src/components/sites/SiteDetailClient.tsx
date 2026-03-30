@@ -66,6 +66,7 @@ import { DocumentList } from "@/components/documents/DocumentList";
 import { DocumentUpload } from "@/components/documents/DocumentUpload";
 import { DailySiteBrief } from "@/components/reports/DailySiteBrief";
 import { ContractorDaySheets } from "@/components/reports/ContractorDaySheets";
+import { ContractorComms } from "@/components/reports/ContractorComms";
 import { DelayReport } from "@/components/reports/DelayReport";
 import { BudgetReport } from "@/components/reports/BudgetReport";
 import { SiteCalendar } from "@/components/reports/SiteCalendar";
@@ -1919,6 +1920,12 @@ export function SiteDetailClient({
           <div className={activeTab !== "day-sheets" ? "hidden" : undefined}>
             {visitedTabs.has("day-sheets") && (
               <ContractorDaySheets siteId={site.id} />
+            )}
+          </div>
+
+          <div className={activeTab !== "contractor-comms" ? "hidden" : undefined}>
+            {visitedTabs.has("contractor-comms") && (
+              <ContractorComms siteId={site.id} />
             )}
           </div>
 

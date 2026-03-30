@@ -1,0 +1,161 @@
+import { NextRequest, NextResponse } from "next/server";
+import { auth } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
+
+export const dynamic = "force-dynamic";
+
+// GET /api/sites/[id]/contractor-comms
+// Returns per-contractor summary: live jobs, next jobs, active plots, open snags
+export async function GET(
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const session = await auth();
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const { id: siteId } = await params;
+
+  const site = await prisma.site.findUnique({
+    where: { id: siteId },
+    select: { id: true, name: true },
+  });
+  if (!site) return NextResponse.json({ error: "Site not found" }, { status: 404 });
+
+  // Get all job-contractor links for this site, grouped by contact
+  const jobContractors = await prisma.jobContractor.findMany({
+    where: { job: { plot: { siteId } } },
+    select: {
+      contactId: true,
+      contact: {
+        select: { id: true, name: true, company: true, email: true, phone: true },
+      },
+      job: {
+        select: {
+          id: true,
+          name: true,
+          status: true,
+          startDate: true,
+          endDate: true,
+          sortOrder: true,
+          plot: { select: { id: true, plotNumber: true, name: true } },
+        },
+      },
+    },
+  });
+
+  // Get open snags for this site that have a contact assigned
+  const snags = await prisma.snag.findMany({
+    where: {
+      plot: { siteId },
+      status: { in: ["OPEN", "IN_PROGRESS"] },
+      contactId: { not: null },
+    },
+    select: {
+      id: true,
+      description: true,
+      status: true,
+      priority: true,
+      location: true,
+      contactId: true,
+      plot: { select: { id: true, plotNumber: true, name: true } },
+    },
+  });
+
+  // Group everything by contactId
+  const contactMap = new Map<string, {
+    id: string;
+    name: string;
+    company: string | null;
+    email: string | null;
+    phone: string | null;
+    liveJobs: typeof jobContractors[number]["job"][];
+    nextJobs: typeof jobContractors[number]["job"][];
+    allJobs: typeof jobContractors[number]["job"][];
+    openSnags: typeof snags;
+    plotIds: Set<string>;
+  }>();
+
+  for (const jc of jobContractors) {
+    const c = jc.contact;
+    if (!contactMap.has(c.id)) {
+      contactMap.set(c.id, {
+        id: c.id,
+        name: c.name,
+        company: c.company,
+        email: c.email,
+        phone: c.phone,
+        liveJobs: [],
+        nextJobs: [],
+        allJobs: [],
+        openSnags: [],
+        plotIds: new Set(),
+      });
+    }
+    const entry = contactMap.get(c.id)!;
+    entry.allJobs.push(jc.job);
+    entry.plotIds.add(jc.job.plot.id);
+  }
+
+  // Assign snags to contacts
+  for (const snag of snags) {
+    if (snag.contactId && contactMap.has(snag.contactId)) {
+      contactMap.get(snag.contactId)!.openSnags.push(snag);
+    }
+  }
+
+  // Split jobs into live vs next
+  for (const entry of contactMap.values()) {
+    entry.liveJobs = entry.allJobs.filter((j) => j.status === "IN_PROGRESS");
+    // Next: NOT_STARTED, ordered by startDate, take first 3
+    entry.nextJobs = entry.allJobs
+      .filter((j) => j.status === "NOT_STARTED")
+      .sort((a, b) => {
+        if (!a.startDate) return 1;
+        if (!b.startDate) return -1;
+        return new Date(a.startDate).getTime() - new Date(b.startDate).getTime();
+      })
+      .slice(0, 3);
+  }
+
+  // Sort contractors: those with live jobs first, then by name
+  const contractors = Array.from(contactMap.values())
+    .sort((a, b) => {
+      if (a.liveJobs.length > 0 && b.liveJobs.length === 0) return -1;
+      if (a.liveJobs.length === 0 && b.liveJobs.length > 0) return 1;
+      return a.name.localeCompare(b.name);
+    })
+    .map((c) => ({
+      id: c.id,
+      name: c.name,
+      company: c.company,
+      email: c.email,
+      phone: c.phone,
+      activePlotCount: c.plotIds.size,
+      liveJobs: c.liveJobs.map((j) => ({
+        id: j.id,
+        name: j.name,
+        status: j.status,
+        startDate: j.startDate?.toISOString() ?? null,
+        endDate: j.endDate?.toISOString() ?? null,
+        plot: j.plot,
+      })),
+      nextJobs: c.nextJobs.map((j) => ({
+        id: j.id,
+        name: j.name,
+        status: j.status,
+        startDate: j.startDate?.toISOString() ?? null,
+        endDate: j.endDate?.toISOString() ?? null,
+        plot: j.plot,
+      })),
+      openSnags: c.openSnags.map((s) => ({
+        id: s.id,
+        description: s.description,
+        status: s.status,
+        priority: s.priority,
+        location: s.location,
+        plot: s.plot,
+      })),
+    }));
+
+  return NextResponse.json({ site, contractors });
+}
