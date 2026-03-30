@@ -1871,6 +1871,7 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
         onOpenChange={setPanelOpen}
         context={panelContext}
         onOrderUpdated={fetchProgramme}
+        onJobUpdated={fetchProgramme}
       />
 
       {/* Toast notification */}

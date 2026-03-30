@@ -97,6 +97,7 @@ interface JobWeekPanelProps {
   onOpenChange: (open: boolean) => void;
   context: PanelContext | null;
   onOrderUpdated?: () => void;
+  onJobUpdated?: () => void;
 }
 
 // ---------- Status Config ----------
@@ -247,7 +248,7 @@ function NotesSection({
 
 // ---------- Component ----------
 
-export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated }: JobWeekPanelProps) {
+export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJobUpdated }: JobWeekPanelProps) {
   const [photos, setPhotos] = useState<JobPhoto[]>([]);
   const [actions, setActions] = useState<JobAction[]>([]);
   const [orders, setOrders] = useState<PanelOrder[]>([]);
@@ -411,6 +412,8 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated }: Jo
         setPhotos(Array.isArray(photosData) ? photosData : []);
         setActions(Array.isArray(jobData.actions) ? jobData.actions : []);
         setOrders(Array.isArray(jobData.orders) ? jobData.orders : []);
+        // Seed localStatus from the fresh API response so the badge is never stale
+        if (jobData.status) setLocalStatus(jobData.status);
         // Extract contractors
         if (Array.isArray(jobData.contractors) && jobData.contractors.length > 0) {
           setJobContractorContactId(jobData.contractors[0].contact?.id || null);
@@ -509,9 +512,11 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated }: Jo
     if (res.ok) {
       const jobData = await fetch(`/api/jobs/${jobId}`, { cache: "no-store" }).then((r) => r.json());
       setActions(Array.isArray(jobData.actions) ? jobData.actions : []);
+      // Notify parent (SiteProgramme) to refresh its grid data
+      onJobUpdated?.();
     }
     return res.ok;
-  }, []);
+  }, [onJobUpdated]);
 
   // Job status actions (start / stop / sign off)
   const handleJobAction = useCallback(async (action: "start" | "stop" | "complete", notes?: string) => {
