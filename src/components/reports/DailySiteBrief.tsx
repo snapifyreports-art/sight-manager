@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { format, addDays, differenceInCalendarDays } from "date-fns";
 import { PostCompletionDialog } from "@/components/PostCompletionDialog";
@@ -803,6 +803,32 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
       setPendingOrderActions((prev) => { const n = new Set(prev); n.delete(orderId); return n; });
     }
   };
+
+  const handleGroupOrderAction = (ids: string[], status: string) => {
+    ids.forEach((id) => handleOrderAction(id, status));
+  };
+
+  const groupedOrdersToPlace = useMemo(() => {
+    const map = new Map<string, typeof data.ordersToPlace>();
+    for (const o of data.ordersToPlace) {
+      const key = `${o.supplier.id}__${o.job.name}`;
+      const existing = map.get(key) ?? [];
+      existing.push(o);
+      map.set(key, existing);
+    }
+    return Array.from(map.values());
+  }, [data.ordersToPlace]);
+
+  const groupedUpcomingOrders = useMemo(() => {
+    const map = new Map<string, typeof data.upcomingOrders>();
+    for (const o of data.upcomingOrders) {
+      const key = `${o.supplier.id}__${o.job.name}`;
+      const existing = map.get(key) ?? [];
+      existing.push(o);
+      map.set(key, existing);
+    }
+    return Array.from(map.values());
+  }, [data.upcomingOrders]);
 
   // Sign-off dialog handlers
   const handleOpenSignOff = (job: { id: string; name: string; plot: { plotNumber: string | null; name: string }; assignedTo: { name: string } | null }) => {
@@ -1744,7 +1770,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
           <CardHeader className="cursor-pointer select-none pb-2" onClick={() => toggleSection("orders-to-place")}>
             <CardTitle className="flex items-center gap-2 text-sm">
               <ShoppingCart className="size-4 text-violet-600" />
-              Orders to Place ({data.ordersToPlace.length})
+              Orders to Place ({groupedOrdersToPlace.length})
               <ChevronDown className={cn("ml-auto size-3.5 shrink-0 transition-transform duration-200", openSections.has("orders-to-place") && "rotate-180")} />
             </CardTitle>
             <CardDescription className="text-xs">Orders created but not yet sent to supplier</CardDescription>
@@ -1752,13 +1778,15 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
           {openSections.has("orders-to-place") && (
             <CardContent>
             <div className="space-y-2">
-              {data.ordersToPlace.map((o) => {
-                const isPendingAction = pendingOrderActions.has(o.id);
+              {groupedOrdersToPlace.map((group) => {
+                const o = group[0];
+                const groupIds = group.map((g) => g.id);
+                const anyPending = groupIds.some((id) => pendingOrderActions.has(id));
                 const mailto = o.supplier.contactEmail
-                  ? `mailto:${encodeURIComponent(o.supplier.contactEmail)}?subject=${encodeURIComponent(`Material Order — ${o.job.plot.plotNumber ? `Plot ${o.job.plot.plotNumber}` : o.job.plot.name}`)}&body=${encodeURIComponent(`Hi ${o.supplier.contactName || o.supplier.name},\n\nPlease supply the following for ${o.job.name}:\n\n${o.itemsDescription || "Materials as discussed"}${o.expectedDeliveryDate ? `\n\nRequired by: ${format(new Date(o.expectedDeliveryDate), "dd MMM yyyy")}` : ""}\n\nPlease confirm receipt.\n\nRegards`)}`
+                  ? `mailto:${encodeURIComponent(o.supplier.contactEmail)}?subject=${encodeURIComponent(`Material Order — ${o.job.name}`)}&body=${encodeURIComponent(`Hi ${o.supplier.contactName || o.supplier.name},\n\nPlease supply the following for ${o.job.name} (${group.length} plot${group.length !== 1 ? "s" : ""}):\n\n${o.itemsDescription || "Materials as discussed"}${o.expectedDeliveryDate ? `\n\nRequired by: ${format(new Date(o.expectedDeliveryDate), "dd MMM yyyy")}` : ""}\n\nPlease confirm receipt.\n\nRegards`)}`
                   : null;
                 return (
-                  <div key={o.id} className="flex items-start justify-between gap-2 rounded border p-2 text-sm">
+                  <div key={`${o.supplier.id}__${o.job.name}`} className="flex items-start justify-between gap-2 rounded border p-2 text-sm">
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-1.5">
                         <Link href={`/suppliers/${o.supplier.id}`} className="truncate font-medium text-blue-600 hover:underline">
@@ -1771,24 +1799,32 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                         )}
                       </div>
                       <p className="text-xs text-muted-foreground">{o.itemsDescription || "—"}</p>
-                      <p className="text-xs text-muted-foreground">
-                        <Link href={`/jobs/${o.job.id}`} className="hover:underline hover:text-blue-600">{o.job.name}</Link>
-                        {" · "}{o.job.plot.plotNumber ? `Plot ${o.job.plot.plotNumber}` : o.job.plot.name}
-                      </p>
+                      <div className="flex flex-wrap items-center gap-1 pt-0.5">
+                        <Link href={`/jobs/${o.job.id}`} className="text-xs hover:underline hover:text-blue-600">{o.job.name}</Link>
+                        <span className="text-xs text-muted-foreground">·</span>
+                        {group.slice(0, 5).map((g) => (
+                          <span key={g.id} className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600">
+                            {g.job.plot.plotNumber ? `Plot ${g.job.plot.plotNumber}` : g.job.plot.name}
+                          </span>
+                        ))}
+                        {group.length > 5 && (
+                          <span className="text-[10px] text-muted-foreground">+{group.length - 5} more</span>
+                        )}
+                      </div>
                     </div>
                     <div className="flex shrink-0 flex-col items-end gap-1">
-                      {isPendingAction ? (
+                      {anyPending ? (
                         <Loader2 className="size-4 animate-spin text-muted-foreground" />
                       ) : (
                         <>
                           {mailto && (
                             <Button variant="outline" size="sm" className="h-6 border-violet-200 px-2 text-[10px] text-violet-700 hover:bg-violet-50"
-                              onClick={() => { window.open(mailto, "_blank"); handleOrderAction(o.id, "ORDERED"); }}>
-                              <Mail className="mr-1 size-2.5" />Send Order
+                              onClick={() => { window.open(mailto, "_blank"); handleGroupOrderAction(groupIds, "ORDERED"); }}>
+                              <Mail className="mr-1 size-2.5" />{group.length > 1 ? `Send (${group.length})` : "Send Order"}
                             </Button>
                           )}
                           <Button variant="outline" size="sm" className="h-6 border-blue-200 px-2 text-[10px] text-blue-700 hover:bg-blue-50"
-                            onClick={() => handleOrderAction(o.id, "ORDERED")}>
+                            onClick={() => handleGroupOrderAction(groupIds, "ORDERED")}>
                             <Package className="mr-1 size-2.5" />{mailto ? "Mark Sent" : "Place Order"}
                           </Button>
                         </>
@@ -1809,7 +1845,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
           <CardHeader className="cursor-pointer select-none pb-2" onClick={() => setUpcomingOrdersOpen((o) => !o)}>
             <CardTitle className="flex items-center gap-2 text-sm">
               <ShoppingCart className="size-4 text-slate-500" />
-              Upcoming Orders ({data.upcomingOrders.length})
+              Upcoming Orders ({groupedUpcomingOrders.length})
               <ChevronDown className={cn("ml-auto size-4 text-muted-foreground transition-transform duration-200", upcomingOrdersOpen && "rotate-180")} />
             </CardTitle>
             <CardDescription className="text-xs">Orders scheduled for future placement — click to expand</CardDescription>
@@ -1817,13 +1853,15 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
           {upcomingOrdersOpen && (
           <CardContent>
             <div className="space-y-2">
-              {data.upcomingOrders.map((o) => {
-                const isPendingAction = pendingOrderActions.has(o.id);
+              {groupedUpcomingOrders.map((group) => {
+                const o = group[0];
+                const groupIds = group.map((g) => g.id);
+                const anyPending = groupIds.some((id) => pendingOrderActions.has(id));
                 const mailto = o.supplier.contactEmail
-                  ? `mailto:${encodeURIComponent(o.supplier.contactEmail)}?subject=${encodeURIComponent(`Material Order — ${o.job.plot.plotNumber ? `Plot ${o.job.plot.plotNumber}` : o.job.plot.name}`)}&body=${encodeURIComponent(`Hi ${o.supplier.contactName || o.supplier.name},\n\nPlease supply the following for ${o.job.name}:\n\n${o.itemsDescription || "Materials as discussed"}${o.expectedDeliveryDate ? `\n\nRequired by: ${format(new Date(o.expectedDeliveryDate), "dd MMM yyyy")}` : ""}\n\nPlease confirm receipt.\n\nRegards`)}`
+                  ? `mailto:${encodeURIComponent(o.supplier.contactEmail)}?subject=${encodeURIComponent(`Material Order — ${o.job.name}`)}&body=${encodeURIComponent(`Hi ${o.supplier.contactName || o.supplier.name},\n\nPlease supply the following for ${o.job.name} (${group.length} plot${group.length !== 1 ? "s" : ""}):\n\n${o.itemsDescription || "Materials as discussed"}${o.expectedDeliveryDate ? `\n\nRequired by: ${format(new Date(o.expectedDeliveryDate), "dd MMM yyyy")}` : ""}\n\nPlease confirm receipt.\n\nRegards`)}`
                   : null;
                 return (
-                  <div key={o.id} className="flex items-start justify-between gap-2 rounded border p-2 text-sm">
+                  <div key={`${o.supplier.id}__${o.job.name}`} className="flex items-start justify-between gap-2 rounded border p-2 text-sm">
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-1.5">
                         <Link href={`/suppliers/${o.supplier.id}`} className="truncate font-medium text-blue-600 hover:underline">
@@ -1836,24 +1874,32 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                         )}
                       </div>
                       <p className="text-xs text-muted-foreground">{o.itemsDescription || "—"}</p>
-                      <p className="text-xs text-muted-foreground">
-                        <Link href={`/jobs/${o.job.id}`} className="hover:underline hover:text-blue-600">{o.job.name}</Link>
-                        {" · "}{o.job.plot.plotNumber ? `Plot ${o.job.plot.plotNumber}` : o.job.plot.name}
-                      </p>
+                      <div className="flex flex-wrap items-center gap-1 pt-0.5">
+                        <Link href={`/jobs/${o.job.id}`} className="text-xs hover:underline hover:text-blue-600">{o.job.name}</Link>
+                        <span className="text-xs text-muted-foreground">·</span>
+                        {group.slice(0, 5).map((g) => (
+                          <span key={g.id} className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600">
+                            {g.job.plot.plotNumber ? `Plot ${g.job.plot.plotNumber}` : g.job.plot.name}
+                          </span>
+                        ))}
+                        {group.length > 5 && (
+                          <span className="text-[10px] text-muted-foreground">+{group.length - 5} more</span>
+                        )}
+                      </div>
                     </div>
                     <div className="flex shrink-0 flex-col items-end gap-1">
-                      {isPendingAction ? (
+                      {anyPending ? (
                         <Loader2 className="size-4 animate-spin text-muted-foreground" />
                       ) : (
                         <>
                           {mailto && (
                             <Button variant="outline" size="sm" className="h-6 border-violet-200 px-2 text-[10px] text-violet-700 hover:bg-violet-50"
-                              onClick={() => { window.open(mailto, "_blank"); handleOrderAction(o.id, "ORDERED"); }}>
-                              <Mail className="mr-1 size-2.5" />Send Order
+                              onClick={() => { window.open(mailto, "_blank"); handleGroupOrderAction(groupIds, "ORDERED"); }}>
+                              <Mail className="mr-1 size-2.5" />{group.length > 1 ? `Send (${group.length})` : "Send Order"}
                             </Button>
                           )}
                           <Button variant="outline" size="sm" className="h-6 border-blue-200 px-2 text-[10px] text-blue-700 hover:bg-blue-50"
-                            onClick={() => handleOrderAction(o.id, "ORDERED")}>
+                            onClick={() => handleGroupOrderAction(groupIds, "ORDERED")}>
                             <Package className="mr-1 size-2.5" />{mailto ? "Mark Sent" : "Place Order"}
                           </Button>
                         </>
