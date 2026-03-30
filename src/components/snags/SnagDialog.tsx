@@ -562,34 +562,88 @@ export function SnagDialog({
                 </span>
               </div>
 
+              {/* Completion progress indicator */}
+              {(() => {
+                const total = 5;
+                let filled = 0;
+                if (snag.location) filled++;
+                if (snag.assignedTo) filled++;
+                if (snag.contact) filled++;
+                if (snag.job) filled++;
+                if (snagPhotos.length > 0) filled++;
+                const isComplete = filled === total;
+                return !isComplete ? (
+                  <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-700">
+                    <AlertTriangle className="size-3.5" />
+                    <span>{filled}/{total} fields complete</span>
+                  </div>
+                ) : null;
+              })()}
+
               {/* Detail rows */}
               <div className="space-y-2 text-sm">
-                {snag.location && (
-                  <div className="flex items-center gap-2 text-muted-foreground">
-                    <MapPin className="size-3.5 shrink-0" />
-                    <span>{snag.location}</span>
-                  </div>
-                )}
-                {snag.job && (
-                  <div className="flex items-center gap-2 text-muted-foreground">
-                    <Briefcase className="size-3.5 shrink-0" />
-                    <span>{snag.job.parent ? `${snag.job.parent.name} › ` : ""}{snag.job.name}</span>
-                  </div>
-                )}
-                {snag.contact && (
-                  <div className="flex items-center gap-2 text-muted-foreground">
-                    <HardHat className="size-3.5 shrink-0" />
-                    <span>{snag.contact.company ? `${snag.contact.company} — ${snag.contact.name}` : snag.contact.name}</span>
-                  </div>
-                )}
-                {snag.assignedTo && (
-                  <div className="flex items-center gap-2 text-muted-foreground">
-                    <User className="size-3.5 shrink-0" />
-                    <span>{snag.assignedTo.name}</span>
-                  </div>
-                )}
+                {/* Location */}
                 <div className="flex items-center gap-2 text-muted-foreground">
-                  <AlertTriangle className="size-3.5 shrink-0" />
+                  <MapPin className="size-3.5 shrink-0" />
+                  {snag.location ? (
+                    <span>{snag.location}</span>
+                  ) : (
+                    <button
+                      onClick={() => setViewMode(false)}
+                      className="flex items-center gap-1 text-amber-600 hover:text-amber-700"
+                    >
+                      <AlertTriangle className="size-3" />
+                      <span className="text-xs">No location set</span>
+                    </button>
+                  )}
+                </div>
+                {/* Linked Job */}
+                <div className="flex items-center gap-2 text-muted-foreground">
+                  <Briefcase className="size-3.5 shrink-0" />
+                  {snag.job ? (
+                    <span>{snag.job.parent ? `${snag.job.parent.name} › ` : ""}{snag.job.name}</span>
+                  ) : (
+                    <button
+                      onClick={() => setViewMode(false)}
+                      className="flex items-center gap-1 text-amber-600 hover:text-amber-700"
+                    >
+                      <AlertTriangle className="size-3" />
+                      <span className="text-xs">Not linked to a job</span>
+                    </button>
+                  )}
+                </div>
+                {/* Contractor */}
+                <div className="flex items-center gap-2 text-muted-foreground">
+                  <HardHat className="size-3.5 shrink-0" />
+                  {snag.contact ? (
+                    <span>{snag.contact.company ? `${snag.contact.company} — ${snag.contact.name}` : snag.contact.name}</span>
+                  ) : (
+                    <button
+                      onClick={() => setViewMode(false)}
+                      className="flex items-center gap-1 text-amber-600 hover:text-amber-700"
+                    >
+                      <AlertTriangle className="size-3" />
+                      <span className="text-xs">No contractor</span>
+                    </button>
+                  )}
+                </div>
+                {/* Assigned To */}
+                <div className="flex items-center gap-2 text-muted-foreground">
+                  <User className="size-3.5 shrink-0" />
+                  {snag.assignedTo ? (
+                    <span>{snag.assignedTo.name}</span>
+                  ) : (
+                    <button
+                      onClick={() => setViewMode(false)}
+                      className="flex items-center gap-1 text-amber-600 hover:text-amber-700"
+                    >
+                      <AlertTriangle className="size-3" />
+                      <span className="text-xs">Unassigned</span>
+                    </button>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 text-muted-foreground">
+                  <Clock className="size-3.5 shrink-0" />
                   <span>Raised by {snag.raisedBy.name}</span>
                 </div>
               </div>
@@ -634,6 +688,31 @@ export function SnagDialog({
                   </div>
                 </div>
               ) : null}
+
+              {/* Add Photos button (always visible in view mode) */}
+              <div>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  capture="environment"
+                  className="hidden"
+                  onChange={(e) => handlePhotoUpload(e.target.files)}
+                />
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={uploading}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-dashed border-blue-300 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-100 disabled:opacity-50"
+                >
+                  {uploading ? (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  ) : (
+                    <Camera className="size-3.5" />
+                  )}
+                  {uploading ? "Uploading..." : "Add Photos"}
+                </button>
+              </div>
 
               {/* Email contractor */}
               {selectedContact?.email && (

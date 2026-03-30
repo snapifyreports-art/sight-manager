@@ -635,6 +635,10 @@ function OverdueCard({
 
   if (!item.order) return null;
 
+  const chaseMailto = item.order.supplier.contactEmail
+    ? `mailto:${encodeURIComponent(item.order.supplier.contactEmail)}?subject=${encodeURIComponent(`Chasing Order — ${item.jobName}`)}&body=${encodeURIComponent(`Hi ${item.order.supplier.contactName || item.order.supplier.name},\n\nI'm chasing the following order which is now ${item.daysOverdue} day${item.daysOverdue !== 1 ? "s" : ""} overdue:\n\n${item.order.itemsDescription || item.order.orderDetails || "Materials as discussed"}\n\nFor: ${item.jobName}\n\nPlease advise on the revised delivery date.\n\nRegards`)}`
+    : null;
+
   return (
     <Card size="sm" className="border-red-200 ring-red-500/20 dark:border-red-900">
       <CardContent className="flex items-center gap-3">
@@ -673,9 +677,16 @@ function OverdueCard({
           >
             {loading === "delivered" ? "Updating..." : "Mark Delivered"}
           </Button>
-          <Button variant="ghost" size="xs" className="text-amber-600">
-            Chase Supplier
-          </Button>
+          {chaseMailto && (
+            <Button
+              variant="ghost"
+              size="xs"
+              className="text-amber-600"
+              onClick={() => window.open(chaseMailto, "_blank")}
+            >
+              Chase Supplier
+            </Button>
+          )}
         </div>
       </CardContent>
     </Card>

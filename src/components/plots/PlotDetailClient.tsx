@@ -28,6 +28,9 @@ import {
   TrendingUp,
   Truck,
   Loader2,
+  Share2,
+  Copy,
+  Check,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -60,6 +63,7 @@ interface PlotData {
   id: string;
   name: string;
   description: string | null;
+  plotNumber: string | null;
   site: { id: string; name: string };
   jobs: Array<{
     id: string;
@@ -152,17 +156,24 @@ function AddJobDialog({
   const [description, setDescription] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
+  const [dateError, setDateError] = useState("");
 
   function resetForm() {
     setName("");
     setDescription("");
     setStartDate("");
     setEndDate("");
+    setDateError("");
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!name.trim()) return;
+    if (startDate && endDate && endDate < startDate) {
+      setDateError("End date cannot be before start date.");
+      return;
+    }
+    setDateError("");
 
     setLoading(true);
     try {
@@ -229,25 +240,30 @@ function AddJobDialog({
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-2">
-              <Label htmlFor="job-start-date">Start Date</Label>
-              <Input
-                id="job-start-date"
-                type="date"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-              />
+          <div className="space-y-1">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label htmlFor="job-start-date">Start Date</Label>
+                <Input
+                  id="job-start-date"
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => { setStartDate(e.target.value); setDateError(""); }}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="job-end-date">End Date</Label>
+                <Input
+                  id="job-end-date"
+                  type="date"
+                  value={endDate}
+                  onChange={(e) => { setEndDate(e.target.value); setDateError(""); }}
+                />
+              </div>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="job-end-date">End Date</Label>
-              <Input
-                id="job-end-date"
-                type="date"
-                value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
-              />
-            </div>
+            {dateError && (
+              <p className="text-xs text-red-600">{dateError}</p>
+            )}
           </div>
 
           <DialogFooter>
@@ -274,16 +290,25 @@ function PlotOverview({
   const router = useRouter();
   const [pendingOrderActions, setPendingOrderActions] = useState<Set<string>>(new Set());
   const [pendingJobActions, setPendingJobActions] = useState<Set<string>>(new Set());
+  const [actionError, setActionError] = useState<string | null>(null);
 
   async function handleOrderStatus(orderId: string, status: string) {
     setPendingOrderActions((prev) => new Set(prev).add(orderId));
     try {
-      await fetch(`/api/orders/${orderId}`, {
+      const res = await fetch(`/api/orders/${orderId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status }),
       });
-      router.refresh();
+      if (res.ok) {
+        router.refresh();
+      } else {
+        setActionError("Failed to update order status. Please try again.");
+        setTimeout(() => setActionError(null), 4000);
+      }
+    } catch {
+      setActionError("Network error. Please check your connection.");
+      setTimeout(() => setActionError(null), 4000);
     } finally {
       setPendingOrderActions((prev) => { const n = new Set(prev); n.delete(orderId); return n; });
     }
@@ -292,12 +317,20 @@ function PlotOverview({
   async function handleJobAction(jobId: string, action: "start" | "complete") {
     setPendingJobActions((prev) => new Set(prev).add(jobId));
     try {
-      await fetch(`/api/jobs/${jobId}/actions`, {
+      const res = await fetch(`/api/jobs/${jobId}/actions`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action }),
       });
-      router.refresh();
+      if (res.ok) {
+        router.refresh();
+      } else {
+        setActionError("Failed to update job status. Please try again.");
+        setTimeout(() => setActionError(null), 4000);
+      }
+    } catch {
+      setActionError("Network error. Please check your connection.");
+      setTimeout(() => setActionError(null), 4000);
     } finally {
       setPendingJobActions((prev) => { const n = new Set(prev); n.delete(jobId); return n; });
     }
@@ -379,6 +412,11 @@ function PlotOverview({
 
   return (
     <div className="space-y-6">
+      {actionError && (
+        <div className="fixed bottom-4 right-4 z-50 flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2.5 text-sm font-medium text-white shadow-lg">
+          ✕ {actionError}
+        </div>
+      )}
       {/* Progress Stats */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Card>
@@ -756,6 +794,44 @@ export function PlotDetailClient({
     router.refresh();
   }
 
+  // Share link state (P2)
+  const [shareDialogOpen, setShareDialogOpen] = useState(false);
+  const [shareUrl, setShareUrl] = useState<string | null>(null);
+  const [shareExpiry, setShareExpiry] = useState<string | null>(null);
+  const [shareLoading, setShareLoading] = useState(false);
+  const [shareCopied, setShareCopied] = useState(false);
+  const [shareError, setShareError] = useState<string | null>(null);
+
+  const handleGenerateShareLink = async () => {
+    setShareLoading(true);
+    setShareError(null);
+    try {
+      const res = await fetch("/api/share/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ plotId: plot.id, expiryDays: 30 }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setShareUrl(data.url);
+        setShareExpiry(data.expiresAt);
+      } else {
+        setShareError("Failed to generate link — please try again");
+      }
+    } catch {
+      setShareError("Network error — please try again");
+    } finally {
+      setShareLoading(false);
+    }
+  };
+
+  const handleCopyShareLink = async () => {
+    if (!shareUrl) return;
+    await navigator.clipboard.writeText(shareUrl);
+    setShareCopied(true);
+    setTimeout(() => setShareCopied(false), 2000);
+  };
+
   return (
     <div className="space-y-6">
       {/* Breadcrumb */}
@@ -793,7 +869,18 @@ export function PlotDetailClient({
           </div>
         </div>
 
-        <AddJobDialog plotId={plot.id} onCreated={handleJobCreated} />
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5 text-xs"
+            onClick={() => { setShareDialogOpen(true); setShareUrl(null); setShareExpiry(null); setShareError(null); }}
+          >
+            <Share2 className="size-3.5" />
+            Share
+          </Button>
+          <AddJobDialog plotId={plot.id} onCreated={handleJobCreated} />
+        </div>
       </div>
 
       {/* Tabs */}
@@ -942,6 +1029,81 @@ export function PlotDetailClient({
           <HandoverChecklist plotId={plot.id} />
         </TabsContent>
       </Tabs>
+
+      {/* Share Link Dialog (P2) */}
+      <Dialog open={shareDialogOpen} onOpenChange={setShareDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Share2 className="size-5 text-blue-600" />
+              Share Plot with Contractor
+            </DialogTitle>
+            <DialogDescription>
+              Generate a read-only link for{" "}
+              <span className="font-medium text-foreground">
+                {plot.plotNumber ? `Plot ${plot.plotNumber}` : plot.name}
+              </span>
+              . No login required — valid for 30 days.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            {!shareUrl ? (
+              <div className="rounded-lg border bg-slate-50 p-3 text-sm text-slate-600">
+                <p>The contractor will be able to see:</p>
+                <ul className="mt-1.5 list-inside list-disc space-y-0.5 text-xs text-slate-500">
+                  <li>All job stages and their status</li>
+                  <li>Scheduled and actual dates</li>
+                  <li>Assigned trades (name only)</li>
+                  <li>Build progress percentage</li>
+                </ul>
+                <p className="mt-2 text-xs text-slate-400">Financial data and orders are not included.</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 rounded-lg border bg-slate-50 p-3">
+                  <p className="flex-1 truncate text-xs text-slate-700 font-mono">{shareUrl}</p>
+                  <button
+                    type="button"
+                    onClick={handleCopyShareLink}
+                    className="flex shrink-0 items-center gap-1 rounded-md border bg-white px-2.5 py-1.5 text-xs font-medium shadow-sm hover:bg-slate-50"
+                  >
+                    {shareCopied ? (
+                      <><Check className="size-3 text-green-600" /> Copied!</>
+                    ) : (
+                      <><Copy className="size-3" /> Copy</>
+                    )}
+                  </button>
+                </div>
+                {shareExpiry && (
+                  <p className="text-center text-[11px] text-slate-400">
+                    Expires {format(new Date(shareExpiry), "dd MMM yyyy")}
+                  </p>
+                )}
+              </div>
+            )}
+            {shareError && (
+              <p className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">{shareError}</p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setShareDialogOpen(false)}>
+              Close
+            </Button>
+            {!shareUrl && (
+              <Button size="sm" disabled={shareLoading} onClick={handleGenerateShareLink}>
+                {shareLoading ? <Loader2 className="mr-1.5 size-3.5 animate-spin" /> : <Share2 className="mr-1.5 size-3.5" />}
+                Generate Link
+              </Button>
+            )}
+            {shareUrl && (
+              <Button size="sm" variant="outline" disabled={shareLoading} onClick={handleGenerateShareLink}>
+                {shareLoading ? <Loader2 className="mr-1.5 size-3.5 animate-spin" /> : null}
+                Regenerate
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { getServerCurrentDate } from "@/lib/dev-date";
 
 export const dynamic = "force-dynamic";
 
@@ -86,6 +87,7 @@ export async function POST(
       contactId: contactId || null,
       raisedById: session.user.id,
       notes: notes || null,
+      createdAt: getServerCurrentDate(req),
     },
     include: {
       assignedTo: { select: { id: true, name: true } },

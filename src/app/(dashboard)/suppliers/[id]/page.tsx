@@ -29,17 +29,61 @@ export default async function SupplierDetailPage({
 }) {
   const { id } = await params;
 
-  const supplier = await prisma.supplier.findUnique({
-    where: { id },
-    include: {
-      materials: { orderBy: { name: "asc" } },
-      _count: { select: { orders: true } },
-    },
-  });
+  const [supplier, deliveredOrders] = await Promise.all([
+    prisma.supplier.findUnique({
+      where: { id },
+      include: {
+        materials: { orderBy: { name: "asc" } },
+        _count: { select: { orders: true } },
+      },
+    }),
+    // All delivered orders for performance scoring
+    prisma.materialOrder.findMany({
+      where: { supplierId: id, status: "DELIVERED" },
+      select: {
+        id: true,
+        expectedDeliveryDate: true,
+        deliveredDate: true,
+        dateOfOrder: true,
+      },
+    }),
+  ]);
 
   if (!supplier) {
     notFound();
   }
+
+  // Calculate performance metrics
+  const ordersWithBoth = deliveredOrders.filter(
+    (o) => o.expectedDeliveryDate && o.deliveredDate
+  );
+  const onTime = ordersWithBoth.filter(
+    (o) => o.deliveredDate! <= o.expectedDeliveryDate!
+  ).length;
+  const totalDelivered = deliveredOrders.length;
+  const onTimeRate = ordersWithBoth.length > 0
+    ? Math.round((onTime / ordersWithBoth.length) * 100)
+    : null;
+
+  // Average days delta (positive = late, negative = early)
+  let avgDaysDelta: number | null = null;
+  if (ordersWithBoth.length > 0) {
+    const totalDelta = ordersWithBoth.reduce((sum, o) => {
+      const delta = Math.round(
+        (o.deliveredDate!.getTime() - o.expectedDeliveryDate!.getTime()) /
+          86400000
+      );
+      return sum + delta;
+    }, 0);
+    avgDaysDelta = Math.round(totalDelta / ordersWithBoth.length);
+  }
+
+  const performance = {
+    totalOrders: supplier._count.orders,
+    totalDelivered,
+    onTimeRate,
+    avgDaysDelta,
+  };
 
   const serialized = {
     id: supplier.id,
@@ -63,6 +107,7 @@ export default async function SupplierDetailPage({
       createdAt: m.createdAt.toISOString(),
       updatedAt: m.updatedAt.toISOString(),
     })),
+    performance,
   };
 
   return <SupplierDetailClient supplier={serialized} />;

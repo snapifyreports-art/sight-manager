@@ -6,6 +6,7 @@ import { format, addWeeks, addDays } from "date-fns";
 import {
   AlertTriangle,
   ArrowLeft,
+  CheckCircle,
   Plus,
   Pencil,
   MapPin,
@@ -21,6 +22,7 @@ import {
   Loader2,
   Search,
   ShoppingCart,
+  Trash2,
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -51,6 +53,7 @@ import {
   DialogClose,
 } from "@/components/ui/dialog";
 // Tabs replaced with custom buttons + conditional rendering (Base UI Tabs click bug)
+import { ClientOnly } from "@/components/ui/ClientOnly";
 import { SiteProgramme } from "@/components/programme/SiteProgramme";
 import { SiteHeatmap } from "@/components/sites/SiteHeatmap";
 import { SnagList } from "@/components/snags/SnagList";
@@ -385,6 +388,9 @@ export function SiteDetailClient({
   const [editPostcode, setEditPostcode] = useState(site.postcode ?? "");
   const [editStatus, setEditStatus] = useState(site.status);
   const [saving, setSaving] = useState(false);
+  const [postcodeValid, setPostcodeValid] = useState<boolean | null>(null);
+  const [postcodeChecking, setPostcodeChecking] = useState(false);
+  const [sitePostcodeInvalid, setSitePostcodeInvalid] = useState(false);
 
   // Add plot state
   const [addPlotDialogOpen, setAddPlotDialogOpen] = useState(false);
@@ -394,6 +400,14 @@ export function SiteDetailClient({
   const [plotName, setPlotName] = useState("");
   const [plotDescription, setPlotDescription] = useState("");
   const [creatingPlot, setCreatingPlot] = useState(false);
+
+  // Delete plot state
+  const [deletePlotTarget, setDeletePlotTarget] = useState<{
+    id: string;
+    name: string;
+    plotNumber: string | null;
+  } | null>(null);
+  const [deletingPlot, setDeletingPlot] = useState(false);
 
   // Template mode state
   const [templates, setTemplates] = useState<Template[]>([]);
@@ -426,6 +440,14 @@ export function SiteDetailClient({
     setActiveTab(tab);
     setVisitedTabs((prev) => (prev.has(tab) ? prev : new Set(prev).add(tab)));
   }, [initialTab]);
+
+  // Check if site postcode is valid for weather
+  useEffect(() => {
+    if (!site.postcode?.trim()) return;
+    fetch(`https://api.postcodes.io/postcodes/${encodeURIComponent(site.postcode.trim())}`)
+      .then((r) => { if (!r.ok) setSitePostcodeInvalid(true); })
+      .catch(() => {});
+  }, [site.postcode]);
 
   const handleTabChange = (tab: string) => {
     setActiveTab(tab);
@@ -523,6 +545,24 @@ export function SiteDetailClient({
     );
   }, [plotName, site.plots]);
 
+  async function handleDeletePlot() {
+    if (!deletePlotTarget) return;
+    setDeletingPlot(true);
+    try {
+      const res = await fetch(`/api/plots/${deletePlotTarget.id}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) throw new Error("Failed to delete plot");
+      setDeletePlotTarget(null);
+      router.refresh();
+    } catch (err) {
+      console.error(err);
+      alert("Failed to delete plot. Please try again.");
+    } finally {
+      setDeletingPlot(false);
+    }
+  }
+
   function resetAddPlotDialog() {
     setPlotMode("choose");
     setPlotName("");
@@ -534,6 +574,22 @@ export function SiteDetailClient({
     setBulkRangeStart("");
     setBulkRangeEnd("");
     setBulkStep("config");
+  }
+
+  async function validatePostcode(pc: string) {
+    if (!pc.trim()) {
+      setPostcodeValid(null);
+      return;
+    }
+    setPostcodeChecking(true);
+    try {
+      const res = await fetch(`https://api.postcodes.io/postcodes/${encodeURIComponent(pc.trim())}`);
+      setPostcodeValid(res.ok);
+    } catch {
+      setPostcodeValid(null);
+    } finally {
+      setPostcodeChecking(false);
+    }
   }
 
   async function handleEditSave() {
@@ -571,6 +627,7 @@ export function SiteDetailClient({
         updatedAt: updated.updatedAt,
       }));
       setEditDialogOpen(false);
+      setSitePostcodeInvalid(postcodeValid === false);
       router.refresh();
     } catch (error) {
       console.error("Failed to update site:", error);
@@ -678,8 +735,9 @@ export function SiteDetailClient({
       });
 
       if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || "Failed to create plots");
+        let errorMsg = "Failed to create plots";
+        try { const err = await res.json(); errorMsg = err.error || errorMsg; } catch {}
+        throw new Error(errorMsg);
       }
 
       resetAddPlotDialog();
@@ -753,6 +811,15 @@ export function SiteDetailClient({
           </div>
 
           <div className="flex items-center gap-2">
+            {activeTab === "plots" && (
+              <Button
+                variant="outline"
+                onClick={() => setAddPlotDialogOpen(true)}
+              >
+                <Plus className="size-4" />
+                Add Plot
+              </Button>
+            )}
             {/* Add Plot Dialog */}
             <Dialog
               open={addPlotDialogOpen}
@@ -761,13 +828,6 @@ export function SiteDetailClient({
                 if (!open) resetAddPlotDialog();
               }}
             >
-              <Button
-                variant="outline"
-                onClick={() => setAddPlotDialogOpen(true)}
-              >
-                <Plus className="size-4" />
-                Add Plot
-              </Button>
               <DialogContent className="sm:max-w-lg">
                 <DialogHeader>
                   <DialogTitle>
@@ -1425,9 +1485,15 @@ export function SiteDetailClient({
               <Button
                 variant="outline"
                 onClick={() => setEditDialogOpen(true)}
+                className={sitePostcodeInvalid ? "border-amber-400" : ""}
               >
                 <Pencil className="size-4" />
                 Edit
+                {sitePostcodeInvalid && (
+                  <span className="relative -mr-1 ml-0.5">
+                    <AlertTriangle className="size-3.5 text-amber-500" />
+                  </span>
+                )}
               </Button>
               <DialogContent className="sm:max-w-md">
                 <DialogHeader>
@@ -1474,13 +1540,25 @@ export function SiteDetailClient({
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="edit-postcode">Postcode</Label>
-                    <Input
-                      id="edit-postcode"
-                      value={editPostcode}
-                      onChange={(e) => setEditPostcode(e.target.value.toUpperCase())}
-                      placeholder="e.g. SW1A 1AA"
-                      className="w-40"
-                    />
+                    <div className="flex items-center gap-2">
+                      <Input
+                        id="edit-postcode"
+                        value={editPostcode}
+                        onChange={(e) => {
+                          setEditPostcode(e.target.value.toUpperCase());
+                          setPostcodeValid(null);
+                        }}
+                        onBlur={() => validatePostcode(editPostcode)}
+                        placeholder="e.g. SW1A 1AA"
+                        className={`w-40 ${postcodeValid === false ? "border-red-400 focus-visible:ring-red-400" : ""}`}
+                      />
+                      {postcodeChecking && <Loader2 className="size-4 animate-spin text-muted-foreground" />}
+                      {postcodeValid === true && <CheckCircle className="size-4 text-green-600" />}
+                      {postcodeValid === false && <AlertTriangle className="size-4 text-red-500" />}
+                    </div>
+                    {postcodeValid === false && (
+                      <p className="text-xs text-red-500">Postcode not found — weather forecasts won&apos;t be available</p>
+                    )}
                   </div>
                   <div className="space-y-2">
                     <Label>Status</Label>
@@ -1558,6 +1636,7 @@ export function SiteDetailClient({
               <div className="relative">
                 <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
                 <Input
+                  id="plot-search"
                   placeholder="Search plots..."
                   value={plotSearch}
                   onChange={(e) => setPlotSearch(e.target.value)}
@@ -1573,19 +1652,21 @@ export function SiteDetailClient({
                 )}
               </div>
 
-              {/* Status Filter */}
-              <Select value={plotStatusFilter} onValueChange={(v) => v !== null && setPlotStatusFilter(v)}>
-                <SelectTrigger className="h-8 text-sm">
-                  <SelectValue placeholder="Status" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Status</SelectItem>
-                  <SelectItem value="IN_PROGRESS">In Progress</SelectItem>
-                  <SelectItem value="COMPLETED">Completed</SelectItem>
-                  <SelectItem value="ON_HOLD">On Hold</SelectItem>
-                  <SelectItem value="NOT_STARTED">Not Started</SelectItem>
-                </SelectContent>
-              </Select>
+              {/* Status Filter — wrapped in ClientOnly to prevent Base UI useId() SSR/CSR mismatch */}
+              <ClientOnly fallback={<div className="h-8 w-28 rounded-md border bg-muted/30 animate-pulse" />}>
+                <Select value={plotStatusFilter} onValueChange={(v) => v !== null && setPlotStatusFilter(v)}>
+                  <SelectTrigger id="plot-status-filter" className="h-8 text-sm">
+                    <SelectValue placeholder="Status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Status</SelectItem>
+                    <SelectItem value="IN_PROGRESS">In Progress</SelectItem>
+                    <SelectItem value="COMPLETED">Completed</SelectItem>
+                    <SelectItem value="ON_HOLD">On Hold</SelectItem>
+                    <SelectItem value="NOT_STARTED">Not Started</SelectItem>
+                  </SelectContent>
+                </Select>
+              </ClientOnly>
 
               {hasPlotFilters && (
                 <div className="flex items-center gap-2">
@@ -1628,7 +1709,7 @@ export function SiteDetailClient({
               return (
                 <Card
                   key={plot.id}
-                  className="cursor-pointer transition-shadow hover:shadow-md"
+                  className="group cursor-pointer transition-shadow hover:shadow-md"
                   onClick={() =>
                     router.push(`/sites/${site.id}/plots/${plot.id}`)
                   }
@@ -1652,11 +1733,27 @@ export function SiteDetailClient({
                           </p>
                         )}
                       </div>
-                      <div className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
-                        <Briefcase className="size-3" />
-                        <span>
-                          {totalJobs} {totalJobs === 1 ? "job" : "jobs"}
-                        </span>
+                      <div className="flex shrink-0 items-center gap-2">
+                        <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                          <Briefcase className="size-3" />
+                          <span>
+                            {totalJobs} {totalJobs === 1 ? "job" : "jobs"}
+                          </span>
+                        </div>
+                        <button
+                          className="rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-red-50 hover:text-red-600 group-hover:opacity-100"
+                          title="Delete plot"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setDeletePlotTarget({
+                              id: plot.id,
+                              name: plot.name,
+                              plotNumber: plot.plotNumber,
+                            });
+                          }}
+                        >
+                          <Trash2 className="size-3.5" />
+                        </button>
                       </div>
                     </div>
                     {plot.description && (
@@ -1707,6 +1804,44 @@ export function SiteDetailClient({
         </div>
           )}
           </div>
+
+          {/* Delete Plot Confirmation Dialog */}
+          <Dialog
+            open={!!deletePlotTarget}
+            onOpenChange={(open) => {
+              if (!open) setDeletePlotTarget(null);
+            }}
+          >
+            <DialogContent className="sm:max-w-sm">
+              <DialogHeader>
+                <DialogTitle>
+                  Delete Plot{" "}
+                  {deletePlotTarget?.plotNumber
+                    ? `#${deletePlotTarget.plotNumber}`
+                    : deletePlotTarget?.name}
+                  ?
+                </DialogTitle>
+                <DialogDescription>
+                  This will permanently remove all jobs, orders, and snags.
+                </DialogDescription>
+              </DialogHeader>
+              <DialogFooter>
+                <DialogClose render={<Button variant="outline" />}>
+                  Cancel
+                </DialogClose>
+                <Button
+                  variant="destructive"
+                  disabled={deletingPlot}
+                  onClick={handleDeletePlot}
+                >
+                  {deletingPlot && (
+                    <Loader2 className="mr-2 size-4 animate-spin" />
+                  )}
+                  Delete
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
 
           <div className={activeTab !== "programme" ? "hidden" : "min-w-0 overflow-hidden"}>
             {visitedTabs.has("programme") && (

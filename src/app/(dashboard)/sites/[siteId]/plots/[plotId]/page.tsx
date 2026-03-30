@@ -82,6 +82,7 @@ export default async function PlotDetailPage({
     id: plot.id,
     name: plot.name,
     description: plot.description,
+    plotNumber: plot.plotNumber ?? null,
     site: plot.site,
     jobs: plot.jobs.map((job) => ({
       id: job.id,

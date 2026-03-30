@@ -52,6 +52,7 @@ enum NotificationType {
   NEW_NOTES_PHOTOS
   ORDERS_TO_SEND
   NEXT_STAGE_READY
+  LATE_STARTS
 }
 
 enum SnagPriority {

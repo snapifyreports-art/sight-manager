@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/lib/auth";
 import { getServerCurrentDate } from "@/lib/dev-date";
+import { sessionHasPermission } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -148,6 +149,10 @@ export async function DELETE(
   const session = await auth();
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  if (!sessionHasPermission(session.user as { role?: string; permissions?: string[] }, "MANAGE_ORDERS")) {
+    return NextResponse.json({ error: "You do not have permission to delete orders" }, { status: 403 });
   }
 
   const { id } = await params;

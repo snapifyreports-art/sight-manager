@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { sendPushToUser } from "@/lib/push";
 import { getServerCurrentDate } from "@/lib/dev-date";
+import { sessionHasPermission } from "@/lib/permissions";
 import type { EventType, JobStatus } from "@prisma/client";
 
 export const dynamic = "force-dynamic";
@@ -60,6 +61,18 @@ export async function POST(
       { error: "Job is already completed" },
       { status: 400 }
     );
+  }
+  // Prevent completing a job that was never started
+  if (action === "complete" && existing.status === "NOT_STARTED") {
+    return NextResponse.json(
+      { error: "Job must be started before it can be completed" },
+      { status: 400 }
+    );
+  }
+
+  // Permission check: completing/signing off requires SIGN_OFF_JOBS
+  if (action === "complete" && !sessionHasPermission(session.user as { role?: string; permissions?: string[] }, "SIGN_OFF_JOBS")) {
+    return NextResponse.json({ error: "You do not have permission to sign off jobs" }, { status: 403 });
   }
 
   const now = getServerCurrentDate(req);

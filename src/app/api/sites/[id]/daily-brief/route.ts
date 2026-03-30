@@ -67,7 +67,7 @@ export async function GET(
     : Promise.resolve(null);
 
   // Batch 2
-  const [overdueJobs, activeJobs, deliveriesToday] = await Promise.all([
+  const [overdueJobs, lateStartJobs, activeJobs, deliveriesToday] = await Promise.all([
     prisma.job.findMany({
       where: {
         plot: { siteId: id },
@@ -80,6 +80,22 @@ export async function GET(
         assignedTo: { select: { name: true } },
       },
       orderBy: { endDate: "asc" },
+    }),
+    // Late starts: NOT_STARTED where startDate is before today
+    prisma.job.findMany({
+      where: {
+        plot: { siteId: id },
+        status: "NOT_STARTED",
+        startDate: { lt: dayStart },
+      },
+      select: {
+        id: true, name: true, startDate: true, endDate: true, sortOrder: true,
+        plotId: true,
+        plot: { select: { plotNumber: true, name: true } },
+        assignedTo: { select: { name: true } },
+        contractors: { include: { contact: { select: { name: true, company: true } } } },
+      },
+      orderBy: { startDate: "asc" },
     }),
     prisma.job.findMany({
       where: { plot: { siteId: id }, status: "IN_PROGRESS" },
@@ -103,11 +119,52 @@ export async function GET(
     }),
   ]);
 
+  // Split late starts into genuinely late vs blocked by predecessor
+  const genuineLateStartJobs: typeof lateStartJobs = [];
+  const blockedJobs: Array<
+    (typeof lateStartJobs)[number] & { blockedBy: string }
+  > = [];
+
+  if (lateStartJobs.length > 0) {
+    // Get all plotIds that have late start jobs
+    const plotIds = [...new Set(lateStartJobs.map((j) => j.plotId))];
+
+    // Fetch all incomplete predecessor jobs for those plots in one query
+    const predecessorJobs = await prisma.job.findMany({
+      where: {
+        plotId: { in: plotIds },
+        status: { not: "COMPLETED" },
+      },
+      select: { id: true, name: true, sortOrder: true, plotId: true },
+    });
+
+    // Group predecessors by plotId for fast lookup
+    const predecessorsByPlot = new Map<string, typeof predecessorJobs>();
+    for (const pj of predecessorJobs) {
+      const existing = predecessorsByPlot.get(pj.plotId) ?? [];
+      existing.push(pj);
+      predecessorsByPlot.set(pj.plotId, existing);
+    }
+
+    for (const job of lateStartJobs) {
+      const plotPredecessors = predecessorsByPlot.get(job.plotId) ?? [];
+      // Find an incomplete job on the same plot with a lower sortOrder (i.e. should come first)
+      const blocker = plotPredecessors.find(
+        (p) => p.id !== job.id && p.sortOrder < job.sortOrder
+      );
+      if (blocker) {
+        blockedJobs.push({ ...job, blockedBy: blocker.name });
+      } else {
+        genuineLateStartJobs.push(job);
+      }
+    }
+  }
+
   // Batch 3
   const tomorrowStart = startOfDay(addDays(targetDate, 1));
   const tomorrowEnd = endOfDay(addDays(targetDate, 1));
 
-  const [overdueDeliveries, openSnags, openSnagsList, rainedOff, outstandingOrders, upcomingOrders, jobsStartingTomorrow] = await Promise.all([
+  const [overdueDeliveries, openSnags, openSnagsList, incompleteSnags, rainedOff, outstandingOrders, upcomingOrders, jobsStartingTomorrow, unassignedJobs, unassignedInternalJobs, unsignedCompletions] = await Promise.all([
     prisma.materialOrder.findMany({
       where: {
         job: { plot: { siteId: id } },
@@ -134,6 +191,31 @@ export async function GET(
       },
       orderBy: [{ priority: "desc" }, { createdAt: "asc" }],
       take: 20,
+    }),
+    prisma.snag.findMany({
+      where: {
+        plot: { siteId: id },
+        status: { in: ["OPEN", "IN_PROGRESS"] },
+        OR: [
+          { assignedToId: null },
+          { contactId: null },
+          { jobId: null },
+          { location: null },
+        ],
+      },
+      select: {
+        id: true,
+        description: true,
+        plotId: true,
+        assignedToId: true,
+        contactId: true,
+        jobId: true,
+        location: true,
+        plot: { select: { plotNumber: true, name: true, siteId: true } },
+        _count: { select: { photos: true } },
+      },
+      take: 20,
+      orderBy: { createdAt: "desc" },
     }),
     prisma.rainedOffDay.findFirst({
       where: { siteId: id, date: { gte: dayStart, lte: dayEnd } },
@@ -180,7 +262,143 @@ export async function GET(
         contractors: { include: { contact: { select: { name: true, company: true } } } },
       },
     }),
+    // Jobs in progress with no contractor
+    prisma.job.findMany({
+      where: {
+        plot: { siteId: id },
+        status: "IN_PROGRESS",
+        contractors: { none: {} },
+      },
+      select: {
+        id: true, name: true, plotId: true,
+        plot: { select: { plotNumber: true, name: true, siteId: true } },
+        assignedTo: { select: { name: true } },
+      },
+      take: 20,
+    }),
+    // Jobs in progress with no internal assignee
+    prisma.job.findMany({
+      where: {
+        plot: { siteId: id },
+        status: "IN_PROGRESS",
+        assignedToId: null,
+      },
+      select: {
+        id: true, name: true, plotId: true,
+        plot: { select: { plotNumber: true, name: true, siteId: true } },
+      },
+      take: 20,
+    }),
+    // Completed jobs with no sign-off documentation
+    prisma.job.findMany({
+      where: {
+        plot: { siteId: id },
+        status: "COMPLETED",
+        OR: [
+          { signOffNotes: null },
+          { signOffNotes: "" },
+        ],
+      },
+      select: {
+        id: true, name: true, plotId: true, signOffNotes: true,
+        plot: { select: { plotNumber: true, name: true, siteId: true } },
+        _count: { select: { photos: true } },
+      },
+      take: 20,
+    }),
   ]);
+
+  const incompleteSnagsList = incompleteSnags.map((s) => {
+    const missing: string[] = [];
+    if (!s.assignedToId) missing.push("No assignee");
+    if (!s.contactId) missing.push("No contractor");
+    if (!s.jobId) missing.push("No job linked");
+    if (!s.location) missing.push("No location");
+    if (s._count.photos === 0) missing.push("No photos");
+    return {
+      id: s.id,
+      description: s.description,
+      plotId: s.plotId,
+      plot: s.plot,
+      missing,
+    };
+  });
+
+  // Build unified needsAttention list
+  const needsAttention: Array<{
+    id: string;
+    type: "snag" | "job" | "order";
+    title: string;
+    subtitle: string;
+    missing: string[];
+  }> = [];
+
+  // Incomplete snags
+  for (const s of incompleteSnagsList) {
+    needsAttention.push({
+      id: s.id,
+      type: "snag",
+      title: s.description,
+      subtitle: s.plot.plotNumber ? `Plot ${s.plot.plotNumber}` : s.plot.name,
+      missing: s.missing,
+    });
+  }
+
+  // Jobs with no contractor
+  for (const j of unassignedJobs) {
+    needsAttention.push({
+      id: j.id,
+      type: "job",
+      title: j.name,
+      subtitle: j.plot.plotNumber ? `Plot ${j.plot.plotNumber}` : j.plot.name,
+      missing: ["No contractor"],
+    });
+  }
+
+  // Jobs with no internal assignee (merge with above if same job)
+  for (const j of unassignedInternalJobs) {
+    const existing = needsAttention.find((n) => n.id === j.id && n.type === "job");
+    if (existing) {
+      existing.missing.push("No assignee");
+    } else {
+      needsAttention.push({
+        id: j.id,
+        type: "job",
+        title: j.name,
+        subtitle: j.plot.plotNumber ? `Plot ${j.plot.plotNumber}` : j.plot.name,
+        missing: ["No assignee"],
+      });
+    }
+  }
+
+  // Completed jobs without sign-off documentation
+  for (const j of unsignedCompletions) {
+    const m: string[] = [];
+    if (!j.signOffNotes) m.push("No sign-off notes");
+    if (j._count.photos === 0) m.push("No completion photos");
+    if (m.length > 0) {
+      needsAttention.push({
+        id: j.id,
+        type: "job",
+        title: j.name,
+        subtitle: j.plot.plotNumber ? `Plot ${j.plot.plotNumber}` : j.plot.name,
+        missing: m,
+      });
+    }
+  }
+
+  // Overdue deliveries
+  for (const d of overdueDeliveries) {
+    needsAttention.push({
+      id: d.id,
+      type: "order",
+      title: d.itemsDescription ?? "Unnamed order",
+      subtitle: d.job?.plot?.plotNumber
+        ? `Plot ${d.job.plot.plotNumber} — ${d.supplier?.name ?? "Unknown supplier"}`
+        : d.supplier?.name ?? "Unknown supplier",
+      missing: ["Overdue delivery"],
+    });
+  }
 
   // Batch 4
   const [recentEvents, totalPlots, allJobs] = await Promise.all([
@@ -225,9 +443,22 @@ export async function GET(
       progressPercent: allJobs > 0 ? Math.round((completedJobs / allJobs) * 100) : 0,
       activeJobCount: activeJobs.length,
       overdueJobCount: overdueJobs.length,
+      lateStartCount: genuineLateStartJobs.length,
+      blockedCount: blockedJobs.length,
       openSnagCount: openSnags,
+      needsAttentionCount: needsAttention.length,
     },
     jobsStartingToday,
+    lateStartJobs: genuineLateStartJobs.map((j) => ({
+      ...j,
+      startDate: j.startDate?.toISOString() ?? null,
+      endDate: j.endDate?.toISOString() ?? null,
+    })),
+    blockedJobs: blockedJobs.map((j) => ({
+      ...j,
+      startDate: j.startDate?.toISOString() ?? null,
+      endDate: j.endDate?.toISOString() ?? null,
+    })),
     jobsStartingTomorrow,
     jobsDueToday,
     overdueJobs: overdueJobs.map((j) => ({
@@ -244,6 +475,8 @@ export async function GET(
       expectedDeliveryDate: d.expectedDeliveryDate?.toISOString() ?? null,
     })),
     openSnagsList,
+    openSnagsTruncated: openSnags > openSnagsList.length,
+    needsAttention,
     ordersToPlace: outstandingOrders.map((o) => ({
       ...o,
       expectedDeliveryDate: o.expectedDeliveryDate?.toISOString() ?? null,

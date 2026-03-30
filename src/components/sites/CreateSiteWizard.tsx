@@ -422,8 +422,9 @@ export function CreateSiteWizard({
               const results = await Promise.all(chunk);
               for (const r of results) {
                 if (!r.ok) {
-                  const err = await r.json();
-                  throw new Error(err.error || "Failed to create plot");
+                  let errorMsg = "Failed to create plot";
+                  try { const err = await r.json(); errorMsg = err.error || errorMsg; } catch {}
+                  throw new Error(errorMsg);
                 }
               }
             }
@@ -449,8 +450,9 @@ export function CreateSiteWizard({
             });
 
             if (!res.ok) {
-              const err = await res.json();
-              throw new Error(err.error || "Failed to create plots");
+              let errorMsg = "Failed to create plots";
+              try { const err = await res.json(); errorMsg = err.error || errorMsg; } catch {}
+              throw new Error(errorMsg);
             }
           }
         } catch (batchErr: unknown) {

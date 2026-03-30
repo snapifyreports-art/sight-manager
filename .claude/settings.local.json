@@ -2,7 +2,30 @@
   "permissions": {
     "allow": [
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "mcp__Claude_Preview__preview_start",
+      "Bash(node -e \"require\\(''dotenv''\\).config\\(\\); console.log\\(''AUTH_SECRET:'', process.env.AUTH_SECRET\\); console.log\\(''NEXTAUTH_SECRET:'', process.env.NEXTAUTH_SECRET\\)\")",
+      "Bash(curl -s http://localhost:3002/api/auth/error?error=Configuration)",
+      "Bash(curl -s -X POST http://localhost:3002/api/auth/callback/credentials -H 'Content-Type: application/x-www-form-urlencoded' -d \"email=ross@sightmanager.com&password=Admin1234!\" -D -)",
+      "Bash(node -e \":*)",
+      "Bash(gh auth:*)",
+      "Bash(git config:*)",
+      "Bash(curl -s http://localhost:3002/api/weather?postcode=CH664UZ)",
+      "Bash(node -e \"let d='''''''';process.stdin.on\\(''''data'''',c=>d+=c\\).on\\(''''end'''',\\(\\)=>{try{const p=JSON.parse\\(d\\);console.log\\(''''Days returned:'''',p.length,''''First:'''',JSON.stringify\\(p[0]\\)\\)}catch\\(e\\){console.log\\(''''Raw:'''',d.slice\\(0,300\\)\\)}}\\)\")",
+      "Bash(node -e \"let d='''''''';process.stdin.on\\(''''data'''',c=>d+=c\\).on\\(''''end'''',\\(\\)=>console.log\\(d.slice\\(0,500\\)\\)\\)\")",
+      "Bash(npx tsc:*)",
+      "Bash(npx next:*)",
+      "Bash(cmd /c \"rmdir /s /q \"\"C:\\\\Users\\\\keith\\\\OneDrive\\\\Desktop\\\\sight-manager\\\\.next\"\"\")",
+      "Bash(cmd /c \"dir \"\"C:\\\\Users\\\\keith\\\\OneDrive\\\\Desktop\\\\sight-manager\\\\.next\"\" /b 2>&1\")",
+      "Bash(cmd /c \"dir \"\"C:\\\\Users\\\\keith\\\\OneDrive\\\\Desktop\\\\sight-manager\\\\.next\"\" /s /b 2>&1 | head -20\")",
+      "Bash(cmd /c \"dir \"\"C:\\\\Users\\\\keith\\\\OneDrive\\\\Desktop\\\\sight-manager\\\\node_modules\\\\.cache\"\" /b 2>&1 | head -5\")",
+      "Bash(wc -l \"C:\\\\Users\\\\keith\\\\OneDrive\\\\Desktop\\\\sight-manager\\\\src\\\\app\\\\\\(dashboard\\)\\\\orders\\\\page.tsx\")",
+      "Bash(head -5 \"C:\\\\Users\\\\keith\\\\OneDrive\\\\Desktop\\\\sight-manager\\\\src\\\\app\\\\\\(dashboard\\)\\\\orders\\\\page.tsx\")",
+      "Bash(grep -n \"dateOfOrder\" /c/Users/keith/OneDrive/Desktop/sight-manager/src/components/orders/*.tsx /c/Users/keith/OneDrive/Desktop/sight-manager/prisma/schema.prisma)",
+      "Bash(find C:/Users/keith/OneDrive/Desktop/sight-manager/src/app/api/sites -name *events* -o -name *logs*)",
+      "Bash(grep -n \"JOB_SIGNED_OFF\\\\|SNAG_RESOLVED\" C:/Users/keith/OneDrive/Desktop/sight-manager/src/app/api/*.ts C:/Users/keith/OneDrive/Desktop/sight-manager/src/app/api/*/*.ts)",
+      "Bash(npx prisma:*)",
+      "Bash(echo \"ALTER TYPE \"\"EventType\"\" ADD VALUE IF NOT EXISTS ''''WEATHER_LOG''''; ALTER TYPE \"\"EventType\"\" ADD VALUE IF NOT EXISTS ''''NOTE'''';\")"
     ]
   }
 }

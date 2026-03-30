@@ -16,6 +16,16 @@ export function DevModeToolbar() {
     setShowPicker(false);
   }, [pathname]);
 
+  // Close dropdown on Escape key
+  useEffect(() => {
+    if (!showPicker) return;
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setShowPicker(false);
+    };
+    document.addEventListener("keydown", handleKey);
+    return () => document.removeEventListener("keydown", handleKey);
+  }, [showPicker]);
+
   // Format the display date
   const displayDate = devDate
     ? format(new Date(devDate + "T00:00:00"), "dd MMM yyyy")
@@ -71,7 +81,7 @@ export function DevModeToolbar() {
               className="fixed inset-0 z-[9998]"
               onClick={() => setShowPicker(false)}
             />
-            <div className="absolute right-0 top-full z-[9998] mt-2 w-72 rounded-xl border border-border bg-popover p-4 text-popover-foreground shadow-xl">
+            <div className="absolute right-0 top-full z-[9999] mt-2 w-72 rounded-xl border border-border bg-popover p-4 text-popover-foreground shadow-xl">
               <div className="mb-3 flex items-center justify-between">
                 <h3 className="text-sm font-semibold">
                   Dev Mode Date

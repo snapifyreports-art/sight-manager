@@ -85,48 +85,60 @@ export async function POST(request: NextRequest) {
 
   const plotStartDate = new Date(startDate);
 
-  // Create everything in a single transaction
-  const result = await prisma.$transaction(async (tx) => {
-    const createdPlots: string[] = [];
+  // Create each plot in its own transaction to avoid timeout on large batches
+  const createdPlots: string[] = [];
+  const errors: Array<{ plotNumber: string; error: string }> = [];
 
-    for (const plotInput of plots) {
-      // 1. Create Plot
-      const plot = await tx.plot.create({
-        data: {
-          name: plotInput.plotName.trim(),
-          siteId,
-          plotNumber: plotInput.plotNumber?.trim() || null,
-          houseType: template.typeLabel || null,
-        },
+  for (const plotInput of plots) {
+    try {
+      const plotId = await prisma.$transaction(async (tx) => {
+        const plot = await tx.plot.create({
+          data: {
+            name: plotInput.plotName.trim(),
+            siteId,
+            plotNumber: plotInput.plotNumber?.trim() || null,
+            houseType: template.typeLabel || null,
+          },
+        });
+
+        await createJobsFromTemplate(
+          tx,
+          plot.id,
+          plotStartDate,
+          template.jobs,
+          supplierMappings || null
+        );
+
+        await tx.eventLog.create({
+          data: {
+            type: "PLOT_CREATED",
+            description: `Plot "${plot.name}" (${plotInput.plotNumber || "no number"}) created from template "${template.name}" (batch)`,
+            siteId,
+            plotId: plot.id,
+            userId: session.user.id,
+          },
+        });
+
+        return plot.id;
       });
-      createdPlots.push(plot.id);
-
-      // 2. Create Jobs from template (handles both hierarchical and flat)
-      await createJobsFromTemplate(
-        tx,
-        plot.id,
-        plotStartDate,
-        template.jobs,
-        supplierMappings || null
-      );
-
-      // 3. Log event
-      await tx.eventLog.create({
-        data: {
-          type: "PLOT_CREATED",
-          description: `Plot "${plot.name}" (${plotInput.plotNumber || "no number"}) created from template "${template.name}" (batch)`,
-          siteId,
-          plotId: plot.id,
-          userId: session.user.id,
-        },
+      createdPlots.push(plotId);
+    } catch (err) {
+      errors.push({
+        plotNumber: plotInput.plotNumber || plotInput.plotName,
+        error: err instanceof Error ? err.message : String(err),
       });
     }
+  }
 
-    return createdPlots;
-  });
+  if (createdPlots.length === 0 && errors.length > 0) {
+    return NextResponse.json(
+      { error: "All plots failed to create", errors },
+      { status: 500 }
+    );
+  }
 
   return NextResponse.json(
-    { created: result.length, plotIds: result },
+    { created: createdPlots.length, plotIds: createdPlots, errors },
     { status: 201 }
   );
 }

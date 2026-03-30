@@ -33,6 +33,7 @@ export async function GET(req: NextRequest) {
     deliveriesTodayCount,
     signOffCount,
     pendingOrdersCount,
+    lateStartCount,
   ] = await Promise.all([
     prisma.job.count({
       where: { status: "IN_PROGRESS", endDate: { lt: now } },
@@ -62,6 +63,10 @@ export async function GET(req: NextRequest) {
       },
     }),
     prisma.materialOrder.count({ where: { status: "PENDING" } }),
+    // Late starts: NOT_STARTED jobs whose start date has already passed
+    prisma.job.count({
+      where: { status: "NOT_STARTED", startDate: { lt: todayStart } },
+    }),
   ]);
 
   // Send grouped notifications for each category that has items
@@ -133,6 +138,17 @@ export async function GET(req: NextRequest) {
     );
   }
 
+  if (lateStartCount > 0) {
+    notifications.push(
+      sendPushToAll("LATE_STARTS", {
+        title: "Late Start Jobs",
+        body: `${lateStartCount} job${lateStartCount !== 1 ? "s have" : " has"} not started yet — start date has passed`,
+        url: "/tasks",
+        tag: "late-starts",
+      })
+    );
+  }
+
   await Promise.allSettled(notifications);
 
   // Log the notification event
@@ -152,6 +168,7 @@ export async function GET(req: NextRequest) {
       deliveriesToday: deliveriesTodayCount,
       signOff: signOffCount,
       pendingOrders: pendingOrdersCount,
+      lateStarts: lateStartCount,
     },
   });
 }

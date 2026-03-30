@@ -182,3 +182,36 @@
     display: none;
   }
 }
+
+/* ─── Print styles for Daily Brief ──────────────────────────────────────── */
+@media print {
+  /* Hide navigation chrome */
+  aside,
+  nav,
+  header,
+  .no-print {
+    display: none !important;
+  }
+
+  /* Remove shadows and backgrounds for clean print */
+  * {
+    box-shadow: none !important;
+  }
+
+  /* Ensure content fills the page */
+  body, html {
+    background: white !important;
+  }
+
+  /* Force all collapsible sections to be visible */
+  [data-collapsible] {
+    display: block !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  /* Page break hints */
+  .card {
+    break-inside: avoid;
+  }
+}

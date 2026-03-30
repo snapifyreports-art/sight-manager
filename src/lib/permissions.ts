@@ -145,3 +145,17 @@ export function hasPermission(
   if (!permissions) return false;
   return permissions.includes(key);
 }
+
+/**
+ * Check if a session user has a required permission.
+ * Accepts the session.user object (which has `permissions` and `role`).
+ * CEO and DIRECTOR always have all permissions.
+ */
+export function sessionHasPermission(
+  user: { role?: string; permissions?: string[] } | undefined,
+  key: string
+): boolean {
+  if (!user) return false;
+  if (user.role === "CEO" || user.role === "DIRECTOR") return true;
+  return hasPermission(user.permissions, key);
+}

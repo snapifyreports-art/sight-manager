@@ -118,39 +118,49 @@ export async function GET(
     const template = templateBudgets[templateKey] ?? null;
 
     let plotBudget = template?.total ?? 0;
-    let plotActual = 0;
+    let plotDelivered = 0;
+    let plotCommitted = 0;
 
     const jobBreakdown = plot.jobs.map((job) => {
       const budgeted = template?.jobs[job.name] ?? 0;
 
-      let actual = 0;
+      let delivered = 0;
+      let committed = 0;
       for (const order of job.orders) {
         if (order.status !== "CANCELLED") {
+          let orderTotal = 0;
           for (const item of order.orderItems) {
-            actual += item.totalCost;
+            orderTotal += item.totalCost;
+          }
+          committed += orderTotal;
+          if (order.status === "DELIVERED") {
+            delivered += orderTotal;
           }
         }
       }
 
-      plotActual += actual;
+      plotDelivered += delivered;
+      plotCommitted += committed;
 
-      const variance = actual - budgeted;
+      const variance = committed - budgeted;
       const variancePercent =
-        budgeted > 0 ? Math.round((variance / budgeted) * 100) : actual > 0 ? 100 : 0;
+        budgeted > 0 ? Math.round((variance / budgeted) * 100) : committed > 0 ? 100 : 0;
 
       return {
         jobId: job.id,
         jobName: job.name,
         status: job.status,
         budgeted: Math.round(budgeted * 100) / 100,
-        actual: Math.round(actual * 100) / 100,
+        actual: Math.round(delivered * 100) / 100,
+        delivered: Math.round(delivered * 100) / 100,
+        committed: Math.round(committed * 100) / 100,
         variance: Math.round(variance * 100) / 100,
         variancePercent,
         orderCount: job.orders.filter((o) => o.status !== "CANCELLED").length,
       };
     });
 
-    const plotVariance = plotActual - plotBudget;
+    const plotVariance = plotCommitted - plotBudget;
 
     return {
       plotId: plot.id,
@@ -159,12 +169,14 @@ export async function GET(
       houseType: plot.houseType,
       templateMatched: template?.templateName ?? null,
       budgeted: Math.round(plotBudget * 100) / 100,
-      actual: Math.round(plotActual * 100) / 100,
+      actual: Math.round(plotCommitted * 100) / 100,
+      delivered: Math.round(plotDelivered * 100) / 100,
+      committed: Math.round(plotCommitted * 100) / 100,
       variance: Math.round(plotVariance * 100) / 100,
       variancePercent:
         plotBudget > 0
           ? Math.round((plotVariance / plotBudget) * 100)
-          : plotActual > 0
+          : plotCommitted > 0
             ? 100
             : 0,
       jobs: jobBreakdown,
@@ -173,8 +185,10 @@ export async function GET(
 
   // Site-wide totals
   const siteBudget = plotReports.reduce((sum, p) => sum + p.budgeted, 0);
-  const siteActual = plotReports.reduce((sum, p) => sum + p.actual, 0);
-  const siteVariance = siteActual - siteBudget;
+  const siteDelivered = plotReports.reduce((sum, p) => sum + p.delivered, 0);
+  const siteCommitted = plotReports.reduce((sum, p) => sum + p.committed, 0);
+  const siteActual = siteCommitted; // backward compat alias
+  const siteVariance = siteCommitted - siteBudget;
 
   // Top cost overruns
   const allJobVariances = plotReports.flatMap((p) =>
@@ -196,6 +210,8 @@ export async function GET(
     siteSummary: {
       totalBudgeted: Math.round(siteBudget * 100) / 100,
       totalActual: Math.round(siteActual * 100) / 100,
+      totalDelivered: Math.round(siteDelivered * 100) / 100,
+      totalCommitted: Math.round(siteCommitted * 100) / 100,
       totalVariance: Math.round(siteVariance * 100) / 100,
       variancePercent:
         siteBudget > 0 ? Math.round((siteVariance / siteBudget) * 100) : 0,

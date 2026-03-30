@@ -17,6 +17,7 @@ import {
   ChevronDown,
   Menu,
   CalendarDays,
+  FolderOpen,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { NAV_PERMISSION_MAP } from "@/lib/permissions";
@@ -39,16 +40,17 @@ import {
 const SITE_TAB_GROUPS = [
   {
     label: "Manage Site",
+    icon: HardHat,
     tabs: [
       { label: "Daily Brief",  tab: "daily-brief" },
       { label: "Programme",    tab: "programme" },
       { label: "Plots",        tab: "plots" },
       { label: "Snags",        tab: "snags" },
-      { label: "Day Sheets",   tab: "day-sheets" },
     ],
   },
   {
     label: "Site Reporting",
+    icon: BarChart3,
     tabs: [
       { label: "Heatmap",        tab: "heatmap" },
       { label: "Weekly Report",  tab: "weekly-report" },
@@ -62,6 +64,7 @@ const SITE_TAB_GROUPS = [
   },
   {
     label: "Site Admin",
+    icon: FolderOpen,
     tabs: [
       { label: "Documents",     tab: "documents" },
       { label: "Critical Path", tab: "critical-path" },
@@ -244,7 +247,7 @@ function SidebarNav({ collapsed = false }: { collapsed?: boolean }) {
                       : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
                   )}
                 >
-                  <Building2 className={cn(
+                  <group.icon className={cn(
                     "size-[18px] shrink-0",
                     hasActive ? "text-blue-600" : "text-muted-foreground/70 group-hover:text-foreground"
                   )} />

@@ -27,6 +27,8 @@ import {
   AlertTriangle,
   ArrowRight,
   Send,
+  Pencil,
+  Check,
 } from "lucide-react";
 import { JobSiblingNav } from "@/components/jobs/JobSiblingNav";
 import { Button } from "@/components/ui/button";
@@ -357,6 +359,18 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
   const [sendingNotifications, setSendingNotifications] = useState(false);
   const [notifyContractorIds, setNotifyContractorIds] = useState<Set<string>>(new Set());
 
+  // Date editing state
+  const [editingStartDate, setEditingStartDate] = useState(false);
+  const [editingEndDate, setEditingEndDate] = useState(false);
+  const [editDateValue, setEditDateValue] = useState("");
+  const [savingDate, setSavingDate] = useState(false);
+  const [dateCascadePreview, setDateCascadePreview] = useState<{
+    deltaDays: number;
+    jobUpdates: Array<{ jobId: string; jobName: string; originalStart: string | null; originalEnd: string | null; newStart: string; newEnd: string }>;
+    orderUpdates: Array<{ orderId: string; originalOrderDate: string; originalDeliveryDate: string | null; newOrderDate: string; newDeliveryDate: string | null }>;
+  } | null>(null);
+  const [pendingEndDate, setPendingEndDate] = useState<string | null>(null);
+
   async function handleAction(action: string) {
     if (action === "complete") {
       setSignOffDialogOpen(true);
@@ -525,6 +539,72 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
     }
   }
 
+  const handleStartDateSave = async () => {
+    setSavingDate(true);
+    try {
+      const res = await fetch(`/api/jobs/${job.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ startDate: editDateValue }),
+      });
+      if (res.ok) {
+        setEditingStartDate(false);
+        router.refresh();
+      }
+    } finally {
+      setSavingDate(false);
+    }
+  };
+
+  const handleEndDateChange = async () => {
+    setSavingDate(true);
+    try {
+      const res = await fetch(`/api/jobs/${job.id}/cascade`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ newEndDate: editDateValue }),
+      });
+      if (res.ok) {
+        const preview = await res.json();
+        if (preview.jobUpdates?.length > 0 || preview.orderUpdates?.length > 0) {
+          setDateCascadePreview(preview);
+          setPendingEndDate(editDateValue);
+        } else {
+          // No cascade needed, just save
+          await fetch(`/api/jobs/${job.id}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ endDate: editDateValue }),
+          });
+          setEditingEndDate(false);
+          router.refresh();
+        }
+      }
+    } finally {
+      setSavingDate(false);
+    }
+  };
+
+  const handleDateCascadeConfirm = async () => {
+    if (!pendingEndDate) return;
+    setSavingDate(true);
+    try {
+      const res = await fetch(`/api/jobs/${job.id}/cascade`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ newEndDate: pendingEndDate, confirm: true }),
+      });
+      if (res.ok) {
+        setDateCascadePreview(null);
+        setPendingEndDate(null);
+        setEditingEndDate(false);
+        router.refresh();
+      }
+    } finally {
+      setSavingDate(false);
+    }
+  };
+
   async function handleSendNextStageNotification() {
     if (!postSignOffData) return;
     setSendingNotifications(true);
@@ -691,24 +771,72 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
           label="Address"
           value={job.address ?? "\u2014"}
         />
-        <InfoCard
-          icon={Calendar}
-          label="Start Date"
-          value={
-            job.startDate
-              ? format(new Date(job.startDate), "dd MMM yyyy")
-              : "\u2014"
-          }
-        />
-        <InfoCard
-          icon={Calendar}
-          label="End Date"
-          value={
-            job.endDate
-              ? format(new Date(job.endDate), "dd MMM yyyy")
-              : "\u2014"
-          }
-        />
+        {/* Start Date - editable */}
+        <Card>
+          <CardContent className="pt-4">
+            <div className="flex items-center gap-2 text-muted-foreground">
+              <Calendar className="size-3.5" />
+              <span className="text-xs font-medium">Start Date</span>
+            </div>
+            {editingStartDate ? (
+              <div className="mt-1 flex items-center gap-2">
+                <input
+                  type="date"
+                  value={editDateValue}
+                  onChange={(e) => setEditDateValue(e.target.value)}
+                  className="rounded border px-2 py-1 text-sm"
+                />
+                <Button size="sm" variant="ghost" className="h-7 px-2" onClick={handleStartDateSave} disabled={savingDate}>
+                  {savingDate ? <Loader2 className="size-3 animate-spin" /> : <Check className="size-3" />}
+                </Button>
+                <Button size="sm" variant="ghost" className="h-7 px-2" onClick={() => setEditingStartDate(false)}>
+                  <X className="size-3" />
+                </Button>
+              </div>
+            ) : (
+              <p
+                className="mt-1 flex items-center gap-2 text-sm font-medium cursor-pointer group"
+                onClick={() => { setEditDateValue(job.startDate?.split("T")[0] || ""); setEditingStartDate(true); }}
+              >
+                {job.startDate ? format(new Date(job.startDate), "dd MMM yyyy") : "\u2014"}
+                <Pencil className="size-3 opacity-0 group-hover:opacity-50 transition-opacity" />
+              </p>
+            )}
+          </CardContent>
+        </Card>
+        {/* End Date - editable with cascade support */}
+        <Card>
+          <CardContent className="pt-4">
+            <div className="flex items-center gap-2 text-muted-foreground">
+              <Calendar className="size-3.5" />
+              <span className="text-xs font-medium">End Date</span>
+            </div>
+            {editingEndDate ? (
+              <div className="mt-1 flex items-center gap-2">
+                <input
+                  type="date"
+                  value={editDateValue}
+                  onChange={(e) => setEditDateValue(e.target.value)}
+                  className="rounded border px-2 py-1 text-sm"
+                />
+                <Button size="sm" variant="ghost" className="h-7 px-2" onClick={handleEndDateChange} disabled={savingDate}>
+                  {savingDate ? <Loader2 className="size-3 animate-spin" /> : <Check className="size-3" />}
+                </Button>
+                <Button size="sm" variant="ghost" className="h-7 px-2" onClick={() => setEditingEndDate(false)}>
+                  <X className="size-3" />
+                </Button>
+              </div>
+            ) : (
+              <p
+                className="mt-1 flex items-center gap-2 text-sm font-medium cursor-pointer group"
+                onClick={() => { setEditDateValue(job.endDate?.split("T")[0] || ""); setEditingEndDate(true); }}
+              >
+                {job.endDate ? format(new Date(job.endDate), "dd MMM yyyy") : "\u2014"}
+                <Pencil className="size-3 opacity-0 group-hover:opacity-50 transition-opacity" />
+              </p>
+            )}
+          </CardContent>
+        </Card>
       </div>
 
       {/* Orders + Actions */}
@@ -1528,6 +1656,134 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
               </DialogFooter>
             </>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Date Cascade Preview Dialog */}
+      <Dialog
+        open={dateCascadePreview !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDateCascadePreview(null);
+            setPendingEndDate(null);
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Calendar className="size-5 text-amber-500" />
+              Schedule Adjustment
+            </DialogTitle>
+            <DialogDescription>
+              Changing the end date shifts subsequent jobs by{" "}
+              <strong>
+                {dateCascadePreview
+                  ? `${Math.abs(dateCascadePreview.deltaDays)} day${Math.abs(dateCascadePreview.deltaDays) !== 1 ? "s" : ""} ${dateCascadePreview.deltaDays > 0 ? "later" : "earlier"}`
+                  : ""}
+              </strong>
+              . Would you like to cascade this change?
+            </DialogDescription>
+          </DialogHeader>
+          {dateCascadePreview && (
+            <div className="max-h-[40vh] space-y-2 overflow-y-auto py-2">
+              {dateCascadePreview.jobUpdates.length > 0 && (
+                <div className="space-y-1.5">
+                  <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                    Jobs affected
+                  </p>
+                  {dateCascadePreview.jobUpdates.map((ju) => (
+                    <div
+                      key={ju.jobId}
+                      className="flex items-center justify-between rounded-lg border px-3 py-2 text-sm"
+                    >
+                      <span className="font-medium">{ju.jobName}</span>
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <span>
+                          {ju.originalStart
+                            ? format(new Date(ju.originalStart), "dd MMM")
+                            : "\u2014"}{" "}
+                          \u2013{" "}
+                          {ju.originalEnd
+                            ? format(new Date(ju.originalEnd), "dd MMM")
+                            : "\u2014"}
+                        </span>
+                        <ArrowRight className="size-3" />
+                        <span className="font-medium text-foreground">
+                          {format(new Date(ju.newStart), "dd MMM")} \u2013{" "}
+                          {format(new Date(ju.newEnd), "dd MMM")}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {dateCascadePreview.orderUpdates.length > 0 && (
+                <div className="mt-3 space-y-1.5">
+                  <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                    Orders affected
+                  </p>
+                  {dateCascadePreview.orderUpdates.map((ou) => (
+                    <div
+                      key={ou.orderId}
+                      className="flex items-center justify-between rounded-lg border px-3 py-2 text-sm"
+                    >
+                      <span className="text-muted-foreground">Order</span>
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <span>
+                          {format(new Date(ou.originalOrderDate), "dd MMM")}
+                          {ou.originalDeliveryDate
+                            ? ` \u2192 ${format(new Date(ou.originalDeliveryDate), "dd MMM")}`
+                            : ""}
+                        </span>
+                        <ArrowRight className="size-3" />
+                        <span className="font-medium text-foreground">
+                          {format(new Date(ou.newOrderDate), "dd MMM")}
+                          {ou.newDeliveryDate
+                            ? ` \u2192 ${format(new Date(ou.newDeliveryDate), "dd MMM")}`
+                            : ""}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={async () => {
+                // Save end date without cascade
+                setSavingDate(true);
+                try {
+                  await fetch(`/api/jobs/${job.id}`, {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ endDate: pendingEndDate }),
+                  });
+                  setDateCascadePreview(null);
+                  setPendingEndDate(null);
+                  setEditingEndDate(false);
+                  router.refresh();
+                } finally {
+                  setSavingDate(false);
+                }
+              }}
+            >
+              Skip (save date only)
+            </Button>
+            <Button onClick={handleDateCascadeConfirm} disabled={savingDate}>
+              {savingDate ? (
+                <>
+                  <Loader2 className="size-4 animate-spin" />
+                  Applying...
+                </>
+              ) : (
+                "Apply Cascade"
+              )}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

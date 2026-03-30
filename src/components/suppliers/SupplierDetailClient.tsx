@@ -55,6 +55,12 @@ interface Supplier {
   updatedAt: string;
   _count: { orders: number };
   materials: MaterialItem[];
+  performance: {
+    totalOrders: number;
+    totalDelivered: number;
+    onTimeRate: number | null;
+    avgDaysDelta: number | null;
+  };
 }
 
 // ---------- Helpers ----------
@@ -291,15 +297,53 @@ export function SupplierDetailClient({ supplier: initial }: { supplier: Supplier
       </div>
 
       {/* Stats row */}
-      <div className="flex gap-4 text-sm">
+      <div className="flex flex-wrap gap-3 text-sm">
         <div className="rounded-lg border bg-white px-4 py-2">
           <span className="text-muted-foreground">Pricelist items: </span>
           <span className="font-semibold">{items.length}</span>
         </div>
         <div className="rounded-lg border bg-white px-4 py-2">
-          <span className="text-muted-foreground">Orders: </span>
+          <span className="text-muted-foreground">Total orders: </span>
           <span className="font-semibold">{supplier._count.orders}</span>
         </div>
+        <div className="rounded-lg border bg-white px-4 py-2">
+          <span className="text-muted-foreground">Delivered: </span>
+          <span className="font-semibold">{supplier.performance.totalDelivered}</span>
+        </div>
+        {supplier.performance.onTimeRate !== null && (
+          <div className={`rounded-lg border px-4 py-2 ${
+            supplier.performance.onTimeRate >= 90 ? "border-green-200 bg-green-50" :
+            supplier.performance.onTimeRate >= 70 ? "border-amber-200 bg-amber-50" :
+            "border-red-200 bg-red-50"
+          }`}>
+            <span className="text-muted-foreground">On-time: </span>
+            <span className={`font-semibold ${
+              supplier.performance.onTimeRate >= 90 ? "text-green-700" :
+              supplier.performance.onTimeRate >= 70 ? "text-amber-700" :
+              "text-red-700"
+            }`}>{supplier.performance.onTimeRate}%</span>
+          </div>
+        )}
+        {supplier.performance.avgDaysDelta !== null && (
+          <div className={`rounded-lg border px-4 py-2 ${
+            supplier.performance.avgDaysDelta <= 0 ? "border-green-200 bg-green-50" :
+            supplier.performance.avgDaysDelta <= 3 ? "border-amber-200 bg-amber-50" :
+            "border-red-200 bg-red-50"
+          }`}>
+            <span className="text-muted-foreground">Avg delivery: </span>
+            <span className={`font-semibold ${
+              supplier.performance.avgDaysDelta <= 0 ? "text-green-700" :
+              supplier.performance.avgDaysDelta <= 3 ? "text-amber-700" :
+              "text-red-700"
+            }`}>
+              {supplier.performance.avgDaysDelta === 0
+                ? "On time"
+                : supplier.performance.avgDaysDelta > 0
+                  ? `${supplier.performance.avgDaysDelta}d late`
+                  : `${Math.abs(supplier.performance.avgDaysDelta)}d early`}
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Pricelist Section */}
