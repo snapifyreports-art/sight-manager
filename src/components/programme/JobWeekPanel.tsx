@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { format } from "date-fns";
+import { format, differenceInCalendarDays, addDays } from "date-fns";
 import Link from "next/link";
 import {
   Loader2,
@@ -296,6 +296,16 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated }: Jo
   const [showSignOffForm, setShowSignOffForm] = useState(false);
   const [signOffNotesInput, setSignOffNotesInput] = useState("");
 
+  // Early-start programme impact dialog
+  const [earlyStartDialog, setEarlyStartDialog] = useState<{
+    jobId: string;
+    jobName: string;
+    daysEarly: number;
+    endDate: string | null;
+    isChild: boolean;
+  } | null>(null);
+  const [cascadeLoading, setCascadeLoading] = useState(false);
+
   // Child job summaries for synthetic parent panels
   const [childJobs, setChildJobs] = useState<Array<{ id: string; name: string; status: string; sortOrder: number; startDate: string | null; endDate: string | null }>>([]);
   const [childJobStatuses, setChildJobStatuses] = useState<Map<string, string>>(new Map());
@@ -320,6 +330,7 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated }: Jo
       setChildJobActionLoading(new Set());
       setChildJobSignOff(null);
       setChildSignOffNotes("");
+      setEarlyStartDialog(null);
       return;
     }
 
@@ -488,48 +499,85 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated }: Jo
     }
   }, [context, noteText]);
 
+  // Fire the actual start/stop/complete API call (shared by direct and post-dialog paths)
+  const fireJobAction = useCallback(async (jobId: string, action: "start" | "stop" | "complete", notes?: string) => {
+    const res = await fetch(`/api/jobs/${jobId}/actions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action, ...(notes ? { signOffNotes: notes } : {}) }),
+    });
+    if (res.ok) {
+      const jobData = await fetch(`/api/jobs/${jobId}`, { cache: "no-store" }).then((r) => r.json());
+      setActions(Array.isArray(jobData.actions) ? jobData.actions : []);
+    }
+    return res.ok;
+  }, []);
+
   // Job status actions (start / stop / sign off)
   const handleJobAction = useCallback(async (action: "start" | "stop" | "complete", notes?: string) => {
     if (!context || isSynthetic) return;
+    const jobId = context.job.id;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    // Early start: intercept and show programme impact dialog
+    if (action === "start" && context.job.startDate) {
+      const planned = new Date(context.job.startDate);
+      planned.setHours(0, 0, 0, 0);
+      const daysEarly = differenceInCalendarDays(planned, today);
+      if (daysEarly > 0) {
+        setEarlyStartDialog({
+          jobId,
+          jobName: context.job.name,
+          daysEarly,
+          endDate: context.job.endDate ?? null,
+          isChild: false,
+        });
+        return;
+      }
+    }
+
     setJobActionLoading(true);
     try {
-      const res = await fetch(`/api/jobs/${context.job.id}/actions`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action, ...(notes ? { signOffNotes: notes } : {}) }),
-      });
-      if (res.ok) {
+      const ok = await fireJobAction(jobId, action, notes);
+      if (ok) {
         if (action === "start") setLocalStatus("IN_PROGRESS");
         if (action === "stop") setLocalStatus("ON_HOLD");
         if (action === "complete") setLocalStatus("COMPLETED");
         setShowSignOffForm(false);
         setSignOffNotesInput("");
-        // Refresh notes timeline
-        const jobData = await fetch(`/api/jobs/${context.job.id}`, { cache: "no-store" }).then((r) => r.json());
-        setActions(Array.isArray(jobData.actions) ? jobData.actions : []);
       }
     } catch (e) {
       console.error("Job action failed:", e);
     } finally {
       setJobActionLoading(false);
     }
-  }, [context, isSynthetic]);
+  }, [context, isSynthetic, fireJobAction]);
 
   // Action on an individual child job inside a synthetic parent panel
   const handleChildJobAction = useCallback(async (childId: string, action: "start" | "stop" | "complete", notes?: string) => {
+    // Early start intercept for child jobs
+    if (action === "start") {
+      const child = childJobs.find((c) => c.id === childId);
+      if (child?.startDate) {
+        const today = new Date(); today.setHours(0, 0, 0, 0);
+        const planned = new Date(child.startDate); planned.setHours(0, 0, 0, 0);
+        const daysEarly = differenceInCalendarDays(planned, today);
+        if (daysEarly > 0) {
+          setEarlyStartDialog({ jobId: childId, jobName: child.name, daysEarly, endDate: child.endDate, isChild: true });
+          return;
+        }
+      }
+    }
+
     setChildJobActionLoading((prev) => new Set(prev).add(childId));
     try {
-      const res = await fetch(`/api/jobs/${childId}/actions`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action, ...(notes ? { signOffNotes: notes } : {}) }),
-      });
-      if (res.ok) {
+      const ok = await fireJobAction(childId, action, notes);
+      if (ok) {
         const newStatus = action === "start" ? "IN_PROGRESS" : action === "stop" ? "ON_HOLD" : "COMPLETED";
         setChildJobStatuses((prev) => new Map(prev).set(childId, newStatus));
         setChildJobSignOff(null);
         setChildSignOffNotes("");
-        // Refresh notes timeline
         const jobData = await fetch(`/api/jobs/${childId}`, { cache: "no-store" }).then((r) => r.json());
         if (Array.isArray(jobData.actions)) {
           const tagged = jobData.actions.map((a: JobAction) => ({ ...a, jobName: jobData.name }));
@@ -544,7 +592,55 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated }: Jo
     } finally {
       setChildJobActionLoading((prev) => { const s = new Set(prev); s.delete(childId); return s; });
     }
-  }, []);
+  }, [childJobs, fireJobAction]);
+
+  // Handle "Pull Forward" — cascade all subsequent jobs earlier, then start
+  const handlePullForward = useCallback(async () => {
+    if (!earlyStartDialog) return;
+    const { jobId, daysEarly, endDate, isChild } = earlyStartDialog;
+    setCascadeLoading(true);
+    try {
+      if (endDate) {
+        const newEnd = addDays(new Date(endDate), -daysEarly).toISOString().split("T")[0];
+        await fetch(`/api/jobs/${jobId}/cascade`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ newEndDate: newEnd, confirm: true }),
+        });
+      }
+      await fireJobAction(jobId, "start");
+      setEarlyStartDialog(null);
+      if (isChild) {
+        setChildJobStatuses((prev) => new Map(prev).set(jobId, "IN_PROGRESS"));
+      } else {
+        setLocalStatus("IN_PROGRESS");
+      }
+    } catch (e) {
+      console.error("Pull forward failed:", e);
+    } finally {
+      setCascadeLoading(false);
+    }
+  }, [earlyStartDialog, fireJobAction]);
+
+  // Handle "Expand Job" — just start, keep end date (more calendar time for this job)
+  const handleExpandJob = useCallback(async () => {
+    if (!earlyStartDialog) return;
+    const { jobId, isChild } = earlyStartDialog;
+    setCascadeLoading(true);
+    try {
+      await fireJobAction(jobId, "start");
+      setEarlyStartDialog(null);
+      if (isChild) {
+        setChildJobStatuses((prev) => new Map(prev).set(jobId, "IN_PROGRESS"));
+      } else {
+        setLocalStatus("IN_PROGRESS");
+      }
+    } catch (e) {
+      console.error("Expand job failed:", e);
+    } finally {
+      setCascadeLoading(false);
+    }
+  }, [earlyStartDialog, fireJobAction]);
 
   // Stage files for upload (shows caption input)
   const handleFileSelect = useCallback((files: FileList | null) => {
@@ -1561,6 +1657,62 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated }: Jo
           setSelectedOrderDetail(null);
         }}
       />
+
+      {/* Early-start programme impact dialog */}
+      {earlyStartDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white shadow-2xl">
+            <div className="border-b px-5 py-4">
+              <h3 className="font-semibold text-foreground">Starting Early</h3>
+              <p className="mt-0.5 text-sm text-muted-foreground">
+                <span className="font-medium">{earlyStartDialog.jobName}</span> is planned to start in{" "}
+                <span className="font-semibold text-blue-600">{earlyStartDialog.daysEarly} day{earlyStartDialog.daysEarly !== 1 ? "s" : ""}</span>.
+                How would you like to handle the programme?
+              </p>
+            </div>
+            <div className="space-y-2 p-4">
+              <button
+                onClick={handlePullForward}
+                disabled={cascadeLoading}
+                className="flex w-full items-start gap-3 rounded-xl border-2 border-blue-200 bg-blue-50 px-4 py-3.5 text-left hover:border-blue-400 hover:bg-blue-100 transition-colors disabled:opacity-60"
+              >
+                <span className="mt-0.5 text-lg">⏩</span>
+                <div>
+                  <p className="text-sm font-semibold text-blue-800">Pull Programme Forward</p>
+                  <p className="text-xs text-blue-600">
+                    Shift this job and all subsequent jobs {earlyStartDialog.daysEarly} day{earlyStartDialog.daysEarly !== 1 ? "s" : ""} earlier. Gantt updates automatically.
+                  </p>
+                </div>
+              </button>
+              <button
+                onClick={handleExpandJob}
+                disabled={cascadeLoading}
+                className="flex w-full items-start gap-3 rounded-xl border-2 border-emerald-200 bg-emerald-50 px-4 py-3.5 text-left hover:border-emerald-400 hover:bg-emerald-100 transition-colors disabled:opacity-60"
+              >
+                <span className="mt-0.5 text-lg">📐</span>
+                <div>
+                  <p className="text-sm font-semibold text-emerald-800">Expand This Job</p>
+                  <p className="text-xs text-emerald-600">
+                    Start now, keep the planned end date. The job gets more calendar time — rest of the programme stays put.
+                  </p>
+                </div>
+              </button>
+              <button
+                onClick={() => setEarlyStartDialog(null)}
+                disabled={cascadeLoading}
+                className="w-full rounded-xl border border-border/60 px-4 py-2.5 text-sm text-muted-foreground hover:bg-slate-50 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+            {cascadeLoading && (
+              <div className="flex items-center justify-center gap-2 border-t px-5 py-3 text-xs text-muted-foreground">
+                <Loader2 className="size-3.5 animate-spin" /> Updating programme…
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </>
   );
 }
