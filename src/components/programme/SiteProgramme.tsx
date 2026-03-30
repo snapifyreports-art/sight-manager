@@ -224,6 +224,20 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
     setTimeout(() => setToast(null), 4000);
   }, []);
 
+  // Schedule status per plot (traffic lights)
+  const [scheduleStatuses, setScheduleStatuses] = useState<Record<string, { status: string; daysDeviation: number; awaitingRestart: boolean }>>({});
+
+  useEffect(() => {
+    fetch(`/api/sites/${siteId}/plot-schedules`)
+      .then((r) => r.json())
+      .then((arr: Array<{ plotId: string; status: string; daysDeviation: number; awaitingRestart: boolean }>) => {
+        const map: Record<string, { status: string; daysDeviation: number; awaitingRestart: boolean }> = {};
+        for (const item of arr) map[item.plotId] = item;
+        setScheduleStatuses(map);
+      })
+      .catch(() => {});
+  }, [siteId]);
+
   // Select mode state (bulk actions)
   const [selectMode, setSelectMode] = useState(false);
   const [selectedPlots, setSelectedPlots] = useState<Set<string>>(new Set());
@@ -1308,10 +1322,18 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                         />
                       </div>
                     )}
-                    <div className="w-[52px] truncate px-1.5 font-semibold">
+                    <div className="w-[52px] flex items-center gap-1 truncate px-1.5 font-semibold">
+                      {scheduleStatuses[plot.id] && (() => {
+                        const s = scheduleStatuses[plot.id];
+                        if (s.awaitingRestart) return <span className="size-2 shrink-0 rounded-full bg-amber-400" title="Awaiting restart" />;
+                        if (s.status === "ahead") return <span className="size-2 shrink-0 rounded-full bg-emerald-500" title={`${s.daysDeviation}d ahead`} />;
+                        if (s.status === "behind") return <span className="size-2 shrink-0 rounded-full bg-red-500" title={`${Math.abs(s.daysDeviation)}d behind`} />;
+                        if (s.status === "on_track") return <span className="size-2 shrink-0 rounded-full bg-blue-400" title="On programme" />;
+                        return null;
+                      })()}
                       <Link
                         href={`/sites/${site.id}/plots/${plot.id}`}
-                        className="text-blue-600 hover:text-blue-800 hover:underline"
+                        className="text-blue-600 hover:text-blue-800 hover:underline truncate"
                       >
                         {plot.plotNumber || plot.name}
                       </Link>

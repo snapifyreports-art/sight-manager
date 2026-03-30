@@ -24,6 +24,10 @@ import {
   ShoppingCart,
   Trash2,
   X,
+  TrendingUp,
+  TrendingDown,
+  Minus,
+  PauseCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -408,6 +412,20 @@ export function SiteDetailClient({
     plotNumber: string | null;
   } | null>(null);
   const [deletingPlot, setDeletingPlot] = useState(false);
+
+  // Schedule status per plot (traffic lights)
+  const [scheduleStatuses, setScheduleStatuses] = useState<Record<string, { status: string; daysDeviation: number; awaitingRestart: boolean }>>({});
+
+  useEffect(() => {
+    fetch(`/api/sites/${site.id}/plot-schedules`)
+      .then((r) => r.json())
+      .then((arr: Array<{ plotId: string; status: string; daysDeviation: number; awaitingRestart: boolean }>) => {
+        const map: Record<string, { status: string; daysDeviation: number; awaitingRestart: boolean }> = {};
+        for (const item of arr) map[item.plotId] = item;
+        setScheduleStatuses(map);
+      })
+      .catch(() => {});
+  }, [site.id]);
 
   // Template mode state
   const [templates, setTemplates] = useState<Template[]>([]);
@@ -1732,6 +1750,31 @@ export function SiteDetailClient({
                             {plot.houseType}
                           </p>
                         )}
+                        {/* Schedule traffic light */}
+                        {scheduleStatuses[plot.id] && (() => {
+                          const s = scheduleStatuses[plot.id];
+                          if (s.awaitingRestart) return (
+                            <span className="mt-1.5 inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700">
+                              <PauseCircle className="size-2.5" /> Awaiting restart
+                            </span>
+                          );
+                          if (s.status === "ahead") return (
+                            <span className="mt-1.5 inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-medium text-emerald-700">
+                              <TrendingUp className="size-2.5" /> {s.daysDeviation}d ahead
+                            </span>
+                          );
+                          if (s.status === "behind") return (
+                            <span className="mt-1.5 inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-medium text-red-700">
+                              <TrendingDown className="size-2.5" /> {Math.abs(s.daysDeviation)}d behind
+                            </span>
+                          );
+                          if (s.status === "on_track") return (
+                            <span className="mt-1.5 inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-medium text-blue-700">
+                              <Minus className="size-2.5" /> On programme
+                            </span>
+                          );
+                          return null;
+                        })()}
                       </div>
                       <div className="flex shrink-0 items-center gap-2">
                         <div className="flex items-center gap-1 text-xs text-muted-foreground">

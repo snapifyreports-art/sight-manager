@@ -168,6 +168,7 @@ model Plot {
   approvalW            Boolean   @default(false)
   approvalKCO          Boolean   @default(false)
   buildCompletePercent Float     @default(0)
+  awaitingRestart      Boolean   @default(false)
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
 
@@ -182,28 +183,30 @@ model Plot {
 }
 
 model Job {
-  id              String    @id @default(cuid())
-  name            String
-  description     String?
-  plotId          String
-  location        String?
-  address         String?
-  startDate       DateTime?
-  endDate         DateTime?
-  status          JobStatus @default(NOT_STARTED)
-  assignedToId    String?
-  stageCode       String?
-  actualStartDate DateTime?
-  actualEndDate   DateTime?
-  signedOffById   String?
-  signedOffAt     DateTime?
-  signOffNotes    String?
-  sortOrder       Int       @default(0)
-  weatherAffected Boolean   @default(false)
-  parentId        String?
-  parentStage     String?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  id                String    @id @default(cuid())
+  name              String
+  description       String?
+  plotId            String
+  location          String?
+  address           String?
+  startDate         DateTime?
+  endDate           DateTime?
+  originalStartDate DateTime?
+  originalEndDate   DateTime?
+  status            JobStatus @default(NOT_STARTED)
+  assignedToId      String?
+  stageCode         String?
+  actualStartDate   DateTime?
+  actualEndDate     DateTime?
+  signedOffById     String?
+  signedOffAt       DateTime?
+  signOffNotes      String?
+  sortOrder         Int       @default(0)
+  weatherAffected   Boolean   @default(false)
+  parentId          String?
+  parentStage       String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
   plot          Plot            @relation(fields: [plotId], references: [id], onDelete: Cascade)
   assignedTo    User?           @relation("AssignedJobs", fields: [assignedToId], references: [id])

@@ -20,6 +20,7 @@ import {
   CheckCircle2,
   Briefcase,
   CalendarDays,
+  PauseCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -106,6 +107,7 @@ export function WeeklySiteReport({ siteId }: WeeklySiteReportProps) {
   const [weekDate, setWeekDate] = useState(
     startOfWeek(getCurrentDate(), { weekStartsOn: 1 })
   );
+  const [scheduleStatuses, setScheduleStatuses] = useState<Array<{ plotId: string; plotNumber: string | null; status: string; daysDeviation: number; awaitingRestart: boolean }>>([]);
 
   useEffect(() => {
     setLoading(true);
@@ -115,6 +117,13 @@ export function WeeklySiteReport({ siteId }: WeeklySiteReportProps) {
       .then(setData)
       .finally(() => setLoading(false));
   }, [siteId, weekDate, devDate]);
+
+  useEffect(() => {
+    fetch(`/api/sites/${siteId}/plot-schedules`)
+      .then((r) => r.json())
+      .then(setScheduleStatuses)
+      .catch(() => {});
+  }, [siteId]);
 
   const prevWeek = () => setWeekDate((d) => subWeeks(d, 1));
   const nextWeek = () => setWeekDate((d) => addWeeks(d, 1));
@@ -217,6 +226,58 @@ export function WeeklySiteReport({ siteId }: WeeklySiteReportProps) {
           </div>
         </CardContent>
       </Card>
+
+      {/* Programme Schedule Summary */}
+      {scheduleStatuses.length > 0 && (() => {
+        const ahead = scheduleStatuses.filter((s) => s.status === "ahead").length;
+        const behind = scheduleStatuses.filter((s) => s.status === "behind").length;
+        const onTrack = scheduleStatuses.filter((s) => s.status === "on_track").length;
+        const awaiting = scheduleStatuses.filter((s) => s.awaitingRestart).length;
+        const behinds = scheduleStatuses.filter((s) => s.status === "behind").sort((a, b) => a.daysDeviation - b.daysDeviation);
+        return (
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm">Programme Schedule</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="mb-3 flex flex-wrap gap-3">
+                {ahead > 0 && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-700">
+                    <TrendingUp className="size-3" /> {ahead} plot{ahead !== 1 ? "s" : ""} ahead
+                  </span>
+                )}
+                {onTrack > 0 && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2.5 py-1 text-xs font-medium text-blue-700">
+                    <Minus className="size-3" /> {onTrack} on programme
+                  </span>
+                )}
+                {behind > 0 && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2.5 py-1 text-xs font-medium text-red-700">
+                    <TrendingDown className="size-3" /> {behind} plot{behind !== 1 ? "s" : ""} behind
+                  </span>
+                )}
+                {awaiting > 0 && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-700">
+                    <PauseCircle className="size-3" /> {awaiting} awaiting restart
+                  </span>
+                )}
+              </div>
+              {behinds.length > 0 && (
+                <div>
+                  <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Most Behind</p>
+                  <div className="flex flex-wrap gap-2">
+                    {behinds.slice(0, 8).map((s) => (
+                      <span key={s.plotId} className="inline-flex items-center gap-1 rounded bg-red-50 px-2 py-0.5 text-[11px] text-red-700">
+                        Plot {s.plotNumber ?? "?"} — {Math.abs(s.daysDeviation)}d behind
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        );
+      })()}
 
       {/* This week's activity summary */}
       <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-4">

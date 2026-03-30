@@ -283,5 +283,68 @@ export async function POST(
     }).catch(() => {});
   }
 
+  // For completion: attach context for the post-completion dialog
+  if (action === "complete" && job) {
+    const allPlotJobs = await prisma.job.findMany({
+      where: { plotId: existing.plotId },
+      orderBy: { sortOrder: "asc" },
+      select: {
+        id: true,
+        name: true,
+        status: true,
+        sortOrder: true,
+        startDate: true,
+        endDate: true,
+        contractors: {
+          select: { contact: { select: { name: true, company: true } } },
+          orderBy: { createdAt: "asc" },
+          take: 1,
+        },
+        assignedTo: { select: { name: true } },
+      },
+    });
+
+    const nextJob = allPlotJobs.find(
+      (j) => j.sortOrder > existing.sortOrder && j.status !== "COMPLETED"
+    ) ?? null;
+
+    // Deviation: how far ahead/behind vs original schedule
+    // positive = finished early (ahead), negative = finished late (behind)
+    const completedJobWithOriginal = await prisma.job.findUnique({
+      where: { id },
+      select: { originalEndDate: true, actualEndDate: true },
+    });
+
+    let daysDeviation = 0;
+    if (completedJobWithOriginal?.originalEndDate && completedJobWithOriginal?.actualEndDate) {
+      const { differenceInCalendarDays } = await import("date-fns");
+      daysDeviation = differenceInCalendarDays(
+        completedJobWithOriginal.originalEndDate,
+        completedJobWithOriginal.actualEndDate
+      ); // positive = finished before original end = ahead
+    }
+
+    const contractor = nextJob?.contractors?.[0]?.contact ?? null;
+
+    return NextResponse.json({
+      ...job,
+      _completionContext: {
+        daysDeviation,
+        nextJob: nextJob
+          ? {
+              id: nextJob.id,
+              name: nextJob.name,
+              status: nextJob.status,
+              contractorName: contractor
+                ? contractor.company || contractor.name
+                : null,
+              assignedToName: nextJob.assignedTo?.name ?? null,
+            }
+          : null,
+        plotId: existing.plotId,
+      },
+    });
+  }
+
   return NextResponse.json(job);
 }

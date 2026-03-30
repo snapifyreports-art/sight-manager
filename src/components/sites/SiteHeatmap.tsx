@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useDevDate } from "@/lib/dev-date-context";
-import { AlertTriangle, Bug, Loader2 } from "lucide-react";
+import { AlertTriangle, Bug, Loader2, TrendingUp, TrendingDown, Minus, PauseCircle } from "lucide-react";
 
 interface HeatmapPlot {
   id: string;
@@ -31,12 +31,18 @@ export function SiteHeatmap({ siteId }: { siteId: string }) {
   const router = useRouter();
   const [plots, setPlots] = useState<HeatmapPlot[]>([]);
   const [loading, setLoading] = useState(true);
+  const [scheduleStatuses, setScheduleStatuses] = useState<Record<string, { status: string; daysDeviation: number; awaitingRestart: boolean }>>({});
 
   useEffect(() => {
-    fetch(`/api/sites/${siteId}/heatmap`)
-      .then((r) => r.json())
-      .then(setPlots)
-      .finally(() => setLoading(false));
+    Promise.all([
+      fetch(`/api/sites/${siteId}/heatmap`).then((r) => r.json()),
+      fetch(`/api/sites/${siteId}/plot-schedules`).then((r) => r.json()),
+    ]).then(([heatmap, schedules]: [HeatmapPlot[], Array<{ plotId: string; status: string; daysDeviation: number; awaitingRestart: boolean }>]) => {
+      setPlots(heatmap);
+      const map: Record<string, { status: string; daysDeviation: number; awaitingRestart: boolean }> = {};
+      for (const item of schedules) map[item.plotId] = item;
+      setScheduleStatuses(map);
+    }).finally(() => setLoading(false));
   }, [siteId, devDate]);
 
   if (loading) {
@@ -107,6 +113,32 @@ export function SiteHeatmap({ siteId }: { siteId: string }) {
                   {plot.houseType}
                 </p>
               )}
+
+              {/* Schedule deviation badge */}
+              {scheduleStatuses[plot.id] && (() => {
+                const s = scheduleStatuses[plot.id];
+                if (s.awaitingRestart) return (
+                  <span className="mt-1 inline-flex items-center gap-0.5 rounded bg-amber-100 px-1 py-0.5 text-[9px] font-medium text-amber-700">
+                    <PauseCircle className="size-2" /> Paused
+                  </span>
+                );
+                if (s.status === "ahead") return (
+                  <span className="mt-1 inline-flex items-center gap-0.5 rounded bg-emerald-100 px-1 py-0.5 text-[9px] font-medium text-emerald-700">
+                    <TrendingUp className="size-2" /> {s.daysDeviation}d ahead
+                  </span>
+                );
+                if (s.status === "behind") return (
+                  <span className="mt-1 inline-flex items-center gap-0.5 rounded bg-red-100 px-1 py-0.5 text-[9px] font-medium text-red-700">
+                    <TrendingDown className="size-2" /> {Math.abs(s.daysDeviation)}d behind
+                  </span>
+                );
+                if (s.status === "on_track") return (
+                  <span className="mt-1 inline-flex items-center gap-0.5 rounded bg-blue-100 px-1 py-0.5 text-[9px] font-medium text-blue-600">
+                    <Minus className="size-2" /> On prog.
+                  </span>
+                );
+                return null;
+              })()}
 
               {/* Progress bar */}
               <div className="mt-2 h-1.5 rounded-full bg-slate-200">

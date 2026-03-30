@@ -18,6 +18,7 @@ import {
   Menu,
   CalendarDays,
   FolderOpen,
+  Footprints,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { NAV_PERMISSION_MAP } from "@/lib/permissions";
@@ -37,6 +38,7 @@ import {
 } from "@/components/ui/tooltip";
 
 // Site sub-nav tabs grouped into sections
+// route?: string — if set, navigates to /sites/[id]/route instead of ?tab=tab
 const SITE_TAB_GROUPS = [
   {
     label: "Manage Site",
@@ -123,9 +125,15 @@ function SidebarNav({ collapsed = false }: { collapsed?: boolean }) {
   const [selectedSiteId, setSelectedSiteId] = useState(siteIdFromPath || "");
   const [sites, setSites] = useState<{ id: string; name: string; status: string }[]>([]);
 
-  // Which group label is open — auto-open the one containing the active tab
+  // Which group label is open — auto-open the one containing the active tab or route
   const activeGroupLabel = SITE_TAB_GROUPS.find((g) =>
-    g.tabs.some((t) => t.tab === currentTab)
+    g.tabs.some((t) => {
+      const routeTab = (t as { route?: string }).route;
+      if (routeTab && siteIdFromPath) {
+        return pathname === `/sites/${siteIdFromPath}/${routeTab}`;
+      }
+      return t.tab === currentTab;
+    })
   )?.label ?? null;
   const [openGroups, setOpenGroups] = useState<Set<string>>(
     () => new Set(activeGroupLabel ? [activeGroupLabel] : [])
@@ -232,7 +240,11 @@ function SidebarNav({ collapsed = false }: { collapsed?: boolean }) {
           {!collapsed && selectedSiteId && SITE_TAB_GROUPS.map((group) => {
             const isOpen = openGroups.has(group.label);
             const hasActive = siteIdFromPath === selectedSiteId &&
-              group.tabs.some((t) => t.tab === currentTab);
+              group.tabs.some((t) => {
+                const routeTab = (t as { route?: string }).route;
+                if (routeTab) return pathname === `/sites/${siteIdFromPath}/${routeTab}`;
+                return t.tab === currentTab;
+              });
             return (
               <div key={group.label} className="relative">
                 {hasActive && (
@@ -260,19 +272,25 @@ function SidebarNav({ collapsed = false }: { collapsed?: boolean }) {
                 {isOpen && (
                   <div className="mb-1 pl-9">
                     {group.tabs.map((t) => {
-                      const href = `/sites/${selectedSiteId}?tab=${t.tab}`;
-                      const isActive = siteIdFromPath === selectedSiteId && currentTab === t.tab;
+                      const href = t.route
+                        ? `/sites/${selectedSiteId}/${t.route}`
+                        : `/sites/${selectedSiteId}?tab=${t.tab}`;
+                      const isActive = t.route
+                        ? pathname === `/sites/${siteIdFromPath}/${t.route}`
+                        : siteIdFromPath === selectedSiteId && currentTab === t.tab;
+                      const TabIcon = (t as { icon?: React.ComponentType<{ className?: string }> }).icon;
                       return (
                         <Link
                           key={t.tab}
                           href={href}
                           className={cn(
-                            "flex items-center rounded-md px-2 py-1 text-[12px] transition-colors",
+                            "flex items-center gap-1.5 rounded-md px-2 py-1 text-[12px] transition-colors",
                             isActive
                               ? "font-medium text-blue-700"
                               : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
                           )}
                         >
+                          {TabIcon && <TabIcon className="size-3 shrink-0" />}
                           {t.label}
                         </Link>
                       );
@@ -282,6 +300,36 @@ function SidebarNav({ collapsed = false }: { collapsed?: boolean }) {
               </div>
             );
           })}
+
+          {/* Walkthrough — standalone prominent button when site selected */}
+          {!collapsed && selectedSiteId && (() => {
+            const isActive = pathname === `/sites/${siteIdFromPath}/walkthrough`;
+            return (
+              <div className="relative my-1">
+                {isActive && (
+                  <div className="absolute left-0 h-6 w-[3px] rounded-r-full bg-blue-600 top-[10px]" />
+                )}
+                <Link
+                  href={`/sites/${selectedSiteId}/walkthrough`}
+                  className={cn(
+                    "group flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-[13px] font-semibold transition-all duration-150",
+                    isActive
+                      ? "bg-gradient-to-r from-blue-600/[0.12] to-blue-600/[0.04] text-blue-700"
+                      : "border border-dashed border-border/60 text-muted-foreground hover:border-blue-300 hover:bg-blue-50/60 hover:text-blue-700"
+                  )}
+                >
+                  <Footprints className={cn(
+                    "size-[18px] shrink-0",
+                    isActive ? "text-blue-600" : "text-muted-foreground/70 group-hover:text-blue-600"
+                  )} />
+                  <span>Site Walkthrough</span>
+                </Link>
+              </div>
+            );
+          })()}
+
+          {/* Divider before main nav */}
+          {!collapsed && selectedSiteId && <div className="my-1 border-t border-border/40" />}
 
           {/* Main nav items — site-contextual */}
           {navItems.filter((item) => {

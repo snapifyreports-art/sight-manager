@@ -401,7 +401,7 @@ export async function GET(
   }
 
   // Batch 4
-  const [recentEvents, totalPlots, allJobs] = await Promise.all([
+  const [recentEvents, totalPlots, allJobs, awaitingRestartRaw] = await Promise.all([
     prisma.eventLog.findMany({
       where: { siteId: id, createdAt: { gte: subDays(dayStart, 1), lte: dayEnd } },
       select: {
@@ -413,7 +413,50 @@ export async function GET(
     }),
     prisma.plot.count({ where: { siteId: id } }),
     prisma.job.count({ where: { plot: { siteId: id } } }),
+    prisma.plot.findMany({
+      where: { siteId: id, awaitingRestart: true },
+      select: {
+        id: true,
+        plotNumber: true,
+        name: true,
+        jobs: {
+          where: { status: { not: "COMPLETED" } },
+          orderBy: { sortOrder: "asc" },
+          take: 1,
+          select: {
+            id: true,
+            name: true,
+            startDate: true,
+            contractors: {
+              select: { contact: { select: { name: true, company: true } } },
+              orderBy: { createdAt: "asc" },
+              take: 1,
+            },
+            assignedTo: { select: { name: true } },
+          },
+        },
+      },
+    }),
   ]);
+
+  const awaitingRestartPlots = awaitingRestartRaw.map((p) => {
+    const nextJob = p.jobs[0] ?? null;
+    const contractor = nextJob?.contractors?.[0]?.contact ?? null;
+    return {
+      id: p.id,
+      plotNumber: p.plotNumber,
+      name: p.name,
+      nextJob: nextJob
+        ? {
+            id: nextJob.id,
+            name: nextJob.name,
+            startDate: nextJob.startDate?.toISOString() ?? null,
+            contractorName: contractor ? contractor.company || contractor.name : null,
+            assignedToName: nextJob.assignedTo?.name ?? null,
+          }
+        : null,
+    };
+  });
 
   const [completedJobs, weatherForecast] = await Promise.all([
     prisma.job.count({
@@ -447,6 +490,7 @@ export async function GET(
       blockedCount: blockedJobs.length,
       openSnagCount: openSnags,
       needsAttentionCount: needsAttention.length,
+      awaitingRestartCount: awaitingRestartRaw.length,
     },
     jobsStartingToday,
     lateStartJobs: genuineLateStartJobs.map((j) => ({
@@ -477,6 +521,7 @@ export async function GET(
     openSnagsList,
     openSnagsTruncated: openSnags > openSnagsList.length,
     needsAttention,
+    awaitingRestartPlots,
     ordersToPlace: outstandingOrders.map((o) => ({
       ...o,
       expectedDeliveryDate: o.expectedDeliveryDate?.toISOString() ?? null,

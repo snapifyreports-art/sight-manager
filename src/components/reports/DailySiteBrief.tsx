@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { format, addDays, differenceInCalendarDays } from "date-fns";
+import { PostCompletionDialog } from "@/components/PostCompletionDialog";
 import { getCurrentDate } from "@/lib/dev-date";
 import { useDevDate } from "@/lib/dev-date-context";
 import {
@@ -38,6 +39,8 @@ import {
   ChevronDown,
   Printer,
   UserPlus,
+  PauseCircle,
+  PlayCircle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -421,6 +424,14 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
   const [signOffPhotos, setSignOffPhotos] = useState<File[]>([]);
   const [signOffPreviews, setSignOffPreviews] = useState<string[]>([]);
   const [signOffSubmitting, setSignOffSubmitting] = useState(false);
+
+  // Post-completion decision dialog state
+  const [completionContext, setCompletionContext] = useState<{
+    completedJobName: string;
+    daysDeviation: number;
+    nextJob: { id: string; name: string; contractorName: string | null; assignedToName: string | null } | null;
+    plotId: string;
+  } | null>(null);
 
   // Contractor quick-assign state
   const [contractorAssignTarget, setContractorAssignTarget] = useState<{ jobId: string; jobName: string } | null>(null);
@@ -814,7 +825,11 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
         signOffPreviews.forEach((url) => URL.revokeObjectURL(url));
         setSignOffTarget(null);
         setRefreshKey((k) => k + 1);
-        if (result.endDate && result.actualEndDate) {
+        // Show post-completion decision dialog
+        if (result._completionContext) {
+          setCompletionContext(result._completionContext);
+        } else if (result.endDate && result.actualEndDate) {
+          // Fallback: legacy cascade dialog
           const delta = differenceInCalendarDays(new Date(result.actualEndDate), new Date(result.endDate));
           if (delta !== 0) {
             setCascadeTarget({ jobId: signOffTarget.id, jobName: signOffTarget.name, deltaDays: delta, endDate: result.endDate, actualEndDate: result.actualEndDate });
@@ -822,7 +837,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
               const previewRes = await fetch(`/api/jobs/${signOffTarget.id}/cascade`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ newEndDate: result.actualEndDate }) });
               if (previewRes.ok) setCascadePreview(await previewRes.json());
             } catch {
-              // cascade preview failure is non-critical, dialog still opens
+              // cascade preview failure is non-critical
             }
           }
         }
@@ -1971,6 +1986,54 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
         </Card>
       )}
 
+      {/* Awaiting Restart — plots where "leave for now" was chosen */}
+      {data.awaitingRestartPlots && data.awaitingRestartPlots.length > 0 && (
+        <Card className="border-amber-200 bg-amber-50/40">
+          <CardHeader className="cursor-pointer select-none pb-2" onClick={() => toggleSection("awaiting-restart")}>
+            <CardTitle className="flex items-center gap-2 text-sm text-amber-700">
+              <PauseCircle className="size-4" />
+              Plots Awaiting Decision ({data.awaitingRestartPlots.length})
+              <ChevronDown className={cn("ml-auto size-3.5 shrink-0 transition-transform duration-200", openSections.has("awaiting-restart") && "rotate-180")} />
+            </CardTitle>
+            <CardDescription className="text-xs text-amber-600/80">
+              These plots are inactive — next job needs a start decision
+            </CardDescription>
+          </CardHeader>
+          {openSections.has("awaiting-restart") && (
+            <CardContent className="space-y-3">
+              {data.awaitingRestartPlots.map((p: { id: string; plotNumber: string | null; name: string; nextJob: { id: string; name: string; contractorName: string | null; assignedToName: string | null } | null }) => (
+                <div key={p.id} className="rounded-xl border border-amber-200 bg-white p-3">
+                  <div className="mb-2 flex items-center justify-between">
+                    <p className="text-sm font-semibold text-foreground">
+                      {p.plotNumber ? `Plot ${p.plotNumber}` : p.name}
+                    </p>
+                    {p.nextJob && (
+                      <span className="text-xs text-muted-foreground">{p.nextJob.name}</span>
+                    )}
+                  </div>
+                  {p.nextJob && (
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        onClick={() => setCompletionContext({ completedJobName: "", daysDeviation: 0, nextJob: p.nextJob, plotId: p.id })}
+                        className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 transition-colors"
+                      >
+                        <PlayCircle className="size-3" /> Start today
+                      </button>
+                      <button
+                        onClick={() => setCompletionContext({ completedJobName: "", daysDeviation: 0, nextJob: p.nextJob, plotId: p.id })}
+                        className="flex items-center gap-1.5 rounded-lg border border-border/60 bg-white px-3 py-1.5 text-xs font-medium text-foreground hover:bg-accent transition-colors"
+                      >
+                        <CalendarDays className="size-3" /> Reschedule…
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </CardContent>
+          )}
+        </Card>
+      )}
+
       {/* Recent activity — always collapsed by default */}
       {data.recentEvents.length > 0 && (
         <Card>
@@ -2259,6 +2322,17 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Post-Completion Decision Dialog */}
+      <PostCompletionDialog
+        open={!!completionContext}
+        completedJobName={completionContext?.completedJobName ?? ""}
+        daysDeviation={completionContext?.daysDeviation ?? 0}
+        nextJob={completionContext?.nextJob ?? null}
+        plotId={completionContext?.plotId ?? ""}
+        onClose={() => setCompletionContext(null)}
+        onDecisionMade={() => setRefreshKey((k) => k + 1)}
+      />
 
       {/* Snag Resolve Dialog (P5) */}
       <Dialog
