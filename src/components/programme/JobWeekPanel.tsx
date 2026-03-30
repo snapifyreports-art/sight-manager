@@ -296,6 +296,13 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated }: Jo
   const [showSignOffForm, setShowSignOffForm] = useState(false);
   const [signOffNotesInput, setSignOffNotesInput] = useState("");
 
+  // Child job summaries for synthetic parent panels
+  const [childJobs, setChildJobs] = useState<Array<{ id: string; name: string; status: string; startDate: string | null; endDate: string | null }>>([]);
+  const [childJobStatuses, setChildJobStatuses] = useState<Map<string, string>>(new Map());
+  const [childJobActionLoading, setChildJobActionLoading] = useState<Set<string>>(new Set());
+  const [childJobSignOff, setChildJobSignOff] = useState<string | null>(null);
+  const [childSignOffNotes, setChildSignOffNotes] = useState("");
+
   // Fetch job data when panel opens
   useEffect(() => {
     if (!open || !context) {
@@ -308,6 +315,11 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated }: Jo
       setLocalStatus(null);
       setShowSignOffForm(false);
       setSignOffNotesInput("");
+      setChildJobs([]);
+      setChildJobStatuses(new Map());
+      setChildJobActionLoading(new Set());
+      setChildJobSignOff(null);
+      setChildSignOffNotes("");
       return;
     }
 
@@ -360,6 +372,18 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated }: Jo
             }
           }
           setPanelContractors(Array.from(contractorMap.values()));
+          // Store child job summaries for per-job action buttons
+          const summaries = childIds.map((cid, i) => {
+            const jobData = results[i][1];
+            return {
+              id: cid,
+              name: jobData.name ?? "Job",
+              status: jobData.status ?? "NOT_STARTED",
+              startDate: jobData.startDate ?? null,
+              endDate: jobData.endDate ?? null,
+            };
+          });
+          setChildJobs(summaries);
         })
         .catch(console.error)
         .finally(() => setLoading(false));
@@ -489,6 +513,37 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated }: Jo
       setJobActionLoading(false);
     }
   }, [context, isSynthetic]);
+
+  // Action on an individual child job inside a synthetic parent panel
+  const handleChildJobAction = useCallback(async (childId: string, action: "start" | "stop" | "complete", notes?: string) => {
+    setChildJobActionLoading((prev) => new Set(prev).add(childId));
+    try {
+      const res = await fetch(`/api/jobs/${childId}/actions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, ...(notes ? { signOffNotes: notes } : {}) }),
+      });
+      if (res.ok) {
+        const newStatus = action === "start" ? "IN_PROGRESS" : action === "stop" ? "ON_HOLD" : "COMPLETED";
+        setChildJobStatuses((prev) => new Map(prev).set(childId, newStatus));
+        setChildJobSignOff(null);
+        setChildSignOffNotes("");
+        // Refresh notes timeline
+        const jobData = await fetch(`/api/jobs/${childId}`, { cache: "no-store" }).then((r) => r.json());
+        if (Array.isArray(jobData.actions)) {
+          const tagged = jobData.actions.map((a: JobAction) => ({ ...a, jobName: jobData.name }));
+          setActions((prev) => {
+            const withoutChild = prev.filter((a) => !tagged.find((t: JobAction) => t.id === a.id));
+            return [...tagged, ...withoutChild].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+          });
+        }
+      }
+    } catch (e) {
+      console.error("Child job action failed:", e);
+    } finally {
+      setChildJobActionLoading((prev) => { const s = new Set(prev); s.delete(childId); return s; });
+    }
+  }, []);
 
   // Stage files for upload (shows caption input)
   const handleFileSelect = useCallback((files: FileList | null) => {
@@ -724,6 +779,102 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated }: Jo
                   </div>
                 )}
               </div>
+
+              {/* Sub-job action buttons — shown inside synthetic parent panels */}
+              {isSynthetic && childJobs.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    Sub-jobs ({childJobs.length})
+                  </p>
+                  {childJobs.map((child) => {
+                    const childStatus = childJobStatuses.get(child.id) ?? child.status;
+                    const childLoading = childJobActionLoading.has(child.id);
+                    const childStatusCfg = STATUS_CONFIG[childStatus] ?? STATUS_CONFIG.NOT_STARTED;
+                    const isSigningOff = childJobSignOff === child.id;
+                    return (
+                      <div key={child.id} className="rounded-lg border bg-slate-50 p-3 space-y-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-sm font-medium truncate">{child.name}</p>
+                          <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${childStatusCfg.className}`}>
+                            {childStatusCfg.label}
+                          </span>
+                        </div>
+                        {(child.startDate || child.endDate) && (
+                          <p className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                            <CalendarDays className="size-3 shrink-0" />
+                            {child.startDate ? format(new Date(child.startDate), "d MMM") : "?"}
+                            {" → "}
+                            {child.endDate ? format(new Date(child.endDate), "d MMM") : "?"}
+                          </p>
+                        )}
+                        {!isSigningOff && (childStatus === "NOT_STARTED" || childStatus === "ON_HOLD") && (
+                          <Button
+                            size="sm"
+                            className="w-full bg-blue-600 hover:bg-blue-700 text-white"
+                            disabled={childLoading}
+                            onClick={() => handleChildJobAction(child.id, "start")}
+                          >
+                            {childLoading ? <Loader2 className="size-3.5 animate-spin mr-1" /> : <Play className="size-3.5 mr-1" />}
+                            Start
+                          </Button>
+                        )}
+                        {!isSigningOff && childStatus === "IN_PROGRESS" && (
+                          <div className="flex gap-1.5">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="flex-1 border-amber-300 text-amber-700 hover:bg-amber-50"
+                              disabled={childLoading}
+                              onClick={() => handleChildJobAction(child.id, "stop")}
+                            >
+                              {childLoading ? <Loader2 className="size-3.5 animate-spin" /> : <Pause className="size-3.5" />}
+                              <span className="ml-1">Pause</span>
+                            </Button>
+                            <Button
+                              size="sm"
+                              className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white"
+                              onClick={() => { setChildJobSignOff(child.id); setChildSignOffNotes(""); }}
+                            >
+                              <ShieldCheck className="size-3.5 mr-1" />
+                              Sign Off
+                            </Button>
+                          </div>
+                        )}
+                        {isSigningOff && (
+                          <div className="space-y-2">
+                            <Textarea
+                              placeholder="Sign-off notes (optional)..."
+                              value={childSignOffNotes}
+                              onChange={(e) => setChildSignOffNotes(e.target.value)}
+                              rows={2}
+                              className="text-xs bg-white"
+                            />
+                            <div className="flex gap-1.5">
+                              <Button size="sm" variant="outline" className="flex-1" onClick={() => setChildJobSignOff(null)}>
+                                Cancel
+                              </Button>
+                              <Button
+                                size="sm"
+                                className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white"
+                                disabled={childLoading}
+                                onClick={() => handleChildJobAction(child.id, "complete", childSignOffNotes.trim() || undefined)}
+                              >
+                                {childLoading ? <Loader2 className="size-3.5 animate-spin mr-1" /> : null}
+                                Confirm
+                              </Button>
+                            </div>
+                          </div>
+                        )}
+                        {childStatus === "COMPLETED" && (
+                          <div className="flex items-center gap-1.5 text-xs font-medium text-emerald-700">
+                            <CircleCheck className="size-3.5" /> Signed off
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
 
               {/* Job Action Buttons — not shown for synthetic aggregate views */}
               {!isSynthetic && (
