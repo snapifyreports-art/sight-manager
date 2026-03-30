@@ -594,6 +594,9 @@ export function SiteOrders({ siteId }: SiteOrdersProps) {
             const items = order.orderItems;
             const itemTotal = items.reduce((s, i) => s + i.quantity * i.unitCost, 0);
             const groupTotal = itemTotal * group.length;
+            const mailto = order.supplier.contactEmail
+              ? `mailto:${encodeURIComponent(order.supplier.contactEmail)}?subject=${encodeURIComponent(`Material Order — ${order.job.name}`)}&body=${encodeURIComponent(`Hi ${order.supplier.contactName || order.supplier.name},\n\nPlease supply the following for ${order.job.name} (${group.length} plot${group.length !== 1 ? "s" : ""}):\n\n${items.map(i => `${i.name}: ${i.quantity} ${i.unit}`).join("\n") || order.itemsDescription || "Materials as discussed"}${order.expectedDeliveryDate ? `\n\nRequired by: ${format(new Date(order.expectedDeliveryDate), "dd MMM yyyy")}` : ""}\n\nPlease confirm receipt.\n\nRegards`)}`
+              : null;
 
             return (
               <Card
@@ -679,27 +682,22 @@ export function SiteOrders({ siteId }: SiteOrdersProps) {
                       <Loader2 className="size-4 animate-spin text-muted-foreground" />
                     ) : (
                       <>
-                        {dominantStatus === "PENDING" && (() => {
-                          const mailto = order.supplier.contactEmail
-                            ? `mailto:${encodeURIComponent(order.supplier.contactEmail)}?subject=${encodeURIComponent(`Material Order — ${order.job.name}`)}&body=${encodeURIComponent(`Hi ${order.supplier.contactName || order.supplier.name},\n\nPlease supply the following for ${order.job.name} (${group.length} plot${group.length !== 1 ? "s" : ""}):\n\n${items.map(i => `${i.name}: ${i.quantity} ${i.unit}`).join("\n") || order.itemsDescription || "Materials as discussed"}${order.expectedDeliveryDate ? `\n\nRequired by: ${format(new Date(order.expectedDeliveryDate), "dd MMM yyyy")}` : ""}\n\nPlease confirm receipt.\n\nRegards`)}`
-                            : null;
-                          return (
-                            <>
-                              {mailto && (
-                                <Button variant="outline" size="sm"
-                                  className="h-6 flex-1 gap-1 border-violet-200 text-[11px] text-violet-700 hover:bg-violet-50"
-                                  onClick={() => { window.open(mailto, "_blank"); handleGroupStatus(groupIds, "ORDERED"); }}>
-                                  <Mail className="size-2.5" />{group.length > 1 ? `Send (${group.length})` : "Send Order"}
-                                </Button>
-                              )}
+                        {dominantStatus === "PENDING" && (
+                          <>
+                            {mailto && (
                               <Button variant="outline" size="sm"
-                                className="h-6 flex-1 gap-1 border-blue-200 text-[11px] text-blue-700 hover:bg-blue-50"
-                                onClick={() => handleGroupStatus(groupIds, "ORDERED")}>
-                                <Package className="size-2.5" />{mailto ? "Mark Sent" : "Place Order"}
+                                className="h-6 flex-1 gap-1 border-violet-200 text-[11px] text-violet-700 hover:bg-violet-50"
+                                onClick={() => { window.open(mailto, "_blank"); handleGroupStatus(groupIds, "ORDERED"); }}>
+                                <Mail className="size-2.5" />{group.length > 1 ? `Send (${group.length})` : "Send Order"}
                               </Button>
-                            </>
-                          );
-                        })()}
+                            )}
+                            <Button variant="outline" size="sm"
+                              className="h-6 flex-1 gap-1 border-blue-200 text-[11px] text-blue-700 hover:bg-blue-50"
+                              onClick={() => handleGroupStatus(groupIds, "ORDERED")}>
+                              <Package className="size-2.5" />{mailto ? "Mark Sent" : "Place Order"}
+                            </Button>
+                          </>
+                        )}
                         {(dominantStatus === "ORDERED" || dominantStatus === "CONFIRMED") && (
                           <Button variant="outline" size="sm"
                             className="h-6 flex-1 gap-1 border-green-200 text-[11px] text-green-700 hover:bg-green-50"

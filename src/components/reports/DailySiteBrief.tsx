@@ -809,6 +809,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
   };
 
   const groupedOrdersToPlace = useMemo(() => {
+    if (!data) return [];
     const map = new Map<string, typeof data.ordersToPlace>();
     for (const o of data.ordersToPlace) {
       const key = `${o.supplier.id}__${o.job.name}`;
@@ -817,9 +818,10 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
       map.set(key, existing);
     }
     return Array.from(map.values());
-  }, [data.ordersToPlace]);
+  }, [data]);
 
   const groupedUpcomingOrders = useMemo(() => {
+    if (!data) return [];
     const map = new Map<string, typeof data.upcomingOrders>();
     for (const o of data.upcomingOrders) {
       const key = `${o.supplier.id}__${o.job.name}`;
@@ -828,7 +830,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
       map.set(key, existing);
     }
     return Array.from(map.values());
-  }, [data.upcomingOrders]);
+  }, [data]);
 
   // Sign-off dialog handlers
   const handleOpenSignOff = (job: { id: string; name: string; plot: { plotNumber: string | null; name: string }; assignedTo: { name: string } | null }) => {
