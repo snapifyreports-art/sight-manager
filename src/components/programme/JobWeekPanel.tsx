@@ -297,7 +297,7 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated }: Jo
   const [signOffNotesInput, setSignOffNotesInput] = useState("");
 
   // Child job summaries for synthetic parent panels
-  const [childJobs, setChildJobs] = useState<Array<{ id: string; name: string; status: string; startDate: string | null; endDate: string | null }>>([]);
+  const [childJobs, setChildJobs] = useState<Array<{ id: string; name: string; status: string; sortOrder: number; startDate: string | null; endDate: string | null }>>([]);
   const [childJobStatuses, setChildJobStatuses] = useState<Map<string, string>>(new Map());
   const [childJobActionLoading, setChildJobActionLoading] = useState<Set<string>>(new Set());
   const [childJobSignOff, setChildJobSignOff] = useState<string | null>(null);
@@ -379,6 +379,7 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated }: Jo
               id: cid,
               name: jobData.name ?? "Job",
               status: jobData.status ?? "NOT_STARTED",
+              sortOrder: jobData.sortOrder ?? 0,
               startDate: jobData.startDate ?? null,
               endDate: jobData.endDate ?? null,
             };
@@ -781,12 +782,21 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated }: Jo
               </div>
 
               {/* Sub-job action buttons — shown inside synthetic parent panels */}
-              {isSynthetic && childJobs.length > 0 && (
+              {isSynthetic && childJobs.length > 0 && (() => {
+                const sorted = [...childJobs].sort((a, b) => a.sortOrder - b.sortOrder);
+                const liveJobs = sorted.filter((j) => (childJobStatuses.get(j.id) ?? j.status) === "IN_PROGRESS");
+                const nextJob = sorted.find((j) => {
+                  const s = childJobStatuses.get(j.id) ?? j.status;
+                  return s === "NOT_STARTED" || s === "ON_HOLD";
+                });
+                const visibleJobs = [...liveJobs, ...(nextJob && !liveJobs.find((j) => j.id === nextJob.id) ? [nextJob] : [])];
+                if (visibleJobs.length === 0) return null;
+                return (
                 <div className="space-y-2">
                   <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                    Sub-jobs ({childJobs.length})
+                    {liveJobs.length > 0 ? "Live & Next" : "Next Up"}
                   </p>
-                  {childJobs.map((child) => {
+                  {visibleJobs.map((child) => {
                     const childStatus = childJobStatuses.get(child.id) ?? child.status;
                     const childLoading = childJobActionLoading.has(child.id);
                     const childStatusCfg = STATUS_CONFIG[childStatus] ?? STATUS_CONFIG.NOT_STARTED;
@@ -874,7 +884,8 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated }: Jo
                     );
                   })}
                 </div>
-              )}
+                );
+              })()}
 
               {/* Job Action Buttons — not shown for synthetic aggregate views */}
               {!isSynthetic && (
