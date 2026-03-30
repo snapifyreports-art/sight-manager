@@ -416,14 +416,6 @@ export function SiteOrders({ siteId }: SiteOrdersProps) {
     }
   };
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center py-16">
-        <Loader2 className="size-6 animate-spin text-muted-foreground" />
-      </div>
-    );
-  }
-
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
@@ -440,6 +432,14 @@ export function SiteOrders({ siteId }: SiteOrdersProps) {
     }
     return Array.from(groupMap.values());
   }, [filtered]);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-16">
+        <Loader2 className="size-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
 
   const overdueOrders = orders.filter(
     (o) =>
