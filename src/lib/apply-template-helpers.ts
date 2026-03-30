@@ -27,6 +27,7 @@ interface TemplateJobWithChildren {
   startWeek: number;
   endWeek: number;
   weatherAffected?: boolean;
+  weatherAffectedType?: string | null;
   parentId: string | null;
   contactId?: string | null;
   orders: TemplateOrderWithItems[];
@@ -39,6 +40,7 @@ interface TemplateJobWithChildren {
     endWeek: number;
     durationWeeks: number | null;
     weatherAffected?: boolean;
+    weatherAffectedType?: string | null;
     contactId?: string | null;
     orders: TemplateOrderWithItems[];
   }>;
@@ -84,6 +86,7 @@ export async function createJobsFromTemplate(
             status: "NOT_STARTED",
             stageCode: child.stageCode || null,
             weatherAffected: child.weatherAffected ?? false,
+            weatherAffectedType: child.weatherAffectedType ?? null,
             parentStage: templateJob.name,
             sortOrder: templateJob.sortOrder * 100 + child.sortOrder,
           },
@@ -152,6 +155,7 @@ export async function createJobsFromTemplate(
           status: "NOT_STARTED",
           stageCode: templateJob.stageCode || null,
           weatherAffected: templateJob.weatherAffected ?? false,
+          weatherAffectedType: templateJob.weatherAffectedType ?? null,
           sortOrder: templateJob.sortOrder,
         },
       });

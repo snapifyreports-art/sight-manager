@@ -53,6 +53,7 @@ enum NotificationType {
   ORDERS_TO_SEND
   NEXT_STAGE_READY
   LATE_STARTS
+  WEATHER_ALERT
 }
 
 enum SnagPriority {
@@ -67,6 +68,11 @@ enum SnagStatus {
   IN_PROGRESS
   RESOLVED
   CLOSED
+}
+
+enum WeatherImpactType {
+  RAIN
+  TEMPERATURE
 }
 
 enum EventType {
@@ -141,15 +147,16 @@ model Site {
 }
 
 model RainedOffDay {
-  id        String   @id @default(cuid())
+  id        String            @id @default(cuid())
   siteId    String
   date      DateTime
+  type      WeatherImpactType @default(RAIN)
   note      String?
-  createdAt DateTime @default(now())
+  createdAt DateTime          @default(now())
 
   site Site @relation(fields: [siteId], references: [id], onDelete: Cascade)
 
-  @@unique([siteId, date])
+  @@unique([siteId, date, type])
 }
 
 model Plot {
@@ -201,10 +208,11 @@ model Job {
   signedOffById     String?
   signedOffAt       DateTime?
   signOffNotes      String?
-  sortOrder         Int       @default(0)
-  weatherAffected   Boolean   @default(false)
-  parentId          String?
-  parentStage       String?
+  sortOrder             Int       @default(0)
+  weatherAffected       Boolean   @default(false)
+  weatherAffectedType   String?   // "RAIN" | "TEMPERATURE" | "BOTH"
+  parentId              String?
+  parentStage           String?
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
 
@@ -368,10 +376,11 @@ model TemplateJob {
   sortOrder     Int      @default(0)
   startWeek     Int
   endWeek       Int
-  durationWeeks   Int?
-  weatherAffected Boolean  @default(false)
-  parentId        String?
-  contactId       String?
+  durationWeeks        Int?
+  weatherAffected      Boolean  @default(false)
+  weatherAffectedType  String?  // "RAIN" | "TEMPERATURE" | "BOTH"
+  parentId             String?
+  contactId            String?
   createdAt       DateTime @default(now())
 
   template    PlotTemplate  @relation(fields: [templateId], references: [id], onDelete: Cascade)
@@ -537,16 +546,17 @@ model HandoverChecklist {
 // ---------- Event Log ----------
 
 model EventLog {
-  id          String    @id @default(cuid())
-  type        EventType
-  description String
-  siteId      String?
-  plotId      String?
-  jobId       String?
-  userId      String?
-  createdAt   DateTime  @default(now())
+  id                String    @id @default(cuid())
+  type              EventType
+  description       String
+  siteId            String?
+  plotId            String?
+  jobId             String?
+  userId            String?
+  delayReasonType   String?   // WEATHER_RAIN | WEATHER_TEMPERATURE | OTHER — set when type=SCHEDULE_CASCADED
+  createdAt         DateTime  @default(now())
 
-  site        Site?     @relation(fields: [siteId], references: [id], onDelete: SetNull)
+  site        Site?     @relation(fields: [siteId], references: [id], onDelete: Cascade)
   plot        Plot?     @relation(fields: [plotId], references: [id], onDelete: SetNull)
   job         Job?      @relation(fields: [jobId], references: [id], onDelete: SetNull)
   user        User?     @relation(fields: [userId], references: [id], onDelete: SetNull)

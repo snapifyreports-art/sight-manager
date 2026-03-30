@@ -54,6 +54,18 @@ const NOTIFICATION_TYPE_META: Record<
     label: "Orders to Send",
     description: "Reminder about pending orders that need placing",
   },
+  NEXT_STAGE_READY: {
+    label: "Next Stage Ready",
+    description: "When a preceding job is completed and the next stage can begin",
+  },
+  LATE_STARTS: {
+    label: "Late Start Jobs",
+    description: "Jobs that have not started but whose scheduled start date has passed",
+  },
+  WEATHER_ALERT: {
+    label: "Weather Alerts",
+    description: "When tomorrow's forecast shows rain or frost at a site with weather-sensitive work",
+  },
 };
 
 interface Preference {

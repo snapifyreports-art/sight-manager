@@ -60,6 +60,10 @@ interface ProgrammeJob {
   stageCode: string | null;
   startDate: string | null;
   endDate: string | null;
+  originalStartDate?: string | null;
+  originalEndDate?: string | null;
+  actualStartDate?: string | null;
+  actualEndDate?: string | null;
   sortOrder: number;
   weatherAffected?: boolean;
   parentId: string | null;
@@ -92,7 +96,7 @@ interface ProgrammeSite {
   id: string;
   name: string;
   postcode: string | null;
-  rainedOffDays?: { date: string; note?: string | null }[];
+  rainedOffDays?: { date: string; type: "RAIN" | "TEMPERATURE"; note?: string | null }[];
   plots: ProgrammePlot[];
 }
 
@@ -200,6 +204,7 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
   // View mode state
   const [viewMode, setViewMode] = useState<"week" | "day">("week");
   const [jobView, setJobView] = useState<"jobs" | "subjobs">("jobs");
+  const [ganttMode, setGanttMode] = useState<"original" | "current" | "overlay">("current");
   const [zoomLevel, setZoomLevel] = useState(1);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
@@ -209,13 +214,19 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
   const [stageFilter, setStageFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
 
-  // Weather + rained-off state
+  // Weather + impact-day state
+  // weatherImpactMap: date string → array of impact types logged for that date
   const [weatherData, setWeatherData] = useState<WeatherDay[]>([]);
-  const [rainedOffDates, setRainedOffDates] = useState<Set<string>>(new Set());
-  const [rainedOffNotes, setRainedOffNotes] = useState<Map<string, string>>(new Map());
+  const [weatherImpactMap, setWeatherImpactMap] = useState<Map<string, Array<"RAIN" | "TEMPERATURE">>>(new Map());
+  const [weatherImpactNotes, setWeatherImpactNotes] = useState<Map<string, string>>(new Map());
   const [rainedOffPopover, setRainedOffPopover] = useState<{ date: string; x: number; y: number } | null>(null);
   const [rainedOffNoteInput, setRainedOffNoteInput] = useState("");
-  const [rainedOffDelay, setRainedOffDelay] = useState(false);
+  const [rainedOffType, setRainedOffType] = useState<"RAIN" | "TEMPERATURE">("RAIN");
+  // Legacy alias used in visual rendering
+  const rainedOffDates = useMemo(
+    () => new Set(weatherImpactMap.keys()),
+    [weatherImpactMap]
+  );
 
   // Toast notification
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
@@ -243,7 +254,8 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
   const [selectedPlots, setSelectedPlots] = useState<Set<string>>(new Set());
   const [delayDialogOpen, setDelayDialogOpen] = useState(false);
   const [delayDays, setDelayDays] = useState(1);
-  const [delayReason, setDelayReason] = useState("Delay");
+  const [delayReason, setDelayReason] = useState("");
+  const [delayReasonType, setDelayReasonType] = useState<"WEATHER_RAIN" | "WEATHER_TEMPERATURE" | "OTHER">("OTHER");
   const [delayLoading, setDelayLoading] = useState(false);
 
   const togglePlotSelection = useCallback((plotId: string) => {
@@ -276,11 +288,11 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
           plotIds: [...selectedPlots],
           days: delayDays,
           reason: delayReason.trim() || undefined,
+          delayReasonType,
         }),
       });
       if (!res.ok) throw new Error("Failed");
       const result = await res.json();
-      // Refresh programme data
       const freshData = await fetch(`/api/sites/${siteId}/programme`, { cache: "no-store" }).then((r) => r.json());
       setSite(freshData);
       setDelayDialogOpen(false);
@@ -292,7 +304,7 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
     } finally {
       setDelayLoading(false);
     }
-  }, [site, siteId, selectedPlots, delayDays, delayReason]);
+  }, [site, siteId, selectedPlots, delayDays, delayReason, delayReasonType]);
 
   // Job week panel state
   const [panelOpen, setPanelOpen] = useState(false);
@@ -313,16 +325,18 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
       .then((r) => r.json())
       .then((data) => {
         setSite(data);
-        // Initialize rained-off dates and notes from site data
         if (data?.rainedOffDays) {
-          setRainedOffDates(
-            new Set(data.rainedOffDays.map((d: { date: string }) => d.date.slice(0, 10)))
-          );
-          const notes = new Map<string, string>();
+          const impactMap = new Map<string, Array<"RAIN" | "TEMPERATURE">>();
+          const notesMap = new Map<string, string>();
           for (const d of data.rainedOffDays) {
-            if (d.note) notes.set(d.date.slice(0, 10), d.note);
+            const key = d.date.slice(0, 10);
+            const existing = impactMap.get(key) ?? [];
+            if (!existing.includes(d.type)) existing.push(d.type);
+            impactMap.set(key, existing);
+            if (d.note) notesMap.set(key, d.note);
           }
-          setRainedOffNotes(notes);
+          setWeatherImpactMap(impactMap);
+          setWeatherImpactNotes(notesMap);
         }
       })
       .catch(console.error)
@@ -373,18 +387,20 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
 
   const hasWeather = weatherData.length > 0 && viewMode === "day";
 
-  // Open the rained-off popover for a date
+  // Open the weather impact popover for a date
   const openRainedOffPopover = useCallback(
     (dateStr: string, e: React.MouseEvent) => {
       const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
       setRainedOffPopover({ date: dateStr, x: rect.left, y: rect.bottom + 4 });
-      setRainedOffNoteInput(rainedOffNotes.get(dateStr) ?? "Rain day");
-      setRainedOffDelay(false);
+      setRainedOffNoteInput(weatherImpactNotes.get(dateStr) ?? "");
+      // Default type: rain unless only temperature is already logged for this date
+      const existing = weatherImpactMap.get(dateStr) ?? [];
+      setRainedOffType(existing.includes("TEMPERATURE") && !existing.includes("RAIN") ? "TEMPERATURE" : "RAIN");
     },
-    [rainedOffNotes]
+    [weatherImpactNotes, weatherImpactMap]
   );
 
-  // Confirm marking a date as rained off (with note + optional delay)
+  // Confirm logging a weather impact day
   const confirmRainedOff = useCallback(
     async () => {
       if (!rainedOffPopover) return;
@@ -392,80 +408,60 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
       const note = rainedOffNoteInput.trim();
 
       // Optimistic update
-      setRainedOffDates((prev) => new Set(prev).add(dateStr));
-      setRainedOffNotes((prev) => {
+      setWeatherImpactMap((prev) => {
         const next = new Map(prev);
-        if (note) next.set(dateStr, note);
+        const existing = next.get(dateStr) ?? [];
+        if (!existing.includes(rainedOffType)) existing.push(rainedOffType);
+        next.set(dateStr, existing);
         return next;
       });
+      if (note) {
+        setWeatherImpactNotes((prev) => new Map(prev).set(dateStr, note));
+      }
       setRainedOffPopover(null);
 
       try {
         const res = await fetch(`/api/sites/${siteId}/rained-off`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            date: dateStr,
-            note: note || null,
-            delayJobs: rainedOffDelay,
-          }),
+          body: JSON.stringify({ date: dateStr, note: note || null, type: rainedOffType }),
         });
         const result = await res.json();
-
-        // Refresh programme data to reflect any date changes
-        if (rainedOffDelay || result.affectedJobs > 0) {
-          const freshData = await fetch(`/api/sites/${siteId}/programme`, { cache: "no-store" }).then((r) => r.json());
-          setSite(freshData);
-          if (freshData?.rainedOffDays) {
-            setRainedOffDates(
-              new Set(freshData.rainedOffDays.map((d: { date: string }) => d.date.slice(0, 10)))
-            );
-            const notes = new Map<string, string>();
-            for (const d of freshData.rainedOffDays) {
-              if (d.note) notes.set(d.date.slice(0, 10), d.note);
-            }
-            setRainedOffNotes(notes);
-          }
-        }
-
-        // Show feedback
+        const icon = rainedOffType === "TEMPERATURE" ? "🌡️" : "☔";
+        const label = rainedOffType === "TEMPERATURE" ? "Temperature impact" : "Rain day";
         if (result.affectedJobs > 0) {
-          showToast(
-            rainedOffDelay
-              ? `Rained off — ${result.delayed} job(s) delayed by 1 day`
-              : `Rained off — ${result.affectedJobs} job(s) noted`
-          );
+          showToast(`${icon} ${label} logged — ${result.affectedJobs} job(s) noted`);
         } else {
-          showToast("Marked as rained off");
+          showToast(`${icon} ${label} logged`);
         }
       } catch {
         // Revert on error
-        setRainedOffDates((prev) => {
-          const next = new Set(prev);
-          next.delete(dateStr);
+        setWeatherImpactMap((prev) => {
+          const next = new Map(prev);
+          const existing = (next.get(dateStr) ?? []).filter((t) => t !== rainedOffType);
+          if (existing.length) next.set(dateStr, existing);
+          else next.delete(dateStr);
           return next;
         });
-        showToast("Failed to mark rained off", "error");
+        showToast("Failed to log weather impact", "error");
       }
     },
-    [siteId, rainedOffPopover, rainedOffNoteInput, rainedOffDelay, showToast]
+    [siteId, rainedOffPopover, rainedOffNoteInput, rainedOffType, showToast]
   );
 
-  // Remove a rained-off date
+  // Remove a specific weather impact type for a date
   const removeRainedOff = useCallback(
     async () => {
       if (!rainedOffPopover) return;
       const dateStr = rainedOffPopover.date;
+      const typeToRemove = rainedOffType;
 
-      // Optimistic update
-      setRainedOffDates((prev) => {
-        const next = new Set(prev);
-        next.delete(dateStr);
-        return next;
-      });
-      setRainedOffNotes((prev) => {
+      // Optimistic update — remove just this type
+      setWeatherImpactMap((prev) => {
         const next = new Map(prev);
-        next.delete(dateStr);
+        const remaining = (next.get(dateStr) ?? []).filter((t) => t !== typeToRemove);
+        if (remaining.length) next.set(dateStr, remaining);
+        else next.delete(dateStr);
         return next;
       });
       setRainedOffPopover(null);
@@ -474,14 +470,20 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
         await fetch(`/api/sites/${siteId}/rained-off`, {
           method: "DELETE",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ date: dateStr }),
+          body: JSON.stringify({ date: dateStr, type: typeToRemove }),
         });
       } catch {
         // Revert on error
-        setRainedOffDates((prev) => new Set(prev).add(dateStr));
+        setWeatherImpactMap((prev) => {
+          const next = new Map(prev);
+          const existing = next.get(dateStr) ?? [];
+          if (!existing.includes(typeToRemove)) existing.push(typeToRemove);
+          next.set(dateStr, existing);
+          return next;
+        });
       }
     },
-    [siteId, rainedOffPopover]
+    [siteId, rainedOffPopover, rainedOffType]
   );
 
   // Derive unique filter options from data
@@ -1089,6 +1091,28 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
           </button>
         </div>
 
+        {/* Gantt mode toggle: Original / Current / Overlay */}
+        <div className="flex items-center rounded-md border overflow-hidden">
+          {(["original", "current", "overlay"] as const).map((mode) => (
+            <button
+              key={mode}
+              onClick={() => setGanttMode(mode)}
+              className={`px-2.5 py-1.5 text-[11px] font-medium transition-colors ${
+                ganttMode === mode
+                  ? "bg-slate-700 text-white"
+                  : "text-muted-foreground hover:bg-slate-50 hover:text-foreground"
+              } ${mode !== "original" ? "border-l" : ""}`}
+              title={
+                mode === "original" ? "Original planned schedule" :
+                mode === "current" ? "Current/actual schedule" :
+                "Overlay: original + current"
+              }
+            >
+              {mode === "original" ? "Original" : mode === "current" ? "Current" : "Overlay"}
+            </button>
+          ))}
+        </div>
+
         {/* Fullscreen toggle */}
         <button
           onClick={() => setIsFullscreen((f) => !f)}
@@ -1329,6 +1353,7 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                         if (s.status === "ahead") return <span className="size-2 shrink-0 rounded-full bg-emerald-500" title={`${s.daysDeviation}d ahead`} />;
                         if (s.status === "behind") return <span className="size-2 shrink-0 rounded-full bg-red-500" title={`${Math.abs(s.daysDeviation)}d behind`} />;
                         if (s.status === "on_track") return <span className="size-2 shrink-0 rounded-full bg-blue-400" title="On programme" />;
+                        if (s.status === "idle") return <span className="size-2 shrink-0 rounded-full bg-orange-400" title="Idle — waiting for next stage" />;
                         return null;
                       })()}
                       <Link
@@ -1387,27 +1412,38 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                     {columns.map((col) => {
                       const colDate = format(col.date, "yyyy-MM-dd");
                       const weather = weatherMap.get(colDate);
-                      const isRainedOff = rainedOffDates.has(colDate);
+                      const impactTypes = weatherImpactMap.get(colDate) ?? [];
+                      const hasRain = impactTypes.includes("RAIN");
+                      const hasTemp = impactTypes.includes("TEMPERATURE");
+                      const hasImpact = hasRain || hasTemp;
+                      const impactNote = weatherImpactNotes.get(colDate);
+                      const impactIcon = hasRain && hasTemp ? "☔🌡️" : hasTemp ? "🌡️" : "☔";
+                      const bgClass = hasRain && hasTemp
+                        ? "bg-amber-200 ring-1 ring-inset ring-amber-400"
+                        : hasTemp
+                          ? "bg-cyan-200 ring-1 ring-inset ring-cyan-400"
+                          : hasRain
+                            ? "bg-orange-200 ring-1 ring-inset ring-orange-400"
+                            : "hover:bg-slate-100";
+                      const impactLabel = hasRain && hasTemp
+                        ? "Rain + Temperature impact"
+                        : hasTemp ? "Temperature impact" : "Rain day";
                       return (
                         <div
                           key={`weather-${col.key}`}
-                          className={`flex shrink-0 items-center justify-center border-r cursor-pointer transition-colors ${
-                            isRainedOff
-                              ? "bg-orange-200 ring-1 ring-inset ring-orange-400"
-                              : "hover:bg-slate-100"
-                          }`}
+                          className={`flex shrink-0 items-center justify-center border-r cursor-pointer transition-colors ${bgClass}`}
                           style={{ width: cellWidth }}
                           title={
                             weather
-                              ? `${weather.category} ${weather.tempMax}°/${weather.tempMin}°${isRainedOff ? ` (RAINED OFF${rainedOffNotes.get(colDate) ? `: ${rainedOffNotes.get(colDate)}` : ""})` : " — click to mark rained off"}`
-                              : isRainedOff
-                                ? `RAINED OFF${rainedOffNotes.get(colDate) ? `: ${rainedOffNotes.get(colDate)}` : ""} — click to edit`
-                                : undefined
+                              ? `${weather.category} ${weather.tempMax}°/${weather.tempMin}°${hasImpact ? ` (${impactLabel.toUpperCase()}${impactNote ? `: ${impactNote}` : ""})` : " — click to log weather impact"}`
+                              : hasImpact
+                                ? `${impactLabel.toUpperCase()}${impactNote ? `: ${impactNote}` : ""} — click to edit`
+                                : "Click to log weather impact"
                           }
                           onClick={(e) => openRainedOffPopover(colDate, e)}
                         >
-                          {isRainedOff ? (
-                            <span className="text-[11px]">☔</span>
+                          {hasImpact ? (
+                            <span className="text-[11px]">{impactIcon}</span>
                           ) : weather ? (
                             <span className="text-[11px]">
                               {weatherEmoji(weather.category)}
@@ -1482,12 +1518,39 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                     }}
                   >
                     {plot.jobs.map((job) => {
-                      if (!job.startDate || !job.endDate) return null;
+                      // Resolve bar dates based on gantt mode
+                      // "original": show original planned dates (before any shifts)
+                      // "current": show actual dates for completed jobs, planned for rest
+                      // "overlay": show current dates for main bar, original as ghost
+                      const resolveBarDates = () => {
+                        if (ganttMode === "original") {
+                          const s = job.originalStartDate || job.startDate;
+                          const e = job.originalEndDate || job.endDate;
+                          return { barStart: s, barEnd: e, ghostStart: null as string | null, ghostEnd: null as string | null };
+                        }
+                        if (ganttMode === "current") {
+                          const s = job.status === "COMPLETED" && job.actualStartDate ? job.actualStartDate : job.startDate;
+                          const e = job.status === "COMPLETED" && job.actualEndDate ? job.actualEndDate : job.endDate;
+                          return { barStart: s, barEnd: e, ghostStart: null as string | null, ghostEnd: null as string | null };
+                        }
+                        // overlay: current bar + ghost original
+                        const s = job.status === "COMPLETED" && job.actualStartDate ? job.actualStartDate : job.startDate;
+                        const e = job.status === "COMPLETED" && job.actualEndDate ? job.actualEndDate : job.endDate;
+                        const gs = job.originalStartDate || null;
+                        const ge = job.originalEndDate || null;
+                        return { barStart: s, barEnd: e, ghostStart: gs, ghostEnd: ge };
+                      };
+                      const { barStart, barEnd, ghostStart, ghostEnd } = resolveBarDates();
+                      if (!barStart || !barEnd) return null;
 
-                      const jobStart = new Date(job.startDate);
-                      const jobEnd = new Date(job.endDate);
+                      const jobStart = new Date(barStart);
+                      const jobEnd = new Date(barEnd);
+                      const ghostJobStart = ghostStart ? new Date(ghostStart) : null;
+                      const ghostJobEnd = ghostEnd ? new Date(ghostEnd) : null;
                       const code = getStageCode(job);
-                      const colors = getStageColor(job.status);
+                      const colors = ganttMode === "original"
+                        ? { bg: "#e2e8f0", text: "#475569" }  // grey for original mode
+                        : getStageColor(job.status);
                       const hasPhotos = (job._count?.photos ?? 0) > 0;
                       const hasNotes = (job._count?.actions ?? 0) > 0;
 
@@ -1501,7 +1564,10 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
 
                       return columns.map((col, colIdx) => {
                         const overlaps = jobStart < col.endDate && jobEnd >= col.date;
-                        if (!overlaps) return null;
+                        const ghostOverlaps = ghostJobStart && ghostJobEnd
+                          ? ghostJobStart < col.endDate && ghostJobEnd >= col.date
+                          : false;
+                        if (!overlaps && !ghostOverlaps) return null;
 
                         const isFirstJobCell = colIdx === jobFirstColIdx;
 
@@ -1531,6 +1597,23 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                           if (d < jobStart && isFirstJobCell) return true;
                           return d >= col.date && d < col.endDate;
                         });
+
+                        // Ghost-only cell (overlay mode: original dates but not current)
+                        if (!overlaps && ghostOverlaps) {
+                          return (
+                            <div
+                              key={`${job.id}-ghost-${col.key}`}
+                              className="absolute pointer-events-none"
+                              style={{ left: colIdx * cellWidth, top: 0, width: cellWidth, height: ROW_HEIGHT }}
+                            >
+                              <div
+                                className="absolute bottom-1 left-px right-px rounded-sm"
+                                style={{ height: 6, backgroundColor: "#94a3b8", opacity: 0.4 }}
+                                title={`${job.name} — original planned period`}
+                              />
+                            </div>
+                          );
+                        }
 
                         return (
                           <div
@@ -1569,22 +1652,44 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                               className={`relative flex items-center justify-center rounded font-bold transition-all hover:brightness-90 hover:shadow-sm ${
                                 viewMode === "day" ? "text-[7px]" : "text-[8px]"
                               } ${
-                                job.weatherAffected && viewMode === "day" && rainedOffDates.has(format(col.date, "yyyy-MM-dd"))
-                                  ? "ring-2 ring-red-500 ring-inset"
-                                  : ""
+                                (() => {
+                                  if (!job.weatherAffected || viewMode !== "day") return "";
+                                  const types = weatherImpactMap.get(format(col.date, "yyyy-MM-dd")) ?? [];
+                                  if (types.includes("RAIN") && types.includes("TEMPERATURE")) return "ring-2 ring-amber-500 ring-inset";
+                                  if (types.includes("TEMPERATURE")) return "ring-2 ring-cyan-500 ring-inset";
+                                  if (types.includes("RAIN")) return "ring-2 ring-orange-500 ring-inset";
+                                  return "";
+                                })()
                               }`}
                               style={{
                                 width: cellWidth - 2,
                                 height: ROW_HEIGHT - 6,
-                                backgroundColor: job.weatherAffected && viewMode === "day" && rainedOffDates.has(format(col.date, "yyyy-MM-dd"))
-                                  ? "#fecaca"
-                                  : colors.bg,
-                                color: job.weatherAffected && viewMode === "day" && rainedOffDates.has(format(col.date, "yyyy-MM-dd"))
-                                  ? "#991b1b"
-                                  : colors.text,
+                                backgroundColor: (() => {
+                                  if (!job.weatherAffected || viewMode !== "day") return colors.bg;
+                                  const types = weatherImpactMap.get(format(col.date, "yyyy-MM-dd")) ?? [];
+                                  if (types.includes("RAIN") && types.includes("TEMPERATURE")) return "#fef3c7";
+                                  if (types.includes("TEMPERATURE")) return "#cffafe";
+                                  if (types.includes("RAIN")) return "#fecaca";
+                                  return colors.bg;
+                                })(),
+                                color: (() => {
+                                  if (!job.weatherAffected || viewMode !== "day") return colors.text;
+                                  const types = weatherImpactMap.get(format(col.date, "yyyy-MM-dd")) ?? [];
+                                  if (types.includes("RAIN") && types.includes("TEMPERATURE")) return "#92400e";
+                                  if (types.includes("TEMPERATURE")) return "#164e63";
+                                  if (types.includes("RAIN")) return "#991b1b";
+                                  return colors.text;
+                                })(),
                               }}
                             >
-                              {job.weatherAffected && viewMode === "day" && rainedOffDates.has(format(col.date, "yyyy-MM-dd")) ? "☔" : code}
+                              {(() => {
+                                if (!job.weatherAffected || viewMode !== "day") return code;
+                                const types = weatherImpactMap.get(format(col.date, "yyyy-MM-dd")) ?? [];
+                                if (types.includes("RAIN") && types.includes("TEMPERATURE")) return "☔🌡️";
+                                if (types.includes("TEMPERATURE")) return "🌡️";
+                                if (types.includes("RAIN")) return "☔";
+                                return code;
+                              })()}
                               {/* Photo/note indicators (week view only — too small for day).
                                   isDotCol is true for every column where a child job (or this
                                   job itself) has photos/notes, keeping dots identical between
@@ -1598,6 +1703,14 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                                     <div className="size-[6px] rounded-full bg-amber-500" title="Has notes" />
                                   )}
                                 </div>
+                              )}
+                              {/* Overlay mode: ghost strip showing original plan */}
+                              {ganttMode === "overlay" && ghostOverlaps && (
+                                <div
+                                  className="absolute bottom-0 left-0 right-0 rounded-b"
+                                  style={{ height: 3, backgroundColor: "#475569", opacity: 0.35 }}
+                                  title="Original planned period"
+                                />
                               )}
                               {/* Order/delivery indicators */}
                               {(hasOrderInCell || hasDeliveryInCell) && (
@@ -1635,24 +1748,26 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                       )
                   )}
 
-                {/* Rained-off day column highlights (day view) */}
+                {/* Weather impact day column highlights (day view) */}
                 {viewMode === "day" &&
-                  columns.map(
-                    (col, i) => {
-                      const colDate = format(col.date, "yyyy-MM-dd");
-                      return rainedOffDates.has(colDate) ? (
-                        <div
-                          key={`rained-${col.key}`}
-                          className="pointer-events-none absolute top-0 bg-orange-100/50"
-                          style={{
-                            left: i * cellWidth,
-                            width: cellWidth,
-                            height: totalHeight,
-                          }}
-                        />
-                      ) : null;
-                    }
-                  )}
+                  columns.map((col, i) => {
+                    const colDate = format(col.date, "yyyy-MM-dd");
+                    const types = weatherImpactMap.get(colDate) ?? [];
+                    if (!types.length) return null;
+                    const bgColor =
+                      types.includes("RAIN") && types.includes("TEMPERATURE")
+                        ? "bg-amber-100/50"
+                        : types.includes("TEMPERATURE")
+                          ? "bg-cyan-100/50"
+                          : "bg-orange-100/50";
+                    return (
+                      <div
+                        key={`impact-${col.key}`}
+                        className={`pointer-events-none absolute top-0 ${bgColor}`}
+                        style={{ left: i * cellWidth, width: cellWidth, height: totalHeight }}
+                      />
+                    );
+                  })}
 
                 {/* Vertical gridlines */}
                 {columns.map((col, i) => (
@@ -1760,6 +1875,20 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
               This will delay the current active job on {selectedPlots.size} plot{selectedPlots.size > 1 ? "s" : ""} and cascade to all downstream jobs.
             </p>
 
+            {/* Weather suggestion if impact days are logged */}
+            {weatherImpactMap.size > 0 && (() => {
+              const rainCount = [...weatherImpactMap.values()].filter((t) => t.includes("RAIN")).length;
+              const tempCount = [...weatherImpactMap.values()].filter((t) => t.includes("TEMPERATURE")).length;
+              return (
+                <div className="mt-3 rounded-md bg-orange-50 p-2 text-[11px] text-orange-700">
+                  {rainCount > 0 && <span>☔ {rainCount} rain day{rainCount !== 1 ? "s" : ""} logged</span>}
+                  {rainCount > 0 && tempCount > 0 && <span> · </span>}
+                  {tempCount > 0 && <span>🌡️ {tempCount} temperature day{tempCount !== 1 ? "s" : ""} logged</span>}
+                  <span className="ml-1">— suggest selecting a weather reason below</span>
+                </div>
+              );
+            })()}
+
             <div className="mt-4 space-y-3">
               <div>
                 <label className="mb-1 block text-xs font-medium">Days to delay</label>
@@ -1773,15 +1902,37 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                 />
               </div>
               <div>
-                <label className="mb-1 block text-xs font-medium">Reason (optional)</label>
-                <input
-                  type="text"
-                  value={delayReason}
-                  onChange={(e) => setDelayReason(e.target.value)}
-                  placeholder="e.g. Weather delay, material shortage..."
-                  className="w-full rounded-md border px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-                />
+                <label className="mb-1 block text-xs font-medium">Delay reason</label>
+                <div className="flex gap-1">
+                  {(["WEATHER_RAIN", "WEATHER_TEMPERATURE", "OTHER"] as const).map((r) => (
+                    <button
+                      key={r}
+                      onClick={() => setDelayReasonType(r)}
+                      className={`flex-1 rounded px-1.5 py-1.5 text-[11px] font-medium transition-colors ${
+                        delayReasonType === r
+                          ? r === "WEATHER_RAIN" ? "bg-orange-500 text-white"
+                            : r === "WEATHER_TEMPERATURE" ? "bg-cyan-500 text-white"
+                            : "bg-slate-700 text-white"
+                          : "border text-slate-600 hover:bg-slate-50"
+                      }`}
+                    >
+                      {r === "WEATHER_RAIN" ? "☔ Rain" : r === "WEATHER_TEMPERATURE" ? "🌡️ Temp" : "⏳ Other"}
+                    </button>
+                  ))}
+                </div>
               </div>
+              {delayReasonType === "OTHER" && (
+                <div>
+                  <label className="mb-1 block text-xs font-medium">Reason detail (optional)</label>
+                  <input
+                    type="text"
+                    value={delayReason}
+                    onChange={(e) => setDelayReason(e.target.value)}
+                    placeholder="e.g. Material shortage, access issue..."
+                    className="w-full rounded-md border px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                  />
+                </div>
+              )}
             </div>
 
             <div className="mt-4 flex justify-end gap-2">
@@ -1813,21 +1964,32 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
         </>
       )}
 
-      {/* Rained-off popover */}
+      {/* Weather impact popover */}
       {rainedOffPopover && (
         <>
-          {/* Backdrop to close */}
+          <div className="fixed inset-0 z-40" onClick={() => setRainedOffPopover(null)} />
           <div
-            className="fixed inset-0 z-40"
-            onClick={() => setRainedOffPopover(null)}
-          />
-          <div
-            className="fixed z-50 w-64 rounded-lg border bg-white p-3 shadow-lg"
+            className="fixed z-50 w-72 rounded-lg border bg-white p-3 shadow-lg"
             style={{ left: rainedOffPopover.x, top: rainedOffPopover.y }}
           >
             <p className="mb-2 text-xs font-semibold text-slate-700">
-              ☔ {format(new Date(rainedOffPopover.date), "EEE dd MMM yyyy")}
+              {format(new Date(rainedOffPopover.date), "EEE dd MMM yyyy")}
             </p>
+            {/* Type selector */}
+            <div className="mb-2 flex gap-1">
+              <button
+                onClick={() => setRainedOffType("RAIN")}
+                className={`flex-1 rounded px-2 py-1 text-xs font-medium transition-colors ${rainedOffType === "RAIN" ? "bg-orange-500 text-white" : "border text-slate-600 hover:bg-slate-50"}`}
+              >
+                ☔ Rain
+              </button>
+              <button
+                onClick={() => setRainedOffType("TEMPERATURE")}
+                className={`flex-1 rounded px-2 py-1 text-xs font-medium transition-colors ${rainedOffType === "TEMPERATURE" ? "bg-cyan-500 text-white" : "border text-slate-600 hover:bg-slate-50"}`}
+              >
+                🌡️ Temperature
+              </button>
+            </div>
             <input
               type="text"
               placeholder="Add a note (optional)..."
@@ -1837,23 +1999,17 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
               className="mb-2 w-full rounded border px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
               autoFocus
             />
-            <label className="mb-2 flex items-center gap-1.5 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={rainedOffDelay}
-                onChange={(e) => setRainedOffDelay(e.target.checked)}
-                className="size-3 rounded border-slate-300 accent-orange-500"
-              />
-              <span className="text-[11px] text-slate-600">Delay affected jobs by 1 day</span>
-            </label>
+            <p className="mb-2 text-[10px] text-muted-foreground">
+              Logs a note on affected jobs. To delay a job, use the Delay action on the job itself.
+            </p>
             <div className="flex gap-2">
               <button
                 onClick={confirmRainedOff}
-                className="flex-1 rounded bg-orange-500 px-2 py-1 text-xs font-medium text-white hover:bg-orange-600"
+                className={`flex-1 rounded px-2 py-1 text-xs font-medium text-white ${rainedOffType === "TEMPERATURE" ? "bg-cyan-500 hover:bg-cyan-600" : "bg-orange-500 hover:bg-orange-600"}`}
               >
-                {rainedOffDates.has(rainedOffPopover.date) ? "Update" : "Mark Rained Off"}
+                {(weatherImpactMap.get(rainedOffPopover.date) ?? []).includes(rainedOffType) ? "Update" : "Log Impact"}
               </button>
-              {rainedOffDates.has(rainedOffPopover.date) && (
+              {(weatherImpactMap.get(rainedOffPopover.date) ?? []).includes(rainedOffType) && (
                 <button
                   onClick={removeRainedOff}
                   className="rounded border px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50"

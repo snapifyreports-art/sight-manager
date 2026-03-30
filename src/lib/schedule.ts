@@ -6,7 +6,8 @@ export type ScheduleStatus =
   | "behind"
   | "not_started"
   | "complete"
-  | "awaiting_restart";
+  | "awaiting_restart"
+  | "idle";
 
 export interface PlotScheduleStatus {
   status: ScheduleStatus;
@@ -45,6 +46,21 @@ export function getPlotScheduleStatus(
   if (allNotStarted) return { status: "not_started", daysDeviation: 0 };
   if (allCompleted) return { status: "complete", daysDeviation: 0 };
 
+  // Detect idle: some completed, none in-progress, and today falls in the gap
+  // between the last completed job's end and the next scheduled job's start
+  const hasCompleted = sorted.some((j) => j.status === "COMPLETED");
+  const hasInProgress = sorted.some((j) => j.status === "IN_PROGRESS");
+
+  if (hasCompleted && !hasInProgress) {
+    const nextJob = sorted.find((j) => j.status === "NOT_STARTED");
+    if (nextJob?.startDate) {
+      const nextStart = new Date(nextJob.startDate as string);
+      if (nextStart > new Date()) {
+        return { status: "idle", daysDeviation: 0 };
+      }
+    }
+  }
+
   // First non-completed job
   const current = sorted.find((j) => j.status !== "COMPLETED");
   if (!current?.originalStartDate || !current?.startDate) {
@@ -68,6 +84,8 @@ export function scheduleStatusColors(status: ScheduleStatus) {
       return { dot: "bg-red-500", badge: "bg-red-100 text-red-700 border-red-200" };
     case "awaiting_restart":
       return { dot: "bg-amber-500", badge: "bg-amber-100 text-amber-700 border-amber-200" };
+    case "idle":
+      return { dot: "bg-orange-400", badge: "bg-orange-100 text-orange-700 border-orange-200" };
     case "complete":
       return { dot: "bg-emerald-400", badge: "bg-emerald-50 text-emerald-600 border-emerald-100" };
     case "not_started":
@@ -84,6 +102,7 @@ export function scheduleStatusLabel(status: ScheduleStatus, days: number): strin
     case "behind":        return `${Math.abs(days)}d behind`;
     case "on_track":      return "On track";
     case "awaiting_restart": return "Awaiting restart";
+    case "idle":          return "Idle";
     case "complete":      return "Complete";
     case "not_started":   return "Not started";
     default:              return "";

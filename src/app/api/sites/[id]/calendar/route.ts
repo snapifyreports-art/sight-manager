@@ -90,7 +90,7 @@ export async function GET(
         siteId: id,
         date: { gte: rangeStart, lte: rangeEnd },
       },
-      select: { date: true, note: true },
+      select: { date: true, type: true, note: true },
     }),
   ]);
 
@@ -118,6 +118,7 @@ export async function GET(
     })),
     rainedOffDays: rainedOffDays.map((r) => ({
       date: r.date.toISOString(),
+      type: r.type,
       note: r.note,
     })),
   });

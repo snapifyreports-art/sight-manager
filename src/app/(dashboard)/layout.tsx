@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { OfflineIndicator } from "@/components/layout/OfflineIndicator";
+import { NotificationBlockedBanner } from "@/components/layout/NotificationBlockedBanner";
 
 export default async function DashboardLayout({
   children,
@@ -18,6 +19,7 @@ export default async function DashboardLayout({
   return (
     <div className="flex h-screen flex-col overflow-hidden">
       <OfflineIndicator />
+      <NotificationBlockedBanner />
       <div className="flex flex-1 overflow-hidden">
         <Sidebar />
         <div className="flex flex-1 flex-col overflow-hidden">

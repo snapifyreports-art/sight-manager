@@ -52,7 +52,18 @@ export async function POST(req: NextRequest) {
     expectedDeliveryDate,
     leadTimeDays,
     itemsDescription,
-  } = body;
+    items,
+  } = body as {
+    supplierId: string;
+    jobId: string;
+    contactId?: string;
+    orderDetails?: string;
+    orderType?: string;
+    expectedDeliveryDate?: string;
+    leadTimeDays?: number | string;
+    itemsDescription?: string;
+    items?: Array<{ name: string; quantity: number; unit: string; unitCost: number }>;
+  };
 
   if (!supplierId || !jobId) {
     return NextResponse.json(
@@ -71,8 +82,20 @@ export async function POST(req: NextRequest) {
       expectedDeliveryDate: expectedDeliveryDate
         ? new Date(expectedDeliveryDate)
         : null,
-      leadTimeDays: leadTimeDays ? parseInt(leadTimeDays, 10) : null,
+      leadTimeDays: leadTimeDays ? parseInt(String(leadTimeDays), 10) : null,
       itemsDescription: itemsDescription || null,
+      ...(items && items.length > 0
+        ? {
+            orderItems: {
+              create: items.map((item) => ({
+                name: item.name,
+                quantity: item.quantity,
+                unit: item.unit,
+                unitCost: item.unitCost,
+              })),
+            },
+          }
+        : {}),
     },
     include: {
       supplier: true,

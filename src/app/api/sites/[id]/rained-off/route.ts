@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { calculateCascade } from "@/lib/cascade";
-import { addDays, format } from "date-fns";
+import { format } from "date-fns";
 
 export const dynamic = "force-dynamic";
 
-// GET /api/sites/[id]/rained-off — list all rained-off dates for a site
+type WeatherImpactType = "RAIN" | "TEMPERATURE";
+
+// GET /api/sites/[id]/rained-off — list all weather impact dates for a site
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -21,13 +22,13 @@ export async function GET(
   const days = await prisma.rainedOffDay.findMany({
     where: { siteId: id },
     orderBy: { date: "asc" },
-    select: { id: true, date: true, note: true },
+    select: { id: true, date: true, type: true, note: true },
   });
 
   return NextResponse.json(days);
 }
 
-// POST /api/sites/[id]/rained-off — mark a date as rained off + note/delay affected jobs
+// POST /api/sites/[id]/rained-off — log a weather impact day + note affected jobs (no auto-delay)
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -39,10 +40,10 @@ export async function POST(
 
   const { id: siteId } = await params;
   const body = await req.json();
-  const { date, note, delayJobs } = body as {
+  const { date, note, type = "RAIN" } = body as {
     date: string;
     note?: string | null;
-    delayJobs?: boolean;
+    type?: WeatherImpactType;
   };
 
   if (!date) {
@@ -52,46 +53,53 @@ export async function POST(
   const dateObj = new Date(date);
   dateObj.setUTCHours(0, 0, 0, 0);
 
-  // Upsert the rained-off day record
+  const impactIcon = type === "TEMPERATURE" ? "🌡️" : "☔";
+  const impactLabel = type === "TEMPERATURE" ? "Temperature impact" : "Rain day";
+
+  // Upsert the weather impact day record (unique by siteId + date + type)
   const day = await prisma.rainedOffDay.upsert({
     where: {
-      siteId_date: { siteId, date: dateObj },
+      siteId_date_type: { siteId, date: dateObj, type },
     },
     update: { note: note || null },
     create: {
       siteId,
       date: dateObj,
+      type,
       note: note || null,
     },
   });
 
-  // Find all weather-affected jobs overlapping this date
+  // Find all weather-affected jobs overlapping this date and log a note — no cascade
   const plots = await prisma.plot.findMany({
     where: { siteId },
-    select: { id: true, plotNumber: true },
+    select: { id: true },
   });
 
-  const affectedJobs: Array<{ id: string; plotId: string; name: string }> = [];
+  const affectedJobs: Array<{ id: string }> = [];
 
   for (const plot of plots) {
     const jobs = await prisma.job.findMany({
       where: {
         plotId: plot.id,
         weatherAffected: true,
+        // Only log notes on jobs whose weatherAffectedType matches (or is BOTH, or null/unset = legacy)
+        OR: [
+          { weatherAffectedType: null },
+          { weatherAffectedType: type },
+          { weatherAffectedType: "BOTH" },
+        ],
         startDate: { lte: dateObj },
         endDate: { gte: dateObj },
       },
-      select: { id: true, plotId: true, name: true },
+      select: { id: true },
     });
     affectedJobs.push(...jobs);
   }
 
-  const noteText = `☔ ${note || "Rain day"} — ${format(dateObj, "dd MMM yyyy")}`;
-  let delayedCount = 0;
+  const noteText = `${impactIcon} ${note || impactLabel} — ${format(dateObj, "dd MMM yyyy")}`;
 
-  // Process affected jobs sequentially (Supabase pool limit)
   for (const job of affectedJobs) {
-    // Always add a note
     await prisma.jobAction.create({
       data: {
         jobId: job.id,
@@ -100,92 +108,15 @@ export async function POST(
         notes: noteText,
       },
     });
-
-    // Optionally delay the job by 1 day
-    if (delayJobs) {
-      const fullJob = await prisma.job.findUnique({
-        where: { id: job.id },
-        select: { id: true, endDate: true, plotId: true, sortOrder: true },
-      });
-
-      if (fullJob?.endDate) {
-        const newEndDate = addDays(fullJob.endDate, 1);
-
-        const allPlotJobs = await prisma.job.findMany({
-          where: { plotId: fullJob.plotId },
-          orderBy: { sortOrder: "asc" },
-        });
-
-        const allOrders = await prisma.materialOrder.findMany({
-          where: { jobId: { in: allPlotJobs.map((j) => j.id) } },
-        });
-
-        const cascade = calculateCascade(
-          fullJob.id,
-          newEndDate,
-          allPlotJobs.map((j) => ({
-            id: j.id,
-            name: j.name,
-            startDate: j.startDate,
-            endDate: j.endDate,
-            sortOrder: j.sortOrder,
-          })),
-          allOrders.map((o) => ({
-            id: o.id,
-            jobId: o.jobId,
-            dateOfOrder: o.dateOfOrder,
-            expectedDeliveryDate: o.expectedDeliveryDate,
-          }))
-        );
-
-        await prisma.$transaction(async (tx) => {
-          await tx.job.update({
-            where: { id: fullJob.id },
-            data: { endDate: newEndDate },
-          });
-
-          for (const update of cascade.jobUpdates) {
-            await tx.job.update({
-              where: { id: update.jobId },
-              data: { startDate: update.newStart, endDate: update.newEnd },
-            });
-          }
-
-          for (const update of cascade.orderUpdates) {
-            await tx.materialOrder.update({
-              where: { id: update.orderId },
-              data: {
-                dateOfOrder: update.newOrderDate,
-                expectedDeliveryDate: update.newDeliveryDate,
-              },
-            });
-          }
-
-          await tx.eventLog.create({
-            data: {
-              type: "SCHEDULE_CASCADED",
-              description: `Rain delay: "${job.name}" delayed 1 day — ${note || "Rain day"}`,
-              siteId,
-              plotId: job.plotId,
-              jobId: job.id,
-              userId: session.user.id,
-            },
-          });
-        });
-
-        delayedCount++;
-      }
-    }
   }
 
-  return NextResponse.json({
-    day,
-    affectedJobs: affectedJobs.length,
-    delayed: delayJobs ? delayedCount : 0,
-  }, { status: 201 });
+  return NextResponse.json(
+    { day, affectedJobs: affectedJobs.length },
+    { status: 201 }
+  );
 }
 
-// DELETE /api/sites/[id]/rained-off — remove a rained-off date
+// DELETE /api/sites/[id]/rained-off — remove a weather impact day entry
 export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -196,7 +127,7 @@ export async function DELETE(
   }
 
   const { id } = await params;
-  const { date } = await req.json();
+  const { date, type } = await req.json();
 
   if (!date) {
     return NextResponse.json({ error: "date is required" }, { status: 400 });
@@ -205,9 +136,16 @@ export async function DELETE(
   const dateObj = new Date(date);
   dateObj.setUTCHours(0, 0, 0, 0);
 
-  await prisma.rainedOffDay.deleteMany({
-    where: { siteId: id, date: dateObj },
-  });
+  // If type provided, delete specific entry; otherwise delete all entries for that date
+  if (type) {
+    await prisma.rainedOffDay.deleteMany({
+      where: { siteId: id, date: dateObj, type },
+    });
+  } else {
+    await prisma.rainedOffDay.deleteMany({
+      where: { siteId: id, date: dateObj },
+    });
+  }
 
   return NextResponse.json({ success: true });
 }

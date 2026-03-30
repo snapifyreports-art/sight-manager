@@ -137,6 +137,11 @@ export function SiteHeatmap({ siteId }: { siteId: string }) {
                     <Minus className="size-2" /> On prog.
                   </span>
                 );
+                if (s.status === "idle") return (
+                  <span className="mt-1 inline-flex items-center gap-0.5 rounded bg-orange-100 px-1 py-0.5 text-[9px] font-medium text-orange-700">
+                    <PauseCircle className="size-2" /> Idle
+                  </span>
+                );
                 return null;
               })()}
 

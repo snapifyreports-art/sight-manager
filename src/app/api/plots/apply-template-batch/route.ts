@@ -120,7 +120,7 @@ export async function POST(request: NextRequest) {
         });
 
         return plot.id;
-      });
+      }, { timeout: 60_000 }); // complex templates can have 20+ jobs + 10+ orders each
       createdPlots.push(plotId);
     } catch (err) {
       errors.push({

@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { fetchWeatherForPostcode } from "@/lib/weather";
-import { startOfDay, endOfDay } from "date-fns";
+import { sendPushToAll } from "@/lib/push";
+import { startOfDay, endOfDay, addDays } from "date-fns";
+import type { NotificationType } from "@prisma/client";
 
 export const dynamic = "force-dynamic";
 
@@ -69,6 +71,40 @@ export async function GET(req: NextRequest) {
       });
 
       logged++;
+
+      // Check tomorrow's forecast for weather alert
+      const tomorrowStr = addDays(now, 1).toISOString().split("T")[0];
+      const tomorrow = forecast.find((d) => d.date === tomorrowStr);
+      if (tomorrow) {
+        const isRainy = ["rain", "snow", "thunder"].includes(tomorrow.category);
+        const isCold = tomorrow.tempMin <= 2;
+
+        if (isRainy || isCold) {
+          // Check if there are weather-sensitive jobs starting in the next 3 days
+          const in3Days = addDays(now, 3);
+          const weatherSensitiveJobCount = await prisma.job.count({
+            where: {
+              plot: { siteId: site.id },
+              weatherAffected: true,
+              status: { in: ["NOT_STARTED", "IN_PROGRESS"] },
+              startDate: { lte: in3Days },
+            },
+          });
+
+          if (weatherSensitiveJobCount > 0) {
+            const alertParts: string[] = [];
+            if (isRainy) alertParts.push(CATEGORY_LABELS[tomorrow.category] ?? tomorrow.category);
+            if (isCold) alertParts.push(`${tomorrow.tempMin}°C low`);
+
+            await sendPushToAll("WEATHER_ALERT" as NotificationType, {
+              title: `Weather Alert — ${site.name}`,
+              body: `Tomorrow: ${alertParts.join(", ")}. ${weatherSensitiveJobCount} weather-sensitive job${weatherSensitiveJobCount !== 1 ? "s" : ""} at risk.`,
+              url: `/sites/${site.id}`,
+              tag: `weather-alert-${site.id}`,
+            });
+          }
+        }
+      }
     } catch {
       failed++;
     }

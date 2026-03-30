@@ -92,6 +92,8 @@ interface AnalyticsData {
   };
   rainedOffStats?: {
     totalDays: number;
+    rainDays: number;
+    temperatureDays: number;
     totalJobsAffected: number;
     bySite: Array<{ siteId: string; siteName: string; days: number }>;
   };
@@ -338,15 +340,15 @@ export function AnalyticsClient() {
         {data.rainedOffStats && (
           <StatCard
             icon={CloudRain}
-            label="Rained Off Days"
+            label="Weather Impact Days"
             value={data.rainedOffStats.totalDays}
-            sub={
+            sub={[
+              data.rainedOffStats.rainDays > 0 ? `☔ ${data.rainedOffStats.rainDays} rain` : null,
+              data.rainedOffStats.temperatureDays > 0 ? `🌡️ ${data.rainedOffStats.temperatureDays} temp` : null,
               data.rainedOffStats.totalJobsAffected > 0
-                ? `${data.rainedOffStats.totalJobsAffected} jobs affected across ${data.rainedOffStats.bySite.length} site${data.rainedOffStats.bySite.length > 1 ? "s" : ""}`
-                : data.rainedOffStats.bySite.length > 0
-                  ? `Across ${data.rainedOffStats.bySite.length} site${data.rainedOffStats.bySite.length > 1 ? "s" : ""}`
-                  : "No rained off days recorded"
-            }
+                ? `${data.rainedOffStats.totalJobsAffected} jobs noted`
+                : null,
+            ].filter(Boolean).join(" · ") || "No weather impact days recorded"}
             color="orange"
           />
         )}

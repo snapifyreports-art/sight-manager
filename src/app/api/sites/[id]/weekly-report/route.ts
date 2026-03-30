@@ -90,7 +90,7 @@ export async function GET(
         siteId: id,
         date: { gte: weekStart, lte: weekEnd },
       },
-      select: { date: true, note: true },
+      select: { date: true, type: true, note: true },
     }),
     prisma.materialOrder.count({
       where: {
@@ -233,8 +233,11 @@ export async function GET(
       snagsResolved: snagsResolvedThisWeek,
       totalOpenSnags,
       rainedOffDays: rainedOffThisWeek.length,
+      rainDays: rainedOffThisWeek.filter((r) => r.type === "RAIN").length,
+      temperatureDays: rainedOffThisWeek.filter((r) => r.type === "TEMPERATURE").length,
       rainedOffDetails: rainedOffThisWeek.map((r) => ({
         date: r.date.toISOString(),
+        type: r.type,
         note: r.note,
       })),
     },

@@ -22,6 +22,31 @@ export interface WeatherDay {
   tempMin: number;
 }
 
+const CATEGORY_LABEL: Record<string, string> = {
+  clear: "Clear",
+  partly_cloudy: "Partly cloudy",
+  cloudy: "Cloudy",
+  fog: "Fog",
+  rain: "Rain",
+  snow: "Snow",
+  thunder: "Thunderstorm",
+};
+
+/**
+ * Return a short weather summary string for today's conditions at a postcode.
+ * e.g. "Rain, 14°C max / 8°C min"
+ * Returns null if the postcode is unavailable or the fetch fails.
+ */
+export async function getTodayWeatherSummary(postcode: string): Promise<string | null> {
+  const forecast = await fetchWeatherForPostcode(postcode);
+  if (!forecast) return null;
+  const todayStr = new Date().toISOString().split("T")[0];
+  const today = forecast.find((d) => d.date === todayStr) ?? forecast[0];
+  if (!today) return null;
+  const label = CATEGORY_LABEL[today.category] ?? today.category;
+  return `${label}, ${today.tempMax}°C max / ${today.tempMin}°C min`;
+}
+
 /**
  * Fetch weather forecast for a UK postcode.
  * Uses postcodes.io (free) for geocoding + Open-Meteo (free) for forecast.

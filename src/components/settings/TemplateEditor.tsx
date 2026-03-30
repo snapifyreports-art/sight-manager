@@ -91,6 +91,7 @@ export function TemplateEditor({
   const [jobEndWeek, setJobEndWeek] = useState(2);
   const [jobStageCode, setJobStageCode] = useState("");
   const [jobWeatherAffected, setJobWeatherAffected] = useState(false);
+  const [jobWeatherAffectedType, setJobWeatherAffectedType] = useState<"RAIN" | "TEMPERATURE" | "BOTH" | null>(null);
   const [jobContractorId, setJobContractorId] = useState("");
   const [savingJob, setSavingJob] = useState(false);
 
@@ -288,6 +289,24 @@ export function TemplateEditor({
       setSavingSplit(false);
     }
   }
+
+  // ---------- Timeline bar click → scroll to job ----------
+
+  const handleBarClick = useCallback((jobId: string, parentJobId?: string) => {
+    // Expand the parent stage first (if sub-job), then the job itself
+    setExpandedJobs((prev) => {
+      const next = new Set(prev);
+      if (parentJobId) next.add(parentJobId);
+      next.add(jobId);
+      return next;
+    });
+    // Scroll to the card — use the parent card if it's a sub-job
+    const targetId = parentJobId ?? jobId;
+    setTimeout(() => {
+      const el = document.querySelector(`[data-job-id="${targetId}"]`);
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 50);
+  }, []);
 
   // ---------- Timeline drag handler ----------
 
@@ -498,6 +517,7 @@ export function TemplateEditor({
     setJobEndWeek(job.endWeek);
     setJobStageCode(job.stageCode ?? "");
     setJobWeatherAffected(job.weatherAffected ?? false);
+    setJobWeatherAffectedType(job.weatherAffectedType ?? null);
     setJobContractorId(job.contactId ?? "");
     setJobDialogOpen(true);
   }
@@ -523,6 +543,7 @@ export function TemplateEditor({
               startWeek: jobStartWeek,
               endWeek: jobEndWeek,
               weatherAffected: jobWeatherAffected,
+              weatherAffectedType: jobWeatherAffected ? jobWeatherAffectedType : null,
               contactId: jobContractorId && jobContractorId !== "__none__" ? jobContractorId : null,
               ...(isSubJob && { durationWeeks }),
             }),
@@ -1026,6 +1047,7 @@ export function TemplateEditor({
           onJobUpdate={handleTimelineJobUpdate}
           expandedJobIds={expandedJobs}
           onToggleExpand={toggleJobExpand}
+          onBarClick={handleBarClick}
         />
       )}
 
@@ -1059,6 +1081,7 @@ export function TemplateEditor({
                 return (
                   <Card
                     key={job.id}
+                    data-job-id={job.id}
                     className="overflow-hidden border-border/50"
                   >
                     <div
@@ -1261,6 +1284,7 @@ export function TemplateEditor({
               return (
                 <Card
                   key={job.id}
+                  data-job-id={job.id}
                   className="overflow-hidden border-border/50"
                 >
                   {/* Stage header row */}
@@ -1993,16 +2017,40 @@ export function TemplateEditor({
                 Short code for the programme view. Auto-generated if empty.
               </p>
             </div>
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={jobWeatherAffected}
-                onChange={(e) => setJobWeatherAffected(e.target.checked)}
-                className="size-4 rounded border-gray-300 accent-blue-600"
-              />
-              <span className="text-sm font-medium">Weather Affected</span>
-              <span className="text-[11px] text-muted-foreground">— can be delayed by bad weather</span>
-            </label>
+            <div className="space-y-2">
+              <Label>Weather Impact</Label>
+              <p className="text-[11px] text-muted-foreground">Weather impact days will be logged against this job if affected</p>
+              <div className="flex flex-wrap gap-2">
+                {([
+                  { value: null,          label: "None",        bg: "bg-slate-100 text-slate-600 border-slate-200" },
+                  { value: "RAIN",        label: "☔ Rain",     bg: "bg-blue-50 text-blue-700 border-blue-200" },
+                  { value: "TEMPERATURE", label: "🌡️ Temperature", bg: "bg-cyan-50 text-cyan-700 border-cyan-200" },
+                  { value: "BOTH",        label: "Both",        bg: "bg-amber-50 text-amber-700 border-amber-200" },
+                ] as const).map(({ value, label, bg }) => {
+                  const selected = jobWeatherAffected
+                    ? (jobWeatherAffectedType === value)
+                    : value === null;
+                  return (
+                    <button
+                      key={String(value)}
+                      type="button"
+                      onClick={() => {
+                        if (value === null) {
+                          setJobWeatherAffected(false);
+                          setJobWeatherAffectedType(null);
+                        } else {
+                          setJobWeatherAffected(true);
+                          setJobWeatherAffectedType(value);
+                        }
+                      }}
+                      className={`rounded-full border px-3 py-1 text-xs font-medium transition-all ${bg} ${selected ? "ring-2 ring-offset-1 ring-blue-400" : "opacity-60 hover:opacity-100"}`}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
             {contractors.length > 0 && (
               <div className="space-y-2">
                 <Label>Contractor</Label>

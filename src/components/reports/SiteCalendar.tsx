@@ -22,6 +22,7 @@ import {
   Briefcase,
   Package,
   CloudRain,
+  Thermometer,
 } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -62,7 +63,7 @@ interface CalendarData {
   month: string;
   jobs: CalendarJob[];
   deliveries: CalendarDelivery[];
-  rainedOffDays: Array<{ date: string; note: string | null }>;
+  rainedOffDays: Array<{ date: string; note: string | null; type: string }>;
 }
 
 interface DayEvents {
@@ -71,6 +72,7 @@ interface DayEvents {
   deliveries: CalendarDelivery[];
   isRainedOff: boolean;
   rainNote: string | null;
+  weatherType: "RAIN" | "TEMPERATURE" | "BOTH" | null;
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -110,6 +112,7 @@ export function SiteCalendar({ siteId }: SiteCalendarProps) {
           deliveries: [],
           isRainedOff: false,
           rainNote: null,
+          weatherType: null,
         });
       }
       return map.get(dateStr)!;
@@ -139,6 +142,12 @@ export function SiteCalendar({ siteId }: SiteCalendarProps) {
       const entry = getOrCreate(key);
       entry.isRainedOff = true;
       entry.rainNote = rain.note;
+      const incoming = rain.type as "RAIN" | "TEMPERATURE";
+      if (entry.weatherType === null) {
+        entry.weatherType = incoming;
+      } else if (entry.weatherType !== incoming) {
+        entry.weatherType = "BOTH";
+      }
     }
 
     return map;
@@ -236,7 +245,9 @@ export function SiteCalendar({ siteId }: SiteCalendarProps) {
                 className={`min-h-[70px] border-b border-r p-1 text-left transition-colors hover:bg-slate-50 ${
                   !inMonth ? "bg-slate-50/50 text-muted-foreground/40" : ""
                 } ${selected ? "bg-blue-50 ring-1 ring-blue-300" : ""} ${
-                  events?.isRainedOff ? "bg-blue-50/30" : ""
+                  events?.weatherType === "RAIN" ? "bg-blue-50/30" :
+                  events?.weatherType === "TEMPERATURE" ? "bg-cyan-50/30" :
+                  events?.weatherType === "BOTH" ? "bg-amber-50/30" : ""
                 }`}
               >
                 <div className="flex items-center justify-between">
@@ -249,8 +260,17 @@ export function SiteCalendar({ siteId }: SiteCalendarProps) {
                   >
                     {format(d, "d")}
                   </span>
-                  {events?.isRainedOff && (
+                  {events?.weatherType === "RAIN" && (
                     <CloudRain className="size-3 text-blue-400" />
+                  )}
+                  {events?.weatherType === "TEMPERATURE" && (
+                    <Thermometer className="size-3 text-cyan-500" />
+                  )}
+                  {events?.weatherType === "BOTH" && (
+                    <span className="flex items-center gap-0.5">
+                      <CloudRain className="size-3 text-blue-400" />
+                      <Thermometer className="size-3 text-cyan-500" />
+                    </span>
                   )}
                 </div>
                 {hasEvents && inMonth && (
@@ -303,9 +323,15 @@ export function SiteCalendar({ siteId }: SiteCalendarProps) {
             <CardTitle className="text-sm">
               {format(selectedDay, "EEEE, d MMMM yyyy")}
               {selectedEvents?.isRainedOff && (
-                <span className="ml-2 inline-flex items-center gap-1 text-xs font-normal text-blue-600">
-                  <CloudRain className="size-3" />
-                  Rained Off
+                <span className={`ml-2 inline-flex items-center gap-1 text-xs font-normal ${
+                  selectedEvents.weatherType === "TEMPERATURE" ? "text-cyan-600" :
+                  selectedEvents.weatherType === "BOTH" ? "text-amber-600" : "text-blue-600"
+                }`}>
+                  {selectedEvents.weatherType === "RAIN" && <CloudRain className="size-3" />}
+                  {selectedEvents.weatherType === "TEMPERATURE" && <Thermometer className="size-3" />}
+                  {selectedEvents.weatherType === "BOTH" && <><CloudRain className="size-3" /><Thermometer className="size-3" /></>}
+                  {selectedEvents.weatherType === "RAIN" ? "Rain" :
+                   selectedEvents.weatherType === "TEMPERATURE" ? "Temperature" : "Weather"} Impact
                   {selectedEvents.rainNote && ` — ${selectedEvents.rainNote}`}
                 </span>
               )}

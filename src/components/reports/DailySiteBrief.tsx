@@ -91,6 +91,7 @@ interface BriefData {
     blockedCount: number;
     openSnagCount: number;
     awaitingRestartCount: number;
+    pendingSignOffCount?: number;
   };
   awaitingRestartPlots: Array<{
     id: string;
@@ -215,6 +216,12 @@ interface BriefData {
     title: string;
     subtitle: string;
     missing: string[];
+  }>;
+  pendingSignOffs?: Array<{
+    id: string;
+    name: string;
+    plotId: string;
+    plot: { plotNumber: string | null; name: string };
   }>;
   weather: {
     today: { date: string; category: string; tempMax: number; tempMin: number };
@@ -1946,6 +1953,40 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
             </div>
           </CardContent>
           )}
+        </Card>
+      )}
+
+      {/* Pending Sign-offs — jobs started without the previous one being signed off */}
+      {data.pendingSignOffs && data.pendingSignOffs.length > 0 && (
+        <Card id="section-pending-signoffs" className="border-amber-200">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <AlertTriangle className="size-4 text-amber-500" />
+              <span className="text-sm font-semibold text-amber-800">
+                Pending Sign-offs ({data.pendingSignOffs.length})
+              </span>
+              <span className="text-xs text-amber-600">— jobs still open while subsequent work has started</span>
+            </div>
+            <div className="space-y-2">
+              {data.pendingSignOffs.map((j) => (
+                <a
+                  key={j.id}
+                  href={`/jobs/${j.id}`}
+                  className="flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 hover:bg-amber-100 transition-colors"
+                >
+                  <div>
+                    <p className="text-sm font-medium text-amber-900">{j.name}</p>
+                    <p className="text-xs text-amber-600">
+                      {j.plot.plotNumber ? `Plot ${j.plot.plotNumber}` : j.plot.name}
+                    </p>
+                  </div>
+                  <span className="rounded-full bg-amber-200 px-2 py-0.5 text-[10px] font-semibold text-amber-800">
+                    Sign Off
+                  </span>
+                </a>
+              ))}
+            </div>
+          </CardContent>
         </Card>
       )}
 

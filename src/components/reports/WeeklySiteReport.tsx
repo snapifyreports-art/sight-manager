@@ -14,6 +14,7 @@ import {
   TrendingDown,
   Minus,
   CloudRain,
+  Thermometer,
   Package,
   Camera,
   AlertTriangle,
@@ -59,7 +60,9 @@ interface ReportData {
     snagsResolved: number;
     totalOpenSnags: number;
     rainedOffDays: number;
-    rainedOffDetails: Array<{ date: string; note: string | null }>;
+    rainDays: number;
+    temperatureDays: number;
+    rainedOffDetails: Array<{ date: string; note: string | null; type: string }>;
   };
   deliveries: Array<{
     id: string;
@@ -326,10 +329,16 @@ export function WeeklySiteReport({ siteId }: WeeklySiteReportProps) {
                 <p className="text-2xl font-bold">{tw.photosUploaded}</p>
                 <p className="text-xs text-muted-foreground">Photos</p>
               </div>
-              {tw.rainedOffDays > 0 && (
+              {tw.rainDays > 0 && (
                 <div>
-                  <p className="text-2xl font-bold text-blue-600">{tw.rainedOffDays}</p>
-                  <p className="text-xs text-muted-foreground">Rain Days</p>
+                  <p className="text-2xl font-bold text-blue-600">{tw.rainDays}</p>
+                  <p className="text-xs text-muted-foreground">☔ Rain</p>
+                </div>
+              )}
+              {tw.temperatureDays > 0 && (
+                <div>
+                  <p className="text-2xl font-bold text-cyan-600">{tw.temperatureDays}</p>
+                  <p className="text-xs text-muted-foreground">🌡️ Temp</p>
                 </div>
               )}
             </div>
@@ -337,22 +346,45 @@ export function WeeklySiteReport({ siteId }: WeeklySiteReportProps) {
         </Card>
       </div>
 
-      {/* Rained off days detail */}
-      {tw.rainedOffDetails.length > 0 && (
-        <div className="flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm">
-          <CloudRain className="size-4 shrink-0 text-blue-600" />
-          <div>
-            <span className="font-medium text-blue-800">Rained Off: </span>
-            {tw.rainedOffDetails.map((r, i) => (
-              <span key={i} className="text-blue-700">
-                {format(new Date(r.date), "EEE dd")}
-                {r.note && ` (${r.note})`}
-                {i < tw.rainedOffDetails.length - 1 ? ", " : ""}
-              </span>
-            ))}
+      {/* Weather impact days detail */}
+      {tw.rainedOffDetails.length > 0 && (() => {
+        const rainEntries = tw.rainedOffDetails.filter((r) => r.type === "RAIN");
+        const tempEntries = tw.rainedOffDetails.filter((r) => r.type === "TEMPERATURE");
+        return (
+          <div className="space-y-2">
+            {rainEntries.length > 0 && (
+              <div className="flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm">
+                <CloudRain className="size-4 shrink-0 text-blue-600" />
+                <div>
+                  <span className="font-medium text-blue-800">Rain Days: </span>
+                  {rainEntries.map((r, i) => (
+                    <span key={i} className="text-blue-700">
+                      {format(new Date(r.date), "EEE dd")}
+                      {r.note && ` (${r.note})`}
+                      {i < rainEntries.length - 1 ? ", " : ""}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+            {tempEntries.length > 0 && (
+              <div className="flex items-center gap-2 rounded-lg border border-cyan-200 bg-cyan-50 p-3 text-sm">
+                <Thermometer className="size-4 shrink-0 text-cyan-600" />
+                <div>
+                  <span className="font-medium text-cyan-800">Temperature Days: </span>
+                  {tempEntries.map((r, i) => (
+                    <span key={i} className="text-cyan-700">
+                      {format(new Date(r.date), "EEE dd")}
+                      {r.note && ` (${r.note})`}
+                      {i < tempEntries.length - 1 ? ", " : ""}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       <div className="grid gap-4 md:grid-cols-2">
         {/* Deliveries this week */}

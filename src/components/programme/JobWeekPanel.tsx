@@ -26,6 +26,7 @@ import {
   Play,
   Pause,
   ShieldCheck,
+  Clock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -283,8 +284,11 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
   const [panelContractors, setPanelContractors] = useState<Array<{ id: string; name: string; company: string | null }>>([]);
   const [allContractors, setAllContractors] = useState<Array<{ id: string; name: string; company: string | null }>>([]);
   const [contractorPickerOpen, setContractorPickerOpen] = useState(false);
+  const [contractorPickerTargetJobId, setContractorPickerTargetJobId] = useState<string | null>(null);
   const [selectedContractorIds, setSelectedContractorIds] = useState<Set<string>>(new Set());
   const [savingContractors, setSavingContractors] = useState(false);
+  // Per-child-job contractors (for synthetic parent panels)
+  const [childJobContractors, setChildJobContractors] = useState<Map<string, { id: string; name: string; company: string | null } | null>>(new Map());
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
@@ -297,6 +301,14 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
   const [showSignOffForm, setShowSignOffForm] = useState(false);
   const [signOffNotesInput, setSignOffNotesInput] = useState("");
 
+  // Delay form state
+  const [showDelayForm, setShowDelayForm] = useState(false);
+  const [delayDays, setDelayDays] = useState(1);
+  const [delayReasonType, setDelayReasonType] = useState<"WEATHER_RAIN" | "WEATHER_TEMPERATURE" | "OTHER">("OTHER");
+  const [delayReasonText, setDelayReasonText] = useState("");
+  const [delayLoading, setDelayLoading] = useState(false);
+  const [delaySuggestion, setDelaySuggestion] = useState<{ rainDays: number; temperatureDays: number; suggestedReason: string | null } | null>(null);
+
   // Early-start programme impact dialog
   const [earlyStartDialog, setEarlyStartDialog] = useState<{
     jobId: string;
@@ -307,8 +319,28 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
   } | null>(null);
   const [cascadeLoading, setCascadeLoading] = useState(false);
 
+  // Pre-start checks (dependency + delivery warnings)
+  const [preStartChecks, setPreStartChecks] = useState<{
+    jobId: string;
+    jobName: string;
+    isChild: boolean;
+    prevJob: { id: string; name: string } | null;
+    undeliveredOrders: Array<{ id: string; supplier: string }>;
+    signOffPrev: boolean;
+    markDelivered: boolean;
+  } | null>(null);
+  const [preStartLoading, setPreStartLoading] = useState(false);
+
+  // Post-completion programme shift dialog
+  const [completionShiftDialog, setCompletionShiftDialog] = useState<{
+    jobId: string;
+    daysDeviation: number; // positive = finished early, negative = finished late
+    nextJob: { id: string; name: string } | null;
+    plotId: string;
+  } | null>(null);
+
   // Child job summaries for synthetic parent panels
-  const [childJobs, setChildJobs] = useState<Array<{ id: string; name: string; status: string; sortOrder: number; startDate: string | null; endDate: string | null }>>([]);
+  const [childJobs, setChildJobs] = useState<Array<{ id: string; name: string; status: string; sortOrder: number; startDate: string | null; endDate: string | null; contractor: { id: string; name: string; company: string | null } | null }>>([]);
   const [childJobStatuses, setChildJobStatuses] = useState<Map<string, string>>(new Map());
   const [childJobActionLoading, setChildJobActionLoading] = useState<Set<string>>(new Set());
   const [childJobSignOff, setChildJobSignOff] = useState<string | null>(null);
@@ -387,6 +419,9 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
           // Store child job summaries for per-job action buttons
           const summaries = childIds.map((cid, i) => {
             const jobData = results[i][1];
+            const firstContractor = Array.isArray(jobData.contractors) && jobData.contractors.length > 0
+              ? (jobData.contractors[0].contact ?? null)
+              : null;
             return {
               id: cid,
               name: jobData.name ?? "Job",
@@ -394,9 +429,14 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
               sortOrder: jobData.sortOrder ?? 0,
               startDate: jobData.startDate ?? null,
               endDate: jobData.endDate ?? null,
+              contractor: firstContractor,
             };
           });
           setChildJobs(summaries);
+          // Seed per-child contractor map
+          const childContractorMap = new Map<string, { id: string; name: string; company: string | null } | null>();
+          summaries.forEach((s) => childContractorMap.set(s.id, s.contractor));
+          setChildJobContractors(childContractorMap);
         })
         .catch(console.error)
         .finally(() => setLoading(false));
@@ -447,20 +487,29 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
     return () => window.removeEventListener("keydown", handler);
   }, [lightboxIndex, photos.length]);
 
-  // Add note
-  const openContractorPicker = useCallback(async () => {
+  // Open contractor picker — optionally targeting a specific child job
+  const openContractorPicker = useCallback(async (childJobId?: string) => {
     const res = await fetch("/api/contacts?type=CONTRACTOR");
     const data = await res.json();
     setAllContractors(Array.isArray(data) ? data.map((c: { id: string; name: string; company: string | null }) => ({ id: c.id, name: c.name, company: c.company })) : []);
-    setSelectedContractorIds(new Set(panelContractors.map((c) => c.id)));
+    if (childJobId) {
+      const existing = childJobContractors.get(childJobId);
+      setSelectedContractorIds(existing ? new Set([existing.id]) : new Set());
+      setContractorPickerTargetJobId(childJobId);
+    } else {
+      setSelectedContractorIds(new Set(panelContractors.map((c) => c.id)));
+      setContractorPickerTargetJobId(null);
+    }
     setContractorPickerOpen(true);
-  }, [panelContractors]);
+  }, [panelContractors, childJobContractors]);
 
   const saveContractors = useCallback(async () => {
-    if (!context || isSynthetic) return;
+    if (!context) return;
+    const targetJobId = contractorPickerTargetJobId ?? (isSynthetic ? null : context.job.id);
+    if (!targetJobId) return;
     setSavingContractors(true);
     try {
-      const res = await fetch(`/api/jobs/${context.job.id}/contractors`, {
+      const res = await fetch(`/api/jobs/${targetJobId}/contractors`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ contactIds: Array.from(selectedContractorIds) }),
@@ -468,14 +517,21 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
       if (res.ok) {
         const updated = await res.json();
         const contacts = updated.map((jc: { contact: { id: string; name: string; company: string | null } | null }) => jc.contact).filter(Boolean);
-        setPanelContractors(contacts);
-        setJobContractorContactId(contacts[0]?.id || null);
+        if (contractorPickerTargetJobId) {
+          // Update per-child contractor map
+          const contractor = contacts[0] ?? null;
+          setChildJobContractors((prev) => new Map(prev).set(contractorPickerTargetJobId, contractor));
+        } else {
+          setPanelContractors(contacts);
+          setJobContractorContactId(contacts[0]?.id || null);
+        }
       }
     } finally {
       setSavingContractors(false);
       setContractorPickerOpen(false);
+      setContractorPickerTargetJobId(null);
     }
-  }, [context, isSynthetic, selectedContractorIds]);
+  }, [context, isSynthetic, contractorPickerTargetJobId, selectedContractorIds]);
 
   const handleAddNote = useCallback(async () => {
     if (!context || !noteText.trim()) return;
@@ -510,10 +566,22 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
       body: JSON.stringify({ action, ...(notes ? { signOffNotes: notes } : {}) }),
     });
     if (res.ok) {
+      const responseData = await res.json();
       const jobData = await fetch(`/api/jobs/${jobId}`, { cache: "no-store" }).then((r) => r.json());
       setActions(Array.isArray(jobData.actions) ? jobData.actions : []);
-      // Notify parent (SiteProgramme) to refresh its grid data
       onJobUpdated?.();
+      // After completing, offer programme adjustment if job deviated from schedule
+      if (action === "complete" && responseData._completionContext) {
+        const ctx = responseData._completionContext;
+        if (ctx.daysDeviation !== 0) {
+          setCompletionShiftDialog({
+            jobId,
+            daysDeviation: ctx.daysDeviation,
+            nextJob: ctx.nextJob ?? null,
+            plotId: ctx.plotId,
+          });
+        }
+      }
     }
     return res.ok;
   }, [onJobUpdated]);
@@ -525,20 +593,44 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    // Early start: intercept and show programme impact dialog
-    if (action === "start" && context.job.startDate) {
-      const planned = new Date(context.job.startDate);
-      planned.setHours(0, 0, 0, 0);
-      const daysEarly = differenceInCalendarDays(planned, today);
-      if (daysEarly > 0) {
-        setEarlyStartDialog({
-          jobId,
-          jobName: context.job.name,
-          daysEarly,
-          endDate: context.job.endDate ?? null,
-          isChild: false,
+    if (action === "start") {
+      // Check for incomplete predecessor job on this plot
+      let prevJob: { id: string; name: string } | null = null;
+      try {
+        const siblingsRes = await fetch(`/api/jobs/${jobId}/siblings`);
+        if (siblingsRes.ok) {
+          const { siblings } = await siblingsRes.json();
+          const current = siblings.find((s: { id: string }) => s.id === jobId);
+          if (current) {
+            const prev = [...siblings]
+              .filter((s: { sortOrder: number; status: string }) => s.sortOrder < current.sortOrder && s.status !== "COMPLETED")
+              .sort((a: { sortOrder: number }, b: { sortOrder: number }) => b.sortOrder - a.sortOrder)[0] ?? null;
+            if (prev) prevJob = { id: prev.id, name: prev.name };
+          }
+        }
+      } catch { /* non-critical */ }
+
+      const undelivered = orders.filter((o) => o.status !== "DELIVERED" && o.status !== "CANCELLED");
+
+      if (prevJob || undelivered.length > 0) {
+        setPreStartChecks({
+          jobId, jobName: context.job.name, isChild: false,
+          prevJob,
+          undeliveredOrders: undelivered.map((o) => ({ id: o.id, supplier: o.supplier.name })),
+          signOffPrev: false, markDelivered: false,
         });
         return;
+      }
+
+      // Early start: intercept and show programme impact dialog
+      if (context.job.startDate) {
+        const planned = new Date(context.job.startDate);
+        planned.setHours(0, 0, 0, 0);
+        const daysEarly = differenceInCalendarDays(planned, today);
+        if (daysEarly > 0) {
+          setEarlyStartDialog({ jobId, jobName: context.job.name, daysEarly, endDate: context.job.endDate ?? null, isChild: false });
+          return;
+        }
       }
     }
 
@@ -557,13 +649,27 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
     } finally {
       setJobActionLoading(false);
     }
-  }, [context, isSynthetic, fireJobAction]);
+  }, [context, isSynthetic, orders, fireJobAction]);
 
   // Action on an individual child job inside a synthetic parent panel
   const handleChildJobAction = useCallback(async (childId: string, action: "start" | "stop" | "complete", notes?: string) => {
-    // Early start intercept for child jobs
     if (action === "start") {
       const child = childJobs.find((c) => c.id === childId);
+      // Check for incomplete predecessor among siblings (other children with lower sortOrder)
+      const prevIncompleteChild = child
+        ? childJobs
+            .filter((c) => c.sortOrder < child.sortOrder && (childJobStatuses.get(c.id) ?? c.status) !== "COMPLETED")
+            .sort((a, b) => b.sortOrder - a.sortOrder)[0] ?? null
+        : null;
+      if (prevIncompleteChild) {
+        setPreStartChecks({
+          jobId: childId, jobName: child?.name ?? "", isChild: true,
+          prevJob: { id: prevIncompleteChild.id, name: prevIncompleteChild.name },
+          undeliveredOrders: [], signOffPrev: false, markDelivered: false,
+        });
+        return;
+      }
+      // Early start intercept for child jobs
       if (child?.startDate) {
         const today = new Date(); today.setHours(0, 0, 0, 0);
         const planned = new Date(child.startDate); planned.setHours(0, 0, 0, 0);
@@ -646,6 +752,157 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
       setCascadeLoading(false);
     }
   }, [earlyStartDialog, fireJobAction]);
+
+  // Pre-start: resolve dependency/delivery warnings then proceed
+  const handlePreStartConfirm = useCallback(async () => {
+    if (!preStartChecks) return;
+    const { jobId, jobName, isChild, prevJob, undeliveredOrders, signOffPrev, markDelivered } = preStartChecks;
+    setPreStartChecks(null);
+    setPreStartLoading(true);
+    try {
+      if (signOffPrev && prevJob) {
+        await fetch(`/api/jobs/${prevJob.id}/actions`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "complete" }),
+        });
+        onJobUpdated?.();
+      }
+      if (markDelivered && undeliveredOrders.length > 0) {
+        await Promise.all(
+          undeliveredOrders.map((o) =>
+            fetch(`/api/orders/${o.id}`, {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ status: "DELIVERED" }),
+            })
+          )
+        );
+        setOrders((prev) =>
+          prev.map((o) => (undeliveredOrders.find((u) => u.id === o.id) ? { ...o, status: "DELIVERED" } : o))
+        );
+      }
+      // Check for early start
+      const today = new Date(); today.setHours(0, 0, 0, 0);
+      const jobRef = isChild ? childJobs.find((c) => c.id === jobId) : context?.job;
+      if (jobRef?.startDate) {
+        const planned = new Date(jobRef.startDate); planned.setHours(0, 0, 0, 0);
+        const daysEarly = differenceInCalendarDays(planned, today);
+        if (daysEarly > 0) {
+          setEarlyStartDialog({ jobId, jobName, daysEarly, endDate: jobRef.endDate ?? null, isChild });
+          return;
+        }
+      }
+      // Fire start
+      if (!isChild) {
+        setJobActionLoading(true);
+        const ok = await fireJobAction(jobId, "start");
+        if (ok) setLocalStatus("IN_PROGRESS");
+        setJobActionLoading(false);
+      } else {
+        setChildJobActionLoading((prev) => new Set(prev).add(jobId));
+        const ok = await fireJobAction(jobId, "start");
+        if (ok) setChildJobStatuses((prev) => new Map(prev).set(jobId, "IN_PROGRESS"));
+        setChildJobActionLoading((prev) => { const s = new Set(prev); s.delete(jobId); return s; });
+      }
+    } catch (e) {
+      console.error("Pre-start confirm failed:", e);
+    } finally {
+      setPreStartLoading(false);
+    }
+  }, [preStartChecks, context, childJobs, fireJobAction, onJobUpdated]);
+
+  // Post-completion: shift entire programme from the actual end date
+  const handleShiftProgramme = useCallback(async () => {
+    if (!completionShiftDialog) return;
+    setCascadeLoading(true);
+    try {
+      const jobData = await fetch(`/api/jobs/${completionShiftDialog.jobId}`, { cache: "no-store" }).then((r) => r.json());
+      const actualEnd: string | null = jobData.actualEndDate ?? null;
+      if (actualEnd) {
+        await fetch(`/api/jobs/${completionShiftDialog.jobId}/cascade`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ newEndDate: actualEnd.slice(0, 10), confirm: true }),
+        });
+        onJobUpdated?.();
+      }
+    } catch (e) {
+      console.error("Shift programme failed:", e);
+    } finally {
+      setCascadeLoading(false);
+      setCompletionShiftDialog(null);
+    }
+  }, [completionShiftDialog, onJobUpdated]);
+
+  // Post-completion: adjust next job only (shift its start + end by same delta)
+  const handleAdjustNextJob = useCallback(async () => {
+    if (!completionShiftDialog?.nextJob) return;
+    setCascadeLoading(true);
+    try {
+      const { daysDeviation, nextJob } = completionShiftDialog;
+      // daysDeviation positive = early (actual before plan) → pull next job forward
+      // daysDeviation negative = late (actual after plan) → push next job back
+      const delta = -daysDeviation;
+      const nextJobData = await fetch(`/api/jobs/${nextJob.id}`, { cache: "no-store" }).then((r) => r.json());
+      const updates: Record<string, string> = {};
+      if (nextJobData.endDate) updates.endDate = addDays(new Date(nextJobData.endDate), delta).toISOString().slice(0, 10);
+      if (nextJobData.startDate) updates.startDate = addDays(new Date(nextJobData.startDate), delta).toISOString().slice(0, 10);
+      if (Object.keys(updates).length > 0) {
+        await fetch(`/api/jobs/${nextJob.id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(updates),
+        });
+        onJobUpdated?.();
+      }
+    } catch (e) {
+      console.error("Adjust next job failed:", e);
+    } finally {
+      setCascadeLoading(false);
+      setCompletionShiftDialog(null);
+    }
+  }, [completionShiftDialog, onJobUpdated]);
+
+  // Open delay form — fetch weather suggestion at the same time
+  const openDelayForm = useCallback(async () => {
+    if (!context || isSynthetic) return;
+    setShowDelayForm(true);
+    setDelayDays(1);
+    setDelayReasonType("OTHER");
+    setDelayReasonText("");
+    try {
+      const res = await fetch(`/api/jobs/${context.job.id}/delay`);
+      if (res.ok) {
+        const data = await res.json();
+        setDelaySuggestion(data);
+        if (data.suggestedReason) setDelayReasonType(data.suggestedReason);
+      }
+    } catch { /* non-critical */ }
+  }, [context, isSynthetic]);
+
+  const handleDelay = useCallback(async () => {
+    if (!context || isSynthetic) return;
+    setDelayLoading(true);
+    try {
+      const res = await fetch(`/api/jobs/${context.job.id}/delay`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          days: delayDays,
+          delayReasonType,
+          reason: delayReasonText.trim() || undefined,
+        }),
+      });
+      if (!res.ok) throw new Error("Failed");
+      setShowDelayForm(false);
+      onJobUpdated?.();
+    } catch (e) {
+      console.error("Delay failed:", e);
+    } finally {
+      setDelayLoading(false);
+    }
+  }, [context, isSynthetic, delayDays, delayReasonType, delayReasonText, onJobUpdated]);
 
   // Stage files for upload (shows caption input)
   const handleFileSelect = useCallback((files: FileList | null) => {
@@ -902,6 +1159,7 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
                     const childLoading = childJobActionLoading.has(child.id);
                     const childStatusCfg = STATUS_CONFIG[childStatus] ?? STATUS_CONFIG.NOT_STARTED;
                     const isSigningOff = childJobSignOff === child.id;
+                    const childContractor = childJobContractors.get(child.id) ?? null;
                     return (
                       <div key={child.id} className="rounded-lg border bg-slate-50 p-3 space-y-2">
                         <div className="flex items-center justify-between gap-2">
@@ -918,6 +1176,19 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
                             {child.endDate ? format(new Date(child.endDate), "d MMM") : "?"}
                           </p>
                         )}
+                        {/* Per-sub-job contractor badge + edit */}
+                        <button
+                          type="button"
+                          className="flex items-center gap-1.5 rounded-md border border-dashed border-slate-300 px-2 py-1 text-[11px] text-slate-600 hover:border-blue-300 hover:bg-blue-50/50 hover:text-blue-700 transition-colors"
+                          onClick={() => openContractorPicker(child.id)}
+                          title="Assign contractor"
+                        >
+                          <HardHat className="size-3 shrink-0" />
+                          {childContractor
+                            ? (childContractor.company || childContractor.name)
+                            : <span className="text-slate-400">No contractor</span>
+                          }
+                        </button>
                         {!isSigningOff && (childStatus === "NOT_STARTED" || childStatus === "ON_HOLD") && (
                           <Button
                             size="sm"
@@ -1053,6 +1324,93 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
                       Signed Off
                     </div>
                   )}
+
+                  {/* Delay button — available for any non-completed job */}
+                  {effectiveStatus !== "COMPLETED" && !showDelayForm && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="w-full border-amber-300 text-amber-700 hover:bg-amber-50"
+                      onClick={openDelayForm}
+                    >
+                      <Clock className="size-3.5 mr-1.5" />
+                      Delay Job
+                    </Button>
+                  )}
+
+                  {/* Inline delay form */}
+                  {showDelayForm && (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 space-y-2.5">
+                      <p className="text-xs font-semibold text-amber-800">Delay this job</p>
+
+                      {/* Weather suggestion */}
+                      {delaySuggestion && (delaySuggestion.rainDays > 0 || delaySuggestion.temperatureDays > 0) && (
+                        <div className="rounded bg-white px-2 py-1.5 text-[11px] text-amber-700 border border-amber-200">
+                          {delaySuggestion.rainDays > 0 && <span>☔ {delaySuggestion.rainDays} rain day{delaySuggestion.rainDays !== 1 ? "s" : ""}</span>}
+                          {delaySuggestion.rainDays > 0 && delaySuggestion.temperatureDays > 0 && <span> · </span>}
+                          {delaySuggestion.temperatureDays > 0 && <span>🌡️ {delaySuggestion.temperatureDays} temperature day{delaySuggestion.temperatureDays !== 1 ? "s" : ""}</span>}
+                          <span className="ml-1 text-amber-600">logged on this job&apos;s period</span>
+                        </div>
+                      )}
+
+                      {/* Days */}
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-slate-600 shrink-0">Days:</span>
+                        <input
+                          type="number"
+                          min={1}
+                          max={365}
+                          value={delayDays}
+                          onChange={(e) => setDelayDays(Math.max(1, parseInt(e.target.value) || 1))}
+                          className="w-16 rounded border px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-amber-400"
+                        />
+                      </div>
+
+                      {/* Reason type */}
+                      <div className="flex gap-1">
+                        {(["WEATHER_RAIN", "WEATHER_TEMPERATURE", "OTHER"] as const).map((r) => (
+                          <button
+                            key={r}
+                            onClick={() => setDelayReasonType(r)}
+                            className={`flex-1 rounded px-1 py-1 text-[10px] font-medium transition-colors ${
+                              delayReasonType === r
+                                ? r === "WEATHER_RAIN" ? "bg-orange-500 text-white"
+                                  : r === "WEATHER_TEMPERATURE" ? "bg-cyan-500 text-white"
+                                  : "bg-slate-700 text-white"
+                                : "border bg-white text-slate-600 hover:bg-slate-50"
+                            }`}
+                          >
+                            {r === "WEATHER_RAIN" ? "☔ Rain" : r === "WEATHER_TEMPERATURE" ? "🌡️ Temp" : "⏳ Other"}
+                          </button>
+                        ))}
+                      </div>
+
+                      {delayReasonType === "OTHER" && (
+                        <input
+                          type="text"
+                          value={delayReasonText}
+                          onChange={(e) => setDelayReasonText(e.target.value)}
+                          placeholder="Reason (optional)..."
+                          className="w-full rounded border px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-amber-400"
+                        />
+                      )}
+
+                      <div className="flex gap-2">
+                        <Button variant="outline" size="sm" className="flex-1" onClick={() => setShowDelayForm(false)}>
+                          Cancel
+                        </Button>
+                        <Button
+                          size="sm"
+                          className="flex-1 bg-amber-500 hover:bg-amber-600 text-white"
+                          disabled={delayLoading}
+                          onClick={handleDelay}
+                        >
+                          {delayLoading ? <Loader2 className="size-3 animate-spin mr-1" /> : <Clock className="size-3 mr-1" />}
+                          Delay {delayDays}d
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1073,7 +1431,7 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
                   )}
                 </div>
                 {!isSynthetic && (
-                  <Button variant="ghost" size="sm" className="h-7 shrink-0 gap-1 text-xs" onClick={openContractorPicker}>
+                  <Button variant="ghost" size="sm" className="h-7 shrink-0 gap-1 text-xs" onClick={() => openContractorPicker()}>
                     <Pencil className="size-3" />
                     {panelContractors.length === 0 ? "Assign" : "Change"}
                   </Button>
@@ -1594,8 +1952,15 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-sm rounded-xl bg-white shadow-2xl">
             <div className="flex items-center justify-between border-b px-5 py-4">
-              <h3 className="font-semibold">Assign Contractor</h3>
-              <button onClick={() => setContractorPickerOpen(false)} className="rounded p-1 hover:bg-slate-100">
+              <div>
+                <h3 className="font-semibold">Assign Contractor</h3>
+                {contractorPickerTargetJobId && (
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    {childJobs.find((c) => c.id === contractorPickerTargetJobId)?.name}
+                  </p>
+                )}
+              </div>
+              <button onClick={() => { setContractorPickerOpen(false); setContractorPickerTargetJobId(null); }} className="rounded p-1 hover:bg-slate-100">
                 <X className="size-4" />
               </button>
             </div>
@@ -1630,7 +1995,7 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
               )}
             </div>
             <div className="flex justify-end gap-2 border-t px-5 py-3">
-              <Button variant="outline" size="sm" onClick={() => setContractorPickerOpen(false)}>Cancel</Button>
+              <Button variant="outline" size="sm" onClick={() => { setContractorPickerOpen(false); setContractorPickerTargetJobId(null); }}>Cancel</Button>
               <Button size="sm" disabled={savingContractors} onClick={saveContractors}>
                 {savingContractors && <Loader2 className="mr-1.5 size-3.5 animate-spin" />}
                 Save ({selectedContractorIds.size})
@@ -1662,6 +2027,147 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
           setSelectedOrderDetail(null);
         }}
       />
+
+      {/* Pre-start checks: incomplete predecessor + undelivered orders */}
+      {preStartChecks && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white shadow-2xl">
+            <div className="border-b px-5 py-4">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="size-4 text-amber-500" />
+                <h3 className="font-semibold text-foreground">Before You Start</h3>
+              </div>
+              <p className="mt-0.5 text-sm text-muted-foreground">
+                Review these items before starting{" "}
+                <span className="font-medium">{preStartChecks.jobName}</span>.
+              </p>
+            </div>
+            <div className="space-y-3 p-4">
+              {preStartChecks.prevJob && (
+                <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-3">
+                  <input
+                    type="checkbox"
+                    checked={preStartChecks.signOffPrev}
+                    onChange={() =>
+                      setPreStartChecks((prev) => prev ? { ...prev, signOffPrev: !prev.signOffPrev } : prev)
+                    }
+                    className="mt-0.5 size-4 rounded"
+                  />
+                  <div>
+                    <p className="text-sm font-medium text-amber-800">Previous job not signed off</p>
+                    <p className="text-xs text-amber-600">
+                      <span className="font-medium">{preStartChecks.prevJob.name}</span> is still in progress.
+                      Tick to sign it off now.
+                    </p>
+                  </div>
+                </label>
+              )}
+              {preStartChecks.undeliveredOrders.length > 0 && (
+                <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-blue-200 bg-blue-50 p-3">
+                  <input
+                    type="checkbox"
+                    checked={preStartChecks.markDelivered}
+                    onChange={() =>
+                      setPreStartChecks((prev) => prev ? { ...prev, markDelivered: !prev.markDelivered } : prev)
+                    }
+                    className="mt-0.5 size-4 rounded"
+                  />
+                  <div>
+                    <p className="text-sm font-medium text-blue-800">
+                      {preStartChecks.undeliveredOrders.length} order
+                      {preStartChecks.undeliveredOrders.length !== 1 ? "s" : ""} not yet delivered
+                    </p>
+                    <p className="text-xs text-blue-600">
+                      {preStartChecks.undeliveredOrders.map((o) => o.supplier).join(", ")} — tick to mark as delivered.
+                    </p>
+                  </div>
+                </label>
+              )}
+              <div className="flex gap-2 pt-1">
+                <button
+                  onClick={() => setPreStartChecks(null)}
+                  disabled={preStartLoading}
+                  className="flex-1 rounded-xl border border-border/60 px-4 py-2.5 text-sm text-muted-foreground hover:bg-slate-50 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handlePreStartConfirm}
+                  disabled={preStartLoading}
+                  className="flex-1 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 transition-colors disabled:opacity-60"
+                >
+                  {preStartLoading ? <Loader2 className="inline size-3.5 animate-spin mr-1" /> : null}
+                  Start Anyway
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Post-completion: offer programme adjustment when there was deviation */}
+      {completionShiftDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white shadow-2xl">
+            <div className="border-b px-5 py-4">
+              <h3 className="font-semibold text-foreground">Programme Impact</h3>
+              <p className="mt-0.5 text-sm text-muted-foreground">
+                This job finished{" "}
+                <span className={`font-semibold ${completionShiftDialog.daysDeviation > 0 ? "text-emerald-600" : "text-amber-600"}`}>
+                  {Math.abs(completionShiftDialog.daysDeviation)} day
+                  {Math.abs(completionShiftDialog.daysDeviation) !== 1 ? "s" : ""}{" "}
+                  {completionShiftDialog.daysDeviation > 0 ? "early" : "late"}
+                </span>. How would you like to adjust the programme?
+              </p>
+            </div>
+            <div className="space-y-2 p-4">
+              <button
+                onClick={handleShiftProgramme}
+                disabled={cascadeLoading}
+                className="flex w-full items-start gap-3 rounded-xl border-2 border-blue-200 bg-blue-50 px-4 py-3.5 text-left hover:border-blue-400 hover:bg-blue-100 transition-colors disabled:opacity-60"
+              >
+                <span className="mt-0.5 text-lg">⏩</span>
+                <div>
+                  <p className="text-sm font-semibold text-blue-800">Shift Entire Programme</p>
+                  <p className="text-xs text-blue-600">
+                    Move all remaining jobs {Math.abs(completionShiftDialog.daysDeviation)} day
+                    {Math.abs(completionShiftDialog.daysDeviation) !== 1 ? "s" : ""}{" "}
+                    {completionShiftDialog.daysDeviation > 0 ? "earlier" : "later"}.
+                  </p>
+                </div>
+              </button>
+              {completionShiftDialog.nextJob && (
+                <button
+                  onClick={handleAdjustNextJob}
+                  disabled={cascadeLoading}
+                  className="flex w-full items-start gap-3 rounded-xl border-2 border-emerald-200 bg-emerald-50 px-4 py-3.5 text-left hover:border-emerald-400 hover:bg-emerald-100 transition-colors disabled:opacity-60"
+                >
+                  <span className="mt-0.5 text-lg">📋</span>
+                  <div>
+                    <p className="text-sm font-semibold text-emerald-800">Adjust Next Job Only</p>
+                    <p className="text-xs text-emerald-600">
+                      Shift <span className="font-medium">{completionShiftDialog.nextJob.name}</span> dates only,
+                      keeping the rest of the programme unchanged.
+                    </p>
+                  </div>
+                </button>
+              )}
+              <button
+                onClick={() => setCompletionShiftDialog(null)}
+                disabled={cascadeLoading}
+                className="w-full rounded-xl border border-border/60 px-4 py-2.5 text-sm text-muted-foreground hover:bg-slate-50 transition-colors"
+              >
+                Keep As Is
+              </button>
+            </div>
+            {cascadeLoading && (
+              <div className="flex items-center justify-center gap-2 border-t px-5 py-3 text-xs text-muted-foreground">
+                <Loader2 className="size-3.5 animate-spin" /> Updating programme…
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Early-start programme impact dialog */}
       {earlyStartDialog && (

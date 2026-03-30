@@ -145,7 +145,7 @@ export async function GET(req: NextRequest) {
   // Rained-off days + weather impact (separate small queries)
   const rainedOffDays = await prisma.rainedOffDay.findMany({
     where: siteId ? { siteId } : {},
-    select: { siteId: true, date: true },
+    select: { siteId: true, date: true, type: true },
   });
 
   const weatherNotes = await prisma.jobAction.count({
@@ -433,6 +433,8 @@ export async function GET(req: NextRequest) {
     },
     rainedOffStats: {
       totalDays: rainedOffDays.length,
+      rainDays: rainedOffDays.filter((d) => d.type === "RAIN").length,
+      temperatureDays: rainedOffDays.filter((d) => d.type === "TEMPERATURE").length,
       totalJobsAffected: weatherNotes,
       bySite: Object.entries(
         rainedOffDays.reduce<Record<string, number>>((acc, d) => {

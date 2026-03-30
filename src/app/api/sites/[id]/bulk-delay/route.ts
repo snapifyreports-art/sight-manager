@@ -2,9 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { calculateCascade } from "@/lib/cascade";
+import { getTodayWeatherSummary } from "@/lib/weather";
 import { addDays } from "date-fns";
 
 export const dynamic = "force-dynamic";
+
+type DelayReasonType = "WEATHER_RAIN" | "WEATHER_TEMPERATURE" | "OTHER";
 
 // POST /api/sites/[id]/bulk-delay — delay the current job on multiple plots
 export async function POST(
@@ -18,10 +21,11 @@ export async function POST(
 
   const { id: siteId } = await params;
   const body = await req.json();
-  const { plotIds, days, reason } = body as {
+  const { plotIds, days, reason, delayReasonType = "OTHER" } = body as {
     plotIds: string[];
     days: number;
     reason?: string;
+    delayReasonType?: DelayReasonType;
   };
 
   if (!plotIds?.length || !days || days < 1) {
@@ -30,6 +34,20 @@ export async function POST(
       { status: 400 }
     );
   }
+
+  // Fetch today's weather once to stamp on all delay notes
+  const site = await prisma.site.findUnique({ where: { id: siteId }, select: { postcode: true } });
+  const weatherSummary = site?.postcode
+    ? await getTodayWeatherSummary(site.postcode).catch(() => null)
+    : null;
+  const weatherStamp = weatherSummary ? ` · ${weatherSummary}` : "";
+
+  const reasonLabel =
+    delayReasonType === "WEATHER_RAIN"
+      ? "Weather – Rain"
+      : delayReasonType === "WEATHER_TEMPERATURE"
+        ? "Weather – Temperature"
+        : reason || "No reason given";
 
   const results: Array<{
     plotId: string;
@@ -43,7 +61,6 @@ export async function POST(
 
   // Process plots sequentially to respect connection pool limits
   for (const plotId of plotIds) {
-    // Find the current active job for this plot
     const currentJob = await prisma.job.findFirst({
       where: {
         plotId,
@@ -61,7 +78,6 @@ export async function POST(
 
     const newEndDate = addDays(currentJob.endDate, days);
 
-    // Get all jobs on this plot for cascade calculation
     const allPlotJobs = await prisma.job.findMany({
       where: { plotId },
       orderBy: { sortOrder: "asc" },
@@ -89,15 +105,12 @@ export async function POST(
       }))
     );
 
-    // Apply in transaction
     await prisma.$transaction(async (tx) => {
-      // Update the current job's end date
       await tx.job.update({
         where: { id: currentJob.id },
         data: { endDate: newEndDate },
       });
 
-      // Also shift start date if job hasn't started
       if (currentJob.status === "NOT_STARTED" && currentJob.startDate) {
         await tx.job.update({
           where: { id: currentJob.id },
@@ -105,7 +118,6 @@ export async function POST(
         });
       }
 
-      // Update subsequent jobs
       for (const update of cascade.jobUpdates) {
         await tx.job.update({
           where: { id: update.jobId },
@@ -113,7 +125,6 @@ export async function POST(
         });
       }
 
-      // Update orders
       for (const update of cascade.orderUpdates) {
         await tx.materialOrder.update({
           where: { id: update.orderId },
@@ -124,8 +135,14 @@ export async function POST(
         });
       }
 
-      // Add note to the job
-      const noteText = `⏳ Delayed ${days} day${days > 1 ? "s" : ""}${reason ? ` — ${reason}` : ""}`;
+      const noteEmoji =
+        delayReasonType === "WEATHER_RAIN"
+          ? "☔"
+          : delayReasonType === "WEATHER_TEMPERATURE"
+            ? "🌡️"
+            : "⏳";
+      const noteText = `${noteEmoji} Delayed ${days} day${days > 1 ? "s" : ""} — ${reasonLabel}${weatherStamp}`;
+
       await tx.jobAction.create({
         data: {
           jobId: currentJob.id,
@@ -135,15 +152,15 @@ export async function POST(
         },
       });
 
-      // Log event
       await tx.eventLog.create({
         data: {
           type: "SCHEDULE_CASCADED",
-          description: `Bulk delay: "${currentJob.name}" on plot ${currentJob.plot.plotNumber || plotId} delayed ${days} day(s)${reason ? ` — ${reason}` : ""}`,
+          description: `Bulk delay: "${currentJob.name}" on plot ${currentJob.plot.plotNumber || plotId} delayed ${days} day(s) — ${reasonLabel}${weatherStamp}`,
           siteId,
           plotId,
           jobId: currentJob.id,
           userId: session.user.id,
+          delayReasonType,
         },
       });
     });

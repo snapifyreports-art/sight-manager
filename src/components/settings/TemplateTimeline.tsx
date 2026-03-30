@@ -21,6 +21,12 @@ const GROUP_COLORS = [
   { bar: "bg-rose-500/80", bg: "bg-rose-50/30", hex: "rgba(244,63,94,0.8)" },
 ];
 
+interface OrderDot {
+  id: string;
+  orderWeek: number;
+  deliveryWeek: number;
+}
+
 interface TimelineRow {
   type: "group-header" | "sub-job" | "flat-job";
   label: string;
@@ -30,6 +36,7 @@ interface TimelineRow {
   groupIndex: number;
   weekRange?: string;
   orders?: TemplateJobData["orders"];
+  orderDots?: OrderDot[]; // precomputed absolute week positions
   collapsed?: boolean; // true when this group-header is collapsed (show bar)
 }
 
@@ -38,6 +45,7 @@ interface TemplateTimelineProps {
   onJobUpdate?: (jobId: string, startWeek: number, endWeek: number) => void;
   expandedJobIds?: Set<string>;
   onToggleExpand?: (jobId: string) => void;
+  onBarClick?: (jobId: string, parentJobId?: string) => void;
 }
 
 interface DragState {
@@ -48,7 +56,7 @@ interface DragState {
   startX: number;
 }
 
-export function TemplateTimeline({ jobs, onJobUpdate, expandedJobIds, onToggleExpand }: TemplateTimelineProps) {
+export function TemplateTimeline({ jobs, onJobUpdate, expandedJobIds, onToggleExpand, onBarClick }: TemplateTimelineProps) {
   if (jobs.length === 0) return null;
 
   // Use external expand state if provided, otherwise fallback to internal
@@ -78,10 +86,27 @@ export function TemplateTimeline({ jobs, onJobUpdate, expandedJobIds, onToggleEx
 
   // Build rows: stages are collapsed by default, expanded on click
   const rows: TimelineRow[] = useMemo(() => {
+    // Inline adjustWeek (pure fn, no dependencies outside args)
+    const adj = (startWeek: number, raw: number) =>
+      raw <= 0 && startWeek >= 1 ? raw - 1 : raw;
+
     const result: TimelineRow[] = [];
     jobs.forEach((parentJob, groupIdx) => {
       if (parentJob.children && parentJob.children.length > 0) {
         const isExpanded = effectiveExpanded.has(parentJob.id);
+        // Precompute absolute order/delivery week positions for collapsed stage dots
+        const orderDots: OrderDot[] = !isExpanded
+          ? parentJob.children.flatMap((child) =>
+              (child.orders ?? []).map((o) => ({
+                id: `${child.id ?? child.name}-${o.id}`,
+                orderWeek: adj(child.startWeek, child.startWeek + o.orderWeekOffset),
+                deliveryWeek: adj(
+                  child.startWeek,
+                  child.startWeek + o.orderWeekOffset + o.deliveryWeekOffset
+                ),
+              }))
+            )
+          : [];
         // Group header row — always shown
         result.push({
           type: "group-header",
@@ -91,6 +116,7 @@ export function TemplateTimeline({ jobs, onJobUpdate, expandedJobIds, onToggleEx
           groupIndex: groupIdx,
           weekRange: `Wk ${parentJob.startWeek}–${parentJob.endWeek}`,
           collapsed: !isExpanded,
+          orderDots,
         });
         // Sub-job rows — only when expanded
         if (isExpanded) {
@@ -102,11 +128,12 @@ export function TemplateTimeline({ jobs, onJobUpdate, expandedJobIds, onToggleEx
               job: child,
               groupIndex: groupIdx,
               orders: child.orders,
+              orderDots: [],
             });
           });
         }
       } else {
-        // Flat job (legacy/no children)
+        // Flat job (legacy/no children): precompute dots too
         result.push({
           type: "flat-job",
           label: parentJob.name,
@@ -114,23 +141,58 @@ export function TemplateTimeline({ jobs, onJobUpdate, expandedJobIds, onToggleEx
           job: parentJob,
           groupIndex: groupIdx,
           orders: parentJob.orders,
+          orderDots: [],
         });
       }
     });
     return result;
   }, [jobs, effectiveExpanded]);
 
-  // Calculate max week and dimensions
-  const allJobs = rows.filter((r) => r.job).map((r) => r.job!);
+  // Calculate grid bounds — include pre-start weeks needed for order dots
+  // Flatten ALL jobs including children of collapsed stages
+  const allJobs: TemplateJobData[] = jobs.flatMap((j) =>
+    j.children && j.children.length > 0 ? [j, ...j.children] : [j]
+  );
   const maxWeek = Math.max(
     ...allJobs.map((j) => {
       const preview = dragPreview?.jobId === j.id ? dragPreview : null;
       return preview ? preview.endWeek : j.endWeek;
     }),
-    ...jobs.map((j) => j.endWeek) // include parent stage endWeeks
   );
-  const totalWeeks = maxWeek + 1;
+
+  // Week numbers skip 0: ..., -2, -1, 1, 2, ...
+  // Going back from a positive week across the boundary requires an extra -1 to jump over the missing 0.
+  // e.g. startWeek=1, offset=-2 → raw=-1 → adjusted=-2 (2 weeks before Wk 1 is Wk -2)
+  const adjustWeek = (startWeek: number, raw: number) =>
+    raw <= 0 && startWeek >= 1 ? raw - 1 : raw;
+
+  const allOrderWeeks = allJobs.flatMap((j) =>
+    (j.orders ?? []).map((o) =>
+      adjustWeek(j.startWeek, j.startWeek + o.orderWeekOffset)
+    )
+  );
+  const gridStartWeek = allOrderWeeks.length > 0 ? Math.min(1, ...allOrderWeeks) : 1;
+
+  // Pre-start columns (Wk -N … Wk -1) + positive columns (Wk 1 … Wk maxWeek) + padding
+  // Week 0 is skipped, so if gridStartWeek < 1 we add (0 - gridStartWeek) pre-start cols
+  const preStartCols = gridStartWeek < 1 ? -gridStartWeek : 0;
+  const totalWeeks = preStartCols + maxWeek + 2;
   const timelineWidth = totalWeeks * WEEK_WIDTH;
+
+  // Convert a week number to pixel offset, skipping the non-existent week 0
+  const weekToLeft = (week: number): number => {
+    if (gridStartWeek >= 1) return (week - gridStartWeek) * WEEK_WIDTH;
+    if (week < 1) return (week - gridStartWeek) * WEEK_WIDTH;
+    // Positive weeks: place after all pre-start columns (gap where 0 would be skipped)
+    return (preStartCols + week - 1) * WEEK_WIDTH;
+  };
+
+  // Build week header list, skipping 0
+  const weekHeaders: number[] = [];
+  for (let col = 0; col < totalWeeks; col++) {
+    const week = col < preStartCols ? gridStartWeek + col : col - preStartCols + 1;
+    if (week !== 0) weekHeaders.push(week);
+  }
 
   // All rows use ROW_HEIGHT (collapsed group headers need bar space too)
   const rowHeights = rows.map(() => ROW_HEIGHT);
@@ -139,8 +201,6 @@ export function TemplateTimeline({ jobs, onJobUpdate, expandedJobIds, onToggleEx
     acc.push(i === 0 ? 0 : acc[i - 1] + rowHeights[i - 1]);
     return acc;
   }, []);
-
-  const weekHeaders = Array.from({ length: totalWeeks }, (_, i) => i + 1);
   const interactive = !!onJobUpdate;
 
   const handleMouseDown = useCallback(
@@ -328,10 +388,10 @@ export function TemplateTimeline({ jobs, onJobUpdate, expandedJobIds, onToggleEx
               {weekHeaders.map((week) => (
                 <div
                   key={week}
-                  className="flex shrink-0 items-center justify-center border-r border-slate-100 text-[10px] font-medium text-muted-foreground"
+                  className={`flex shrink-0 items-center justify-center border-r border-slate-100 text-[10px] font-medium ${week < 1 ? "text-amber-500" : "text-muted-foreground"}`}
                   style={{ width: WEEK_WIDTH }}
                 >
-                  Wk {week}
+                  {`Wk ${week}`}
                 </div>
               ))}
             </div>
@@ -342,9 +402,9 @@ export function TemplateTimeline({ jobs, onJobUpdate, expandedJobIds, onToggleEx
               {weekHeaders.map((week) => (
                 <div
                   key={week}
-                  className="absolute top-0 border-r border-slate-100"
+                  className={`absolute top-0 border-r ${week < 1 ? "border-amber-100" : "border-slate-100"}`}
                   style={{
-                    left: (week - 1) * WEEK_WIDTH,
+                    left: weekToLeft(week),
                     height: totalHeight,
                     width: 1,
                   }}
@@ -377,30 +437,56 @@ export function TemplateTimeline({ jobs, onJobUpdate, expandedJobIds, onToggleEx
 
               {/* Gantt bars */}
               {rows.map((row, idx) => {
-                // Collapsed group-header: render a summary bar for the whole stage
+                // Collapsed group-header: render a summary bar for the whole stage + order dots
                 if (row.type === "group-header" && row.collapsed && row.parentJob) {
                   const pj = row.parentJob;
                   const colorSet =
                     GROUP_COLORS[row.groupIndex % GROUP_COLORS.length];
-                  const left = (pj.startWeek - 1) * WEEK_WIDTH;
+                  const left = weekToLeft(pj.startWeek);
                   const width = (pj.endWeek - pj.startWeek + 1) * WEEK_WIDTH - 4;
                   const top = rowYPositions[idx] + (ROW_HEIGHT - BAR_HEIGHT) / 2;
+                  const rowTop = rowYPositions[idx];
 
                   return (
-                    <div
-                      key={`collapsed-${idx}`}
-                      className={`absolute rounded-md ${colorSet.bar} flex items-center px-2 shadow-sm cursor-pointer select-none`}
-                      style={{
-                        left: left + 2,
-                        top,
-                        width: Math.max(width, 20),
-                        height: BAR_HEIGHT,
-                      }}
-                      onClick={() => toggleGroup(row.parentJob?.id ?? '')}
-                    >
-                      <span className="truncate text-[10px] font-medium text-white px-1">
-                        {row.stageCode || row.label}
-                      </span>
+                    <div key={`collapsed-${idx}`}>
+                      <div
+                        className={`absolute rounded-md ${colorSet.bar} flex items-center px-2 shadow-sm cursor-pointer select-none`}
+                        style={{
+                          left: left + 2,
+                          top,
+                          width: Math.max(width, 20),
+                          height: BAR_HEIGHT,
+                        }}
+                        onClick={() => toggleGroup(row.parentJob?.id ?? '')}
+                      >
+                        <span className="truncate text-[10px] font-medium text-white px-1">
+                          {row.stageCode || row.label}
+                        </span>
+                      </div>
+                      {row.orderDots?.map((dot) => (
+                        <div key={dot.id}>
+                          <div
+                            className="absolute"
+                            style={{
+                              left: weekToLeft(dot.orderWeek) + WEEK_WIDTH / 2 - 4,
+                              top: rowTop + 2,
+                            }}
+                            title={`Order: Wk ${dot.orderWeek}`}
+                          >
+                            <div className="size-2 rounded-full bg-orange-500 ring-1 ring-white" />
+                          </div>
+                          <div
+                            className="absolute"
+                            style={{
+                              left: weekToLeft(dot.deliveryWeek) + WEEK_WIDTH / 2 - 4,
+                              top: rowTop + ROW_HEIGHT - 10,
+                            }}
+                            title={`Delivery: Wk ${dot.deliveryWeek}`}
+                          >
+                            <div className="size-2 rounded-full bg-green-500 ring-1 ring-white" />
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   );
                 }
@@ -417,7 +503,7 @@ export function TemplateTimeline({ jobs, onJobUpdate, expandedJobIds, onToggleEx
                 const colorSet =
                   GROUP_COLORS[row.groupIndex % GROUP_COLORS.length];
 
-                const left = (sw - 1) * WEEK_WIDTH;
+                const left = weekToLeft(sw);
                 const width = (ew - sw + 1) * WEEK_WIDTH - 4;
                 const top =
                   rowYPositions[idx] +
@@ -430,13 +516,21 @@ export function TemplateTimeline({ jobs, onJobUpdate, expandedJobIds, onToggleEx
                       className={`absolute rounded-md ${colorSet.bar} flex items-center px-2 shadow-sm ${
                         isDragging
                           ? "ring-2 ring-blue-400 ring-offset-1"
-                          : ""
+                          : onBarClick ? "cursor-pointer hover:brightness-110" : ""
                       } ${interactive ? "select-none" : ""}`}
                       style={{
                         left: left + 2,
                         top,
                         width: Math.max(width, 20),
                         height: BAR_HEIGHT,
+                      }}
+                      onClick={(e) => {
+                        // Only fire if this was a click, not the end of a drag
+                        if (!dragPreview && onBarClick) {
+                          e.stopPropagation();
+                          const parentId = row.type === "sub-job" ? row.parentJob?.id : undefined;
+                          onBarClick(job.id, parentId);
+                        }
                       }}
                     >
                       {/* Left drag handle */}
@@ -470,46 +564,38 @@ export function TemplateTimeline({ jobs, onJobUpdate, expandedJobIds, onToggleEx
 
                     {/* Order flag markers */}
                     {row.orders?.map((order) => {
-                      const orderWeek =
-                        job.startWeek + order.orderWeekOffset;
-                      const deliveryWeek =
-                        job.startWeek +
-                        order.orderWeekOffset +
-                        order.deliveryWeekOffset;
+                      const orderWeek = adjustWeek(
+                        job.startWeek,
+                        job.startWeek + order.orderWeekOffset
+                      );
+                      const deliveryWeek = adjustWeek(
+                        job.startWeek,
+                        job.startWeek + order.orderWeekOffset + order.deliveryWeekOffset
+                      );
                       const rowTop = rowYPositions[idx];
 
                       return (
                         <div key={order.id}>
-                          {orderWeek >= 1 && (
-                            <div
-                              className="absolute"
-                              style={{
-                                left:
-                                  (orderWeek - 1) * WEEK_WIDTH +
-                                  WEEK_WIDTH / 2 -
-                                  4,
-                                top: rowTop + 2,
-                              }}
-                              title={`Order: Wk ${orderWeek}`}
-                            >
-                              <div className="size-2 rounded-full bg-orange-500 ring-1 ring-white" />
-                            </div>
-                          )}
-                          {deliveryWeek >= 1 && (
-                            <div
-                              className="absolute"
-                              style={{
-                                left:
-                                  (deliveryWeek - 1) * WEEK_WIDTH +
-                                  WEEK_WIDTH / 2 -
-                                  4,
-                                top: rowTop + ROW_HEIGHT - 10,
-                              }}
-                              title={`Delivery: Wk ${deliveryWeek}`}
-                            >
-                              <div className="size-2 rounded-full bg-green-500 ring-1 ring-white" />
-                            </div>
-                          )}
+                          <div
+                            className="absolute"
+                            style={{
+                              left: weekToLeft(orderWeek) + WEEK_WIDTH / 2 - 4,
+                              top: rowTop + 2,
+                            }}
+                            title={`Order: Wk ${orderWeek}`}
+                          >
+                            <div className="size-2 rounded-full bg-orange-500 ring-1 ring-white" />
+                          </div>
+                          <div
+                            className="absolute"
+                            style={{
+                              left: weekToLeft(deliveryWeek) + WEEK_WIDTH / 2 - 4,
+                              top: rowTop + ROW_HEIGHT - 10,
+                            }}
+                            title={`Delivery: Wk ${deliveryWeek}`}
+                          >
+                            <div className="size-2 rounded-full bg-green-500 ring-1 ring-white" />
+                          </div>
                         </div>
                       );
                     })}

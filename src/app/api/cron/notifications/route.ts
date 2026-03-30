@@ -76,8 +76,8 @@ export async function GET(req: NextRequest) {
     notifications.push(
       sendPushToAll("JOBS_OVERDUE", {
         title: "Overdue Jobs",
-        body: `You have ${overdueJobsCount} overdue job${overdueJobsCount !== 1 ? "s" : ""} that need attention`,
-        url: "/tasks",
+        body: `${overdueJobsCount} overdue job${overdueJobsCount !== 1 ? "s" : ""} need${overdueJobsCount === 1 ? "s" : ""} attention`,
+        url: "/tasks?tab=jobs",
         tag: "jobs-overdue",
       })
     );
@@ -87,8 +87,8 @@ export async function GET(req: NextRequest) {
     notifications.push(
       sendPushToAll("MATERIALS_OVERDUE", {
         title: "Overdue Materials",
-        body: `You have ${overdueOrdersCount} order${overdueOrdersCount !== 1 ? "s" : ""} past expected delivery date`,
-        url: "/tasks",
+        body: `${overdueOrdersCount} order${overdueOrdersCount !== 1 ? "s" : ""} past expected delivery date`,
+        url: "/orders",
         tag: "materials-overdue",
       })
     );
@@ -98,8 +98,8 @@ export async function GET(req: NextRequest) {
     notifications.push(
       sendPushToAll("JOBS_STARTING_TODAY", {
         title: "Jobs Starting Today",
-        body: `You have ${jobsStartingTodayCount} job${jobsStartingTodayCount !== 1 ? "s" : ""} starting today`,
-        url: "/tasks",
+        body: `${jobsStartingTodayCount} job${jobsStartingTodayCount !== 1 ? "s" : ""} starting today`,
+        url: "/tasks?tab=jobs",
         tag: "jobs-starting",
       })
     );
@@ -109,8 +109,8 @@ export async function GET(req: NextRequest) {
     notifications.push(
       sendPushToAll("DELIVERIES_DUE_TODAY", {
         title: "Deliveries Due Today",
-        body: `You have ${deliveriesTodayCount} deliver${deliveriesTodayCount !== 1 ? "ies" : "y"} expected today`,
-        url: "/tasks",
+        body: `${deliveriesTodayCount} deliver${deliveriesTodayCount !== 1 ? "ies" : "y"} expected today`,
+        url: "/orders",
         tag: "deliveries-today",
       })
     );
@@ -120,8 +120,8 @@ export async function GET(req: NextRequest) {
     notifications.push(
       sendPushToAll("JOBS_READY_FOR_SIGNOFF", {
         title: "Jobs Ready for Sign Off",
-        body: `You have ${signOffCount} job${signOffCount !== 1 ? "s" : ""} approaching their end date`,
-        url: "/tasks",
+        body: `${signOffCount} job${signOffCount !== 1 ? "s" : ""} approaching end date — ready to sign off`,
+        url: "/tasks?tab=jobs",
         tag: "signoff-needed",
       })
     );
@@ -131,8 +131,8 @@ export async function GET(req: NextRequest) {
     notifications.push(
       sendPushToAll("ORDERS_TO_SEND", {
         title: "Orders to Send",
-        body: `You have ${pendingOrdersCount} order${pendingOrdersCount !== 1 ? "s" : ""} still pending`,
-        url: "/tasks",
+        body: `${pendingOrdersCount} order${pendingOrdersCount !== 1 ? "s" : ""} still pending — ready to place`,
+        url: "/orders",
         tag: "orders-pending",
       })
     );
@@ -142,8 +142,8 @@ export async function GET(req: NextRequest) {
     notifications.push(
       sendPushToAll("LATE_STARTS", {
         title: "Late Start Jobs",
-        body: `${lateStartCount} job${lateStartCount !== 1 ? "s have" : " has"} not started yet — start date has passed`,
-        url: "/tasks",
+        body: `${lateStartCount} job${lateStartCount !== 1 ? "s have" : " has"} not started — start date passed`,
+        url: "/tasks?tab=jobs",
         tag: "late-starts",
       })
     );

@@ -8,7 +8,6 @@ import {
   HardHat,
   LayoutDashboard,
   Building2,
-  ShoppingCart,
   Package,
   BarChart3,
   Settings,
@@ -47,6 +46,7 @@ const SITE_TAB_GROUPS = [
       { label: "Daily Brief",       tab: "daily-brief" },
       { label: "Programme",         tab: "programme" },
       { label: "Plots",             tab: "plots" },
+      { label: "Orders",            tab: "orders" },
       { label: "Snags",             tab: "snags" },
       { label: "Contractor Comms",  tab: "contractor-comms" },
     ],
@@ -55,15 +55,13 @@ const SITE_TAB_GROUPS = [
     label: "Site Reporting",
     icon: BarChart3,
     tabs: [
-      { label: "Heatmap",            tab: "heatmap" },
-      { label: "Weekly Report",      tab: "weekly-report" },
-      { label: "Contractor Comms",   tab: "contractor-comms" },
-      { label: "Budget",             tab: "budget" },
-      { label: "Cash Flow",          tab: "cash-flow" },
-      { label: "Orders",             tab: "orders" },
-      { label: "Delays",             tab: "delays" },
-      { label: "Calendar",           tab: "calendar" },
-      { label: "Site Log",           tab: "log" },
+      { label: "Heatmap",        tab: "heatmap" },
+      { label: "Weekly Report",  tab: "weekly-report" },
+      { label: "Budget",         tab: "budget" },
+      { label: "Cash Flow",      tab: "cash-flow" },
+      { label: "Delays",         tab: "delays" },
+      { label: "Calendar",       tab: "calendar" },
+      { label: "Site Log",       tab: "log" },
     ],
   },
   {
@@ -81,9 +79,7 @@ const SITE_TAB_GROUPS = [
 const navItems = [
   { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { label: "Daily Brief", href: "/daily-brief", icon: CalendarDays },
-  { label: "Orders", href: "/orders", icon: ShoppingCart },
-  { label: "Suppliers", href: "/suppliers", icon: Package },
-  { label: "Contractors", href: "/contacts", icon: HardHat },
+  { label: "Suppliers & Contractors", href: "/suppliers", icon: Package },
   { label: "Analytics", href: "/analytics", icon: BarChart3 },
 ];
 
@@ -470,28 +466,28 @@ export function Sidebar() {
   return (
     <aside
       className={cn(
-        "hidden h-screen flex-col border-r border-border/50 bg-gradient-to-b from-white to-slate-50/80 transition-all duration-300 md:flex",
+        "relative hidden h-screen flex-col border-r border-border/50 bg-gradient-to-b from-white to-slate-50/80 transition-all duration-300 md:flex",
         collapsed ? "w-[60px]" : "w-[240px]"
       )}
     >
-      <div className="relative flex-1 overflow-hidden">
+      <div className="flex-1 overflow-hidden">
         <Suspense fallback={null}>
           <SidebarNav collapsed={collapsed} />
         </Suspense>
-        <Button
-          variant="outline"
-          size="icon-xs"
-          className="absolute -right-3 top-[22px] z-10 rounded-full border bg-white shadow-sm hover:shadow-md transition-shadow"
-          onClick={() => setCollapsed(!collapsed)}
-        >
-          <ChevronLeft
-            className={cn(
-              "size-3 transition-transform",
-              collapsed && "rotate-180"
-            )}
-          />
-        </Button>
       </div>
+      <Button
+        variant="outline"
+        size="icon-xs"
+        className="absolute -right-3 top-[22px] z-20 rounded-full border bg-white shadow-sm transition-shadow hover:shadow-md"
+        onClick={() => setCollapsed(!collapsed)}
+      >
+        <ChevronLeft
+          className={cn(
+            "size-3 transition-transform duration-300",
+            collapsed && "rotate-180"
+          )}
+        />
+      </Button>
     </aside>
   );
 }

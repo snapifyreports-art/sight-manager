@@ -14,6 +14,9 @@ import {
   Eye,
   Trash2,
   CircleDot,
+  Clock,
+  Loader2,
+  HardHat,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -80,6 +83,7 @@ interface JobRow {
   updatedAt: string;
   workflow: Workflow & { createdAt: string; updatedAt: string; description: string | null; status: string; createdById: string };
   assignedTo: (User & { createdAt: string; updatedAt: string; email: string; password: string; role: string; jobTitle: string | null; company: string | null; phone: string | null; avatar: string | null }) | null;
+  contractors?: Array<{ contact: { id: string; name: string; company: string | null } | null }>;
   _count: { orders: number };
 }
 
@@ -283,6 +287,48 @@ export function JobsClient({ initialJobs, workflows, users }: JobsClientProps) {
     }
   }
 
+  // Delay dialog state
+  const [delayJobId, setDelayJobId] = useState<string | null>(null);
+  const [delayDays, setDelayDays] = useState(1);
+  const [delayReasonType, setDelayReasonType] = useState<"WEATHER_RAIN" | "WEATHER_TEMPERATURE" | "OTHER">("OTHER");
+  const [delayReasonText, setDelayReasonText] = useState("");
+  const [delaySubmitting, setDelaySubmitting] = useState(false);
+  const [delaySuggestion, setDelaySuggestion] = useState<{ rainDays: number; temperatureDays: number; suggestedReason: string | null } | null>(null);
+
+  async function openDelayDialog(jobId: string) {
+    setDelayJobId(jobId);
+    setDelayDays(1);
+    setDelayReasonType("OTHER");
+    setDelayReasonText("");
+    setDelaySuggestion(null);
+    try {
+      const res = await fetch(`/api/jobs/${jobId}/delay`);
+      if (res.ok) {
+        const data = await res.json();
+        setDelaySuggestion(data);
+        if (data.suggestedReason) setDelayReasonType(data.suggestedReason);
+      }
+    } catch { /* non-critical */ }
+  }
+
+  async function handleDelay() {
+    if (!delayJobId) return;
+    setDelaySubmitting(true);
+    try {
+      const res = await fetch(`/api/jobs/${delayJobId}/delay`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ days: delayDays, delayReasonType, reason: delayReasonText.trim() || undefined }),
+      });
+      if (res.ok) {
+        setDelayJobId(null);
+        router.refresh();
+      }
+    } finally {
+      setDelaySubmitting(false);
+    }
+  }
+
   // Delete job
   async function handleDelete(jobId: string) {
     const res = await fetch(`/api/jobs/${jobId}`, { method: "DELETE" });
@@ -367,6 +413,7 @@ export function JobsClient({ initialJobs, workflows, users }: JobsClientProps) {
               <TableHead>Workflow</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Assigned To</TableHead>
+              <TableHead>Contractor</TableHead>
               <TableHead>Site / Plot</TableHead>
               <TableHead>Start Date</TableHead>
               <TableHead className="text-center">Orders</TableHead>
@@ -387,6 +434,17 @@ export function JobsClient({ initialJobs, workflows, users }: JobsClientProps) {
                 </TableCell>
                 <TableCell className="text-muted-foreground">
                   {job.assignedTo?.name ?? "\u2014"}
+                </TableCell>
+                <TableCell className="text-muted-foreground">
+                  {job.contractors && job.contractors.length > 0 ? (
+                    <span className="inline-flex items-center gap-1">
+                      <HardHat className="size-3 shrink-0" />
+                      {job.contractors
+                        .map((jc) => jc.contact?.company || jc.contact?.name)
+                        .filter(Boolean)
+                        .join(", ")}
+                    </span>
+                  ) : "\u2014"}
                 </TableCell>
                 <TableCell className="text-muted-foreground">
                   {[job.siteName, job.plot ? `Plot ${job.plot}` : null]
@@ -450,6 +508,17 @@ export function JobsClient({ initialJobs, workflows, users }: JobsClientProps) {
                         >
                           <CheckCircle className="size-4 text-green-500" />
                           Complete Job
+                        </DropdownMenuItem>
+                      )}
+                      {job.status !== "COMPLETED" && (
+                        <DropdownMenuItem
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openDelayDialog(job.id);
+                          }}
+                        >
+                          <Clock className="size-4 text-amber-500" />
+                          Delay Job
                         </DropdownMenuItem>
                       )}
                       <DropdownMenuSeparator />
@@ -556,6 +625,68 @@ export function JobsClient({ initialJobs, workflows, users }: JobsClientProps) {
               disabled={saving || !form.name}
             >
               {saving ? "Saving..." : "Save Changes"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delay Dialog */}
+      <Dialog open={!!delayJobId} onOpenChange={(open) => { if (!open) setDelayJobId(null); }}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Clock className="size-4 text-amber-500" />
+              Delay Job
+            </DialogTitle>
+            <DialogDescription>
+              Cascades to all downstream jobs on this plot.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            {delaySuggestion && (delaySuggestion.rainDays > 0 || delaySuggestion.temperatureDays > 0) && (
+              <div className="rounded bg-orange-50 px-3 py-2 text-xs text-orange-700 border border-orange-200">
+                {delaySuggestion.rainDays > 0 && <span>☔ {delaySuggestion.rainDays} rain day{delaySuggestion.rainDays !== 1 ? "s" : ""}</span>}
+                {delaySuggestion.rainDays > 0 && delaySuggestion.temperatureDays > 0 && <span> · </span>}
+                {delaySuggestion.temperatureDays > 0 && <span>🌡️ {delaySuggestion.temperatureDays} temperature day{delaySuggestion.temperatureDays !== 1 ? "s" : ""}</span>}
+                <span> logged on this job&apos;s period</span>
+              </div>
+            )}
+            <div>
+              <Label className="mb-1 block text-xs">Days to delay</Label>
+              <Input type="number" min={1} max={365} value={delayDays}
+                onChange={(e) => setDelayDays(Math.max(1, parseInt(e.target.value) || 1))} className="w-24" />
+            </div>
+            <div>
+              <Label className="mb-1 block text-xs">Delay reason</Label>
+              <div className="flex gap-1">
+                {(["WEATHER_RAIN", "WEATHER_TEMPERATURE", "OTHER"] as const).map((r) => (
+                  <button key={r} onClick={() => setDelayReasonType(r)}
+                    className={`flex-1 rounded px-1.5 py-1 text-xs font-medium transition-colors ${
+                      delayReasonType === r
+                        ? r === "WEATHER_RAIN" ? "bg-orange-500 text-white"
+                          : r === "WEATHER_TEMPERATURE" ? "bg-cyan-500 text-white"
+                          : "bg-slate-700 text-white"
+                        : "border text-slate-600 hover:bg-slate-50"
+                    }`}>
+                    {r === "WEATHER_RAIN" ? "☔ Rain" : r === "WEATHER_TEMPERATURE" ? "🌡️ Temp" : "⏳ Other"}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {delayReasonType === "OTHER" && (
+              <div>
+                <Label className="mb-1 block text-xs">Reason detail (optional)</Label>
+                <Input value={delayReasonText} onChange={(e) => setDelayReasonText(e.target.value)}
+                  placeholder="e.g. Material shortage..." />
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDelayJobId(null)}>Cancel</Button>
+            <Button onClick={handleDelay} disabled={delaySubmitting}
+              className="bg-amber-500 hover:bg-amber-600 text-white">
+              {delaySubmitting ? <Loader2 className="size-4 animate-spin mr-1" /> : <Clock className="size-4 mr-1" />}
+              Delay {delayDays} day{delayDays !== 1 ? "s" : ""}
             </Button>
           </DialogFooter>
         </DialogContent>

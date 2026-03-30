@@ -12,8 +12,9 @@ import {
   TrendingUp,
   ChevronDown,
   ChevronRight,
+  ShieldCheck,
+  Thermometer,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -26,32 +27,40 @@ interface DelayReportProps {
   siteId: string;
 }
 
+interface DelayedJob {
+  id: string;
+  name: string;
+  status: string;
+  startDate: string | null;
+  endDate: string | null;
+  daysOverdue: number;
+  weatherAffected: boolean;
+  rainDaysImpact: number;
+  temperatureDaysImpact: number;
+  isWeatherExcused: boolean;
+  weatherReasonType: "RAIN" | "TEMPERATURE" | null;
+  causes: string[];
+  plot: { plotNumber: string | null; name: string };
+  assignedTo: string | null;
+  contractor: string | null;
+  lateOrders: Array<{
+    id: string;
+    items: string | null;
+    supplier: string;
+    expectedDate: string | null;
+    deliveredDate: string | null;
+    daysLate: number;
+  }>;
+}
+
 interface DelayData {
   generatedAt: string;
+  totalWeatherImpactDays: number;
+  totalRainDays: number;
+  totalTemperatureDays: number;
   totalRainedOffDays: number;
-  rainedOffDays: Array<{ date: string; note: string | null }>;
-  delayedJobs: Array<{
-    id: string;
-    name: string;
-    status: string;
-    startDate: string | null;
-    endDate: string | null;
-    daysOverdue: number;
-    weatherAffected: boolean;
-    rainDaysImpact: number;
-    causes: string[];
-    plot: { plotNumber: string | null; name: string };
-    assignedTo: string | null;
-    contractor: string | null;
-    lateOrders: Array<{
-      id: string;
-      items: string | null;
-      supplier: string;
-      expectedDate: string | null;
-      deliveredDate: string | null;
-      daysLate: number;
-    }>;
-  }>;
+  rainedOffDays: Array<{ date: string; type: "RAIN" | "TEMPERATURE"; note: string | null }>;
+  delayedJobs: DelayedJob[];
   overdueDeliveries: Array<{
     id: string;
     items: string | null;
@@ -71,18 +80,92 @@ interface DelayData {
   }>;
   summary: {
     currentlyOverdueJobs: number;
-    weatherRelatedDelays: number;
+    weatherExcusedDelays: number;
+    weatherRainDelays: number;
+    weatherTempDelays: number;
+    nonWeatherDelays: number;
     materialRelatedDelays: number;
     overdueDeliveryCount: number;
     completedLateCount: number;
   };
 }
 
+function JobDelayCard({ job }: { job: DelayedJob }) {
+  const isWeather = job.isWeatherExcused;
+  const borderClass = isWeather ? "border-blue-200 bg-blue-50/40" : "border-red-200";
+
+  return (
+    <div className={`rounded-lg border p-3 ${borderClass}`}>
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <p className="font-medium text-sm">{job.name}</p>
+            {isWeather && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-medium text-green-700">
+                <ShieldCheck className="size-3" />
+                Excused — Weather
+              </span>
+            )}
+          </div>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            {job.plot.plotNumber ? `Plot ${job.plot.plotNumber}` : job.plot.name}
+            {!isWeather && job.contractor && ` · ${job.contractor}`}
+            {job.assignedTo && ` · ${job.assignedTo}`}
+          </p>
+        </div>
+        <Badge variant={isWeather ? "outline" : "destructive"} className={`shrink-0 text-xs ${isWeather ? "border-blue-300 text-blue-700" : ""}`}>
+          {job.daysOverdue} day{job.daysOverdue !== 1 ? "s" : ""} overdue
+        </Badge>
+      </div>
+      <div className="mt-2 flex flex-wrap gap-1.5">
+        {job.causes.map((cause, i) => (
+          <span
+            key={i}
+            className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${
+              cause.startsWith("Weather – Rain")
+                ? "bg-blue-100 text-blue-700"
+                : cause.startsWith("Weather – Temperature")
+                  ? "bg-cyan-100 text-cyan-700"
+                  : cause.startsWith("Weather")
+                    ? "bg-blue-100 text-blue-700"
+                    : cause.startsWith("Material")
+                      ? "bg-orange-100 text-orange-700"
+                      : "bg-slate-100 text-slate-600"
+            }`}
+          >
+            {cause.startsWith("Weather – Temperature") && <Thermometer className="size-3" />}
+            {cause.startsWith("Weather – Rain") && <CloudRain className="size-3" />}
+            {cause.startsWith("Weather") && !cause.includes("Rain") && !cause.includes("Temperature") && <CloudRain className="size-3" />}
+            {cause.startsWith("Material") && <Package className="size-3" />}
+            {cause}
+          </span>
+        ))}
+      </div>
+      {job.endDate && (
+        <p className="mt-1 text-xs text-muted-foreground">
+          Due: {format(new Date(job.endDate), "dd MMM yyyy")}
+          {job.startDate && ` · Started: ${format(new Date(job.startDate), "dd MMM yyyy")}`}
+        </p>
+      )}
+      {job.lateOrders.length > 0 && (
+        <div className="mt-2 space-y-1">
+          {job.lateOrders.map((o) => (
+            <div key={o.id} className="flex items-center gap-2 rounded bg-orange-50 px-2 py-1 text-xs">
+              <Package className="size-3 text-orange-500" />
+              <span>{o.supplier}: {o.items || "Materials"} — {o.daysLate} day{o.daysLate !== 1 ? "s" : ""} late</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function DelayReport({ siteId }: DelayReportProps) {
   const { devDate } = useDevDate();
   const [data, setData] = useState<DelayData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [showRainDays, setShowRainDays] = useState(false);
+  const [showImpactDays, setShowImpactDays] = useState(false);
   const [showTrend, setShowTrend] = useState(false);
 
   useEffect(() => {
@@ -104,6 +187,9 @@ export function DelayReport({ siteId }: DelayReportProps) {
   if (!data) return null;
 
   const s = data.summary;
+  const weatherExcusedJobs = data.delayedJobs.filter((j) => j.isWeatherExcused);
+  const nonWeatherJobs = data.delayedJobs.filter((j) => !j.isWeatherExcused);
+  const totalImpactDays = data.totalWeatherImpactDays ?? data.totalRainedOffDays;
 
   return (
     <div className="space-y-4">
@@ -124,107 +210,82 @@ export function DelayReport({ siteId }: DelayReportProps) {
             <p className="text-xs text-muted-foreground">Overdue Jobs</p>
           </CardContent>
         </Card>
-        <Card>
+        <Card className="border-green-200">
           <CardContent className="p-3 text-center">
-            <p className="text-2xl font-bold text-blue-600">
-              {s.weatherRelatedDelays}
+            <p className="text-2xl font-bold text-green-600">{s.weatherExcusedDelays ?? 0}</p>
+            <p className="text-xs text-muted-foreground">Weather Excused</p>
+          </CardContent>
+        </Card>
+        <Card className="border-red-200">
+          <CardContent className="p-3 text-center">
+            <p className={`text-2xl font-bold ${(s.nonWeatherDelays ?? 0) > 0 ? "text-red-600" : "text-slate-600"}`}>
+              {s.nonWeatherDelays ?? 0}
             </p>
-            <p className="text-xs text-muted-foreground">Weather Delays</p>
+            <p className="text-xs text-muted-foreground">Non-Weather Delays</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-3 text-center">
-            <p className="text-2xl font-bold text-orange-600">
-              {s.materialRelatedDelays}
+            <div className="flex items-center justify-center gap-1">
+              {(data.totalRainDays ?? 0) > 0 && <span className="text-lg">☔</span>}
+              {(data.totalTemperatureDays ?? 0) > 0 && <span className="text-lg">🌡️</span>}
+              <p className="text-2xl font-bold text-blue-600">{totalImpactDays}</p>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {(data.totalRainDays ?? 0) > 0 && `${data.totalRainDays}R`}
+              {(data.totalRainDays ?? 0) > 0 && (data.totalTemperatureDays ?? 0) > 0 && " + "}
+              {(data.totalTemperatureDays ?? 0) > 0 && `${data.totalTemperatureDays}T`}
+              {totalImpactDays === 0 && "Weather Days"}
+              {totalImpactDays > 0 && " Impact Days"}
             </p>
-            <p className="text-xs text-muted-foreground">Material Delays</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-3 text-center">
-            <p className="text-2xl font-bold text-purple-600">
-              {data.totalRainedOffDays}
-            </p>
-            <p className="text-xs text-muted-foreground">Rained Off Days</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-3 text-center">
-            <p className="text-2xl font-bold text-slate-600">
-              {s.completedLateCount}
-            </p>
+            <p className="text-2xl font-bold text-slate-600">{s.completedLateCount}</p>
             <p className="text-xs text-muted-foreground">Completed Late</p>
           </CardContent>
         </Card>
       </div>
 
-      {/* Currently delayed jobs */}
-      {data.delayedJobs.length > 0 && (
+      {/* Weather-excused delays */}
+      {weatherExcusedJobs.length > 0 && (
+        <Card className="border-blue-200">
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-sm text-blue-700">
+              <ShieldCheck className="size-4" />
+              Weather-Excused Delays ({weatherExcusedJobs.length})
+              <span className="ml-auto text-[10px] font-normal text-blue-500 rounded-full bg-blue-100 px-2 py-0.5">
+                No contractor accountability
+              </span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="mb-3 text-xs text-blue-600">
+              These delays are attributed to weather impact. Contractors are not penalised for these.
+            </p>
+            <div className="space-y-3">
+              {weatherExcusedJobs.map((job) => (
+                <JobDelayCard key={job.id} job={job} />
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Non-weather delays */}
+      {nonWeatherJobs.length > 0 && (
         <Card className="border-red-200">
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-sm text-red-700">
               <AlertTriangle className="size-4" />
-              Currently Overdue Jobs
+              Non-Weather Delays ({nonWeatherJobs.length})
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="space-y-3">
-              {data.delayedJobs.map((job) => (
-                <div key={job.id} className="rounded-lg border p-3">
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <p className="font-medium">{job.name}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {job.plot.plotNumber ? `Plot ${job.plot.plotNumber}` : job.plot.name}
-                        {job.contractor && ` · ${job.contractor}`}
-                        {job.assignedTo && ` · ${job.assignedTo}`}
-                      </p>
-                    </div>
-                    <Badge variant="destructive" className="text-xs">
-                      {job.daysOverdue} day{job.daysOverdue !== 1 ? "s" : ""} overdue
-                    </Badge>
-                  </div>
-                  <div className="mt-2 flex flex-wrap gap-1.5">
-                    {job.causes.map((cause, i) => (
-                      <span
-                        key={i}
-                        className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${
-                          cause.startsWith("Weather")
-                            ? "bg-blue-100 text-blue-700"
-                            : cause.startsWith("Material")
-                              ? "bg-orange-100 text-orange-700"
-                              : "bg-slate-100 text-slate-600"
-                        }`}
-                      >
-                        {cause.startsWith("Weather") && <CloudRain className="size-3" />}
-                        {cause.startsWith("Material") && <Package className="size-3" />}
-                        {cause}
-                      </span>
-                    ))}
-                  </div>
-                  {job.endDate && (
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      Due: {format(new Date(job.endDate), "dd MMM yyyy")}
-                      {job.startDate && ` · Started: ${format(new Date(job.startDate), "dd MMM yyyy")}`}
-                    </p>
-                  )}
-                  {job.lateOrders.length > 0 && (
-                    <div className="mt-2 space-y-1">
-                      {job.lateOrders.map((o) => (
-                        <div
-                          key={o.id}
-                          className="flex items-center gap-2 rounded bg-orange-50 px-2 py-1 text-xs"
-                        >
-                          <Package className="size-3 text-orange-500" />
-                          <span>
-                            {o.supplier}: {o.items || "Materials"} —{" "}
-                            {o.daysLate} day{o.daysLate !== 1 ? "s" : ""} late
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
+              {nonWeatherJobs.map((job) => (
+                <JobDelayCard key={job.id} job={job} />
               ))}
             </div>
           </CardContent>
@@ -260,31 +321,47 @@ export function DelayReport({ siteId }: DelayReportProps) {
         </Card>
       )}
 
-      {/* Rained-off days (collapsible) */}
-      {data.totalRainedOffDays > 0 && (
+      {/* Weather impact days (collapsible) */}
+      {totalImpactDays > 0 && (
         <Card>
           <CardHeader className="pb-2">
             <button
               className="flex w-full items-center justify-between text-left"
-              onClick={() => setShowRainDays(!showRainDays)}
+              onClick={() => setShowImpactDays(!showImpactDays)}
             >
               <CardTitle className="flex items-center gap-2 text-sm">
                 <CloudRain className="size-4 text-blue-600" />
-                Rained Off Days ({data.totalRainedOffDays})
+                Weather Impact Days ({totalImpactDays})
+                {(data.totalRainDays ?? 0) > 0 && (
+                  <span className="rounded-full bg-orange-100 px-1.5 py-0.5 text-[10px] text-orange-700">
+                    ☔ {data.totalRainDays} rain
+                  </span>
+                )}
+                {(data.totalTemperatureDays ?? 0) > 0 && (
+                  <span className="rounded-full bg-cyan-100 px-1.5 py-0.5 text-[10px] text-cyan-700">
+                    🌡️ {data.totalTemperatureDays} temp
+                  </span>
+                )}
               </CardTitle>
-              {showRainDays ? (
+              {showImpactDays ? (
                 <ChevronDown className="size-4 text-muted-foreground" />
               ) : (
                 <ChevronRight className="size-4 text-muted-foreground" />
               )}
             </button>
           </CardHeader>
-          {showRainDays && (
+          {showImpactDays && (
             <CardContent>
               <div className="divide-y rounded-lg border">
                 {data.rainedOffDays.map((r, i) => (
                   <div key={i} className="flex items-center justify-between px-3 py-2 text-sm">
-                    <span>{format(new Date(r.date), "EEE dd MMM yyyy")}</span>
+                    <div className="flex items-center gap-2">
+                      <span>{r.type === "TEMPERATURE" ? "🌡️" : "☔"}</span>
+                      <span>{format(new Date(r.date), "EEE dd MMM yyyy")}</span>
+                      <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-medium ${r.type === "TEMPERATURE" ? "bg-cyan-100 text-cyan-700" : "bg-orange-100 text-orange-700"}`}>
+                        {r.type === "TEMPERATURE" ? "Temperature" : "Rain"}
+                      </span>
+                    </div>
                     <span className="text-xs text-muted-foreground">{r.note || "—"}</span>
                   </div>
                 ))}

@@ -18,12 +18,17 @@ export async function GET() {
 
   // Build a complete map: every NotificationType with its enabled status
   // Default to true if no row exists
-  const allTypes = Object.values(NotificationType);
+  // Explicit list so adding new enum values doesn't require client regeneration
+  const allTypes: string[] = [
+    ...Object.values(NotificationType),
+    // New types added after last client generation:
+    ...["WEATHER_ALERT"].filter((t) => !Object.values(NotificationType).includes(t as NotificationType)),
+  ];
   const prefMap = new Map(preferences.map((p) => [p.type, p.enabled]));
 
   const result = allTypes.map((type) => ({
     type,
-    enabled: prefMap.get(type) ?? true,
+    enabled: prefMap.get(type as NotificationType) ?? true,
   }));
 
   return NextResponse.json(result);

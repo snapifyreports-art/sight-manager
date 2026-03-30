@@ -1,21 +1,26 @@
+import { Suspense } from "react";
 import { prisma } from "@/lib/prisma";
-import { SuppliersListClient } from "@/components/suppliers/SuppliersListClient";
+import { SuppliersAndContractorsPage } from "@/components/suppliers/SuppliersAndContractorsPage";
 
 export const dynamic = "force-dynamic";
 
 export const metadata = {
-  title: "Suppliers | Sight Manager",
+  title: "Suppliers & Contractors | Sight Manager",
 };
 
 export default async function SuppliersPage() {
-  const suppliers = await prisma.supplier.findMany({
-    orderBy: { name: "asc" },
-    include: {
-      _count: { select: { orders: true, materials: true } },
-    },
-  });
+  const [suppliers, contractors] = await Promise.all([
+    prisma.supplier.findMany({
+      orderBy: { name: "asc" },
+      include: { _count: { select: { orders: true, materials: true } } },
+    }),
+    prisma.contact.findMany({
+      where: { type: "CONTRACTOR" },
+      orderBy: { name: "asc" },
+    }),
+  ]);
 
-  const serialized = suppliers.map((s) => ({
+  const serializedSuppliers = suppliers.map((s) => ({
     id: s.id,
     name: s.name,
     contactName: s.contactName,
@@ -28,5 +33,24 @@ export default async function SuppliersPage() {
     _count: s._count,
   }));
 
-  return <SuppliersListClient suppliers={serialized} />;
+  const serializedContractors = contractors.map((c) => ({
+    id: c.id,
+    name: c.name,
+    email: c.email,
+    phone: c.phone,
+    type: c.type as "SUPPLIER" | "CONTRACTOR",
+    company: c.company,
+    notes: c.notes,
+    createdAt: c.createdAt.toISOString(),
+    updatedAt: c.updatedAt.toISOString(),
+  }));
+
+  return (
+    <Suspense>
+      <SuppliersAndContractorsPage
+        suppliers={serializedSuppliers}
+        contractors={serializedContractors}
+      />
+    </Suspense>
+  );
 }

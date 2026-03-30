@@ -14,6 +14,7 @@ export async function GET() {
     include: {
       plot: { include: { site: true } },
       assignedTo: true,
+      contractors: { include: { contact: { select: { id: true, name: true, company: true } } } },
       _count: { select: { orders: true } },
     },
     orderBy: { updatedAt: "desc" },

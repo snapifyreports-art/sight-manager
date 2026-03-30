@@ -24,14 +24,17 @@ export async function GET(
         include: {
           jobs: {
             orderBy: { sortOrder: "asc" },
+            // Only fetch what the grid needs — panel fetches full data on demand
             include: {
               orders: {
-                include: { supplier: true },
-              },
-              assignedTo: { select: { id: true, name: true } },
-              contractors: {
-                include: {
-                  contact: { select: { id: true, name: true } },
+                select: {
+                  id: true,
+                  dateOfOrder: true,
+                  expectedDeliveryDate: true,
+                  leadTimeDays: true,
+                  status: true,
+                  itemsDescription: true,
+                  supplier: { select: { name: true } },
                 },
               },
               _count: {
@@ -45,7 +48,7 @@ export async function GET(
         },
       },
       rainedOffDays: {
-        select: { date: true, note: true },
+        select: { date: true, type: true, note: true },
         orderBy: { date: "asc" },
       },
     },

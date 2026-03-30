@@ -401,7 +401,7 @@ export async function GET(
   }
 
   // Batch 4
-  const [recentEvents, totalPlots, allJobs, awaitingRestartRaw] = await Promise.all([
+  const [recentEvents, totalPlots, allJobs, pendingSignOffsRaw, awaitingRestartRaw] = await Promise.all([
     prisma.eventLog.findMany({
       where: { siteId: id, createdAt: { gte: subDays(dayStart, 1), lte: dayEnd } },
       select: {
@@ -413,6 +413,26 @@ export async function GET(
     }),
     prisma.plot.count({ where: { siteId: id } }),
     prisma.job.count({ where: { plot: { siteId: id } } }),
+    // IN_PROGRESS jobs where a later job on the same plot has already been started
+    prisma.job.findMany({
+      where: { plot: { siteId: id }, status: "IN_PROGRESS" },
+      select: {
+        id: true,
+        name: true,
+        plotId: true,
+        sortOrder: true,
+        plot: {
+          select: {
+            plotNumber: true,
+            name: true,
+            jobs: {
+              where: { status: { in: ["IN_PROGRESS", "COMPLETED"] } },
+              select: { sortOrder: true },
+            },
+          },
+        },
+      },
+    }),
     prisma.plot.findMany({
       where: { siteId: id, awaitingRestart: true },
       select: {
@@ -458,6 +478,16 @@ export async function GET(
     };
   });
 
+  // Jobs that are IN_PROGRESS but a subsequent job on the same plot is already running/done
+  const pendingSignOffs = pendingSignOffsRaw
+    .filter((j) => j.plot.jobs.some((other) => other.sortOrder > j.sortOrder))
+    .map((j) => ({
+      id: j.id,
+      name: j.name,
+      plotId: j.plotId,
+      plot: { plotNumber: j.plot.plotNumber, name: j.plot.name },
+    }));
+
   const [completedJobs, weatherForecast] = await Promise.all([
     prisma.job.count({
       where: { plot: { siteId: id }, status: "COMPLETED" },
@@ -491,6 +521,7 @@ export async function GET(
       openSnagCount: openSnags,
       needsAttentionCount: needsAttention.length,
       awaitingRestartCount: awaitingRestartRaw.length,
+      pendingSignOffCount: pendingSignOffs.length,
     },
     jobsStartingToday,
     lateStartJobs: genuineLateStartJobs.map((j) => ({
@@ -521,6 +552,7 @@ export async function GET(
     openSnagsList,
     openSnagsTruncated: openSnags > openSnagsList.length,
     needsAttention,
+    pendingSignOffs,
     awaitingRestartPlots,
     ordersToPlace: outstandingOrders.map((o) => ({
       ...o,

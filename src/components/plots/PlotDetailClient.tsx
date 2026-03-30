@@ -1057,6 +1057,15 @@ export function PlotDetailClient({
                             {job.assignedTo.name}
                           </span>
                         )}
+                        {job.contractors.length > 0 && (
+                          <span className="inline-flex items-center gap-1">
+                            <HardHat className="size-3" />
+                            {job.contractors
+                              .map((jc) => jc.contact?.company || jc.contact?.name)
+                              .filter(Boolean)
+                              .join(", ")}
+                          </span>
+                        )}
                         {(job.startDate || job.endDate) && (
                           <span className="hidden items-center gap-1 sm:inline-flex">
                             <CalendarDays className="size-3" />

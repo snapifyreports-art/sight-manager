@@ -16,7 +16,7 @@ export async function PUT(
 
   const { id, jobId } = await params;
   const body = await request.json();
-  const { name, description, stageCode, sortOrder, startWeek, endWeek, durationWeeks, parentId, weatherAffected, contactId } = body;
+  const { name, description, stageCode, sortOrder, startWeek, endWeek, durationWeeks, parentId, weatherAffected, weatherAffectedType, contactId } = body;
 
   const job = await prisma.templateJob.findFirst({
     where: { id: jobId, templateId: id },
@@ -43,6 +43,7 @@ export async function PUT(
       ...(endWeek !== undefined && { endWeek }),
       ...(durationWeeks !== undefined && { durationWeeks }),
       ...(weatherAffected !== undefined && { weatherAffected }),
+      ...(weatherAffectedType !== undefined && { weatherAffectedType: weatherAffectedType || null }),
       ...(contactId !== undefined && { contactId: contactId || null }),
       ...(parentId !== undefined && { parentId: parentId || null }),
     },

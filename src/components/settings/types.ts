@@ -52,6 +52,7 @@ export interface TemplateJobData {
   endWeek: number;
   durationWeeks: number | null;
   weatherAffected: boolean;
+  weatherAffectedType: "RAIN" | "TEMPERATURE" | "BOTH" | null;
   parentId: string | null;
   contactId: string | null;
   contact: { id: string; name: string; company: string | null } | null;
