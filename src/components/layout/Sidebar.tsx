@@ -125,15 +125,9 @@ function SidebarNav({ collapsed = false }: { collapsed?: boolean }) {
   const [selectedSiteId, setSelectedSiteId] = useState(siteIdFromPath || "");
   const [sites, setSites] = useState<{ id: string; name: string; status: string }[]>([]);
 
-  // Which group label is open — auto-open the one containing the active tab or route
+  // Which group label is open — auto-open the one containing the active tab
   const activeGroupLabel = SITE_TAB_GROUPS.find((g) =>
-    g.tabs.some((t) => {
-      const routeTab = (t as { route?: string }).route;
-      if (routeTab && siteIdFromPath) {
-        return pathname === `/sites/${siteIdFromPath}/${routeTab}`;
-      }
-      return t.tab === currentTab;
-    })
+    g.tabs.some((t) => t.tab === currentTab)
   )?.label ?? null;
   const [openGroups, setOpenGroups] = useState<Set<string>>(
     () => new Set(activeGroupLabel ? [activeGroupLabel] : [])
@@ -240,11 +234,7 @@ function SidebarNav({ collapsed = false }: { collapsed?: boolean }) {
           {!collapsed && selectedSiteId && SITE_TAB_GROUPS.map((group) => {
             const isOpen = openGroups.has(group.label);
             const hasActive = siteIdFromPath === selectedSiteId &&
-              group.tabs.some((t) => {
-                const routeTab = (t as { route?: string }).route;
-                if (routeTab) return pathname === `/sites/${siteIdFromPath}/${routeTab}`;
-                return t.tab === currentTab;
-              });
+              group.tabs.some((t) => t.tab === currentTab);
             return (
               <div key={group.label} className="relative">
                 {hasActive && (
@@ -272,13 +262,8 @@ function SidebarNav({ collapsed = false }: { collapsed?: boolean }) {
                 {isOpen && (
                   <div className="mb-1 pl-9">
                     {group.tabs.map((t) => {
-                      const href = t.route
-                        ? `/sites/${selectedSiteId}/${t.route}`
-                        : `/sites/${selectedSiteId}?tab=${t.tab}`;
-                      const isActive = t.route
-                        ? pathname === `/sites/${siteIdFromPath}/${t.route}`
-                        : siteIdFromPath === selectedSiteId && currentTab === t.tab;
-                      const TabIcon = (t as { icon?: React.ComponentType<{ className?: string }> }).icon;
+                      const href = `/sites/${selectedSiteId}?tab=${t.tab}`;
+                      const isActive = siteIdFromPath === selectedSiteId && currentTab === t.tab;
                       return (
                         <Link
                           key={t.tab}
@@ -290,7 +275,6 @@ function SidebarNav({ collapsed = false }: { collapsed?: boolean }) {
                               : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
                           )}
                         >
-                          {TabIcon && <TabIcon className="size-3 shrink-0" />}
                           {t.label}
                         </Link>
                       );
