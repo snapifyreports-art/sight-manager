@@ -31,6 +31,7 @@ import {
   Share2,
   Copy,
   Check,
+  HardHat,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -400,6 +401,32 @@ function PlotOverview({
     [plot.jobs]
   );
 
+  // Current stage: from active jobs (or most recently started stage)
+  const currentStage = useMemo(() => {
+    if (activeJobs.length > 0) {
+      // Use the stage of the first active job (they're sorted by sortOrder)
+      return activeJobs[0].parentStage || null;
+    }
+    // Fallback: find the last incomplete stage
+    const incomplete = plot.jobs.filter((j) => j.status !== "COMPLETED" && j.parentStage);
+    return incomplete.length > 0 ? incomplete[0].parentStage : null;
+  }, [activeJobs, plot.jobs]);
+
+  // Unique contractors across all active jobs
+  const activeContractors = useMemo(() => {
+    const seen = new Set<string>();
+    const result: { id: string; name: string; company: string | null }[] = [];
+    for (const job of activeJobs) {
+      for (const jc of job.contractors) {
+        if (jc.contact && !seen.has(jc.contact.id)) {
+          seen.add(jc.contact.id);
+          result.push(jc.contact);
+        }
+      }
+    }
+    return result;
+  }, [activeJobs]);
+
   // Jobs that haven't started yet but are overdue (startDate < today)
   const overdueStartJobs = useMemo(
     () => plot.jobs.filter((j) => {
@@ -417,6 +444,46 @@ function PlotOverview({
           ✕ {actionError}
         </div>
       )}
+      {/* Current Status Strip */}
+      {(activeJobs.length > 0 || currentStage) && (
+        <div className="flex flex-wrap items-center gap-3 rounded-xl border bg-muted/30 px-4 py-3">
+          {currentStage && (
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Stage</span>
+              <span className="rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-semibold text-primary">{currentStage}</span>
+            </div>
+          )}
+          {activeJobs.length > 0 && (
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Active</span>
+              <div className="flex flex-wrap gap-1">
+                {activeJobs.map((j) => (
+                  <Link key={j.id} href={`/jobs/${j.id}`} className="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-800 hover:bg-amber-200">
+                    {j.name}
+                  </Link>
+                ))}
+              </div>
+            </div>
+          )}
+          {activeContractors.length > 0 && (
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">On Site</span>
+              <div className="flex flex-wrap gap-1">
+                {activeContractors.map((c) => (
+                  <span key={c.id} className="flex items-center gap-1 rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-medium text-blue-800">
+                    <HardHat className="size-3" />
+                    {c.company || c.name}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+          {activeJobs.length === 0 && (
+            <span className="text-xs text-muted-foreground italic">No jobs currently in progress</span>
+          )}
+        </div>
+      )}
+
       {/* Progress Stats */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Card>

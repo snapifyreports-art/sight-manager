@@ -306,7 +306,25 @@ export function PlotHistoryTab({ plotId }: { plotId: string }) {
                             href={`/jobs/${event.job.id}`}
                             className="hover:text-foreground hover:underline"
                           >
-                            {event.job.name}
+                            → {event.job.name}
+                          </Link>
+                        )}
+                        {/* Snag events: link to snags tab */}
+                        {(event.type === "SNAG_CREATED" || event.type === "SNAG_RESOLVED" || (event.type === "USER_ACTION" && event.description.toLowerCase().includes("snag"))) && event.plot && (
+                          <Link
+                            href={`/sites/${event.plot.siteId}?tab=snags`}
+                            className="hover:text-foreground hover:underline"
+                          >
+                            → View Snags
+                          </Link>
+                        )}
+                        {/* Order events: link to orders page */}
+                        {(event.type === "ORDER_PLACED" || event.type === "ORDER_DELIVERED" || event.type === "ORDER_CANCELLED") && (
+                          <Link
+                            href="/orders"
+                            className="hover:text-foreground hover:underline"
+                          >
+                            → View Orders
                           </Link>
                         )}
                         <span>

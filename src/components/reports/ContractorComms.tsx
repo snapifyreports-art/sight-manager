@@ -19,6 +19,7 @@ import {
   Printer,
   X,
   Building2,
+  Send,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -89,6 +90,7 @@ function ShareDialog({
   const [url, setUrl] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [expiryDays, setExpiryDays] = useState(30);
+  const [emailBody, setEmailBody] = useState("");
 
   const generate = async () => {
     setLoading(true);
@@ -100,6 +102,10 @@ function ShareDialog({
       });
       const data = await res.json();
       setUrl(data.url);
+      const name = contractor.company || contractor.name;
+      setEmailBody(
+        `Hi ${contractor.name},\n\nPlease find a link to your latest worksheets for ${name}:\n\n${data.url}\n\nThis link gives you a read-only view of your live jobs, upcoming work and any open snags. Please do not hesitate to get in touch if you have any queries.\n\nKind regards`
+      );
     } finally {
       setLoading(false);
     }
@@ -166,6 +172,26 @@ function ShareDialog({
               <Button variant="outline" onClick={generate} disabled={loading} className="w-full text-xs">
                 Regenerate
               </Button>
+              {/* Email compose */}
+              <div className="space-y-1.5 border-t pt-3">
+                <p className="text-xs font-medium text-muted-foreground">Email body (editable before sending)</p>
+                <textarea
+                  value={emailBody}
+                  onChange={(e) => setEmailBody(e.target.value)}
+                  rows={6}
+                  className="w-full rounded-lg border border-border bg-background px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                />
+                <a
+                  href={`mailto:${contractor.email || ""}?subject=${encodeURIComponent(`Your worksheets — ${contractor.company || contractor.name}`)}&body=${encodeURIComponent(emailBody)}`}
+                  className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+                >
+                  <Send className="size-3.5" />
+                  Open in Email App
+                </a>
+                {!contractor.email && (
+                  <p className="text-[11px] text-amber-600">No email on file — add one in Contacts first.</p>
+                )}
+              </div>
             </div>
           )}
         </div>

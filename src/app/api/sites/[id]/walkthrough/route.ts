@@ -58,7 +58,8 @@ export async function GET(
       },
       snags: {
         where: { status: { in: ["OPEN", "IN_PROGRESS"] } },
-        select: { id: true },
+        select: { id: true, description: true, priority: true, status: true, location: true },
+        orderBy: [{ priority: "desc" }, { createdAt: "asc" }],
       },
     },
     orderBy: [{ plotNumber: "asc" }, { createdAt: "asc" }],
@@ -151,6 +152,13 @@ export async function GET(
           }
         : null,
       openSnags: plot.snags.length,
+      snagsList: plot.snags.map((s) => ({
+        id: s.id,
+        description: s.description,
+        priority: s.priority,
+        status: s.status,
+        location: s.location,
+      })),
     };
   });
 

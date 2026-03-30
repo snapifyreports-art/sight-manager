@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { format, formatDistanceToNow } from "date-fns";
 import { getCurrentDate } from "@/lib/dev-date";
 import {
@@ -29,6 +30,7 @@ import {
   Send,
   Pencil,
   Check,
+  Bug,
 } from "lucide-react";
 import { JobSiblingNav } from "@/components/jobs/JobSiblingNav";
 import { Button } from "@/components/ui/button";
@@ -274,10 +276,46 @@ interface ContractorContact {
   email: string | null;
 }
 
+interface JobSnag {
+  id: string;
+  description: string;
+  status: string;
+  priority: string;
+  location: string | null;
+  assignedTo: { name: string } | null;
+  contact: { name: string; company: string | null } | null;
+}
+
+const SNAG_PRIORITY_COLOR: Record<string, string> = {
+  CRITICAL: "bg-red-100 text-red-700",
+  HIGH: "bg-orange-100 text-orange-700",
+  MEDIUM: "bg-amber-100 text-amber-700",
+  LOW: "bg-slate-100 text-slate-600",
+};
+const SNAG_STATUS_COLOR: Record<string, string> = {
+  OPEN: "bg-red-100 text-red-700",
+  IN_PROGRESS: "bg-blue-100 text-blue-700",
+  RESOLVED: "bg-green-100 text-green-700",
+  CLOSED: "bg-slate-100 text-slate-500",
+};
+
 export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
   const router = useRouter();
   const [job, setJob] = useState(initialJob);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+
+  // Snags linked to this job
+  const [jobSnags, setJobSnags] = useState<JobSnag[]>([]);
+  useEffect(() => {
+    fetch(`/api/plots/${initialJob.plotId}/snags`)
+      .then((r) => r.json())
+      .then((data: Array<JobSnag & { jobId?: string | null }>) => {
+        if (Array.isArray(data)) {
+          setJobSnags(data.filter((s) => s.jobId === initialJob.id));
+        }
+      })
+      .catch(console.error);
+  }, [initialJob.plotId, initialJob.id]);
 
   // Contractor dialog state
   const [contractorDialogOpen, setContractorDialogOpen] = useState(false);
@@ -717,11 +755,13 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
           icon={Building2}
           label="Site"
           value={job.plot.site.name}
+          href={`/sites/${job.plot.siteId}`}
         />
         <InfoCard
           icon={LayoutGrid}
           label="Plot"
           value={job.plot.name}
+          href={`/sites/${job.plot.siteId}/plots/${job.plotId}`}
         />
         <InfoCard
           icon={User}
@@ -750,12 +790,13 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
             ) : (
               <div className="mt-1.5 flex flex-wrap gap-1">
                 {job.contractors.map((c) => (
-                  <span
+                  <Link
                     key={c.id}
-                    className="inline-flex items-center rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700"
+                    href={`/contacts?highlight=${c.contact.id}`}
+                    className="inline-flex items-center rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700 hover:bg-blue-100"
                   >
-                    {c.contact.name}
-                  </span>
+                    {c.contact.company ? `${c.contact.company}` : c.contact.name}
+                  </Link>
                 ))}
               </div>
             )}
@@ -1051,6 +1092,58 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
           </CardContent>
         </Card>
       )}
+
+      {/* Snags linked to this job */}
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Bug className="size-4 text-muted-foreground" />
+              <CardTitle>Snags ({jobSnags.length})</CardTitle>
+            </div>
+            <Link
+              href={`/sites/${job.plot.siteId}/plots/${job.plotId}?tab=snags`}
+              className="text-xs text-blue-600 hover:underline"
+            >
+              View all snags →
+            </Link>
+          </div>
+          <CardDescription>Snags raised against this job</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {jobSnags.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No snags linked to this job</p>
+          ) : (
+            <div className="space-y-2">
+              {jobSnags.map((snag) => (
+                <Link
+                  key={snag.id}
+                  href={`/sites/${job.plot.siteId}?tab=snags&snagId=${snag.id}`}
+                  className="flex items-start justify-between rounded-lg border p-3 hover:bg-muted/50 no-underline"
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-foreground">{snag.description}</p>
+                    {snag.location && <p className="text-xs text-muted-foreground mt-0.5">{snag.location}</p>}
+                    {(snag.assignedTo || snag.contact) && (
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        {snag.contact?.company || snag.contact?.name || snag.assignedTo?.name}
+                      </p>
+                    )}
+                  </div>
+                  <div className="ml-3 flex flex-col items-end gap-1 shrink-0">
+                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${SNAG_STATUS_COLOR[snag.status] ?? "bg-slate-100 text-slate-600"}`}>
+                      {snag.status === "IN_PROGRESS" ? "In Progress" : snag.status.charAt(0) + snag.status.slice(1).toLowerCase()}
+                    </span>
+                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${SNAG_PRIORITY_COLOR[snag.priority] ?? "bg-slate-100 text-slate-600"}`}>
+                      {snag.priority.charAt(0) + snag.priority.slice(1).toLowerCase()}
+                    </span>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Manage Contractors Dialog */}
       <Dialog
@@ -1796,10 +1889,12 @@ function InfoCard({
   icon: Icon,
   label,
   value,
+  href,
 }: {
   icon: typeof Briefcase;
   label: string;
   value: string;
+  href?: string;
 }) {
   return (
     <Card>
@@ -1808,7 +1903,13 @@ function InfoCard({
           <Icon className="size-3.5" />
           <span className="text-xs font-medium">{label}</span>
         </div>
-        <p className="mt-1 truncate text-sm font-medium">{value}</p>
+        {href ? (
+          <Link href={href} className="mt-1 block truncate text-sm font-medium text-blue-600 hover:underline">
+            {value}
+          </Link>
+        ) : (
+          <p className="mt-1 truncate text-sm font-medium">{value}</p>
+        )}
       </CardContent>
     </Card>
   );

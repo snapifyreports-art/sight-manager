@@ -23,6 +23,9 @@ import {
   Trash2,
   HardHat,
   Check,
+  Play,
+  Pause,
+  ShieldCheck,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -287,6 +290,12 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated }: Jo
 
   const isSynthetic = context?.job.id.startsWith("synth-") ?? false;
 
+  // Local job status (updated optimistically after actions)
+  const [localStatus, setLocalStatus] = useState<string | null>(null);
+  const [jobActionLoading, setJobActionLoading] = useState(false);
+  const [showSignOffForm, setShowSignOffForm] = useState(false);
+  const [signOffNotesInput, setSignOffNotesInput] = useState("");
+
   // Fetch job data when panel opens
   useEffect(() => {
     if (!open || !context) {
@@ -296,6 +305,9 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated }: Jo
       setNoteText("");
       setLightboxIndex(null);
       setSnagPromptPhotos(null);
+      setLocalStatus(null);
+      setShowSignOffForm(false);
+      setSignOffNotesInput("");
       return;
     }
 
@@ -450,6 +462,33 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated }: Jo
       setSubmittingNote(false);
     }
   }, [context, noteText]);
+
+  // Job status actions (start / stop / sign off)
+  const handleJobAction = useCallback(async (action: "start" | "stop" | "complete", notes?: string) => {
+    if (!context || isSynthetic) return;
+    setJobActionLoading(true);
+    try {
+      const res = await fetch(`/api/jobs/${context.job.id}/actions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, ...(notes ? { signOffNotes: notes } : {}) }),
+      });
+      if (res.ok) {
+        if (action === "start") setLocalStatus("IN_PROGRESS");
+        if (action === "stop") setLocalStatus("ON_HOLD");
+        if (action === "complete") setLocalStatus("COMPLETED");
+        setShowSignOffForm(false);
+        setSignOffNotesInput("");
+        // Refresh notes timeline
+        const jobData = await fetch(`/api/jobs/${context.job.id}`, { cache: "no-store" }).then((r) => r.json());
+        setActions(Array.isArray(jobData.actions) ? jobData.actions : []);
+      }
+    } catch (e) {
+      console.error("Job action failed:", e);
+    } finally {
+      setJobActionLoading(false);
+    }
+  }, [context, isSynthetic]);
 
   // Stage files for upload (shows caption input)
   const handleFileSelect = useCallback((files: FileList | null) => {
@@ -625,9 +664,10 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated }: Jo
   if (!context) return null;
 
   const { job, plotName, plotId, siteName, siteId } = context;
+  const effectiveStatus = localStatus ?? job.status;
   const stageCode = getStageCode(job);
   const stageColors = getStageColor(job.status);
-  const statusConfig = STATUS_CONFIG[job.status] ?? STATUS_CONFIG.NOT_STARTED;
+  const statusConfig = STATUS_CONFIG[effectiveStatus] ?? STATUS_CONFIG.NOT_STARTED;
   const lightboxPhoto = lightboxIndex !== null ? photos[lightboxIndex] : null;
 
   return (
@@ -684,6 +724,74 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated }: Jo
                   </div>
                 )}
               </div>
+
+              {/* Job Action Buttons — not shown for synthetic aggregate views */}
+              {!isSynthetic && (
+                <div className="space-y-2">
+                  {(effectiveStatus === "NOT_STARTED" || effectiveStatus === "ON_HOLD") && (
+                    <Button
+                      className="w-full bg-blue-600 hover:bg-blue-700 text-white"
+                      disabled={jobActionLoading}
+                      onClick={() => handleJobAction("start")}
+                    >
+                      {jobActionLoading ? <Loader2 className="size-4 animate-spin mr-2" /> : <Play className="size-4 mr-2" />}
+                      Start Job
+                    </Button>
+                  )}
+                  {effectiveStatus === "IN_PROGRESS" && !showSignOffForm && (
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        className="flex-1 border-amber-300 text-amber-700 hover:bg-amber-50"
+                        disabled={jobActionLoading}
+                        onClick={() => handleJobAction("stop")}
+                      >
+                        {jobActionLoading ? <Loader2 className="size-4 animate-spin" /> : <Pause className="size-4" />}
+                        <span className="ml-1">Pause</span>
+                      </Button>
+                      <Button
+                        className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white"
+                        onClick={() => setShowSignOffForm(true)}
+                      >
+                        <ShieldCheck className="size-4 mr-1" />
+                        Sign Off
+                      </Button>
+                    </div>
+                  )}
+                  {showSignOffForm && (
+                    <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 space-y-2">
+                      <p className="text-xs font-semibold text-emerald-800">Sign-off notes (optional)</p>
+                      <Textarea
+                        placeholder="Work completed, handover notes..."
+                        value={signOffNotesInput}
+                        onChange={(e) => setSignOffNotesInput(e.target.value)}
+                        rows={2}
+                        className="text-sm bg-white"
+                      />
+                      <div className="flex gap-2">
+                        <Button variant="outline" size="sm" className="flex-1" onClick={() => setShowSignOffForm(false)}>
+                          Cancel
+                        </Button>
+                        <Button
+                          size="sm"
+                          className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white"
+                          disabled={jobActionLoading}
+                          onClick={() => handleJobAction("complete", signOffNotesInput.trim() || undefined)}
+                        >
+                          {jobActionLoading ? <Loader2 className="size-4 animate-spin mr-1" /> : <ShieldCheck className="size-4 mr-1" />}
+                          Confirm
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                  {effectiveStatus === "COMPLETED" && (
+                    <div className="flex items-center justify-center gap-2 rounded-lg bg-emerald-50 px-3 py-2.5 text-sm font-medium text-emerald-700">
+                      <CircleCheck className="size-4" />
+                      Signed Off
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Contractor row */}
               <div className="flex items-center justify-between rounded-lg border bg-slate-50 px-3 py-2.5">

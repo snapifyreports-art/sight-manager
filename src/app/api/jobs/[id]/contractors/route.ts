@@ -57,6 +57,15 @@ export async function PUT(
     return NextResponse.json({ error: "Job not found" }, { status: 404 });
   }
 
+  // Fetch contractor names for the log description
+  const contacts = contactIds.length > 0
+    ? await prisma.contact.findMany({
+        where: { id: { in: contactIds } },
+        select: { name: true, company: true },
+      })
+    : [];
+  const contractorNames = contacts.map((c) => c.company || c.name).join(", ");
+
   // Replace all assignments in a transaction
   const result = await prisma.$transaction(async (tx) => {
     // Delete existing assignments
@@ -72,11 +81,14 @@ export async function PUT(
       });
     }
 
-    // Log event
+    // Log event with contractor names
+    const desc = contactIds.length === 0
+      ? `All contractors removed from "${job.name}"`
+      : `Contractor${contacts.length > 1 ? "s" : ""} assigned to "${job.name}": ${contractorNames}`;
     await tx.eventLog.create({
       data: {
         type: "JOB_EDITED",
-        description: `Contractors updated on "${job.name}" (${contactIds.length} assigned)`,
+        description: desc,
         siteId: job.plot.siteId,
         plotId: job.plotId,
         jobId: id,

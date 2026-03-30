@@ -130,19 +130,48 @@ export async function PATCH(
     }
   }
 
-  // Log to linked job when snag is closed
+  // Log snag CLOSED to EventLog + linked job
   const isClosing = status === "CLOSED" && existing.status !== "CLOSED";
-  if (isClosing && existing.jobId) {
-    const closeNoteText = notes
-      ? `🔒 Snag closed: "${existing.description.slice(0, 80)}" — ${notes}`
-      : `🔒 Snag closed: "${existing.description.slice(0, 80)}"`;
+  if (isClosing) {
+    const closeDesc = notes
+      ? `Snag closed on Plot ${existing.plot.plotNumber || existing.plot.name}: "${existing.description.slice(0, 60)}" — ${notes}`
+      : `Snag closed on Plot ${existing.plot.plotNumber || existing.plot.name}: "${existing.description.slice(0, 60)}"`;
 
-    await prisma.jobAction.create({
+    await prisma.eventLog.create({
       data: {
-        jobId: existing.jobId,
+        type: "USER_ACTION",
+        description: closeDesc,
+        siteId: existing.plot.siteId,
+        plotId: existing.plotId,
+        jobId: existing.jobId || undefined,
         userId: session.user.id,
-        action: "note",
-        notes: closeNoteText,
+      },
+    });
+
+    if (existing.jobId) {
+      await prisma.jobAction.create({
+        data: {
+          jobId: existing.jobId,
+          userId: session.user.id,
+          action: "note",
+          notes: `🔒 Snag closed: "${existing.description.slice(0, 80)}"${notes ? ` — ${notes}` : ""}`,
+        },
+      });
+    }
+  }
+
+  // Log status changes (open → in_progress) to EventLog
+  const isStatusChange = status && status !== existing.status && status !== "RESOLVED" && status !== "CLOSED";
+  if (isStatusChange) {
+    const statusLabel = status === "IN_PROGRESS" ? "In Progress" : status.charAt(0) + status.slice(1).toLowerCase();
+    await prisma.eventLog.create({
+      data: {
+        type: "USER_ACTION",
+        description: `Snag status updated to ${statusLabel} on Plot ${existing.plot.plotNumber || existing.plot.name}: "${existing.description.slice(0, 60)}"`,
+        siteId: existing.plot.siteId,
+        plotId: existing.plotId,
+        jobId: existing.jobId || undefined,
+        userId: session.user.id,
       },
     });
   }

@@ -44,10 +44,11 @@ const SITE_TAB_GROUPS = [
     label: "Manage Site",
     icon: HardHat,
     tabs: [
-      { label: "Daily Brief",  tab: "daily-brief" },
-      { label: "Programme",    tab: "programme" },
-      { label: "Plots",        tab: "plots" },
-      { label: "Snags",        tab: "snags" },
+      { label: "Daily Brief",       tab: "daily-brief" },
+      { label: "Programme",         tab: "programme" },
+      { label: "Plots",             tab: "plots" },
+      { label: "Snags",             tab: "snags" },
+      { label: "Contractor Comms",  tab: "contractor-comms" },
     ],
   },
   {

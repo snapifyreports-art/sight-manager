@@ -24,6 +24,7 @@ import {
   CalendarDays,
   ImagePlus,
   ClipboardCheck,
+  ChevronsUpDown,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { format, parseISO } from "date-fns";
@@ -56,6 +57,13 @@ interface WalkthroughPlot {
   currentJob: WalkthroughJob | null;
   nextJob: { id: string; name: string; status: string } | null;
   openSnags: number;
+  snagsList: Array<{
+    id: string;
+    description: string;
+    priority: string;
+    status: string;
+    location: string | null;
+  }>;
 }
 
 type ModalType = "finish" | "note" | "snag" | "photo" | "delay" | null;
@@ -169,6 +177,8 @@ export default function SiteWalkthrough({
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [plotPickerOpen, setPlotPickerOpen] = useState(false);
+  const [snagsExpanded, setSnagsExpanded] = useState(false);
   const [activeModal, setActiveModal] = useState<ModalType>(null);
   const [actionLoading, setActionLoading] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
@@ -229,10 +239,10 @@ export default function SiteWalkthrough({
   const plot = plots[currentIndex] ?? null;
 
   const goNext = () => {
-    if (currentIndex < plots.length - 1) setCurrentIndex((i) => i + 1);
+    if (currentIndex < plots.length - 1) { setCurrentIndex((i) => i + 1); setSnagsExpanded(false); }
   };
   const goPrev = () => {
-    if (currentIndex > 0) setCurrentIndex((i) => i - 1);
+    if (currentIndex > 0) { setCurrentIndex((i) => i - 1); setSnagsExpanded(false); }
   };
 
   const showToast = (message: string, type: "success" | "error") => {
@@ -537,21 +547,64 @@ export default function SiteWalkthrough({
           <ChevronLeft className="size-5" />
         </button>
 
-        {/* Dot indicators */}
-        <div className="flex items-center gap-1.5">
-          {plots.map((p, i) => (
+        {/* Centre: dot indicators + jump button */}
+        <div className="flex items-center gap-2">
+          {/* Dot indicators (show up to 8, collapse beyond) */}
+          {plots.length <= 12 && (
+            <div className="flex items-center gap-1.5">
+              {plots.map((p, i) => (
+                <button
+                  key={p.id}
+                  onClick={() => setCurrentIndex(i)}
+                  title={p.plotNumber ? `Plot ${p.plotNumber}` : (p.plotName || "Plot")}
+                  className={cn(
+                    "h-2 rounded-full transition-all duration-200",
+                    i === currentIndex
+                      ? "w-5 bg-blue-600"
+                      : "w-2 bg-slate-300 hover:bg-slate-400"
+                  )}
+                />
+              ))}
+            </div>
+          )}
+
+          {/* Jump to plot dropdown */}
+          <div className="relative">
             <button
-              key={p.id}
-              onClick={() => setCurrentIndex(i)}
-              title={`Plot ${p.plotNumber}`}
-              className={cn(
-                "h-2 rounded-full transition-all duration-200",
-                i === currentIndex
-                  ? "w-5 bg-blue-600"
-                  : "w-2 bg-slate-300 hover:bg-slate-400"
-              )}
-            />
-          ))}
+              onClick={() => setPlotPickerOpen((o) => !o)}
+              className="flex items-center gap-1 rounded-lg border border-border/60 bg-white px-2.5 py-1 text-xs font-medium text-muted-foreground hover:bg-accent"
+            >
+              <span>{currentIndex + 1} / {plots.length}</span>
+              <ChevronsUpDown className="size-3" />
+            </button>
+            {plotPickerOpen && (
+              <div className="absolute left-1/2 top-full z-50 mt-1 max-h-64 w-48 -translate-x-1/2 overflow-y-auto rounded-xl border bg-white shadow-lg">
+                {plots.map((p, i) => (
+                  <button
+                    key={p.id}
+                    onClick={() => { setCurrentIndex(i); setPlotPickerOpen(false); setSnagsExpanded(false); }}
+                    className={cn(
+                      "flex w-full items-center justify-between px-3 py-2 text-sm hover:bg-accent",
+                      i === currentIndex && "bg-blue-50 font-semibold text-blue-700"
+                    )}
+                  >
+                    <span>{p.plotNumber ? `Plot ${p.plotNumber}` : (p.plotName || "Plot")}</span>
+                    {p.currentJob && (
+                      <span className={cn(
+                        "rounded-full px-1.5 py-0.5 text-[10px] font-medium",
+                        p.currentJob.status === "IN_PROGRESS" ? "bg-amber-100 text-amber-700" :
+                        p.currentJob.status === "COMPLETED" ? "bg-green-100 text-green-700" :
+                        "bg-slate-100 text-slate-500"
+                      )}>
+                        {p.currentJob.status === "IN_PROGRESS" ? "Active" :
+                         p.currentJob.status === "COMPLETED" ? "Done" : "Pending"}
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
         <button
@@ -680,11 +733,47 @@ export default function SiteWalkthrough({
                   <p className="text-sm text-muted-foreground">All jobs complete on this plot.</p>
                 )}
 
-                {/* Open snags indicator */}
+                {/* Open snags — expandable */}
                 {plot.openSnags > 0 && (
-                  <div className="mt-3 flex items-center gap-1.5 rounded-lg bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700">
-                    <AlertTriangle className="size-3.5" />
-                    {plot.openSnags} open snag{plot.openSnags !== 1 ? "s" : ""}
+                  <div className="mt-3">
+                    <button
+                      onClick={() => setSnagsExpanded((e) => !e)}
+                      className="flex w-full items-center justify-between rounded-lg bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700 hover:bg-amber-100 transition-colors"
+                    >
+                      <span className="flex items-center gap-1.5">
+                        <AlertTriangle className="size-3.5" />
+                        {plot.openSnags} open snag{plot.openSnags !== 1 ? "s" : ""}
+                      </span>
+                      <ChevronRight className={cn("size-3.5 transition-transform", snagsExpanded && "rotate-90")} />
+                    </button>
+                    {snagsExpanded && (
+                      <div className="mt-1 space-y-1">
+                        {plot.snagsList.map((snag) => {
+                          const priorityColor =
+                            snag.priority === "CRITICAL" ? "text-red-600" :
+                            snag.priority === "HIGH" ? "text-orange-600" :
+                            "text-amber-600";
+                          return (
+                            <button
+                              key={snag.id}
+                              onClick={() => router.push(`/sites/${siteId}?tab=snags&snagId=${snag.id}`)}
+                              className="flex w-full items-start gap-2 rounded-lg border border-amber-100 bg-white px-3 py-2 text-left hover:bg-amber-50 transition-colors"
+                            >
+                              <AlertTriangle className={cn("size-3.5 mt-0.5 shrink-0", priorityColor)} />
+                              <div className="min-w-0 flex-1">
+                                <p className="text-xs font-medium text-foreground line-clamp-2">{snag.description}</p>
+                                {snag.location && (
+                                  <p className="text-[10px] text-muted-foreground">{snag.location}</p>
+                                )}
+                              </div>
+                              <span className={cn("shrink-0 text-[10px] font-semibold uppercase", priorityColor)}>
+                                {snag.priority}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 )}
 
