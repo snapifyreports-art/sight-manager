@@ -1948,62 +1948,53 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
       )}
 
       {/* Contractor Picker Dialog */}
-      {contractorPickerOpen && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-sm rounded-xl bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b px-5 py-4">
-              <div>
-                <h3 className="font-semibold">Assign Contractor</h3>
-                {contractorPickerTargetJobId && (
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    {childJobs.find((c) => c.id === contractorPickerTargetJobId)?.name}
-                  </p>
-                )}
+      <Dialog open={contractorPickerOpen} onOpenChange={(o) => { if (!o) { setContractorPickerOpen(false); setContractorPickerTargetJobId(null); } }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Assign Contractor</DialogTitle>
+            {contractorPickerTargetJobId && (
+              <DialogDescription>{childJobs.find((c) => c.id === contractorPickerTargetJobId)?.name}</DialogDescription>
+            )}
+          </DialogHeader>
+          <div className="max-h-64 overflow-y-auto">
+            {allContractors.length === 0 ? (
+              <p className="py-4 text-center text-sm text-muted-foreground">No contractors found</p>
+            ) : (
+              <div className="space-y-1">
+                {allContractors.map((c) => {
+                  const selected = selectedContractorIds.has(c.id);
+                  return (
+                    <button
+                      key={c.id}
+                      onClick={() => setSelectedContractorIds((prev) => {
+                        const next = new Set(prev);
+                        selected ? next.delete(c.id) : next.add(c.id);
+                        return next;
+                      })}
+                      className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left hover:bg-slate-50"
+                    >
+                      <div className={`flex size-5 shrink-0 items-center justify-center rounded border ${selected ? "border-blue-600 bg-blue-600" : "border-slate-300"}`}>
+                        {selected && <Check className="size-3 text-white" />}
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium">{c.name}</p>
+                        {c.company && <p className="text-xs text-muted-foreground">{c.company}</p>}
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
-              <button onClick={() => { setContractorPickerOpen(false); setContractorPickerTargetJobId(null); }} className="rounded p-1 hover:bg-slate-100">
-                <X className="size-4" />
-              </button>
-            </div>
-            <div className="max-h-64 overflow-y-auto p-3">
-              {allContractors.length === 0 ? (
-                <p className="py-4 text-center text-sm text-muted-foreground">No contractors found</p>
-              ) : (
-                <div className="space-y-1">
-                  {allContractors.map((c) => {
-                    const selected = selectedContractorIds.has(c.id);
-                    return (
-                      <button
-                        key={c.id}
-                        onClick={() => setSelectedContractorIds((prev) => {
-                          const next = new Set(prev);
-                          selected ? next.delete(c.id) : next.add(c.id);
-                          return next;
-                        })}
-                        className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left hover:bg-slate-50"
-                      >
-                        <div className={`flex size-5 shrink-0 items-center justify-center rounded border ${selected ? "border-blue-600 bg-blue-600" : "border-slate-300"}`}>
-                          {selected && <Check className="size-3 text-white" />}
-                        </div>
-                        <div>
-                          <p className="text-sm font-medium">{c.name}</p>
-                          {c.company && <p className="text-xs text-muted-foreground">{c.company}</p>}
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-            <div className="flex justify-end gap-2 border-t px-5 py-3">
-              <Button variant="outline" size="sm" onClick={() => { setContractorPickerOpen(false); setContractorPickerTargetJobId(null); }}>Cancel</Button>
-              <Button size="sm" disabled={savingContractors} onClick={saveContractors}>
-                {savingContractors && <Loader2 className="mr-1.5 size-3.5 animate-spin" />}
-                Save ({selectedContractorIds.size})
-              </Button>
-            </div>
+            )}
           </div>
-        </div>
-      )}
+          <div className="flex justify-end gap-2 border-t pt-3">
+            <Button variant="outline" size="sm" onClick={() => { setContractorPickerOpen(false); setContractorPickerTargetJobId(null); }}>Cancel</Button>
+            <Button size="sm" disabled={savingContractors} onClick={saveContractors}>
+              {savingContractors && <Loader2 className="mr-1.5 size-3.5 animate-spin" />}
+              Save ({selectedContractorIds.size})
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Order Detail Sheet */}
       <OrderDetailSheet
@@ -2029,98 +2020,98 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
       />
 
       {/* Pre-start checks: incomplete predecessor + undelivered orders */}
-      {preStartChecks && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-sm rounded-2xl bg-white shadow-2xl">
-            <div className="border-b px-5 py-4">
-              <div className="flex items-center gap-2">
-                <AlertTriangle className="size-4 text-amber-500" />
-                <h3 className="font-semibold text-foreground">Before You Start</h3>
-              </div>
-              <p className="mt-0.5 text-sm text-muted-foreground">
-                Review these items before starting{" "}
-                <span className="font-medium">{preStartChecks.jobName}</span>.
-              </p>
-            </div>
-            <div className="space-y-3 p-4">
-              {preStartChecks.prevJob && (
-                <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-3">
-                  <input
-                    type="checkbox"
-                    checked={preStartChecks.signOffPrev}
-                    onChange={() =>
-                      setPreStartChecks((prev) => prev ? { ...prev, signOffPrev: !prev.signOffPrev } : prev)
-                    }
-                    className="mt-0.5 size-4 rounded"
-                  />
-                  <div>
-                    <p className="text-sm font-medium text-amber-800">Previous job not signed off</p>
-                    <p className="text-xs text-amber-600">
-                      <span className="font-medium">{preStartChecks.prevJob.name}</span> is still in progress.
-                      Tick to sign it off now.
-                    </p>
-                  </div>
-                </label>
-              )}
-              {preStartChecks.undeliveredOrders.length > 0 && (
-                <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-blue-200 bg-blue-50 p-3">
-                  <input
-                    type="checkbox"
-                    checked={preStartChecks.markDelivered}
-                    onChange={() =>
-                      setPreStartChecks((prev) => prev ? { ...prev, markDelivered: !prev.markDelivered } : prev)
-                    }
-                    className="mt-0.5 size-4 rounded"
-                  />
-                  <div>
-                    <p className="text-sm font-medium text-blue-800">
-                      {preStartChecks.undeliveredOrders.length} order
-                      {preStartChecks.undeliveredOrders.length !== 1 ? "s" : ""} not yet delivered
-                    </p>
-                    <p className="text-xs text-blue-600">
-                      {preStartChecks.undeliveredOrders.map((o) => o.supplier).join(", ")} — tick to mark as delivered.
-                    </p>
-                  </div>
-                </label>
-              )}
-              <div className="flex gap-2 pt-1">
-                <button
-                  onClick={() => setPreStartChecks(null)}
-                  disabled={preStartLoading}
-                  className="flex-1 rounded-xl border border-border/60 px-4 py-2.5 text-sm text-muted-foreground hover:bg-slate-50 transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handlePreStartConfirm}
-                  disabled={preStartLoading}
-                  className="flex-1 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 transition-colors disabled:opacity-60"
-                >
-                  {preStartLoading ? <Loader2 className="inline size-3.5 animate-spin mr-1" /> : null}
-                  Start Anyway
-                </button>
-              </div>
+      <Dialog open={!!preStartChecks} onOpenChange={(o) => { if (!o) setPreStartChecks(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="size-4 text-amber-500" />
+              Before You Start
+            </DialogTitle>
+            <DialogDescription>
+              Review these items before starting{" "}
+              <span className="font-medium">{preStartChecks?.jobName}</span>.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            {preStartChecks?.prevJob && (
+              <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-3">
+                <input
+                  type="checkbox"
+                  checked={preStartChecks.signOffPrev}
+                  onChange={() =>
+                    setPreStartChecks((prev) => prev ? { ...prev, signOffPrev: !prev.signOffPrev } : prev)
+                  }
+                  className="mt-0.5 size-4 rounded"
+                />
+                <div>
+                  <p className="text-sm font-medium text-amber-800">Previous job not signed off</p>
+                  <p className="text-xs text-amber-600">
+                    <span className="font-medium">{preStartChecks.prevJob.name}</span> is still in progress.
+                    Tick to sign it off now.
+                  </p>
+                </div>
+              </label>
+            )}
+            {preStartChecks && preStartChecks.undeliveredOrders.length > 0 && (
+              <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-blue-200 bg-blue-50 p-3">
+                <input
+                  type="checkbox"
+                  checked={preStartChecks.markDelivered}
+                  onChange={() =>
+                    setPreStartChecks((prev) => prev ? { ...prev, markDelivered: !prev.markDelivered } : prev)
+                  }
+                  className="mt-0.5 size-4 rounded"
+                />
+                <div>
+                  <p className="text-sm font-medium text-blue-800">
+                    {preStartChecks.undeliveredOrders.length} order
+                    {preStartChecks.undeliveredOrders.length !== 1 ? "s" : ""} not yet delivered
+                  </p>
+                  <p className="text-xs text-blue-600">
+                    {preStartChecks.undeliveredOrders.map((o) => o.supplier).join(", ")} — tick to mark as delivered.
+                  </p>
+                </div>
+              </label>
+            )}
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={() => setPreStartChecks(null)}
+                disabled={preStartLoading}
+                className="flex-1 rounded-xl border border-border/60 px-4 py-2.5 text-sm text-muted-foreground hover:bg-slate-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handlePreStartConfirm}
+                disabled={preStartLoading}
+                className="flex-1 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 transition-colors disabled:opacity-60"
+              >
+                {preStartLoading ? <Loader2 className="inline size-3.5 animate-spin mr-1" /> : null}
+                Start Anyway
+              </button>
             </div>
           </div>
-        </div>
-      )}
+        </DialogContent>
+      </Dialog>
 
       {/* Post-completion: offer programme adjustment when there was deviation */}
-      {completionShiftDialog && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-sm rounded-2xl bg-white shadow-2xl">
-            <div className="border-b px-5 py-4">
-              <h3 className="font-semibold text-foreground">Programme Impact</h3>
-              <p className="mt-0.5 text-sm text-muted-foreground">
+      <Dialog open={!!completionShiftDialog} onOpenChange={(o) => { if (!o) setCompletionShiftDialog(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Programme Impact</DialogTitle>
+            <DialogDescription>
+              {completionShiftDialog && <>
                 This job finished{" "}
                 <span className={`font-semibold ${completionShiftDialog.daysDeviation > 0 ? "text-emerald-600" : "text-amber-600"}`}>
                   {Math.abs(completionShiftDialog.daysDeviation)} day
                   {Math.abs(completionShiftDialog.daysDeviation) !== 1 ? "s" : ""}{" "}
                   {completionShiftDialog.daysDeviation > 0 ? "early" : "late"}
                 </span>. How would you like to adjust the programme?
-              </p>
-            </div>
-            <div className="space-y-2 p-4">
+              </>}
+            </DialogDescription>
+          </DialogHeader>
+          {completionShiftDialog && (
+            <div className="space-y-2">
               <button
                 onClick={handleShiftProgramme}
                 disabled={cascadeLoading}
@@ -2159,29 +2150,31 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
               >
                 Keep As Is
               </button>
+              {cascadeLoading && (
+                <div className="flex items-center justify-center gap-2 border-t pt-3 text-xs text-muted-foreground">
+                  <Loader2 className="size-3.5 animate-spin" /> Updating programme…
+                </div>
+              )}
             </div>
-            {cascadeLoading && (
-              <div className="flex items-center justify-center gap-2 border-t px-5 py-3 text-xs text-muted-foreground">
-                <Loader2 className="size-3.5 animate-spin" /> Updating programme…
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* Early-start programme impact dialog */}
-      {earlyStartDialog && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-sm rounded-2xl bg-white shadow-2xl">
-            <div className="border-b px-5 py-4">
-              <h3 className="font-semibold text-foreground">Starting Early</h3>
-              <p className="mt-0.5 text-sm text-muted-foreground">
+      <Dialog open={!!earlyStartDialog} onOpenChange={(o) => { if (!o) setEarlyStartDialog(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Starting Early</DialogTitle>
+            <DialogDescription>
+              {earlyStartDialog && <>
                 <span className="font-medium">{earlyStartDialog.jobName}</span> is planned to start in{" "}
                 <span className="font-semibold text-blue-600">{earlyStartDialog.daysEarly} day{earlyStartDialog.daysEarly !== 1 ? "s" : ""}</span>.
                 How would you like to handle the programme?
-              </p>
-            </div>
-            <div className="space-y-2 p-4">
+              </>}
+            </DialogDescription>
+          </DialogHeader>
+          {earlyStartDialog && (
+            <div className="space-y-2">
               <button
                 onClick={handlePullForward}
                 disabled={cascadeLoading}
@@ -2215,15 +2208,15 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
               >
                 Cancel
               </button>
+              {cascadeLoading && (
+                <div className="flex items-center justify-center gap-2 border-t pt-3 text-xs text-muted-foreground">
+                  <Loader2 className="size-3.5 animate-spin" /> Updating programme…
+                </div>
+              )}
             </div>
-            {cascadeLoading && (
-              <div className="flex items-center justify-center gap-2 border-t px-5 py-3 text-xs text-muted-foreground">
-                <Loader2 className="size-3.5 animate-spin" /> Updating programme…
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+          )}
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
