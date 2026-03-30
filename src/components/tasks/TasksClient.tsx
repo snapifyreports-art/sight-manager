@@ -150,6 +150,7 @@ export function TasksClient() {
   const { devDate } = useDevDate();
   const [data, setData] = useState<TaskData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshKey, setRefreshKey] = useState(0);
   const [confirmingIds, setConfirmingIds] = useState<Set<string>>(new Set());
   const [stoppingIds, setStoppingIds] = useState<Set<string>>(new Set());
   const [chaseDialogOpen, setChaseDialogOpen] = useState(false);
@@ -169,7 +170,7 @@ export function TasksClient() {
       .then(setData)
       .catch(console.error)
       .finally(() => setLoading(false));
-  }, [devDate]);
+  }, [devDate, refreshKey]);
 
   // ── Group send orders by supplier ──
   const supplierGroups = useMemo(() => {
@@ -240,12 +241,8 @@ export function TasksClient() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "stop", notes: "Stopped from tasks — overdue" }),
       });
-      if (res.ok && data) {
-        setData({
-          ...data,
-          overdueJobs: data.overdueJobs.filter((j) => j.id !== jobId),
-          counts: { ...data.counts, overdueJobs: data.counts.overdueJobs - 1 },
-        });
+      if (res.ok) {
+        setRefreshKey((k) => k + 1);
       }
     } catch (err) {
       console.error("Failed to stop job:", err);

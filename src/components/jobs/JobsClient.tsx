@@ -279,6 +279,7 @@ export function JobsClient({ initialJobs, workflows, users }: JobsClientProps) {
     if (res.ok) {
       const updated = await res.json();
       setJobs((prev) => prev.map((j) => (j.id === updated.id ? updated : j)));
+      router.refresh();
     }
   }
 

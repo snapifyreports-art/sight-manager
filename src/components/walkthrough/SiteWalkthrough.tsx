@@ -367,6 +367,7 @@ export default function SiteWalkthrough({
       if (res.ok) {
         closeModal();
         showToast("Note added", "success");
+        await refresh();
       } else {
         showToast("Failed to add note", "error");
       }
