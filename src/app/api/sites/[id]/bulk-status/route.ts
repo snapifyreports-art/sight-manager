@@ -66,6 +66,20 @@ export async function POST(
         data: updateData,
       });
 
+      // Progress orders: start → ORDERED, complete → DELIVERED
+      if (action === "start") {
+        await prisma.materialOrder.updateMany({
+          where: { jobId, status: "PENDING" },
+          data: { status: "ORDERED", dateOfOrder: now },
+        });
+      }
+      if (action === "complete") {
+        await prisma.materialOrder.updateMany({
+          where: { jobId, status: { in: ["ORDERED", "CONFIRMED"] } },
+          data: { status: "DELIVERED", deliveredDate: now },
+        });
+      }
+
       // Create job action record
       await prisma.jobAction.create({
         data: {

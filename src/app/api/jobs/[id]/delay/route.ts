@@ -149,23 +149,29 @@ export async function POST(
         ? "🌡️"
         : "⏳";
 
-  await prisma.$transaction(async (tx) => {
-    await tx.job.update({
-      where: { id },
-      data: { endDate: newEndDate },
-    });
+  // Build a map of current job dates for preserving originals
+  const jobMap = new Map(allPlotJobs.map((j) => [j.id, j]));
 
+  await prisma.$transaction(async (tx) => {
+    // Update triggering job — preserve originals on first change
+    const triggerData: Record<string, unknown> = { endDate: newEndDate };
+    if (!job.originalEndDate && job.endDate) triggerData.originalEndDate = job.endDate;
     if (job.status === "NOT_STARTED" && job.startDate) {
-      await tx.job.update({
-        where: { id },
-        data: { startDate: addDays(job.startDate, days) },
-      });
+      if (!job.originalStartDate) triggerData.originalStartDate = job.startDate;
+      triggerData.startDate = addDays(job.startDate, days);
     }
+    await tx.job.update({ where: { id }, data: triggerData });
 
     for (const update of cascade.jobUpdates) {
+      const currentJob = jobMap.get(update.jobId);
       await tx.job.update({
         where: { id: update.jobId },
-        data: { startDate: update.newStart, endDate: update.newEnd },
+        data: {
+          startDate: update.newStart,
+          endDate: update.newEnd,
+          ...(!currentJob?.originalStartDate && currentJob?.startDate ? { originalStartDate: currentJob.startDate } : {}),
+          ...(!currentJob?.originalEndDate && currentJob?.endDate ? { originalEndDate: currentJob.endDate } : {}),
+        },
       });
     }
 

@@ -132,19 +132,28 @@ export async function PUT(
 
   // Apply in transaction
   await prisma.$transaction(async (tx) => {
-    // Update the changed job's end date
+    // Update the changed job's end date — preserve originalEndDate on first change
     await tx.job.update({
       where: { id },
-      data: { endDate: new Date(newEndDate) },
+      data: {
+        endDate: new Date(newEndDate),
+        ...(!job.originalEndDate && job.endDate ? { originalEndDate: job.endDate } : {}),
+      },
     });
 
-    // Update subsequent jobs
+    // Build a map of current job dates for preserving originals
+    const jobMap = new Map(allPlotJobs.map((j) => [j.id, j]));
+
+    // Update subsequent jobs — preserve original dates on first change
     for (const update of result.jobUpdates) {
+      const currentJob = jobMap.get(update.jobId);
       await tx.job.update({
         where: { id: update.jobId },
         data: {
           startDate: update.newStart,
           endDate: update.newEnd,
+          ...(!currentJob?.originalStartDate && currentJob?.startDate ? { originalStartDate: currentJob.startDate } : {}),
+          ...(!currentJob?.originalEndDate && currentJob?.endDate ? { originalEndDate: currentJob.endDate } : {}),
         },
       });
     }

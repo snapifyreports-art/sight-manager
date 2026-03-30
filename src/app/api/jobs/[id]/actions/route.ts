@@ -95,7 +95,7 @@ export async function POST(
     // Build update data
     const updateData: Record<string, unknown> = { status: newStatus };
 
-    // Handle start action — set actualStartDate + progress orders
+    // Handle start action — set actualStartDate + progress orders + clear awaitingRestart
     if (action === "start" && !existing.actualStartDate) {
       updateData.actualStartDate = now;
     }
@@ -105,6 +105,14 @@ export async function POST(
         where: { jobId: id, status: "PENDING" },
         data: { status: "ORDERED", dateOfOrder: now },
       });
+      // If the plot was awaiting a restart decision (user chose "leave for now"),
+      // clear it — the job has now been started directly
+      if (existing.plot.awaitingRestart) {
+        await prisma.plot.update({
+          where: { id: existing.plotId },
+          data: { awaitingRestart: false },
+        });
+      }
     }
 
     // Handle complete/sign-off action

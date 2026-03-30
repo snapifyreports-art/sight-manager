@@ -81,6 +81,8 @@ interface PanelJob {
   stageCode: string | null;
   startDate: string | null;
   endDate: string | null;
+  actualStartDate?: string | null;
+  actualEndDate?: string | null;
   orders?: PanelOrder[];
 }
 
@@ -340,7 +342,7 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
   } | null>(null);
 
   // Child job summaries for synthetic parent panels
-  const [childJobs, setChildJobs] = useState<Array<{ id: string; name: string; status: string; sortOrder: number; startDate: string | null; endDate: string | null; contractor: { id: string; name: string; company: string | null } | null }>>([]);
+  const [childJobs, setChildJobs] = useState<Array<{ id: string; name: string; status: string; sortOrder: number; startDate: string | null; endDate: string | null; actualStartDate?: string | null; actualEndDate?: string | null; contractor: { id: string; name: string; company: string | null } | null }>>([]);
   const [childJobStatuses, setChildJobStatuses] = useState<Map<string, string>>(new Map());
   const [childJobActionLoading, setChildJobActionLoading] = useState<Set<string>>(new Set());
   const [childJobSignOff, setChildJobSignOff] = useState<string | null>(null);
@@ -429,6 +431,8 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
               sortOrder: jobData.sortOrder ?? 0,
               startDate: jobData.startDate ?? null,
               endDate: jobData.endDate ?? null,
+              actualStartDate: jobData.actualStartDate ?? null,
+              actualEndDate: jobData.actualEndDate ?? null,
               contractor: firstContractor,
             };
           });
@@ -1127,13 +1131,22 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
                   <div className="flex items-center gap-1.5">
                     <CalendarDays className="size-3.5" />
                     <span>
-                      {job.startDate
-                        ? format(new Date(job.startDate), "d MMM")
-                        : "?"}
-                      {" \u2192 "}
-                      {job.endDate
-                        ? format(new Date(job.endDate), "d MMM yyyy")
-                        : "?"}
+                      {(() => {
+                        // Show actual start for IN_PROGRESS/COMPLETED if available
+                        const displayStart = (job.status === "IN_PROGRESS" || job.status === "COMPLETED") && job.actualStartDate
+                          ? job.actualStartDate
+                          : job.startDate;
+                        const displayEnd = job.status === "COMPLETED" && job.actualEndDate
+                          ? job.actualEndDate
+                          : job.endDate;
+                        return (
+                          <>
+                            {displayStart ? format(new Date(displayStart), "d MMM") : "?"}
+                            {" → "}
+                            {displayEnd ? format(new Date(displayEnd), "d MMM yyyy") : "?"}
+                          </>
+                        );
+                      })()}
                     </span>
                   </div>
                 )}
@@ -1171,9 +1184,21 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
                         {(child.startDate || child.endDate) && (
                           <p className="flex items-center gap-1 text-[11px] text-muted-foreground">
                             <CalendarDays className="size-3 shrink-0" />
-                            {child.startDate ? format(new Date(child.startDate), "d MMM") : "?"}
-                            {" → "}
-                            {child.endDate ? format(new Date(child.endDate), "d MMM") : "?"}
+                            {(() => {
+                              const displayStart = (childStatus === "IN_PROGRESS" || childStatus === "COMPLETED") && child.actualStartDate
+                                ? child.actualStartDate
+                                : child.startDate;
+                              const displayEnd = childStatus === "COMPLETED" && child.actualEndDate
+                                ? child.actualEndDate
+                                : child.endDate;
+                              return (
+                                <>
+                                  {displayStart ? format(new Date(displayStart), "d MMM") : "?"}
+                                  {" → "}
+                                  {displayEnd ? format(new Date(displayEnd), "d MMM") : "?"}
+                                </>
+                              );
+                            })()}
                           </p>
                         )}
                         {/* Per-sub-job contractor badge + edit */}

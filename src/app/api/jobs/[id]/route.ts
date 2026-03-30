@@ -63,18 +63,32 @@ export async function PUT(
     return NextResponse.json({ error: "Job not found" }, { status: 404 });
   }
 
+  const updateData: Record<string, unknown> = {
+    name: body.name ?? existing.name,
+    description: body.description !== undefined ? body.description : existing.description,
+    plotId: body.plotId ?? existing.plotId,
+    assignedToId: body.assignedToId !== undefined ? body.assignedToId : existing.assignedToId,
+    location: body.location !== undefined ? body.location : existing.location,
+    address: body.address !== undefined ? body.address : existing.address,
+  };
+
+  if (body.startDate !== undefined) {
+    // Preserve original on first manual edit
+    if (!existing.originalStartDate && existing.startDate) {
+      updateData.originalStartDate = existing.startDate;
+    }
+    updateData.startDate = body.startDate ? new Date(body.startDate) : null;
+  }
+  if (body.endDate !== undefined) {
+    if (!existing.originalEndDate && existing.endDate) {
+      updateData.originalEndDate = existing.endDate;
+    }
+    updateData.endDate = body.endDate ? new Date(body.endDate) : null;
+  }
+
   const job = await prisma.job.update({
     where: { id },
-    data: {
-      name: body.name ?? existing.name,
-      description: body.description !== undefined ? body.description : existing.description,
-      plotId: body.plotId ?? existing.plotId,
-      assignedToId: body.assignedToId !== undefined ? body.assignedToId : existing.assignedToId,
-      location: body.location !== undefined ? body.location : existing.location,
-      address: body.address !== undefined ? body.address : existing.address,
-      startDate: body.startDate !== undefined ? (body.startDate ? new Date(body.startDate) : null) : existing.startDate,
-      endDate: body.endDate !== undefined ? (body.endDate ? new Date(body.endDate) : null) : existing.endDate,
-    },
+    data: updateData,
     include: {
       plot: { include: { site: true } },
       assignedTo: true,

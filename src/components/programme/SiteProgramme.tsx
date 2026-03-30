@@ -565,8 +565,15 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
 
       const synthetic: ProgrammeJob[] = [];
       for (const [stage, children] of grouped) {
+        // Use actualStartDate (if set) for the start — this reflects early starts
         const starts = children
           .map((c) => c.startDate)
+          .filter(Boolean) as string[];
+        const actualStarts = children
+          .map((c) => c.actualStartDate)
+          .filter(Boolean) as string[];
+        const actualEnds = children
+          .map((c) => c.actualEndDate)
           .filter(Boolean) as string[];
         const ends = children
           .map((c) => c.endDate)
@@ -574,6 +581,12 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
         if (!starts.length || !ends.length) continue;
 
         const minStart = starts.reduce((a, b) => (a < b ? a : b));
+        const minActualStart = actualStarts.length
+          ? actualStarts.reduce((a, b) => (a < b ? a : b))
+          : null;
+        const maxActualEnd = actualEnds.length
+          ? actualEnds.reduce((a, b) => (a > b ? a : b))
+          : null;
         const maxEnd = ends.reduce((a, b) => (a > b ? a : b));
 
         // Determine aggregate status
@@ -609,6 +622,8 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
           stageCode: firstChild?.stageCode || null,
           startDate: minStart,
           endDate: maxEnd,
+          actualStartDate: minActualStart,
+          actualEndDate: maxActualEnd,
           sortOrder: firstChild?.sortOrder ?? 0,
           parentId: null,
           parentStage: null,
@@ -1529,13 +1544,13 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                           return { barStart: s, barEnd: e, ghostStart: null as string | null, ghostEnd: null as string | null };
                         }
                         if (ganttMode === "current") {
-                          const s = job.status === "COMPLETED" && job.actualStartDate ? job.actualStartDate : job.startDate;
-                          const e = job.status === "COMPLETED" && job.actualEndDate ? job.actualEndDate : job.endDate;
+                          const s = job.actualStartDate ?? job.startDate;
+                          const e = job.actualEndDate ?? job.endDate;
                           return { barStart: s, barEnd: e, ghostStart: null as string | null, ghostEnd: null as string | null };
                         }
                         // overlay: current bar + ghost original
-                        const s = job.status === "COMPLETED" && job.actualStartDate ? job.actualStartDate : job.startDate;
-                        const e = job.status === "COMPLETED" && job.actualEndDate ? job.actualEndDate : job.endDate;
+                        const s = job.actualStartDate ?? job.startDate;
+                        const e = job.actualEndDate ?? job.endDate;
                         const gs = job.originalStartDate || null;
                         const ge = job.originalEndDate || null;
                         return { barStart: s, barEnd: e, ghostStart: gs, ghostEnd: ge };
