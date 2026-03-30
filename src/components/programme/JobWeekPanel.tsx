@@ -21,6 +21,8 @@ import {
   ChevronRight,
   Pencil,
   Trash2,
+  HardHat,
+  Check,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -273,6 +275,13 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated }: Jo
   // Post-upload snag prompt
   const [snagPromptPhotos, setSnagPromptPhotos] = useState<JobPhoto[] | null>(null);
 
+  // Contractor state
+  const [panelContractors, setPanelContractors] = useState<Array<{ id: string; name: string; company: string | null }>>([]);
+  const [allContractors, setAllContractors] = useState<Array<{ id: string; name: string; company: string | null }>>([]);
+  const [contractorPickerOpen, setContractorPickerOpen] = useState(false);
+  const [selectedContractorIds, setSelectedContractorIds] = useState<Set<string>>(new Set());
+  const [savingContractors, setSavingContractors] = useState(false);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
 
@@ -329,6 +338,16 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated }: Jo
           setPhotos(allPhotos);
           setActions(allActions);
           setOrders(allOrders);
+          // Aggregate unique contractors from all child jobs
+          const contractorMap = new Map<string, { id: string; name: string; company: string | null }>();
+          for (const [, jobData] of results) {
+            if (Array.isArray(jobData.contractors)) {
+              for (const jc of jobData.contractors) {
+                if (jc.contact) contractorMap.set(jc.contact.id, jc.contact);
+              }
+            }
+          }
+          setPanelContractors(Array.from(contractorMap.values()));
         })
         .catch(console.error)
         .finally(() => setLoading(false));
@@ -344,11 +363,13 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated }: Jo
         setPhotos(Array.isArray(photosData) ? photosData : []);
         setActions(Array.isArray(jobData.actions) ? jobData.actions : []);
         setOrders(Array.isArray(jobData.orders) ? jobData.orders : []);
-        // Extract first contractor's contactId for snag auto-fill
+        // Extract contractors
         if (Array.isArray(jobData.contractors) && jobData.contractors.length > 0) {
           setJobContractorContactId(jobData.contractors[0].contact?.id || null);
+          setPanelContractors(jobData.contractors.map((jc: { contact: { id: string; name: string; company: string | null } | null }) => jc.contact).filter(Boolean));
         } else {
           setJobContractorContactId(null);
+          setPanelContractors([]);
         }
       })
       .catch(console.error)
@@ -376,6 +397,35 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated }: Jo
   }, [lightboxIndex, photos.length]);
 
   // Add note
+  const openContractorPicker = useCallback(async () => {
+    const res = await fetch("/api/contacts?type=CONTRACTOR");
+    const data = await res.json();
+    setAllContractors(Array.isArray(data) ? data.map((c: { id: string; name: string; company: string | null }) => ({ id: c.id, name: c.name, company: c.company })) : []);
+    setSelectedContractorIds(new Set(panelContractors.map((c) => c.id)));
+    setContractorPickerOpen(true);
+  }, [panelContractors]);
+
+  const saveContractors = useCallback(async () => {
+    if (!context || isSynthetic) return;
+    setSavingContractors(true);
+    try {
+      const res = await fetch(`/api/jobs/${context.job.id}/contractors`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contactIds: Array.from(selectedContractorIds) }),
+      });
+      if (res.ok) {
+        const updated = await res.json();
+        const contacts = updated.map((jc: { contact: { id: string; name: string; company: string | null } | null }) => jc.contact).filter(Boolean);
+        setPanelContractors(contacts);
+        setJobContractorContactId(contacts[0]?.id || null);
+      }
+    } finally {
+      setSavingContractors(false);
+      setContractorPickerOpen(false);
+    }
+  }, [context, isSynthetic, selectedContractorIds]);
+
   const handleAddNote = useCallback(async () => {
     if (!context || !noteText.trim()) return;
 
@@ -632,6 +682,30 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated }: Jo
                         : "?"}
                     </span>
                   </div>
+                )}
+              </div>
+
+              {/* Contractor row */}
+              <div className="flex items-center justify-between rounded-lg border bg-slate-50 px-3 py-2.5">
+                <div className="flex items-center gap-2">
+                  <HardHat className="size-4 shrink-0 text-muted-foreground" />
+                  {panelContractors.length === 0 ? (
+                    <span className="text-sm text-muted-foreground">No contractor assigned</span>
+                  ) : (
+                    <div className="flex flex-wrap gap-1.5">
+                      {panelContractors.map((c) => (
+                        <span key={c.id} className="rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-medium text-blue-700">
+                          {c.company || c.name}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                {!isSynthetic && (
+                  <Button variant="ghost" size="sm" className="h-7 shrink-0 gap-1 text-xs" onClick={openContractorPicker}>
+                    <Pencil className="size-3" />
+                    {panelContractors.length === 0 ? "Assign" : "Change"}
+                  </Button>
                 )}
               </div>
 
@@ -1142,6 +1216,57 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated }: Jo
           initialJobId={job.id}
           initialContactId={jobContractorContactId || undefined}
         />
+      )}
+
+      {/* Contractor Picker Dialog */}
+      {contractorPickerOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-sm rounded-xl bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b px-5 py-4">
+              <h3 className="font-semibold">Assign Contractor</h3>
+              <button onClick={() => setContractorPickerOpen(false)} className="rounded p-1 hover:bg-slate-100">
+                <X className="size-4" />
+              </button>
+            </div>
+            <div className="max-h-64 overflow-y-auto p-3">
+              {allContractors.length === 0 ? (
+                <p className="py-4 text-center text-sm text-muted-foreground">No contractors found</p>
+              ) : (
+                <div className="space-y-1">
+                  {allContractors.map((c) => {
+                    const selected = selectedContractorIds.has(c.id);
+                    return (
+                      <button
+                        key={c.id}
+                        onClick={() => setSelectedContractorIds((prev) => {
+                          const next = new Set(prev);
+                          selected ? next.delete(c.id) : next.add(c.id);
+                          return next;
+                        })}
+                        className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left hover:bg-slate-50"
+                      >
+                        <div className={`flex size-5 shrink-0 items-center justify-center rounded border ${selected ? "border-blue-600 bg-blue-600" : "border-slate-300"}`}>
+                          {selected && <Check className="size-3 text-white" />}
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium">{c.name}</p>
+                          {c.company && <p className="text-xs text-muted-foreground">{c.company}</p>}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+            <div className="flex justify-end gap-2 border-t px-5 py-3">
+              <Button variant="outline" size="sm" onClick={() => setContractorPickerOpen(false)}>Cancel</Button>
+              <Button size="sm" disabled={savingContractors} onClick={saveContractors}>
+                {savingContractors && <Loader2 className="mr-1.5 size-3.5 animate-spin" />}
+                Save ({selectedContractorIds.size})
+              </Button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Order Detail Sheet */}
