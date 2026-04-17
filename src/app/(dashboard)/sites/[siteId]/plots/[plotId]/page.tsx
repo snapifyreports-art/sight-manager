@@ -90,10 +90,13 @@ export default async function PlotDetailPage({
       description: job.description,
       startDate: job.startDate?.toISOString() ?? null,
       endDate: job.endDate?.toISOString() ?? null,
+      originalStartDate: job.originalStartDate?.toISOString() ?? null,
+      originalEndDate: job.originalEndDate?.toISOString() ?? null,
       status: job.status,
       parentId: job.parentId ?? null,
       parentStage: job.parentStage ?? null,
       sortOrder: job.sortOrder,
+      signedOffAt: job.signedOffAt?.toISOString() ?? null,
       assignedTo: job.assignedTo
         ? { id: job.assignedTo.id, name: job.assignedTo.name }
         : null,

@@ -53,6 +53,24 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         token.role = (user as { role: string }).role;
         token.permissions = (user as { permissions: string[] }).permissions;
       }
+      // Always refresh permissions from DB so changes take effect instantly
+      if (token.id) {
+        try {
+          const freshPerms = await prisma.userPermission.findMany({
+            where: { userId: token.id as string },
+            select: { permission: true },
+          });
+          token.permissions = freshPerms.map((p) => p.permission);
+          // Also refresh role in case it changed
+          const freshUser = await prisma.user.findUnique({
+            where: { id: token.id as string },
+            select: { role: true },
+          });
+          if (freshUser) token.role = freshUser.role;
+        } catch {
+          // Non-critical — keep existing token permissions
+        }
+      }
       return token;
     },
     async session({ session, token }) {

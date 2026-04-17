@@ -1,12 +1,14 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   Bell,
   BellOff,
   Smartphone,
   Loader2,
   AlertTriangle,
+  Download,
+  Share,
 } from "lucide-react";
 import {
   Card,
@@ -79,6 +81,44 @@ export function NotificationsSection() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
+  // PWA Install prompt
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [installPrompt, setInstallPrompt] = useState<any>(null);
+  const [isInstalled, setIsInstalled] = useState(false);
+  const [isIOS, setIsIOS] = useState(false);
+  const [showIOSGuide, setShowIOSGuide] = useState(false);
+
+  useEffect(() => {
+    // Check if already installed as PWA
+    if (typeof window !== "undefined") {
+      const isStandalone = window.matchMedia("(display-mode: standalone)").matches
+        || ("standalone" in window.navigator && (window.navigator as unknown as { standalone: boolean }).standalone);
+      setIsInstalled(isStandalone);
+
+      // Detect iOS
+      const ua = window.navigator.userAgent;
+      setIsIOS(/iPad|iPhone|iPod/.test(ua) || (ua.includes("Mac") && "ontouchend" in document));
+    }
+
+    // Listen for the beforeinstallprompt event (Chrome, Edge, Samsung Internet)
+    const handler = (e: Event) => {
+      e.preventDefault();
+      setInstallPrompt(e);
+    };
+    window.addEventListener("beforeinstallprompt", handler);
+    return () => window.removeEventListener("beforeinstallprompt", handler);
+  }, []);
+
+  const handleInstall = useCallback(async () => {
+    if (!installPrompt) return;
+    installPrompt.prompt();
+    const result = await installPrompt.userChoice;
+    if (result.outcome === "accepted") {
+      setIsInstalled(true);
+    }
+    setInstallPrompt(null);
+  }, [installPrompt]);
+
   // Fetch preferences on mount
   useEffect(() => {
     fetch("/api/notifications/preferences")
@@ -116,6 +156,58 @@ export function NotificationsSection() {
 
   return (
     <div className="space-y-6">
+      {/* Install App Card */}
+      {!isInstalled && (
+        <Card className="border-blue-200">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Download className="size-5 text-blue-600" />
+              Install App
+            </CardTitle>
+            <CardDescription>
+              Install Sight Manager as an app for the best experience — full screen, faster loading, and push notifications.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {installPrompt ? (
+              <Button onClick={handleInstall} className="w-full gap-2 bg-blue-600 hover:bg-blue-700">
+                <Download className="size-4" />
+                Install Sight Manager
+              </Button>
+            ) : isIOS ? (
+              <div className="space-y-3">
+                <Button variant="outline" className="w-full gap-2" onClick={() => setShowIOSGuide(!showIOSGuide)}>
+                  <Share className="size-4" />
+                  How to install on iOS
+                </Button>
+                {showIOSGuide && (
+                  <div className="rounded-lg border bg-slate-50 p-3 text-sm space-y-2">
+                    <p className="font-medium">To install on your iPhone or iPad:</p>
+                    <ol className="list-decimal ml-4 space-y-1 text-xs text-muted-foreground">
+                      <li>Tap the <strong>Share</strong> button <Share className="inline size-3" /> in Safari</li>
+                      <li>Scroll down and tap <strong>&quot;Add to Home Screen&quot;</strong></li>
+                      <li>Tap <strong>&quot;Add&quot;</strong> in the top right</li>
+                      <li>Open Sight Manager from your home screen</li>
+                    </ol>
+                    <p className="text-xs text-muted-foreground">Once installed, push notifications will be available.</p>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                Open this site in Chrome, Edge, or Samsung Internet to install as an app.
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      )}
+      {isInstalled && (
+        <div className="flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-700">
+          <Download className="size-4 shrink-0" />
+          <p className="font-medium">App installed — you&apos;re using Sight Manager as an app</p>
+        </div>
+      )}
+
       {/* Push Subscription Card */}
       <Card>
         <CardHeader>

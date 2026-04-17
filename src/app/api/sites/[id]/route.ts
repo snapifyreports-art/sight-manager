@@ -23,6 +23,9 @@ export async function GET(
       createdBy: {
         select: { id: true, name: true, email: true },
       },
+      assignedTo: {
+        select: { id: true, name: true },
+      },
       plots: {
         orderBy: { createdAt: "asc" },
         include: {
@@ -64,7 +67,7 @@ export async function PUT(
 
   const { id } = await params;
   const body = await request.json();
-  const { name, description, location, address, postcode, status } = body;
+  const { name, description, location, address, postcode, status, assignedToId } = body;
 
   const existing = await prisma.site.findUnique({ where: { id } });
   if (!existing) {
@@ -96,10 +99,14 @@ export async function PUT(
         postcode: postcode?.trim() || null,
       }),
       ...(status !== undefined && { status }),
+      ...(assignedToId !== undefined && { assignedToId: assignedToId || null }),
     },
     include: {
       createdBy: {
         select: { id: true, name: true, email: true },
+      },
+      assignedTo: {
+        select: { id: true, name: true },
       },
       plots: {
         orderBy: { createdAt: "asc" },
@@ -122,6 +129,17 @@ export async function PUT(
       },
     },
   });
+
+  // Cascade assignedToId to all jobs on this site
+  if (assignedToId !== undefined && assignedToId !== existing.assignedToId) {
+    const plotIds = (await prisma.plot.findMany({ where: { siteId: id }, select: { id: true } })).map((p) => p.id);
+    if (plotIds.length > 0) {
+      await prisma.job.updateMany({
+        where: { plotId: { in: plotIds } },
+        data: { assignedToId: assignedToId || null },
+      });
+    }
+  }
 
   await prisma.eventLog.create({
     data: {

@@ -33,7 +33,7 @@ export async function POST(request: NextRequest) {
   }
 
   // Verify site exists
-  const site = await prisma.site.findUnique({ where: { id: siteId } });
+  const site = await prisma.site.findUnique({ where: { id: siteId }, select: { id: true, assignedToId: true } });
   if (!site) {
     return NextResponse.json({ error: "Site not found" }, { status: 404 });
   }
@@ -106,7 +106,8 @@ export async function POST(request: NextRequest) {
           plot.id,
           plotStartDate,
           template.jobs,
-          supplierMappings || null
+          supplierMappings || null,
+          site.assignedToId
         );
 
         await tx.eventLog.create({

@@ -1,4 +1,6 @@
 import { prisma } from "@/lib/prisma";
+import { auth } from "@/lib/auth";
+import { getUserSiteIds } from "@/lib/site-access";
 import { DashboardClient, type DashboardData } from "@/components/dashboard/DashboardClient";
 
 export const dynamic = "force-dynamic";
@@ -8,6 +10,17 @@ export const metadata = {
 };
 
 export default async function DashboardPage() {
+  const session = await auth();
+  const siteIds = session
+    ? await getUserSiteIds(session.user.id, session.user.role)
+    : null;
+
+  // Build where clauses for site-filtered queries
+  const siteWhere = siteIds !== null ? { id: { in: siteIds } } : {};
+  const jobSiteWhere = siteIds !== null ? { plot: { siteId: { in: siteIds } } } : {};
+  const orderSiteWhere = siteIds !== null ? { job: { plot: { siteId: { in: siteIds } } } } : {};
+  const eventSiteWhere = siteIds !== null ? { siteId: { in: siteIds } } : {};
+
   // Run all queries in parallel for performance
   const [
     totalSites,
@@ -17,28 +30,31 @@ export default async function DashboardPage() {
     recentEvents,
     trafficLightJobs,
   ] = await Promise.all([
-    // Total sites
-    prisma.site.count(),
+    // Total sites (filtered)
+    prisma.site.count({ where: siteWhere }),
 
-    // Total contacts
+    // Total contacts (not site-specific)
     prisma.contact.count(),
 
-    // Orders grouped by status
+    // Orders grouped by status (filtered)
     prisma.materialOrder.groupBy({
       by: ["status"],
+      where: orderSiteWhere,
       _count: { status: true },
     }),
 
-    // Jobs grouped by status
+    // Jobs grouped by status (filtered)
     prisma.job.groupBy({
       by: ["status"],
+      where: jobSiteWhere,
       _count: { status: true },
     }),
 
-    // Recent 10 events with relations
+    // Recent 10 events with relations (filtered)
     prisma.eventLog.findMany({
       take: 10,
       orderBy: { createdAt: "desc" },
+      where: eventSiteWhere,
       include: {
         user: { select: { name: true } },
         site: { select: { id: true, name: true } },
@@ -46,12 +62,13 @@ export default async function DashboardPage() {
       },
     }),
 
-    // Jobs for traffic light display (exclude completed, limit for display)
+    // Jobs for traffic light display (filtered)
     prisma.job.findMany({
       take: 12,
       orderBy: { updatedAt: "desc" },
       where: {
         status: { in: ["IN_PROGRESS", "ON_HOLD", "NOT_STARTED"] },
+        ...jobSiteWhere,
       },
       select: {
         id: true,
@@ -89,7 +106,7 @@ export default async function DashboardPage() {
   }
   const totalOrders = Object.values(ordersByStatus).reduce((a, b) => a + b, 0);
   const ordersToSend = ordersByStatus["PENDING"] ?? 0;
-  const awaitingDelivery = (ordersByStatus["ORDERED"] ?? 0) + (ordersByStatus["CONFIRMED"] ?? 0);
+  const awaitingDelivery = (ordersByStatus["ORDERED"] ?? 0);
   const deliveredOrders = ordersByStatus["DELIVERED"] ?? 0;
 
   // Serialize dates for client component

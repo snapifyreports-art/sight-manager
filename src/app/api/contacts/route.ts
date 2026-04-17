@@ -61,5 +61,13 @@ export async function POST(req: NextRequest) {
     },
   });
 
+  await prisma.eventLog.create({
+    data: {
+      type: "USER_ACTION",
+      description: `${type === "CONTRACTOR" ? "Contractor" : "Supplier"} "${name}"${company ? ` (${company})` : ""} added`,
+      userId: session.user.id,
+    },
+  });
+
   return NextResponse.json(contact, { status: 201 });
 }

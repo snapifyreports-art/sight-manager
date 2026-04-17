@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getServerCurrentDate } from "@/lib/dev-date";
-import { addDays, addWeeks, differenceInCalendarDays } from "date-fns";
+import { addWeeks, differenceInCalendarDays } from "date-fns";
+import { addWorkingDays, snapToWorkingDay } from "@/lib/working-days";
 import { getNextMonday } from "@/lib/schedule";
 
 export const dynamic = "force-dynamic";
@@ -27,10 +28,11 @@ export async function POST(
 
   const { id: plotId } = await params;
   const body = await req.json();
-  const { decision, nextJobId, pushWeeks } = body as {
+  const { decision, nextJobId, pushWeeks, awaitingContractor } = body as {
     decision: "start_today" | "start_next_monday" | "push_weeks" | "leave_for_now";
     nextJobId?: string;
     pushWeeks?: number;
+    awaitingContractor?: boolean;
   };
 
   const now = getServerCurrentDate(req);
@@ -47,13 +49,18 @@ export async function POST(
   if (decision === "leave_for_now") {
     await prisma.plot.update({
       where: { id: plotId },
-      data: { awaitingRestart: true },
+      data: {
+        awaitingRestart: true,
+        ...(awaitingContractor ? { awaitingContractorConfirmation: true } : {}),
+      },
     });
 
     await prisma.eventLog.create({
       data: {
         type: "USER_ACTION",
-        description: `Plot ${plot.plotNumber || plotId}: next job deferred — awaiting restart decision`,
+        description: awaitingContractor
+          ? `Plot ${plot.plotNumber || plotId}: awaiting contractor confirmation`
+          : `Plot ${plot.plotNumber || plotId}: next job deferred — awaiting restart decision`,
         siteId: plot.siteId,
         plotId,
         userId: session.user.id,
@@ -97,7 +104,11 @@ export async function POST(
       ? Math.max(1, differenceInCalendarDays(nextJob.endDate, nextJob.startDate))
       : 7;
 
-  const targetEnd = addDays(targetStart, durationDays);
+  // Snap target start to working day
+  targetStart = snapToWorkingDay(targetStart, "forward");
+  // Duration stays calendar days
+  const targetEnd = new Date(targetStart);
+  targetEnd.setDate(targetEnd.getDate() + durationDays);
 
   // Delta to apply to all subsequent jobs
   const delta = nextJob.startDate
@@ -105,6 +116,14 @@ export async function POST(
     : 0;
 
   await prisma.$transaction(async (tx) => {
+    // Preserve original dates before any shift
+    if (!nextJob.originalStartDate && nextJob.startDate) {
+      await tx.job.update({
+        where: { id: nextJobId },
+        data: { originalStartDate: nextJob.startDate, originalEndDate: nextJob.endDate },
+      });
+    }
+
     // Update next job dates
     await tx.job.update({
       where: { id: nextJobId },
@@ -116,16 +135,27 @@ export async function POST(
       const subsequent = allPlotJobs.filter((j) => j.sortOrder > nextJob.sortOrder);
       for (const job of subsequent) {
         if (!job.startDate || !job.endDate) continue;
+        // Preserve original dates on first shift
+        const preserveOriginals: Record<string, unknown> = {};
+        if (!job.originalStartDate) {
+          preserveOriginals.originalStartDate = job.startDate;
+          preserveOriginals.originalEndDate = job.endDate;
+        }
+        const newJobStart = snapToWorkingDay(addWorkingDays(job.startDate, delta), "forward");
+        const jobDuration = differenceInCalendarDays(job.endDate, job.startDate);
+        const newJobEnd = new Date(newJobStart);
+        newJobEnd.setDate(newJobEnd.getDate() + jobDuration);
         await tx.job.update({
           where: { id: job.id },
           data: {
-            startDate: addDays(job.startDate, delta),
-            endDate: addDays(job.endDate, delta),
+            startDate: newJobStart,
+            endDate: newJobEnd,
+            ...preserveOriginals,
           },
         });
       }
 
-      // Shift pending/ordered material orders on shifted jobs
+      // Shift pending/ordered material orders on shifted jobs (exclude CANCELLED)
       const shiftedJobIds = subsequent.map((j) => j.id).concat(nextJobId);
       const orders = await tx.materialOrder.findMany({
         where: { jobId: { in: shiftedJobIds }, status: { in: ["PENDING", "ORDERED"] } },
@@ -134,9 +164,9 @@ export async function POST(
         await tx.materialOrder.update({
           where: { id: order.id },
           data: {
-            dateOfOrder: order.dateOfOrder ? addDays(order.dateOfOrder, delta) : undefined,
+            dateOfOrder: order.dateOfOrder ? snapToWorkingDay(addWorkingDays(order.dateOfOrder, delta), "back") : undefined,
             expectedDeliveryDate: order.expectedDeliveryDate
-              ? addDays(order.expectedDeliveryDate, delta)
+              ? snapToWorkingDay(addWorkingDays(order.expectedDeliveryDate, delta), "back")
               : undefined,
           },
         });
@@ -168,10 +198,10 @@ export async function POST(
       },
     });
 
-    // Clear awaitingRestart
+    // Clear awaitingRestart and contractor confirmation
     await tx.plot.update({
       where: { id: plotId },
-      data: { awaitingRestart: false },
+      data: { awaitingRestart: false, awaitingContractorConfirmation: false },
     });
   });
 

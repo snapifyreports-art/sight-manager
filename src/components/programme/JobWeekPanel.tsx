@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { format, differenceInCalendarDays, addDays } from "date-fns";
+import { useJobAction } from "@/hooks/useJobAction";
 import Link from "next/link";
 import {
   Loader2,
@@ -71,7 +72,7 @@ interface PanelOrder {
   status: string;
   itemsDescription?: string | null;
   supplier: { name: string };
-  orderItems?: Array<{ description: string | null; quantity: number }>;
+  orderItems?: Array<{ name: string; quantity: number }>;
 }
 
 interface PanelJob {
@@ -320,6 +321,10 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
     isChild: boolean;
   } | null>(null);
   const [cascadeLoading, setCascadeLoading] = useState(false);
+  const [orderConflictDialog, setOrderConflictDialog] = useState<{
+    conflicts: Array<{ jobName: string; orderDate: string; deliveryDate: string | null; newOrderDate: string; newDeliveryDate: string | null }>;
+    onConfirm: () => void;
+  } | null>(null);
 
   // Pre-start checks (dependency + delivery warnings)
   const [preStartChecks, setPreStartChecks] = useState<{
@@ -345,6 +350,18 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
   const [childJobs, setChildJobs] = useState<Array<{ id: string; name: string; status: string; sortOrder: number; startDate: string | null; endDate: string | null; actualStartDate?: string | null; actualEndDate?: string | null; contractor: { id: string; name: string; company: string | null } | null }>>([]);
   const [childJobStatuses, setChildJobStatuses] = useState<Map<string, string>>(new Map());
   const [childJobActionLoading, setChildJobActionLoading] = useState<Set<string>>(new Set());
+
+  // Centralised job start hook — full pre-start flow (order warnings, early/late, predecessor)
+  const { triggerAction: triggerCentralStart, dialogs: centralStartDialogs } = useJobAction(
+    async (_action, jobId) => {
+      // After start completes, update local state and refresh
+      if (context?.job.id === jobId) setLocalStatus("IN_PROGRESS");
+      else setChildJobStatuses((prev) => new Map(prev).set(jobId, "IN_PROGRESS"));
+      const jobData = await fetch(`/api/jobs/${jobId}`, { cache: "no-store" }).then((r) => r.json());
+      setActions(Array.isArray(jobData.actions) ? jobData.actions : []);
+      onJobUpdated?.();
+    }
+  );
   const [childJobSignOff, setChildJobSignOff] = useState<string | null>(null);
   const [childSignOffNotes, setChildSignOffNotes] = useState("");
 
@@ -564,6 +581,28 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
 
   // Fire the actual start/stop/complete API call (shared by direct and post-dialog paths)
   const fireJobAction = useCallback(async (jobId: string, action: "start" | "stop" | "complete", notes?: string) => {
+    // For start actions: check if job starts early/late and cascade first
+    if (action === "start" && context?.job) {
+      const jobStart = context.job.startDate;
+      const jobEnd = context.job.endDate;
+      if (jobStart && jobEnd) {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const planned = new Date(jobStart);
+        planned.setHours(0, 0, 0, 0);
+        const diff = Math.round((planned.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+        if (diff !== 0) {
+          // Pull forward (early) or push back (late) — cascade the programme
+          const newEnd = new Date(new Date(jobEnd).getTime() - diff * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+          await fetch(`/api/jobs/${jobId}/cascade`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ newEndDate: newEnd, confirm: true }),
+          });
+        }
+      }
+    }
+
     const res = await fetch(`/api/jobs/${jobId}/actions`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -594,55 +633,20 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
   const handleJobAction = useCallback(async (action: "start" | "stop" | "complete", notes?: string) => {
     if (!context || isSynthetic) return;
     const jobId = context.job.id;
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
 
     if (action === "start") {
-      // Check for incomplete predecessor job on this plot
-      let prevJob: { id: string; name: string } | null = null;
-      try {
-        const siblingsRes = await fetch(`/api/jobs/${jobId}/siblings`);
-        if (siblingsRes.ok) {
-          const { siblings } = await siblingsRes.json();
-          const current = siblings.find((s: { id: string }) => s.id === jobId);
-          if (current) {
-            const prev = [...siblings]
-              .filter((s: { sortOrder: number; status: string }) => s.sortOrder < current.sortOrder && s.status !== "COMPLETED")
-              .sort((a: { sortOrder: number }, b: { sortOrder: number }) => b.sortOrder - a.sortOrder)[0] ?? null;
-            if (prev) prevJob = { id: prev.id, name: prev.name };
-          }
-        }
-      } catch { /* non-critical */ }
-
-      const undelivered = orders.filter((o) => o.status !== "DELIVERED" && o.status !== "CANCELLED");
-
-      if (prevJob || undelivered.length > 0) {
-        setPreStartChecks({
-          jobId, jobName: context.job.name, isChild: false,
-          prevJob,
-          undeliveredOrders: undelivered.map((o) => ({ id: o.id, supplier: o.supplier.name })),
-          signOffPrev: false, markDelivered: false,
-        });
-        return;
-      }
-
-      // Early start: intercept and show programme impact dialog
-      if (context.job.startDate) {
-        const planned = new Date(context.job.startDate);
-        planned.setHours(0, 0, 0, 0);
-        const daysEarly = differenceInCalendarDays(planned, today);
-        if (daysEarly > 0) {
-          setEarlyStartDialog({ jobId, jobName: context.job.name, daysEarly, endDate: context.job.endDate ?? null, isChild: false });
-          return;
-        }
-      }
+      // Delegate to centralised hook — full pre-start flow (orders, predecessor, early/late)
+      await triggerCentralStart(
+        { id: jobId, name: context.job.name, status: context.job.status, startDate: context.job.startDate ?? null, endDate: context.job.endDate ?? null },
+        "start"
+      );
+      return;
     }
 
     setJobActionLoading(true);
     try {
       const ok = await fireJobAction(jobId, action, notes);
       if (ok) {
-        if (action === "start") setLocalStatus("IN_PROGRESS");
         if (action === "stop") setLocalStatus("ON_HOLD");
         if (action === "complete") setLocalStatus("COMPLETED");
         setShowSignOffForm(false);
@@ -653,43 +657,25 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
     } finally {
       setJobActionLoading(false);
     }
-  }, [context, isSynthetic, orders, fireJobAction]);
+  }, [context, isSynthetic, fireJobAction, triggerCentralStart]);
 
   // Action on an individual child job inside a synthetic parent panel
   const handleChildJobAction = useCallback(async (childId: string, action: "start" | "stop" | "complete", notes?: string) => {
     if (action === "start") {
+      // Delegate to centralised hook — full pre-start flow
       const child = childJobs.find((c) => c.id === childId);
-      // Check for incomplete predecessor among siblings (other children with lower sortOrder)
-      const prevIncompleteChild = child
-        ? childJobs
-            .filter((c) => c.sortOrder < child.sortOrder && (childJobStatuses.get(c.id) ?? c.status) !== "COMPLETED")
-            .sort((a, b) => b.sortOrder - a.sortOrder)[0] ?? null
-        : null;
-      if (prevIncompleteChild) {
-        setPreStartChecks({
-          jobId: childId, jobName: child?.name ?? "", isChild: true,
-          prevJob: { id: prevIncompleteChild.id, name: prevIncompleteChild.name },
-          undeliveredOrders: [], signOffPrev: false, markDelivered: false,
-        });
-        return;
-      }
-      // Early start intercept for child jobs
-      if (child?.startDate) {
-        const today = new Date(); today.setHours(0, 0, 0, 0);
-        const planned = new Date(child.startDate); planned.setHours(0, 0, 0, 0);
-        const daysEarly = differenceInCalendarDays(planned, today);
-        if (daysEarly > 0) {
-          setEarlyStartDialog({ jobId: childId, jobName: child.name, daysEarly, endDate: child.endDate, isChild: true });
-          return;
-        }
-      }
+      await triggerCentralStart(
+        { id: childId, name: child?.name ?? "", status: child?.status ?? "NOT_STARTED", startDate: child?.startDate ?? null, endDate: child?.endDate ?? null },
+        "start"
+      );
+      return;
     }
 
     setChildJobActionLoading((prev) => new Set(prev).add(childId));
     try {
       const ok = await fireJobAction(childId, action, notes);
       if (ok) {
-        const newStatus = action === "start" ? "IN_PROGRESS" : action === "stop" ? "ON_HOLD" : "COMPLETED";
+        const newStatus = action === "stop" ? "ON_HOLD" : "COMPLETED";
         setChildJobStatuses((prev) => new Map(prev).set(childId, newStatus));
         setChildJobSignOff(null);
         setChildSignOffNotes("");
@@ -710,9 +696,7 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
   }, [childJobs, fireJobAction]);
 
   // Handle "Pull Forward" — cascade all subsequent jobs earlier, then start
-  const handlePullForward = useCallback(async () => {
-    if (!earlyStartDialog) return;
-    const { jobId, daysEarly, endDate, isChild } = earlyStartDialog;
+  const executePullForward = useCallback(async (jobId: string, daysEarly: number, endDate: string | null, isChild: boolean) => {
     setCascadeLoading(true);
     try {
       if (endDate) {
@@ -735,7 +719,59 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
     } finally {
       setCascadeLoading(false);
     }
-  }, [earlyStartDialog, fireJobAction]);
+  }, [fireJobAction]);
+
+  const handlePullForward = useCallback(async () => {
+    if (!earlyStartDialog) return;
+    const { jobId, daysEarly, endDate, isChild } = earlyStartDialog;
+
+    // Preview the cascade to check if any order dates would go into the past
+    if (endDate) {
+      const newEnd = addDays(new Date(endDate), -daysEarly).toISOString().split("T")[0];
+      try {
+        const res = await fetch(`/api/jobs/${jobId}/cascade`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ newEndDate: newEnd }),
+        });
+        if (res.ok) {
+          const preview = await res.json();
+          const today = new Date().toISOString().split("T")[0];
+          // Build a map of jobId → jobName from the preview
+          type PreviewJobUpdate = { jobId: string; jobName: string };
+          type PreviewOrderUpdate = { orderId: string; jobId: string; newOrderDate: string; newDeliveryDate: string | null; originalOrderDate: string; originalDeliveryDate: string | null };
+          const jobNameMap = new Map<string, string>(
+            (preview.jobUpdates ?? []).map((u: PreviewJobUpdate) => [u.jobId, u.jobName])
+          );
+          const conflicts = (preview.orderUpdates ?? [])
+            .filter((u: PreviewOrderUpdate) =>
+              u.newOrderDate.slice(0, 10) < today || (u.newDeliveryDate && u.newDeliveryDate.slice(0, 10) < today)
+            )
+            .map((u: PreviewOrderUpdate) => ({
+              jobName: jobNameMap.get(u.jobId) ?? "Unknown job",
+              orderDate: u.originalOrderDate.slice(0, 10),
+              deliveryDate: u.originalDeliveryDate ? u.originalDeliveryDate.slice(0, 10) : null,
+              newOrderDate: u.newOrderDate.slice(0, 10),
+              newDeliveryDate: u.newDeliveryDate ? u.newDeliveryDate.slice(0, 10) : null,
+            }));
+          if (conflicts.length > 0) {
+            setOrderConflictDialog({
+              conflicts,
+              onConfirm: () => {
+                setOrderConflictDialog(null);
+                executePullForward(jobId, daysEarly, endDate, isChild);
+              },
+            });
+            return;
+          }
+        }
+      } catch {
+        // If preview fails, proceed anyway
+      }
+    }
+
+    executePullForward(jobId, daysEarly, endDate, isChild);
+  }, [earlyStartDialog, executePullForward]);
 
   // Handle "Expand Job" — just start, keep end date (more calendar time for this job)
   const handleExpandJob = useCallback(async () => {
@@ -1090,8 +1126,9 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
 
   return (
     <>
+      {centralStartDialogs}
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto">
+        <DialogContent className="w-[calc(100vw-2rem)] sm:max-w-lg max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <div className="flex items-center gap-2">
               <div
@@ -1380,13 +1417,13 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
 
                       {/* Days */}
                       <div className="flex items-center gap-2">
-                        <span className="text-xs text-slate-600 shrink-0">Days:</span>
+                        <span className="text-xs text-slate-600 shrink-0">Working days (Mon-Fri):</span>
                         <input
                           type="number"
-                          min={1}
+                          min={0}
                           max={365}
-                          value={delayDays}
-                          onChange={(e) => setDelayDays(Math.max(1, parseInt(e.target.value) || 1))}
+                          value={delayDays || ""}
+                          onChange={(e) => setDelayDays(parseInt(e.target.value) || 0)}
                           className="w-16 rounded border px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-amber-400"
                         />
                       </div>
@@ -1427,11 +1464,11 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
                         <Button
                           size="sm"
                           className="flex-1 bg-amber-500 hover:bg-amber-600 text-white"
-                          disabled={delayLoading}
+                          disabled={delayLoading || !delayDays || delayDays < 1}
                           onClick={handleDelay}
                         >
                           {delayLoading ? <Loader2 className="size-3 animate-spin mr-1" /> : <Clock className="size-3 mr-1" />}
-                          Delay {delayDays}d
+                          Delay {delayDays || 0} working day{delayDays !== 1 ? "s" : ""}
                         </Button>
                       </div>
                     </div>
@@ -1479,7 +1516,6 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
                       const statusColors: Record<string, string> = {
                         PENDING: "bg-slate-100 text-slate-600",
                         ORDERED: "bg-blue-100 text-blue-700",
-                        CONFIRMED: "bg-amber-100 text-amber-700",
                         DELIVERED: "bg-green-100 text-green-700",
                         CANCELLED: "bg-red-100 text-red-700",
                       };
@@ -1503,7 +1539,7 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
                           {order.orderItems && order.orderItems.length > 0 && (
                             <p className="mt-1 text-xs text-muted-foreground truncate">
                               {order.orderItems
-                                .map((i) => `${i.quantity}x ${i.description || "item"}`)
+                                .map((i) => `${i.quantity}x ${i.name || "item"}`)
                                 .join(", ")}
                             </p>
                           )}
@@ -1546,7 +1582,7 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
                                   Mark Sent
                                 </Button>
                               )}
-                              {(order.status === "ORDERED" || order.status === "CONFIRMED") && (
+                              {order.status === "ORDERED" && (
                                 <Button
                                   variant="outline"
                                   size="sm"
@@ -1974,7 +2010,7 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
 
       {/* Contractor Picker Dialog */}
       <Dialog open={contractorPickerOpen} onOpenChange={(o) => { if (!o) { setContractorPickerOpen(false); setContractorPickerTargetJobId(null); } }}>
-        <DialogContent className="max-w-sm">
+        <DialogContent className="w-[calc(100vw-2rem)] max-w-sm">
           <DialogHeader>
             <DialogTitle>Assign Contractor</DialogTitle>
             {contractorPickerTargetJobId && (
@@ -2046,7 +2082,7 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
 
       {/* Pre-start checks: incomplete predecessor + undelivered orders */}
       <Dialog open={!!preStartChecks} onOpenChange={(o) => { if (!o) setPreStartChecks(null); }}>
-        <DialogContent className="max-w-sm">
+        <DialogContent className="w-[calc(100vw-2rem)] max-w-sm">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <AlertTriangle className="size-4 text-amber-500" />
@@ -2121,7 +2157,7 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
 
       {/* Post-completion: offer programme adjustment when there was deviation */}
       <Dialog open={!!completionShiftDialog} onOpenChange={(o) => { if (!o) setCompletionShiftDialog(null); }}>
-        <DialogContent className="max-w-sm">
+        <DialogContent className="w-[calc(100vw-2rem)] max-w-sm">
           <DialogHeader>
             <DialogTitle>Programme Impact</DialogTitle>
             <DialogDescription>
@@ -2187,7 +2223,7 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
 
       {/* Early-start programme impact dialog */}
       <Dialog open={!!earlyStartDialog} onOpenChange={(o) => { if (!o) setEarlyStartDialog(null); }}>
-        <DialogContent className="max-w-sm">
+        <DialogContent className="w-[calc(100vw-2rem)] max-w-sm">
           <DialogHeader>
             <DialogTitle>Starting Early</DialogTitle>
             <DialogDescription>
@@ -2238,6 +2274,53 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
                   <Loader2 className="size-3.5 animate-spin" /> Updating programme…
                 </div>
               )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Order conflict warning dialog — shown when pull-forward would push order dates into the past */}
+      <Dialog open={!!orderConflictDialog} onOpenChange={(o) => { if (!o) setOrderConflictDialog(null); }}>
+        <DialogContent className="w-[calc(100vw-2rem)] max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-amber-700">
+              <AlertTriangle className="size-4" /> Order Date Conflict
+            </DialogTitle>
+            <DialogDescription>
+              Pulling the programme forward would push the following order dates into the past. These orders may need to be re-placed.
+            </DialogDescription>
+          </DialogHeader>
+          {orderConflictDialog && (
+            <div className="space-y-3">
+              <div className="max-h-48 overflow-y-auto space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-3">
+                {orderConflictDialog.conflicts.map((c, i) => (
+                  <div key={i} className="text-xs">
+                    <p className="font-semibold text-amber-900">{c.jobName}</p>
+                    <p className="text-amber-700">
+                      Order: {c.orderDate.slice(0, 10)} → <span className="font-medium text-red-600">{c.newOrderDate.slice(0, 10)}</span>
+                    </p>
+                    {c.newDeliveryDate && (
+                      <p className="text-amber-700">
+                        Delivery: {c.deliveryDate?.slice(0, 10) ?? "—"} → <span className="font-medium text-red-600">{c.newDeliveryDate.slice(0, 10)}</span>
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={orderConflictDialog.onConfirm}
+                  className="flex-1 rounded-xl bg-amber-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-amber-700 transition-colors"
+                >
+                  Pull Forward Anyway
+                </button>
+                <button
+                  onClick={() => setOrderConflictDialog(null)}
+                  className="flex-1 rounded-xl border border-border/60 px-4 py-2.5 text-sm text-muted-foreground hover:bg-slate-50 transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
             </div>
           )}
         </DialogContent>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useDevDate } from "@/lib/dev-date-context";
 import {
@@ -111,7 +112,6 @@ const STATUS_COLORS: Record<string, string> = {
 const ORDER_COLORS: Record<string, string> = {
   PENDING: "#94a3b8",
   ORDERED: "#3b82f6",
-  CONFIRMED: "#8b5cf6",
   DELIVERED: "#22c55e",
   CANCELLED: "#ef4444",
 };
@@ -380,7 +380,7 @@ export function AnalyticsClient() {
                   <div key={site.siteId} className="group">
                     <div className="flex items-center justify-between mb-1.5">
                       <div className="flex items-center gap-2">
-                        <span className="text-sm font-semibold">{site.siteName}</span>
+                        <Link href={`/sites/${site.siteId}`} className="text-sm font-semibold hover:text-blue-600 hover:underline">{site.siteName}</Link>
                         {site.onTrack ? (
                           <span className="inline-flex items-center gap-0.5 rounded-full bg-green-100 px-1.5 py-0.5 text-[10px] font-semibold text-green-700">
                             <CheckCircle2 className="size-2.5" />
@@ -579,7 +579,9 @@ export function AnalyticsClient() {
                 <tbody>
                   {data.contractorPerformance.map((c) => (
                     <tr key={c.id} className="border-b last:border-0">
-                      <td className="py-2 font-medium">{c.name}</td>
+                      <td className="py-2 font-medium">
+                        <Link href={`/contacts?highlight=${c.id}`} className="hover:text-blue-600 hover:underline">{c.name}</Link>
+                      </td>
                       <td className="py-2 text-center">{c.totalJobs}</td>
                       <td className="py-2 text-center">{c.completedJobs}</td>
                       <td className="py-2 text-center">

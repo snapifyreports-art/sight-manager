@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { format, addDays } from "date-fns";
+import { buildOrderMailto } from "@/lib/order-email";
 import {
   Package,
   Loader2,
@@ -63,7 +64,7 @@ interface SiteOrder {
   deliveredDate: string | null;
   leadTimeDays: number | null;
   automated: boolean;
-  supplier: { id: string; name: string; contactEmail: string | null; contactName: string | null };
+  supplier: { id: string; name: string; contactEmail: string | null; contactName: string | null; accountNumber: string | null };
   job: {
     id: string;
     name: string;
@@ -118,10 +119,6 @@ const STATUS_CONFIG: Record<string, { label: string; className: string }> = {
     label: "Ordered",
     className: "bg-blue-500/15 text-blue-700 dark:text-blue-400",
   },
-  CONFIRMED: {
-    label: "Confirmed",
-    className: "bg-purple-500/15 text-purple-700 dark:text-purple-400",
-  },
   DELIVERED: {
     label: "Delivered",
     className: "bg-green-500/15 text-green-700 dark:text-green-400",
@@ -136,7 +133,6 @@ const FILTER_TABS = [
   { value: "all", label: "All" },
   { value: "PENDING", label: "Pending" },
   { value: "ORDERED", label: "Ordered" },
-  { value: "CONFIRMED", label: "Confirmed" },
   { value: "DELIVERED", label: "Delivered" },
 ];
 
@@ -182,6 +178,7 @@ function WizardSteps({ step }: { step: number }) {
 
 export function SiteOrders({ siteId }: SiteOrdersProps) {
   const [orders, setOrders] = useState<SiteOrder[]>([]);
+  const [siteInfo, setSiteInfo] = useState<{ name: string; address: string | null; postcode: string | null } | null>(null);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("all");
   const [pendingActions, setPendingActions] = useState<Set<string>>(new Set());
@@ -243,14 +240,14 @@ export function SiteOrders({ siteId }: SiteOrdersProps) {
   const refreshOrders = () => {
     fetch(`/api/sites/${siteId}/orders`)
       .then((r) => r.json())
-      .then(setOrders)
+      .then((data) => { setOrders(data.orders || data); if (data.site) setSiteInfo(data.site); })
       .catch(console.error);
   };
 
   useEffect(() => {
     fetch(`/api/sites/${siteId}/orders`)
       .then((r) => r.json())
-      .then(setOrders)
+      .then((data) => { setOrders(data.orders || data); if (data.site) setSiteInfo(data.site); })
       .finally(() => setLoading(false));
   }, [siteId]);
 
@@ -452,7 +449,6 @@ export function SiteOrders({ siteId }: SiteOrdersProps) {
   const statusCounts = {
     PENDING: orders.filter((o) => o.status === "PENDING").length,
     ORDERED: orders.filter((o) => o.status === "ORDERED").length,
-    CONFIRMED: orders.filter((o) => o.status === "CONFIRMED").length,
     DELIVERED: orders.filter((o) => o.status === "DELIVERED").length,
   };
 
@@ -579,12 +575,11 @@ export function SiteOrders({ siteId }: SiteOrdersProps) {
                 o.status !== "CANCELLED"
             );
             const dominantStatus = (() => {
-              for (const s of ["PENDING", "ORDERED", "CONFIRMED", "DELIVERED", "CANCELLED"]) {
+              for (const s of ["PENDING", "ORDERED", "DELIVERED", "CANCELLED"]) {
                 if (group.every((o) => o.status === s)) return s;
               }
               // mixed — pick the most "in-progress" one
               return group.find((o) => o.status === "ORDERED")?.status
-                ?? group.find((o) => o.status === "CONFIRMED")?.status
                 ?? group[0].status;
             })();
             const config = STATUS_CONFIG[dominantStatus] ?? STATUS_CONFIG.PENDING;
@@ -595,7 +590,20 @@ export function SiteOrders({ siteId }: SiteOrdersProps) {
             const itemTotal = items.reduce((s, i) => s + i.quantity * i.unitCost, 0);
             const groupTotal = itemTotal * group.length;
             const mailto = order.supplier.contactEmail
-              ? `mailto:${encodeURIComponent(order.supplier.contactEmail)}?subject=${encodeURIComponent(`Material Order — ${order.job.name}`)}&body=${encodeURIComponent(`Hi ${order.supplier.contactName || order.supplier.name},\n\nPlease supply the following for ${order.job.name} (${group.length} plot${group.length !== 1 ? "s" : ""}):\n\n${items.map(i => `${i.name}: ${i.quantity} ${i.unit}`).join("\n") || order.itemsDescription || "Materials as discussed"}${order.expectedDeliveryDate ? `\n\nRequired by: ${format(new Date(order.expectedDeliveryDate), "dd MMM yyyy")}` : ""}\n\nPlease confirm receipt.\n\nRegards`)}`
+              ? buildOrderMailto(order.supplier.contactEmail, {
+                  supplierName: order.supplier.name,
+                  supplierContactName: order.supplier.contactName,
+                  supplierAccountNumber: order.supplier.accountNumber,
+                  jobName: order.job.name,
+                  siteName: siteInfo?.name || "",
+                  siteAddress: siteInfo?.address,
+                  sitePostcode: siteInfo?.postcode,
+                  plotNumbers: group.map((g) => g.job.plot.plotNumber ? `Plot ${g.job.plot.plotNumber}` : g.job.plot.name),
+                  items: items.map((i) => ({ name: i.name, quantity: i.quantity, unit: i.unit, unitCost: i.unitCost })),
+                  itemsDescriptionFallback: order.itemsDescription,
+                  expectedDeliveryDate: order.expectedDeliveryDate,
+                  orderDate: order.dateOfOrder,
+                })
               : null;
 
             return (
@@ -672,9 +680,6 @@ export function SiteOrders({ siteId }: SiteOrdersProps) {
                       </span>
                     )}
                   </div>
-                  {order.automated && (
-                    <Badge variant="secondary" className="text-[9px]">Auto-ordered</Badge>
-                  )}
                 </CardContent>
                 {dominantStatus !== "DELIVERED" && dominantStatus !== "CANCELLED" && (
                   <div className="flex gap-1.5 border-t px-3 pb-3 pt-2">
@@ -698,19 +703,12 @@ export function SiteOrders({ siteId }: SiteOrdersProps) {
                             </Button>
                           </>
                         )}
-                        {(dominantStatus === "ORDERED" || dominantStatus === "CONFIRMED") && (
+                        {dominantStatus === "ORDERED" && (
                           <Button variant="outline" size="sm"
                             className="h-6 flex-1 gap-1 border-green-200 text-[11px] text-green-700 hover:bg-green-50"
                             onClick={() => handleGroupStatus(groupIds, "DELIVERED")}>
                             <CheckCircle2 className="size-2.5" />
                             {group.length > 1 ? `Delivered (${group.length})` : "Delivered"}
-                          </Button>
-                        )}
-                        {dominantStatus === "ORDERED" && (
-                          <Button variant="outline" size="sm"
-                            className="h-6 flex-1 gap-1 border-purple-200 text-[11px] text-purple-700 hover:bg-purple-50"
-                            onClick={() => handleGroupStatus(groupIds, "CONFIRMED")}>
-                            <Check className="size-2.5" />Confirm
                           </Button>
                         )}
                       </>

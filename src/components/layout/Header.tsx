@@ -1,8 +1,11 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import { usePathname } from "next/navigation";
+import Link from "next/link";
 import { useSession, signOut } from "next-auth/react";
-import { LogOut, User } from "lucide-react";
+import { LogOut, User, CalendarDays, ClipboardCheck, BarChart3, Search } from "lucide-react";
+import { SearchModal } from "./SearchModal";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
@@ -54,10 +57,41 @@ function getInitials(name: string | null | undefined) {
     .slice(0, 2);
 }
 
+function useSiteId(pathname: string): string | null {
+  const [storedSiteId, setStoredSiteId] = useState<string | null>(null);
+
+  // Extract from URL: /sites/[siteId]/...
+  const match = pathname.match(/^\/sites\/([^/]+)/);
+  const urlSiteId = match ? match[1] : null;
+
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem("sight-manager-last-site");
+      if (stored) setStoredSiteId(stored);
+    } catch {}
+  }, []);
+
+  return urlSiteId || storedSiteId;
+}
+
 export function Header() {
   const pathname = usePathname();
   const { data: session } = useSession();
   const pageTitle = getPageTitle(pathname);
+  const siteId = useSiteId(pathname);
+  const [searchOpen, setSearchOpen] = useState(false);
+
+  // Cmd+K / Ctrl+K shortcut
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+        e.preventDefault();
+        setSearchOpen(true);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
 
   return (
     <header className="shrink-0">
@@ -67,7 +101,48 @@ export function Header() {
       <h1 className="text-sm font-semibold text-slate-700">{pageTitle}</h1>
 
       <div className="ml-auto flex items-center gap-2">
-        <DevModeToolbar />
+        {siteId && (
+          <>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="flex gap-1.5 px-1.5 sm:px-2 text-xs text-muted-foreground"
+              render={<Link href={`/sites/${siteId}?tab=daily-brief`} />}
+            >
+              <CalendarDays className="size-4 sm:size-3.5" />
+              <span className="hidden sm:inline">Brief</span>
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="flex gap-1.5 px-1.5 sm:px-2 text-xs text-muted-foreground"
+              render={<Link href={`/sites/${siteId}?tab=programme`} />}
+            >
+              <BarChart3 className="size-4 sm:size-3.5" />
+              <span className="hidden sm:inline">Prog</span>
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="flex gap-1.5 px-1.5 sm:px-2 text-xs text-muted-foreground"
+              render={<Link href={`/sites/${siteId}/walkthrough`} />}
+            >
+              <ClipboardCheck className="size-4 sm:size-3.5" />
+              <span className="hidden sm:inline">Walk</span>
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="flex gap-1.5 px-1.5 sm:px-2 text-xs text-muted-foreground"
+              onClick={() => setSearchOpen(true)}
+            >
+              <Search className="size-4 sm:size-3.5" />
+              <span className="hidden lg:inline text-[10px] text-muted-foreground/60">⌘K</span>
+            </Button>
+            <Separator orientation="vertical" className="h-5" />
+          </>
+        )}
+        <div className="hidden"><DevModeToolbar /></div>
         {session?.user && (
           <DropdownMenu>
             <DropdownMenuTrigger
@@ -115,6 +190,7 @@ export function Header() {
       </div>
     </div>
     <MobileSiteBar />
+    <SearchModal open={searchOpen} onClose={() => setSearchOpen(false)} siteId={siteId} />
     </header>
   );
 }

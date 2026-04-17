@@ -3,7 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { calculateCascade } from "@/lib/cascade";
 import { getTodayWeatherSummary } from "@/lib/weather";
-import { addDays } from "date-fns";
+import { addWorkingDays } from "@/lib/working-days";
 
 export const dynamic = "force-dynamic";
 
@@ -106,7 +106,7 @@ export async function POST(
   const sitePostcode = job.plot.site?.postcode ?? null;
   const weatherSummary = sitePostcode ? await getTodayWeatherSummary(sitePostcode).catch(() => null) : null;
 
-  const newEndDate = addDays(job.endDate, days);
+  const newEndDate = addWorkingDays(job.endDate, days);
 
   const allPlotJobs = await prisma.job.findMany({
     where: { plotId: job.plotId },
@@ -114,7 +114,7 @@ export async function POST(
   });
 
   const allOrders = await prisma.materialOrder.findMany({
-    where: { jobId: { in: allPlotJobs.map((j) => j.id) } },
+    where: { jobId: { in: allPlotJobs.map((j) => j.id) }, status: { not: "CANCELLED" } },
   });
 
   const cascade = calculateCascade(
@@ -158,7 +158,7 @@ export async function POST(
     if (!job.originalEndDate && job.endDate) triggerData.originalEndDate = job.endDate;
     if (job.status === "NOT_STARTED" && job.startDate) {
       if (!job.originalStartDate) triggerData.originalStartDate = job.startDate;
-      triggerData.startDate = addDays(job.startDate, days);
+      triggerData.startDate = addWorkingDays(job.startDate, days);
     }
     await tx.job.update({ where: { id }, data: triggerData });
 
@@ -207,6 +207,17 @@ export async function POST(
       },
     });
   });
+
+  // Notify assigned user about the delay
+  if (job.assignedToId) {
+    const { sendPushToUser } = await import("@/lib/push");
+    sendPushToUser(job.assignedToId, "JOBS_OVERDUE", {
+      title: "Job Delayed",
+      body: `"${job.name}" delayed ${days} day(s) — ${cascade.jobUpdates.length} downstream job(s) shifted`,
+      url: `/jobs/${id}`,
+      tag: `job-delayed-${id}`,
+    }).catch(() => {});
+  }
 
   return NextResponse.json({
     jobId: id,

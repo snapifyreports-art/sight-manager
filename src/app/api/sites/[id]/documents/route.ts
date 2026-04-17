@@ -127,5 +127,16 @@ export async function POST(
     },
   });
 
+  await prisma.eventLog.create({
+    data: {
+      type: "USER_ACTION",
+      description: `Document "${doc.name}" uploaded${doc.plot ? ` to ${doc.plot.plotNumber ? `Plot ${doc.plot.plotNumber}` : doc.plot.name}` : ""}`,
+      siteId: id,
+      plotId: plotId || null,
+      jobId: jobId || null,
+      userId: session.user.id,
+    },
+  });
+
   return NextResponse.json(doc, { status: 201 });
 }

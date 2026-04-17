@@ -6,6 +6,8 @@ import { format, addDays, differenceInCalendarDays } from "date-fns";
 import { PostCompletionDialog } from "@/components/PostCompletionDialog";
 import { getCurrentDate } from "@/lib/dev-date";
 import { useDevDate } from "@/lib/dev-date-context";
+import { buildOrderMailto } from "@/lib/order-email";
+import { useJobAction } from "@/hooks/useJobAction";
 import {
   Cloud,
   CloudRain,
@@ -41,8 +43,19 @@ import {
   UserPlus,
   PauseCircle,
   PlayCircle,
+  Truck,
+  Phone,
+  HardHat,
+  CheckCircle,
+  Bell,
+  ListTodo,
+  GitBranch,
+  StickyNote,
+  RotateCcw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { SnagDialog } from "@/components/snags/SnagDialog";
+import { useRefreshOnFocus } from "@/hooks/useRefreshOnFocus";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -76,7 +89,7 @@ interface DailySiteBriefProps {
 }
 
 interface BriefData {
-  site: { name: string };
+  site: { name: string; address: string | null; postcode: string | null };
   date: string;
   isRainedOff: boolean;
   rainedOffNote: string | null;
@@ -90,10 +103,24 @@ interface BriefData {
     lateStartCount: number;
     blockedCount: number;
     openSnagCount: number;
-    awaitingRestartCount: number;
+    inactivePlotCount: number;
     pendingSignOffCount?: number;
   };
-  awaitingRestartPlots: Array<{
+  inactivePlots?: Array<{
+    id: string;
+    plotNumber: string | null;
+    name: string;
+    houseType: string | null;
+    inactivityType: string;
+    label: string;
+    nextJob: { id: string; name: string; startDate: string | null; endDate: string | null; contractorName: string | null; contractorPhone: string | null; contractorEmail: string | null; assignedToName: string | null } | null;
+    hasContractor?: boolean;
+    ordersPending?: number;
+    ordersOrdered?: number;
+    ordersTotal?: number;
+  }>;
+  // Legacy — kept for backward compat
+  awaitingRestartPlots?: Array<{
     id: string;
     plotNumber: string | null;
     name: string;
@@ -104,6 +131,17 @@ interface BriefData {
       contractorName: string | null;
       assignedToName: string | null;
     } | null;
+  }>;
+  delayedJobs?: Array<{
+    id: string;
+    name: string;
+    startDate: string | null;
+    endDate: string | null;
+    originalStartDate: string | null;
+    plotId: string;
+    plot: { plotNumber: string | null; name: string };
+    assignedTo: { name: string } | null;
+    contractors: Array<{ contact: { name: string; company: string | null } }>;
   }>;
   blockedJobs: Array<{
     id: string;
@@ -119,6 +157,7 @@ interface BriefData {
     name: string;
     startDate: string | null;
     endDate: string | null;
+    plotId?: string;
     plot: { plotNumber: string | null; name: string };
     assignedTo: { name: string } | null;
     contractors: Array<{ contact: { name: string; company: string | null } }>;
@@ -127,16 +166,29 @@ interface BriefData {
     id: string;
     name: string;
     status: string;
+    plotId: string;
     plot: { plotNumber: string | null; name: string };
     assignedTo: { name: string } | null;
     contractors: Array<{ contact: { name: string; company: string | null } }>;
+    readiness?: {
+      hasContractor: boolean;
+      hasAssignee: boolean;
+      predecessorComplete: boolean;
+      ordersPending: number;
+      ordersOrdered: number;
+      ordersDelivered: number;
+      ordersTotal: number;
+      pendingOrdersList?: Array<{ id: string; description: string | null; supplierName: string; supplierEmail: string | null }>;
+    };
   }>;
   jobsDueToday: Array<{
     id: string;
     name: string;
     status: string;
+    plotId: string;
     plot: { plotNumber: string | null; name: string };
     assignedTo: { name: string } | null;
+    orders?: Array<{ id: string; status: string }>;
   }>;
   overdueJobs: Array<{
     id: string;
@@ -190,16 +242,29 @@ interface BriefData {
     id: string;
     itemsDescription: string | null;
     status: string;
+    dateOfOrder: string;
     expectedDeliveryDate: string | null;
-    supplier: { id: string; name: string; contactEmail: string | null; contactName: string | null };
+    supplier: { id: string; name: string; contactEmail: string | null; contactName: string | null; accountNumber: string | null };
     job: { id: string; name: string; plot: { plotNumber: string | null; name: string } };
+    orderItems: Array<{ id: string; name: string; quantity: number; unit: string; unitCost: number; totalCost: number }>;
   }>;
   upcomingOrders: Array<{
     id: string;
     itemsDescription: string | null;
     status: string;
+    dateOfOrder: string;
     expectedDeliveryDate: string | null;
-    supplier: { id: string; name: string; contactEmail: string | null; contactName: string | null };
+    supplier: { id: string; name: string; contactEmail: string | null; contactName: string | null; accountNumber: string | null };
+    job: { id: string; name: string; plot: { plotNumber: string | null; name: string } };
+    orderItems: Array<{ id: string; name: string; quantity: number; unit: string; unitCost: number; totalCost: number }>;
+  }>;
+  upcomingDeliveries: Array<{
+    id: string;
+    itemsDescription: string | null;
+    status: string;
+    dateOfOrder: string;
+    expectedDeliveryDate: string | null;
+    supplier: { id: string; name: string };
     job: { id: string; name: string; plot: { plotNumber: string | null; name: string } };
   }>;
   jobsStartingTomorrow: Array<{
@@ -227,6 +292,16 @@ interface BriefData {
     today: { date: string; category: string; tempMax: number; tempMin: number };
     forecast: Array<{ date: string; category: string; tempMax: number; tempMin: number }>;
   } | null;
+  awaitingSignOff?: Array<{
+    id: string;
+    name: string;
+    status: string;
+    actualEndDate: string | null;
+    plotId: string;
+    plot: { plotNumber: string | null; name: string };
+    assignedTo: { name: string } | null;
+    contractors: Array<{ contact: { name: string; company: string | null } }>;
+  }>;
 }
 
 // Weather icon mapping
@@ -355,6 +430,11 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
   const [upcomingOrdersOpen, setUpcomingOrdersOpen] = useState(false);
   const [openSections, setOpenSections] = useState<Set<string>>(new Set());
 
+  // Centralised job action hook for late-start / early-start dialogs
+  const { triggerAction: triggerJobAction, dialogs: jobActionDialogs } = useJobAction(
+    () => setRefreshKey((k) => k + 1)
+  );
+
   const toggleSection = (id: string) =>
     setOpenSections((prev) => {
       const next = new Set(prev);
@@ -406,6 +486,25 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
   const [snagResolvePreviews, setSnagResolvePreviews] = useState<string[]>([]);
   const [snagResolveSubmitting, setSnagResolveSubmitting] = useState(false);
 
+  // Checklist expand state (which job + which item is expanded)
+  const [checklistExpand, setChecklistExpand] = useState<{ jobId: string; item: "orders" | "contractor" | "assignee" | "predecessor" } | null>(null);
+
+  // Needs Attention expand state
+  const [expandedAttentionItem, setExpandedAttentionItem] = useState<string | null>(null);
+
+  // Inline snag dialog state
+  const [inlineSnagTarget, setInlineSnagTarget] = useState<{ jobId: string; plotId: string; contactId?: string } | null>(null);
+
+  // Inline note dialog state
+  const [noteTarget, setNoteTarget] = useState<{ jobId: string; jobName: string } | null>(null);
+  const [noteText, setNoteText] = useState("");
+  const [noteSubmitting, setNoteSubmitting] = useState(false);
+
+  // Inline photo upload state
+  const [photoTarget, setPhotoTarget] = useState<{ jobId: string; jobName: string } | null>(null);
+  const [photoFiles, setPhotoFiles] = useState<File[]>([]);
+  const [photoSubmitting, setPhotoSubmitting] = useState(false);
+
   // Toast notifications
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const showToast = (message: string, type: "success" | "error" = "error") => {
@@ -413,32 +512,14 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
     setTimeout(() => setToast(null), 4000);
   };
 
-  // Budget summary (P6)
-  const [budgetSummary, setBudgetSummary] = useState<{
-    totalBudgeted: number;
-    totalActual: number;
-    totalDelivered: number;
-    totalCommitted: number;
-    totalVariance: number;
-    variancePercent: number;
-  } | null>(null);
-  const [budgetPlots, setBudgetPlots] = useState<Array<{
-    plotId: string;
-    plotNumber: string | null;
-    plotName: string;
-    budgeted: number;
-    delivered: number;
-    committed: number;
-    variance: number;
-    variancePercent: number;
-  }>>([]);
 
   // Sign-off dialog state
   const [signOffTarget, setSignOffTarget] = useState<{
     id: string;
     name: string;
-    plot: { plotNumber: string | null; name: string };
-    assignedTo: { name: string } | null;
+    status?: string;
+    plot?: { plotNumber: string | null; name: string };
+    assignedTo?: { name: string } | null;
   } | null>(null);
   const [signOffNotes, setSignOffNotes] = useState("");
   const [signOffPhotos, setSignOffPhotos] = useState<File[]>([]);
@@ -451,11 +532,15 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
     daysDeviation: number;
     nextJob: { id: string; name: string; contractorName: string | null; assignedToName: string | null } | null;
     plotId: string;
+    signOffNotes?: string;
   } | null>(null);
 
   // Contractor quick-assign state
   const [contractorAssignTarget, setContractorAssignTarget] = useState<{ jobId: string; jobName: string } | null>(null);
   const [availableContractors, setAvailableContractors] = useState<Array<{ id: string; name: string; company: string | null }>>([]);
+  const [availableUsers, setAvailableUsers] = useState<Array<{ id: string; name: string }>>([]);
+  const [selectedAssigneeId, setSelectedAssigneeId] = useState("");
+  const [assigningUser, setAssigningUser] = useState(false);
   const [selectedContractorId, setSelectedContractorId] = useState("");
   const [assigningContractor, setAssigningContractor] = useState(false);
 
@@ -472,33 +557,16 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
     fetchData();
   }, [fetchData, refreshKey, devDate]);
 
-  // Fetch budget summary once on mount (independent of date)
-  useEffect(() => {
-    fetch(`/api/sites/${siteId}/budget-report`)
-      .then((r) => r.ok ? r.json() : null)
-      .then((d) => {
-        if (d) {
-          setBudgetSummary(d.siteSummary);
-          setBudgetPlots(d.plots || []);
-        }
-      })
-      .catch(() => null);
-  }, [siteId]);
+  // Auto-refresh when tab regains focus (real-time sync across views)
+  useRefreshOnFocus(fetchData);
 
   // Open sections that have content; empty ones stay collapsed; recent-activity always closed
   useEffect(() => {
     if (!data) return;
     const open = new Set<string>();
-    if (data.jobsStartingToday.length > 0) open.add("starting-today");
-    if (data.jobsDueToday.length > 0) open.add("finishing-today");
-    if (data.deliveriesToday.length > 0) open.add("deliveries");
-    if (data.lateStartJobs.length > 0) open.add("late-starts");
-    if (data.overdueJobs.length > 0 || data.overdueDeliveries.length > 0) open.add("overdue");
-    if (data.jobsStartingTomorrow.length > 0) open.add("starting-tomorrow");
-    if (data.ordersToPlace.length > 0) open.add("orders-to-place");
-    if (data.openSnagsList.length > 0) open.add("snags");
-    // upcoming-orders uses its own upcomingOrdersOpen state (always collapsed)
-    // recent-activity always collapsed — not added
+    // Today's Jobs always expanded, In Progress if it has items
+    open.add("todays-jobs");
+    if (data.activeJobs.length > 0) open.add("in-progress");
     setOpenSections(open);
   }, [data]);
 
@@ -686,6 +754,118 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
     setSnagResolvePreviews([]);
   };
 
+  // Inline note handler
+  const handleAddNote = async () => {
+    if (!noteTarget || !noteText.trim()) return;
+    setNoteSubmitting(true);
+    try {
+      const res = await fetch(`/api/jobs/${noteTarget.jobId}/actions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "note", note: noteText.trim() }),
+      });
+      if (res.ok) {
+        setNoteTarget(null);
+        setNoteText("");
+        showToast("Note added", "success");
+      } else {
+        showToast("Failed to add note");
+      }
+    } catch {
+      showToast("Network error");
+    } finally {
+      setNoteSubmitting(false);
+    }
+  };
+
+  // Inline photo handler
+  const handleUploadPhotos = async () => {
+    if (!photoTarget || photoFiles.length === 0) return;
+    setPhotoSubmitting(true);
+    try {
+      const fd = new FormData();
+      photoFiles.forEach((f) => fd.append("photos", f));
+      const res = await fetch(`/api/jobs/${photoTarget.jobId}/photos`, {
+        method: "POST",
+        body: fd,
+      });
+      if (res.ok) {
+        setPhotoTarget(null);
+        setPhotoFiles([]);
+        showToast(`${photoFiles.length} photo${photoFiles.length !== 1 ? "s" : ""} uploaded`, "success");
+        setRefreshKey((k) => k + 1);
+      } else {
+        showToast("Failed to upload photos");
+      }
+    } catch {
+      showToast("Network error");
+    } finally {
+      setPhotoSubmitting(false);
+    }
+  };
+
+  // Reopen job handler — set back to IN_PROGRESS, then open delay dialog for programme impact
+  const handleReopenJob = async (jobId: string, jobName?: string) => {
+    setPendingActions((prev) => new Set(prev).add(jobId));
+    try {
+      const res = await fetch(`/api/jobs/${jobId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "IN_PROGRESS" }),
+      });
+      if (res.ok) {
+        setRefreshKey((k) => k + 1);
+        showToast("Job reopened — set delay to update programme", "success");
+        // Open delay dialog so user can set the programme impact
+        const jobRes = await fetch(`/api/jobs/${jobId}`);
+        if (jobRes.ok) {
+          const jobData = await jobRes.json();
+          setExtendTarget({ id: jobId, name: jobName || jobData.name, endDate: jobData.endDate || null });
+          setExtendDays(1);
+          setExtendPreview(null);
+        }
+      } else {
+        showToast("Failed to reopen job");
+      }
+    } catch {
+      showToast("Network error");
+    } finally {
+      setPendingActions((prev) => {
+        const next = new Set(prev);
+        next.delete(jobId);
+        return next;
+      });
+    }
+  };
+
+  // Assignee quick-assign
+  const handleAssigneeOpen = async (jobId: string) => {
+    setChecklistExpand({ jobId, item: "assignee" });
+    setSelectedAssigneeId("");
+    try {
+      const res = await fetch("/api/users");
+      if (res.ok) setAvailableUsers(await res.json());
+    } catch { /* silently fail */ }
+  };
+
+  const handleAssigneeConfirm = async (jobId: string) => {
+    if (!selectedAssigneeId) return;
+    setAssigningUser(true);
+    try {
+      const res = await fetch(`/api/jobs/${jobId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ assignedToId: selectedAssigneeId }),
+      });
+      if (res.ok) {
+        setChecklistExpand(null);
+        setRefreshKey((k) => k + 1);
+      }
+    } finally {
+      setAssigningUser(false);
+    }
+  };
+
   const handleSnagResolvePhotosChange = (files: FileList | null) => {
     if (!files) return;
     const arr = Array.from(files);
@@ -863,10 +1043,19 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
         fd.append("tag", "after");
         await fetch(`/api/jobs/${signOffTarget.id}/photos`, { method: "POST", body: fd });
       }
+      // If job is already COMPLETED, just sign off. Otherwise complete + signoff.
+      const isAlreadyCompleted = signOffTarget.status === "COMPLETED";
+      if (!isAlreadyCompleted) {
+        await fetch(`/api/jobs/${signOffTarget.id}/actions`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "complete" }),
+        });
+      }
       const res = await fetch(`/api/jobs/${signOffTarget.id}/actions`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "complete", signOffNotes: signOffNotes.trim() || undefined }),
+        body: JSON.stringify({ action: "signoff", signOffNotes: signOffNotes.trim() || undefined }),
       });
       if (res.ok) {
         const result = await res.json();
@@ -875,19 +1064,11 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
         setRefreshKey((k) => k + 1);
         // Show post-completion decision dialog
         if (result._completionContext) {
-          setCompletionContext(result._completionContext);
-        } else if (result.endDate && result.actualEndDate) {
-          // Fallback: legacy cascade dialog
-          const delta = differenceInCalendarDays(new Date(result.actualEndDate), new Date(result.endDate));
-          if (delta !== 0) {
-            setCascadeTarget({ jobId: signOffTarget.id, jobName: signOffTarget.name, deltaDays: delta, endDate: result.endDate, actualEndDate: result.actualEndDate });
-            try {
-              const previewRes = await fetch(`/api/jobs/${signOffTarget.id}/cascade`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ newEndDate: result.actualEndDate }) });
-              if (previewRes.ok) setCascadePreview(await previewRes.json());
-            } catch {
-              // cascade preview failure is non-critical
-            }
-          }
+          setCompletionContext({
+            completedJobName: signOffTarget.name,
+            signOffNotes: signOffNotes.trim() || undefined,
+            ...result._completionContext,
+          });
         }
       } else {
         const err = await res.json().catch(() => ({}));
@@ -1019,98 +1200,79 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
     showAction = true,
     showContractorAssign = false
   ) => (
-    <div key={j.id} className="flex items-center gap-2 rounded border p-2 text-sm">
-      {bulkMode && (
-        <input
-          type="checkbox"
-          checked={selectedJobIds.has(j.id)}
-          onChange={() => toggleJobSelection(j.id)}
-          className="size-3.5 shrink-0 accent-blue-600"
-        />
-      )}
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <Link href={`/jobs/${j.id}`} className="truncate font-medium text-blue-600 hover:underline">{j.name}</Link>
-          {j.status && j.status !== "NOT_STARTED" && (
-            <Badge variant={j.status === "IN_PROGRESS" ? "default" : "secondary"} className="shrink-0 text-[10px]">
-              {j.status.replace("_", " ")}
-            </Badge>
-          )}
-          {showContractorAssign && (!j.contractors || j.contractors.length === 0) && (
-            <button
-              className="ml-1 inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[10px] text-muted-foreground hover:bg-accent hover:text-foreground"
-              onClick={(e) => { e.stopPropagation(); handleContractorAssignOpen(j.id, j.name); }}
-              title="Assign contractor"
-            >
-              <UserPlus className="size-3" />
-            </button>
-          )}
-        </div>
-        <p className="text-xs text-muted-foreground">
-          {j.plot.plotNumber ? `Plot ${j.plot.plotNumber}` : j.plot.name}
-          {j.assignedTo && <span className="hidden sm:inline"> · {j.assignedTo.name}</span>}
-          {j.contractors?.[0] && <span className="hidden sm:inline"> · {j.contractors[0].contact.company || j.contractors[0].contact.name}</span>}
-          {j.endDate && <span className="hidden sm:inline"> · Due {format(new Date(j.endDate), "dd MMM")}</span>}
-        </p>
+    <div key={j.id} className="rounded border p-2 text-sm">
+      <div className="flex items-center gap-2">
+        {bulkMode && (
+          <input
+            type="checkbox"
+            checked={selectedJobIds.has(j.id)}
+            onChange={() => toggleJobSelection(j.id)}
+            className="size-3.5 shrink-0 accent-blue-600"
+          />
+        )}
+        <Link href={`/jobs/${j.id}`} className="truncate font-medium text-blue-600 hover:underline">{j.name}</Link>
+        {j.status && j.status !== "NOT_STARTED" && (
+          <Badge variant={j.status === "IN_PROGRESS" ? "default" : "secondary"} className="shrink-0 text-[10px]">
+            {j.status.replace("_", " ")}
+          </Badge>
+        )}
+        {showContractorAssign && (!j.contractors || j.contractors.length === 0) && (
+          <button
+            className="ml-1 inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[10px] text-muted-foreground hover:bg-accent hover:text-foreground"
+            onClick={(e) => { e.stopPropagation(); handleContractorAssignOpen(j.id, j.name); }}
+            title="Assign contractor"
+          >
+            <UserPlus className="size-3" />
+          </button>
+        )}
       </div>
+      <p className="text-xs text-muted-foreground">
+        {j.plot.plotNumber ? `Plot ${j.plot.plotNumber}` : j.plot.name}
+        {j.assignedTo && <span className="hidden sm:inline"> · {j.assignedTo.name}</span>}
+        {j.contractors?.[0] && <span className="hidden sm:inline"> · {j.contractors[0].contact.company || j.contractors[0].contact.name}</span>}
+        {j.endDate && <span className="hidden sm:inline"> · Due {format(new Date(j.endDate), "dd MMM")}</span>}
+      </p>
       {showAction && !bulkMode && (
-        <JobActionButton
-          jobId={j.id}
-          status={j.status}
-          pending={pendingActions.has(j.id)}
-          onAction={handleJobAction}
-          onExtend={handleExtendOpen}
-        />
+        <div className="mt-1.5 flex flex-wrap items-center gap-1 border-t pt-1.5">
+          <span className="mr-auto text-[10px] font-medium text-muted-foreground">Actions</span>
+          {pendingActions.has(j.id) ? (
+            <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
+          ) : j.status === "COMPLETED" ? (
+            <span className="flex items-center gap-0.5 text-[10px] text-green-600">
+              <Check className="size-3" /> Done
+            </span>
+          ) : j.status === "IN_PROGRESS" ? (
+            <>
+              <Button variant="outline" size="sm" className="h-6 gap-1 border-blue-200 px-2 text-[10px] text-blue-700 hover:bg-blue-50" onClick={(e) => { e.stopPropagation(); handleJobAction(j.id, "complete"); }}>
+                <CheckCircle2 className="size-2.5" /> Complete
+              </Button>
+              <Button variant="outline" size="sm" className="h-6 gap-1 border-orange-200 px-2 text-[10px] text-orange-700 hover:bg-orange-50" onClick={(e) => { e.stopPropagation(); handleExtendOpen(j.id); }}>
+                <Clock className="size-2.5" /> Extend
+              </Button>
+            </>
+          ) : j.status === "NOT_STARTED" ? (
+            <>
+              <Button variant="outline" size="sm" className="h-6 gap-1 border-green-200 px-2 text-[10px] text-green-700 hover:bg-green-50" onClick={(e) => { e.stopPropagation(); handleJobAction(j.id, "start"); }}>
+                <Play className="size-2.5" /> Start
+              </Button>
+              <Button variant="outline" size="sm" className="h-6 gap-1 border-orange-200 px-2 text-[10px] text-orange-700 hover:bg-orange-50" onClick={(e) => { e.stopPropagation(); handleExtendOpen(j.id); }}>
+                <Clock className="size-2.5" /> Extend
+              </Button>
+            </>
+          ) : null}
+        </div>
       )}
     </div>
   );
 
   return (
     <div className="space-y-4">
-      {/* Date nav + actions */}
+      {/* Date + actions */}
       <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm font-semibold sm:text-lg">
+          {format(date, "EEEE, d MMMM yyyy")}
+        </p>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="icon" onClick={prevDay}>
-            <ChevronLeft className="size-4" />
-          </Button>
-          <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
-            <PopoverTrigger className="text-sm font-semibold sm:text-lg hover:text-primary hover:underline underline-offset-4 transition-colors cursor-pointer">
-              {format(date, "EEEE, d MMMM yyyy")}
-            </PopoverTrigger>
-            <PopoverContent className="w-auto p-0" align="center">
-              <Calendar
-                mode="single"
-                selected={date}
-                onSelect={(d) => {
-                  if (d) {
-                    setDate(d);
-                    setCalendarOpen(false);
-                  }
-                }}
-                autoFocus
-              />
-            </PopoverContent>
-          </Popover>
-          <Button variant="outline" size="icon" onClick={nextDay}>
-            <ChevronRight className="size-4" />
-          </Button>
-        </div>
-        <div className="flex items-center gap-2">
-          {/* Bulk mode toggle (UX #3) */}
-          <Button
-            variant={bulkMode ? "default" : "outline"}
-            size="sm"
-            onClick={() => {
-              setBulkMode(!bulkMode);
-              setSelectedJobIds(new Set());
-            }}
-          >
-            <ListChecks className="mr-1 size-3.5" />
-            <span className="hidden sm:inline">{bulkMode ? "Exit Bulk" : "Bulk Actions"}</span>
-            <span className="sm:hidden">{bulkMode ? "Exit" : "Bulk"}</span>
-          </Button>
-
-          {/* Rained Off button (UX #4) */}
           {data.isRainedOff ? (
             <Button
               variant="outline"
@@ -1132,10 +1294,6 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
               <span className="hidden sm:inline">Mark </span>Rained Off
             </Button>
           )}
-
-          <Button variant="outline" size="sm" onClick={goToday}>
-            Today
-          </Button>
           <Button
             variant="outline"
             size="sm"
@@ -1204,125 +1362,64 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
         </div>
       )}
 
-      {/* Summary stat pills */}
-      <div className="flex flex-wrap gap-2">
-        {[
-          { label: "Progress", value: `${s.progressPercent}%`, sub: `${s.completedJobs}/${s.totalJobs} jobs`, color: "text-foreground", anchor: null },
-          { label: "Starting Today", value: data.jobsStartingToday.length, color: "text-green-600", anchor: "section-starting-today" },
-          { label: "Finishing Today", value: data.jobsDueToday.length, color: "text-emerald-600", anchor: "section-finishing-today" },
-          { label: "Late Starts", value: s.lateStartCount, color: s.lateStartCount > 0 ? "text-red-600" : "text-green-600", anchor: "section-late-starts" },
-          { label: "Blocked", value: s.blockedCount, color: s.blockedCount > 0 ? "text-slate-500" : "text-green-600", anchor: "section-blocked" },
-          { label: "Overdue", value: `${s.overdueJobCount}`, color: s.overdueJobCount > 0 ? "text-red-600" : "text-green-600", anchor: "section-overdue" },
-          { label: "Deliveries", value: data.deliveriesToday.length, color: "text-blue-600", anchor: "section-deliveries" },
-          { label: "Orders to Place", value: data.ordersToPlace.length, color: data.ordersToPlace.length > 0 ? "text-amber-600" : "text-green-600", anchor: "section-orders" },
-          { label: "Open Snags", value: s.openSnagCount, color: s.openSnagCount > 0 ? "text-orange-600" : "text-green-600", anchor: "section-snags" },
-          { label: "Needs Attention", value: String(data.needsAttention?.length || 0), color: (data.needsAttention?.length || 0) > 0 ? "text-amber-600" : "text-green-600", anchor: "section-needs-attention" },
-        ].map(({ label, value, sub, color, anchor }) => {
+      {/* Summary stats — grouped by section */}
+      {(() => {
+        const pill = (label: string, value: number | string, anchor: string | null, activeColor: string) => {
+          const num = typeof value === "number" ? value : parseInt(value) || 0;
+          if (num === 0 && label !== "Progress") return null;
           const inner = (
-            <div className="flex items-center gap-2 rounded-lg border bg-white px-3 py-1.5 shadow-sm">
-              <span className={`text-lg font-bold leading-none ${color}`}>{value}</span>
-              <div>
-                <p className="text-[11px] font-medium leading-tight text-foreground">{label}</p>
-                {sub && <p className="text-[10px] text-muted-foreground">{sub}</p>}
-              </div>
+            <div className="flex items-center gap-1.5 rounded border border-slate-200 bg-white px-2 py-1 text-xs shadow-sm">
+              <span className={cn("text-sm font-bold leading-none", activeColor)}>{value}</span>
+              <span className="leading-tight text-foreground">{label}</span>
             </div>
           );
           return anchor ? (
-            <a key={label} href={`#${anchor}`} className="no-underline hover:opacity-80 transition-opacity">
-              {inner}
-            </a>
+            <a key={label} href={`#${anchor}`} className="no-underline hover:opacity-80 transition-opacity">{inner}</a>
           ) : (
             <div key={label}>{inner}</div>
           );
-        })}
-      </div>
-
-      {/* Budget / Cost burn card (P6) */}
-      {budgetSummary && budgetSummary.totalBudgeted > 0 && (() => {
-        const variance = budgetSummary.totalVariance;
-        const pct = budgetSummary.variancePercent;
-        const rag =
-          pct > 10 ? "red" :
-          pct > 5 ? "amber" :
-          pct < -5 ? "green" : "green";
-        const ragColors = {
-          red: "border-red-300 bg-red-50/40",
-          amber: "border-amber-300 bg-amber-50/40",
-          green: "border-green-300 bg-green-50/40",
         };
-        const ragTextColors = {
-          red: "text-red-700",
-          amber: "text-amber-700",
-          green: "text-green-700",
-        };
-        const fmt = (n: number) =>
-          new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP", maximumFractionDigits: 0 }).format(n);
         return (
-          <Card className={ragColors[rag]}>
-            <CardContent className="p-4">
-              <div className="flex flex-wrap items-center gap-6">
+          <div className="space-y-2">
+            {/* Progress */}
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 rounded border border-slate-200 bg-white px-3 py-1.5 shadow-sm">
+                <span className="text-lg font-bold leading-none text-foreground">{s.progressPercent}%</span>
                 <div>
-                  <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Budget</p>
-                  <p className="text-lg font-bold">{fmt(budgetSummary.totalBudgeted)}</p>
-                </div>
-                <div>
-                  <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Delivered</p>
-                  <p className="text-lg font-bold">{fmt(budgetSummary.totalDelivered ?? budgetSummary.totalActual)}</p>
-                </div>
-                <div>
-                  <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Committed</p>
-                  <p className="text-sm font-semibold text-muted-foreground">{fmt(budgetSummary.totalCommitted ?? budgetSummary.totalActual)}</p>
-                </div>
-                <div>
-                  <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Variance</p>
-                  <p className={`text-lg font-bold ${ragTextColors[rag]}`}>
-                    {variance > 0 ? "+" : ""}{fmt(variance)} ({pct > 0 ? "+" : ""}{pct}%)
-                  </p>
-                </div>
-                <div className={`ml-auto rounded-full px-3 py-1 text-xs font-semibold ${
-                  rag === "red" ? "bg-red-100 text-red-700" :
-                  rag === "amber" ? "bg-amber-100 text-amber-700" :
-                  "bg-green-100 text-green-700"
-                }`}>
-                  {rag === "red" ? "OVER BUDGET" : rag === "amber" ? "WATCH" : "ON BUDGET"}
+                  <p className="text-[11px] font-medium leading-tight">Progress</p>
+                  <p className="text-[10px] text-muted-foreground">{s.completedJobs}/{s.totalJobs} jobs</p>
                 </div>
               </div>
-              {/* Per-plot budget breakdown (F5) */}
-              {budgetPlots.length > 0 && (
-                <details className="mt-3 border-t pt-2">
-                  <summary className="cursor-pointer text-xs font-medium text-muted-foreground hover:text-foreground">
-                    View per-plot breakdown ({budgetPlots.length} plots)
-                  </summary>
-                  <div className="mt-2 max-h-60 overflow-y-auto rounded border text-xs">
-                    <table className="w-full">
-                      <thead className="sticky top-0 bg-muted">
-                        <tr>
-                          <th className="px-2 py-1 text-left font-medium">Plot</th>
-                          <th className="px-2 py-1 text-right font-medium">Budget</th>
-                          <th className="px-2 py-1 text-right font-medium">Delivered</th>
-                          <th className="px-2 py-1 text-right font-medium">Committed</th>
-                          <th className="px-2 py-1 text-right font-medium">Variance</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {budgetPlots.map((p) => (
-                          <tr key={p.plotId} className="border-t">
-                            <td className="px-2 py-1">{p.plotNumber ? `Plot ${p.plotNumber}` : p.plotName}</td>
-                            <td className="px-2 py-1 text-right">{fmt(p.budgeted)}</td>
-                            <td className="px-2 py-1 text-right">{fmt(p.delivered)}</td>
-                            <td className="px-2 py-1 text-right">{fmt(p.committed)}</td>
-                            <td className={`px-2 py-1 text-right ${p.variance > 0 ? "text-red-600" : "text-green-600"}`}>
-                              {p.variance > 0 ? "+" : ""}{fmt(p.variance)}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </details>
-              )}
-            </CardContent>
-          </Card>
+            </div>
+
+            {/* Jobs */}
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="mr-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Jobs</span>
+              {pill("Starting", data.jobsStartingToday.filter((j) => j.status === "NOT_STARTED").length, "section-starting-today", "text-green-600")}
+              {pill("Finishing", data.jobsDueToday.length, "section-starting-today", "text-emerald-600")}
+              {pill("Late", s.lateStartCount, "section-late-starts", "text-red-600")}
+              {pill("Blocked", s.blockedCount, "section-blocked", "text-slate-500")}
+              {pill("Overdue", s.overdueJobCount, "section-overdue", "text-red-600")}
+              {pill("Sign Off", data.awaitingSignOff?.length || 0, "section-awaiting-signoff", "text-amber-600")}
+            </div>
+
+            {/* Materials */}
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="mr-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Materials</span>
+              {pill("Deliveries", data.deliveriesToday.length, "section-deliveries", "text-blue-600")}
+              {pill("To Order", data.ordersToPlace.length, "section-orders", "text-violet-600")}
+              {pill("Awaiting", data.upcomingDeliveries?.length || 0, "section-upcoming-deliveries", "text-blue-600")}
+            </div>
+
+            {/* Issues */}
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="mr-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Issues</span>
+              {pill("Snags", s.openSnagCount, "section-snags", "text-orange-600")}
+              {pill("Attention", data.needsAttention?.length || 0, "section-needs-attention", "text-amber-600")}
+              {pill("Contractors", (data.inactivePlots ?? []).filter((p) => p.inactivityType === "awaiting_contractor").length, "section-contractor-confirmations", "text-amber-600")}
+              {pill("Inactive", data.inactivePlots?.length || 0, "section-inactive-plots", "text-orange-600")}
+            </div>
+          </div>
         );
       })()}
 
@@ -1336,7 +1433,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
         return (
           <Card className={todayIsBad ? "border-blue-300 bg-blue-50/40" : ""}>
             <CardContent className="p-4">
-              <div className="flex flex-wrap items-start gap-4">
+              <div className="flex flex-col items-start gap-4 sm:flex-row sm:flex-wrap">
                 {/* Today's weather — main */}
                 <div className="flex items-center gap-3">
                   <div className={`rounded-lg p-2.5 ${todayIsBad ? "bg-blue-100" : "bg-blue-50"}`}>
@@ -1357,7 +1454,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                 {/* Tomorrow — highlighted */}
                 {tomorrow && (
                   <>
-                    <div className="h-14 border-l" />
+                    <div className="hidden h-14 border-l sm:block" />
                     <div className={`flex items-center gap-3 rounded-lg px-3 py-2 ${tomorrowIsBad ? "bg-amber-50 ring-1 ring-amber-200" : "bg-slate-50"}`}>
                       <div className={`rounded-lg p-2 ${tomorrowIsBad ? "bg-amber-100" : "bg-slate-100"}`}>
                         <WeatherIcon category={tomorrow.category} className={`size-7 ${tomorrowIsBad ? "text-amber-600" : "text-slate-500"}`} />
@@ -1413,14 +1510,14 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
 
               {/* Rain day action banner */}
               {todayIsBad && !data.isRainedOff && (
-                <div className="mt-3 flex items-center justify-between gap-2 rounded-lg border border-blue-200 bg-blue-100 px-3 py-2">
+                <div className="mt-3 flex flex-col gap-2 rounded-lg border border-blue-200 bg-blue-100 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
                   <div className="flex items-center gap-2 text-sm text-blue-800">
                     <CloudRain className="size-4 shrink-0" />
                     <span className="font-medium">Rain today — do you want to mark this as a rained off day?</span>
                   </div>
                   <Button
                     size="sm"
-                    className="shrink-0 bg-blue-600 text-white hover:bg-blue-700"
+                    className="w-full shrink-0 bg-blue-600 text-white hover:bg-blue-700 sm:w-auto"
                     onClick={() => setRainedOffDialogOpen(true)}
                   >
                     Mark Rained Off
@@ -1445,13 +1542,76 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
         );
       })()}
 
+      {/* ═══════════════ ALERTS ═══════════════ */}
+      {(() => {
+        const todayJobCount = data.jobsStartingToday.length + data.jobsDueToday.length + data.lateStartJobs.length + data.overdueJobs.length + (data.awaitingSignOff?.length || 0);
+        const snagCount = data.summary.openSnagCount;
+        const inactiveCount = data.inactivePlots?.length || 0;
+        const contractorPending = (data.inactivePlots ?? []).filter(p => p.inactivityType === "awaiting_contractor").length;
+        const attentionCount = data.needsAttention?.length || 0;
+
+        const lines: Array<{ href: string; color: string; icon: React.ReactNode; text: string }> = [];
+
+        // Summary counts
+        const startingCount = data.jobsStartingToday.filter((j) => j.status === "NOT_STARTED").length;
+        const recalcJobCount = startingCount + data.jobsDueToday.length + data.lateStartJobs.length + data.overdueJobs.length + (data.awaitingSignOff?.length || 0);
+        if (recalcJobCount > 0) lines.push({ href: "#section-starting-today", color: "text-blue-700", icon: <Briefcase className="size-3" />, text: `${recalcJobCount} job${recalcJobCount !== 1 ? "s" : ""} today — ${startingCount} starting, ${data.jobsDueToday.length} finishing${data.lateStartJobs.length > 0 ? `, ${data.lateStartJobs.length} late` : ""}${data.overdueJobs.length > 0 ? `, ${data.overdueJobs.length} overdue` : ""}${(data.awaitingSignOff?.length || 0) > 0 ? `, ${data.awaitingSignOff!.length} sign off` : ""}` });
+        if (snagCount > 0) lines.push({ href: "#section-snags", color: "text-orange-700", icon: <Bug className="size-3" />, text: `${snagCount} open snag${snagCount !== 1 ? "s" : ""}` });
+        if (inactiveCount > 0) lines.push({ href: "#section-inactive-plots", color: "text-amber-700", icon: <PauseCircle className="size-3" />, text: `${inactiveCount} inactive plot${inactiveCount !== 1 ? "s" : ""} need decisions` });
+
+        // Issue alerts
+        if (data.overdueDeliveries.length > 0) lines.push({ href: "#section-overdue", color: "text-red-700", icon: <Package className="size-3" />, text: `${data.overdueDeliveries.length} overdue deliver${data.overdueDeliveries.length !== 1 ? "ies" : "y"}` });
+        if (contractorPending > 0) lines.push({ href: "#section-contractor-confirmations", color: "text-amber-700", icon: <HardHat className="size-3" />, text: `${contractorPending} contractor confirmation${contractorPending !== 1 ? "s" : ""} pending` });
+        if (attentionCount > 0) lines.push({ href: "#section-needs-attention", color: "text-amber-700", icon: <AlertTriangle className="size-3" />, text: `${attentionCount} item${attentionCount !== 1 ? "s" : ""} need attention (missing info)` });
+
+        if (lines.length === 0) return null;
+        return (
+          <>
+            <div className="mt-6 flex items-center gap-2 border-b-2 border-blue-200 pb-1">
+              <Bell className="size-4 text-blue-600" />
+              <h2 className="text-xs font-bold text-blue-900 uppercase tracking-widest">Alerts</h2>
+              <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-semibold text-blue-700">
+                {lines.length}
+              </span>
+            </div>
+            <div className="space-y-1.5 rounded-lg border border-blue-100 bg-blue-50/30 p-3">
+              {lines.map((line, i) => (
+                <a key={i} href={line.href} className={`flex items-center gap-2 text-xs ${line.color} no-underline hover:underline`}>
+                  {line.icon} {line.text}
+                </a>
+              ))}
+            </div>
+          </>
+        );
+      })()}
+
+      {/* ═══════════════ GROUP 2: ACTIONS TODAY ═══════════════ */}
+      {(() => {
+        // Count sections with content, not individual items
+        let sectionCount = 0;
+        if (data.jobsStartingToday.length > 0 || data.jobsDueToday.length > 0 || data.lateStartJobs.length > 0 || data.overdueJobs.length > 0 || (data.awaitingSignOff?.length || 0) > 0) sectionCount++;
+        if (data.deliveriesToday.length > 0 || data.ordersToPlace.length > 0) sectionCount++;
+        if (data.activeJobs.length > 0) sectionCount++;
+        return (
+          <div className="mt-6 flex items-center gap-2 border-b-2 border-green-200 pb-1">
+            <ListTodo className="size-4 text-green-600" />
+            <h2 className="text-xs font-bold text-green-900 uppercase tracking-widest">Actions Today</h2>
+            {sectionCount > 0 && (
+              <span className="rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-semibold text-green-700">
+                {sectionCount} section{sectionCount !== 1 ? "s" : ""}
+              </span>
+            )}
+          </div>
+        );
+      })()}
+
       <div className="grid gap-4 md:grid-cols-2">
-        {/* Jobs starting today */}
-        <Card id="section-starting-today">
-          <CardHeader className="cursor-pointer select-none pb-2" onClick={() => toggleSection("starting-today")}>
+        {/* Today's Jobs — unified start/finish */}
+        <Card id="section-starting-today" className="md:col-span-2">
+          <CardHeader className="cursor-pointer select-none pb-2" onClick={() => toggleSection("todays-jobs")}>
             <CardTitle className="flex items-center gap-2 text-sm">
               <Briefcase className="size-4 text-green-600" />
-              Starting Today ({data.jobsStartingToday.length})
+              Today&apos;s Jobs ({data.jobsStartingToday.filter((j) => j.status === "NOT_STARTED").length + data.jobsDueToday.length + data.lateStartJobs.length + data.overdueJobs.length + (data.awaitingSignOff?.length || 0)})
               {!bulkMode && (() => {
                 const startable = data.jobsStartingToday.filter((j) => j.status === "NOT_STARTED");
                 return startable.length > 1 ? (
@@ -1467,160 +1627,257 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                   </Button>
                 ) : null;
               })()}
-              <ChevronDown className={cn("ml-auto size-3.5 shrink-0 transition-transform duration-200", openSections.has("starting-today") && "rotate-180")} />
+              <ChevronDown className={cn("ml-auto size-3.5 shrink-0 transition-transform duration-200", openSections.has("todays-jobs") && "rotate-180")} />
             </CardTitle>
           </CardHeader>
-          {openSections.has("starting-today") && (
+          {openSections.has("todays-jobs") && (
             <CardContent>
-              {data.jobsStartingToday.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No jobs starting today</p>
+              {data.jobsStartingToday.length === 0 && data.jobsDueToday.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No jobs scheduled today</p>
               ) : (
                 <div className="space-y-2">
-                  {data.jobsStartingToday.map((j) => renderJobRow(j, true, true))}
-                </div>
-              )}
-            </CardContent>
-          )}
-        </Card>
+                  {/* Starting — only show NOT_STARTED jobs */}
+                  {(() => {
+                    const startingJobs = data.jobsStartingToday.filter((j) => j.status === "NOT_STARTED");
+                    return startingJobs.length > 0 ? (
+                      <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-green-700">
+                        <Play className="size-3" /> Starting ({startingJobs.length})
+                      </p>
+                    ) : null;
+                  })()}
+                  {data.jobsStartingToday.filter((j) => j.status === "NOT_STARTED").map((j) => {
+                    const r = j.readiness;
+                    return (
+                      <div key={j.id} className="rounded border p-2 text-sm">
+                        <div className="flex items-center gap-2">
+                          <Link href={`/jobs/${j.id}`} className="truncate font-medium text-blue-600 hover:underline">{j.name}</Link>
+                          <Badge variant="outline" className="shrink-0 border-green-200 text-[10px] text-green-700">Start</Badge>
+                          {j.status === "IN_PROGRESS" && <Badge className="shrink-0 text-[10px]">IN PROGRESS</Badge>}
+                          {j.status === "COMPLETED" && <Badge variant="secondary" className="shrink-0 text-[10px]">COMPLETED</Badge>}
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          <Link href={`/sites/${siteId}/plots/${j.plotId}`} className="hover:underline hover:text-blue-600">{j.plot.plotNumber ? `Plot ${j.plot.plotNumber}` : j.plot.name}</Link>
+                          {j.assignedTo && <span className="hidden sm:inline"> · {j.assignedTo.name}</span>}
+                          {j.contractors?.[0]?.contact && <span className="hidden sm:inline"> · {j.contractors[0].contact.company || j.contractors[0].contact.name}</span>}
+                        </p>
+                        {/* Readiness checklist — expandable inline */}
+                        {r && j.status === "NOT_STARTED" && (
+                          <div className="mt-1.5 space-y-1">
+                            <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[10px]">
+                              {r.predecessorComplete ? (
+                                <span className="text-green-700"><Check className="inline size-3 mr-0.5" />Predecessor</span>
+                              ) : (
+                                <button onClick={() => setChecklistExpand(checklistExpand?.jobId === j.id && checklistExpand.item === "predecessor" ? null : { jobId: j.id, item: "predecessor" })} className="text-red-600 underline hover:text-red-800">
+                                  <X className="inline size-3 mr-0.5" />Predecessor
+                                </button>
+                              )}
+                              {r.hasContractor ? (
+                                <span className="text-green-700"><Check className="inline size-3 mr-0.5" />Contractor</span>
+                              ) : (
+                                <button onClick={() => { setChecklistExpand({ jobId: j.id, item: "contractor" }); handleContractorAssignOpen(j.id, j.name); }} className="text-red-600 underline hover:text-red-800">
+                                  <X className="inline size-3 mr-0.5" />Contractor
+                                </button>
+                              )}
+                              {r.hasAssignee ? (
+                                <span className="text-green-700"><Check className="inline size-3 mr-0.5" />Assignee</span>
+                              ) : (
+                                <button onClick={() => handleAssigneeOpen(j.id)} className="text-red-600 underline hover:text-red-800">
+                                  <X className="inline size-3 mr-0.5" />Assignee
+                                </button>
+                              )}
+                              {r.ordersPending === 0 ? (
+                                <span className="text-green-700"><Check className="inline size-3 mr-0.5" />Sent</span>
+                              ) : (
+                                <button onClick={() => setChecklistExpand(checklistExpand?.jobId === j.id && checklistExpand.item === "orders" ? null : { jobId: j.id, item: "orders" })} className="text-red-600 underline hover:text-red-800">
+                                  <X className="inline size-3 mr-0.5" />{r.ordersPending} not sent
+                                </button>
+                              )}
+                              {r.ordersOrdered === 0 && r.ordersPending === 0 ? (
+                                <span className="text-green-700"><Check className="inline size-3 mr-0.5" />Materials</span>
+                              ) : (
+                                <span className="text-amber-600"><Clock className="inline size-3 mr-0.5" />{r.ordersOrdered > 0 ? `${r.ordersOrdered} awaiting` : "Materials"}</span>
+                              )}
+                            </div>
 
-        {/* Jobs finishing today — sign-off */}
-        <Card id="section-finishing-today">
-          <CardHeader className="cursor-pointer select-none pb-2" onClick={() => toggleSection("finishing-today")}>
-            <CardTitle className="flex items-center gap-2 text-sm">
-              <FileCheck className="size-4 text-emerald-600" />
-              Finishing Today ({data.jobsDueToday.length})
-              <ChevronDown className={cn("ml-auto size-3.5 shrink-0 transition-transform duration-200", openSections.has("finishing-today") && "rotate-180")} />
-            </CardTitle>
-            <CardDescription className="text-xs">Jobs scheduled to complete — sign off with notes &amp; photos</CardDescription>
-          </CardHeader>
-          {openSections.has("finishing-today") && (
-            <CardContent>
-            {data.jobsDueToday.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No jobs finishing today</p>
-            ) : (
-              <div className="space-y-2">
-                {data.jobsDueToday.map((j) => (
-                  <div key={j.id} className="flex items-center gap-2 rounded border p-2 text-sm">
-                    <div className="min-w-0 flex-1">
+                            {/* Expanded inline panels */}
+                            {checklistExpand?.jobId === j.id && checklistExpand.item === "orders" && r.pendingOrdersList && (
+                              <div className="rounded border border-red-200 bg-red-50/50 p-2 space-y-1.5">
+                                <p className="text-[10px] font-semibold text-red-700">Pending Orders</p>
+                                {r.pendingOrdersList.map((o) => (
+                                  <div key={o.id} className="flex items-center justify-between text-[10px]">
+                                    <div>
+                                      <span className="font-medium">{o.supplierName}</span>
+                                      {o.description && <span className="text-muted-foreground"> — {o.description}</span>}
+                                    </div>
+                                    <div className="flex gap-1">
+                                      {o.supplierEmail && (
+                                        <a href={`mailto:${o.supplierEmail}?subject=${encodeURIComponent(`Order — ${o.description || j.name}`)}`}
+                                          onClick={() => handleOrderAction(o.id, "ORDERED")}
+                                          className="rounded border border-violet-200 bg-white px-1.5 py-0.5 text-violet-700 hover:bg-violet-50">
+                                          <Mail className="inline size-2.5 mr-0.5" />Send
+                                        </a>
+                                      )}
+                                      <button onClick={() => handleOrderAction(o.id, "ORDERED")}
+                                        className="rounded border border-blue-200 bg-white px-1.5 py-0.5 text-blue-700 hover:bg-blue-50">
+                                        <Package className="inline size-2.5 mr-0.5" />Mark Sent
+                                      </button>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+
+                            {checklistExpand?.jobId === j.id && checklistExpand.item === "contractor" && (
+                              <div className="rounded border border-red-200 bg-red-50/50 p-2">
+                                <p className="text-[10px] font-semibold text-red-700 mb-1">Assign Contractor</p>
+                                <div className="flex gap-1">
+                                  <select value={selectedContractorId} onChange={(e) => setSelectedContractorId(e.target.value)}
+                                    className="flex-1 rounded border px-2 py-1 text-[10px]">
+                                    <option value="">Select...</option>
+                                    {availableContractors.map((c) => (
+                                      <option key={c.id} value={c.id}>{c.company || c.name}</option>
+                                    ))}
+                                  </select>
+                                  <Button size="sm" className="h-6 px-2 text-[10px]" disabled={!selectedContractorId || assigningContractor} onClick={handleContractorAssign}>
+                                    {assigningContractor ? <Loader2 className="size-3 animate-spin" /> : "Assign"}
+                                  </Button>
+                                </div>
+                              </div>
+                            )}
+
+                            {checklistExpand?.jobId === j.id && checklistExpand.item === "assignee" && (
+                              <div className="rounded border border-red-200 bg-red-50/50 p-2">
+                                <p className="text-[10px] font-semibold text-red-700 mb-1">Assign Team Member</p>
+                                <div className="flex gap-1">
+                                  <select value={selectedAssigneeId} onChange={(e) => setSelectedAssigneeId(e.target.value)}
+                                    className="flex-1 rounded border px-2 py-1 text-[10px]">
+                                    <option value="">Select...</option>
+                                    {availableUsers.map((u) => (
+                                      <option key={u.id} value={u.id}>{u.name}</option>
+                                    ))}
+                                  </select>
+                                  <Button size="sm" className="h-6 px-2 text-[10px]" disabled={!selectedAssigneeId || assigningUser} onClick={() => handleAssigneeConfirm(j.id)}>
+                                    {assigningUser ? <Loader2 className="size-3 animate-spin" /> : "Assign"}
+                                  </Button>
+                                </div>
+                              </div>
+                            )}
+
+                            {checklistExpand?.jobId === j.id && checklistExpand.item === "predecessor" && (
+                              <div className="rounded border border-red-200 bg-red-50/50 p-2">
+                                <p className="text-[10px] font-semibold text-red-700 mb-1">Blocked by predecessor job</p>
+                                <p className="text-[10px] text-muted-foreground">A previous job on this plot hasn&apos;t been completed yet.</p>
+                                <Link href={`/jobs/${j.id}`} className="mt-1 inline-block text-[10px] text-blue-600 underline">View job details →</Link>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        <div className="mt-1.5 flex flex-wrap items-center gap-1 border-t pt-1.5">
+                          <span className="mr-auto text-[10px] font-medium text-muted-foreground">Actions</span>
+                          {pendingActions.has(j.id) ? (
+                            <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
+                          ) : j.status === "NOT_STARTED" ? (
+                            <>
+                              <Button variant="outline" size="sm" className="h-6 gap-1 border-green-200 px-2 text-[10px] text-green-700 hover:bg-green-50" onClick={() => triggerJobAction({ id: j.id, name: j.name, status: "NOT_STARTED", startDate: null, endDate: null }, "start")}>
+                                <Play className="size-2.5" /> Start
+                              </Button>
+                              <Button variant="outline" size="sm" className="h-6 gap-1 border-orange-200 px-2 text-[10px] text-orange-700 hover:bg-orange-50" onClick={() => handleExtendOpen(j.id)}>
+                                <Clock className="size-2.5" /> Extend
+                              </Button>
+                              <Button variant="outline" size="sm" className="h-6 gap-1 border-amber-200 px-2 text-[10px] text-amber-700 hover:bg-amber-50" onClick={() => { setPushTarget({ id: j.id, name: j.name, startDate: null, endDate: null }); setPushDays(1); }}>
+                                <CalendarClock className="size-2.5" /> Delay
+                              </Button>
+                              <Button variant="outline" size="sm" className="h-6 gap-1 px-2 text-[10px]" onClick={() => setNoteTarget({ jobId: j.id, jobName: j.name })}>
+                                <StickyNote className="size-2.5" /> Note
+                              </Button>
+                            </>
+                          ) : (
+                            <JobActionButton
+                              jobId={j.id}
+                              status={j.status}
+                              pending={false}
+                              onAction={handleJobAction}
+                              onExtend={() => handleExtendOpen(j.id)}
+                            />
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  {/* Finishing */}
+                  {data.jobsDueToday.length > 0 && (
+                    <p className={cn("flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-emerald-700", data.jobsStartingToday.length > 0 && "mt-3 border-t pt-3")}>
+                      <FileCheck className="size-3" /> Finishing ({data.jobsDueToday.length})
+                    </p>
+                  )}
+                  {data.jobsDueToday.map((j) => (
+                    <div key={j.id} className="rounded border p-2 text-sm">
                       <div className="flex items-center gap-2">
                         <Link href={`/jobs/${j.id}`} className="truncate font-medium text-blue-600 hover:underline">{j.name}</Link>
-                        {j.status !== "NOT_STARTED" && (
-                          <Badge variant={j.status === "IN_PROGRESS" ? "default" : j.status === "COMPLETED" ? "secondary" : "outline"} className="shrink-0 text-[10px]">
-                            {j.status.replace(/_/g, " ")}
-                          </Badge>
+                        <Badge variant="outline" className="shrink-0 border-emerald-200 text-[10px] text-emerald-700">Finish</Badge>
+                        {j.status !== "NOT_STARTED" && j.status !== "COMPLETED" && (
+                          <Badge className="shrink-0 text-[10px]">{j.status.replace(/_/g, " ")}</Badge>
                         )}
                       </div>
                       <p className="text-xs text-muted-foreground">
-                        {j.plot.plotNumber ? `Plot ${j.plot.plotNumber}` : j.plot.name}
+                        <Link href={`/sites/${siteId}/plots/${j.plotId}`} className="hover:underline hover:text-blue-600">{j.plot.plotNumber ? `Plot ${j.plot.plotNumber}` : j.plot.name}</Link>
                         {j.assignedTo && <span className="hidden sm:inline"> · {j.assignedTo.name}</span>}
                       </p>
-                    </div>
-                    {j.status === "COMPLETED" ? (
-                      <span className="flex shrink-0 items-center gap-0.5 text-[10px] text-emerald-600">
-                        <Check className="size-3" /> Signed Off
-                      </span>
-                    ) : pendingActions.has(j.id) ? (
-                      <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
-                    ) : (
-                      <div className="flex shrink-0 items-center gap-1">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-7 gap-1 border-orange-200 px-2 text-[10px] text-orange-700 hover:bg-orange-50"
-                          onClick={() => handleExtendOpen(j.id)}
-                        >
-                          <Clock className="size-2.5" /> Extend
-                        </Button>
-                        <Button
-                          size="sm"
-                          className="h-7 gap-1 bg-emerald-600 px-2.5 text-[11px] text-white hover:bg-emerald-700"
-                          onClick={() => handleOpenSignOff(j)}
-                        >
-                          <FileCheck className="size-3" />
-                          Sign Off
-                        </Button>
+                      <div className="mt-1.5 flex flex-wrap items-center gap-1 border-t pt-1.5">
+                        <span className="mr-auto text-[10px] font-medium text-muted-foreground">Actions</span>
+                        {j.status === "COMPLETED" ? (
+                          <span className="flex items-center gap-0.5 text-[10px] text-emerald-600">
+                            <Check className="size-3" /> Signed Off
+                          </span>
+                        ) : pendingActions.has(j.id) ? (
+                          <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
+                        ) : (
+                          <>
+                            <Button variant="outline" size="sm" className="h-6 gap-1 border-orange-200 px-2 text-[10px] text-orange-700 hover:bg-orange-50" onClick={() => handleExtendOpen(j.id)}>
+                              <Clock className="size-2.5" /> Extend
+                            </Button>
+                            <Button size="sm" className="h-6 gap-1 bg-emerald-600 px-2 text-[10px] text-white hover:bg-emerald-700" onClick={() => handleJobAction(j.id, "complete")}>
+                              <CheckCircle2 className="size-2.5" /> Complete
+                            </Button>
+                            <Button size="sm" className="h-6 gap-1 bg-emerald-700 px-2 text-[10px] text-white hover:bg-emerald-800" onClick={() => handleOpenSignOff(j)}>
+                              <FileCheck className="size-2.5" /> Sign Off
+                            </Button>
+                            <Button variant="outline" size="sm" className="h-6 gap-1 px-2 text-[10px]" onClick={() => setInlineSnagTarget({ jobId: j.id, plotId: j.plotId, contactId: (j as { contractors?: Array<{ contactId: string }> }).contractors?.[0]?.contactId })}>
+                              <AlertTriangle className="size-2.5" /> Snag
+                            </Button>
+                            <Button variant="outline" size="sm" className="h-6 gap-1 px-2 text-[10px]" onClick={() => setNoteTarget({ jobId: j.id, jobName: j.name })}>
+                              <StickyNote className="size-2.5" /> Note
+                            </Button>
+                            <Button variant="outline" size="sm" className="h-6 gap-1 px-2 text-[10px]" onClick={() => setPhotoTarget({ jobId: j.id, jobName: j.name })}>
+                              <Camera className="size-2.5" /> Photos
+                            </Button>
+                          </>
+                        )}
                       </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-            </CardContent>
-          )}
-        </Card>
-
-        {/* Deliveries expected */}
-        <Card id="section-deliveries">
-          <CardHeader className="cursor-pointer select-none pb-2" onClick={() => toggleSection("deliveries")}>
-            <CardTitle className="flex items-center gap-2 text-sm">
-              <Package className="size-4 text-blue-600" />
-              Deliveries Today ({data.deliveriesToday.length})
-              <ChevronDown className={cn("ml-auto size-3.5 shrink-0 transition-transform duration-200", openSections.has("deliveries") && "rotate-180")} />
-            </CardTitle>
-          </CardHeader>
-          {openSections.has("deliveries") && (
-            <CardContent>
-            {data.deliveriesToday.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No deliveries expected</p>
-            ) : (
-              <div className="space-y-2">
-                {data.deliveriesToday.map((d) => (
-                  <div key={d.id} className="flex items-start justify-between gap-2 rounded border p-2 text-sm">
-                    <div className="min-w-0 flex-1">
-                      <Link href={`/suppliers/${d.supplier.id}`} className="font-medium text-blue-600 hover:underline">{d.supplier.name}</Link>
-                      <p className="text-xs text-muted-foreground">{d.itemsDescription || "—"}</p>
-                      <p className="text-xs text-muted-foreground">
-                        <Link href={`/jobs/${d.job.id}`} className="hover:underline hover:text-blue-600">{d.job.name}</Link>
-                        {" · "}{d.job.plot.plotNumber ? `Plot ${d.job.plot.plotNumber}` : d.job.plot.name}
-                      </p>
                     </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-7 shrink-0 border-green-200 px-2 text-[10px] text-green-700 hover:bg-green-50"
-                      disabled={pendingOrderActions.has(d.id)}
-                      onClick={() => handleOrderAction(d.id, "DELIVERED")}
-                    >
-                      {pendingOrderActions.has(d.id) ? <Loader2 className="size-3 animate-spin" /> : <CheckCircle2 className="size-3" />}
-                      <span className="ml-1">Received</span>
-                    </Button>
-                  </div>
-                ))}
-              </div>
-            )}
-            </CardContent>
-          )}
-        </Card>
-
-        {/* Late starts — NOT_STARTED jobs whose start date has passed */}
-        <Card id="section-late-starts" className={data.lateStartJobs.length > 0 ? "border-amber-200" : ""}>
-          <CardHeader className="cursor-pointer select-none pb-2" onClick={() => toggleSection("late-starts")}>
-            <CardTitle className={cn("flex items-center gap-2 text-sm", data.lateStartJobs.length > 0 ? "text-amber-700" : "")}>
-              <Clock className="size-4" />
-              Late Starts ({data.lateStartJobs.length})
-              <ChevronDown className={cn("ml-auto size-3.5 shrink-0 transition-transform duration-200", openSections.has("late-starts") && "rotate-180")} />
-            </CardTitle>
-            <CardDescription className="text-xs">Jobs that should have started but haven&apos;t been actioned</CardDescription>
-          </CardHeader>
-          {openSections.has("late-starts") && (
-            <CardContent>
-              {data.lateStartJobs.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No late starts</p>
-              ) : (
-                <div className="space-y-2">
+                  ))}
+                  {/* ── Late Starts ── */}
+                  {data.lateStartJobs.length > 0 && (
+                    <p id="section-late-starts" className={cn("flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-red-700", (data.jobsStartingToday.length > 0 || data.jobsDueToday.length > 0) && "mt-3 border-t pt-3")}>
+                      <Clock className="size-3" /> Late Starts ({data.lateStartJobs.length})
+                    </p>
+                  )}
                   {data.lateStartJobs.map((j) => (
-                    <div key={j.id} className="flex items-center gap-2 rounded border border-amber-100 bg-amber-50/50 p-2 text-sm">
-                      <div className="min-w-0 flex-1">
+                    <div key={`late-${j.id}`} className="rounded border border-amber-100 bg-amber-50/50 p-2 text-sm">
+                      <div className="flex items-center gap-2">
                         <Link href={`/jobs/${j.id}`} className="truncate font-medium text-blue-600 hover:underline">{j.name}</Link>
-                        <p className="text-xs text-muted-foreground">
-                          {j.plot.plotNumber ? `Plot ${j.plot.plotNumber}` : j.plot.name}
-                          {j.assignedTo && <span> · {j.assignedTo.name}</span>}
-                          {j.startDate && <span className="text-amber-700"> · Should have started {format(new Date(j.startDate), "dd MMM")}</span>}
-                        </p>
+                        <Badge variant="outline" className="shrink-0 border-red-200 text-[10px] text-red-700">Late</Badge>
                       </div>
-                      <div className="flex shrink-0 items-center gap-1">
-                        <Button variant="outline" size="sm" className="h-6 gap-1 border-green-200 px-2 text-[10px] text-green-700 hover:bg-green-50" disabled={pendingActions.has(j.id)} onClick={() => handleJobAction(j.id, "start")}>
-                          <Play className="size-2.5" /> Start Now
+                      <p className="text-xs text-muted-foreground">
+                        {j.plotId ? <Link href={`/sites/${siteId}/plots/${j.plotId}`} className="hover:underline hover:text-blue-600">{j.plot.plotNumber ? `Plot ${j.plot.plotNumber}` : j.plot.name}</Link> : (j.plot.plotNumber ? `Plot ${j.plot.plotNumber}` : j.plot.name)}
+                        {j.assignedTo && <span> · {j.assignedTo.name}</span>}
+                        {j.startDate && <span className="text-amber-700"> · Due {format(new Date(j.startDate), "dd MMM")}</span>}
+                      </p>
+                      <div className="mt-1.5 flex items-center gap-1 border-t border-amber-200 pt-1.5">
+                        <span className="mr-auto text-[10px] font-medium text-muted-foreground">Actions</span>
+                        <Button variant="outline" size="sm" className="h-6 gap-1 border-green-200 px-2 text-[10px] text-green-700 hover:bg-green-50" disabled={pendingActions.has(j.id)} onClick={() => triggerJobAction({ id: j.id, name: j.name, status: "NOT_STARTED", startDate: j.startDate, endDate: j.endDate ?? null }, "start")}>
+                          <Play className="size-2.5" /> Start
                         </Button>
                         <Button variant="outline" size="sm" className="h-6 gap-1 border-amber-200 px-2 text-[10px] text-amber-700 hover:bg-amber-50" onClick={() => { setPushTarget(j); setPushDays(differenceInCalendarDays(date, j.startDate ? new Date(j.startDate) : date) || 1); }}>
                           <CalendarClock className="size-2.5" /> Push
@@ -1628,105 +1885,185 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                       </div>
                     </div>
                   ))}
+
+                  {/* ── Blocked ── */}
+                  {data.blockedJobs && data.blockedJobs.length > 0 && (
+                    <>
+                      <p id="section-blocked" className="mt-3 flex items-center gap-1.5 border-t pt-3 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                        <Lock className="size-3" /> Blocked ({data.blockedJobs.length})
+                      </p>
+                      {data.blockedJobs.map((j) => (
+                        <div key={`blocked-${j.id}`} className="rounded border border-slate-200 bg-slate-50/50 p-2 text-sm opacity-70">
+                            <div className="flex items-center gap-2">
+                              <Link href={`/jobs/${j.id}`} className="truncate font-medium text-slate-600 hover:underline">{j.name}</Link>
+                              <Badge variant="outline" className="shrink-0 border-slate-300 text-[10px] text-slate-500">Blocked</Badge>
+                            </div>
+                            <p className="text-xs text-muted-foreground">
+                              {j.plot.plotNumber ? `Plot ${j.plot.plotNumber}` : j.plot.name}
+                              {j.assignedTo && <span> · {j.assignedTo.name}</span>}
+                            </p>
+                            <p className="mt-0.5 flex items-center gap-1 text-xs text-slate-500">
+                              <Lock className="size-3" /> Blocked by: {j.blockedBy}
+                            </p>
+                            <div className="mt-1.5 flex flex-wrap items-center gap-1 border-t pt-1.5">
+                              <span className="mr-auto text-[10px] font-medium text-muted-foreground">Actions</span>
+                              <Link href={`/jobs/${j.id}`} className="inline-flex h-6 items-center gap-1 rounded-md border px-2 text-[10px] text-slate-600 hover:bg-slate-100">
+                                <Briefcase className="size-2.5" /> View Job
+                              </Link>
+                            </div>
+                        </div>
+                      ))}
+                    </>
+                  )}
+
+                  {/* ── Overdue ── */}
+                  {(data.overdueJobs.length > 0 || data.overdueDeliveries.length > 0) && (
+                    <>
+                      <p id="section-overdue" className="mt-3 flex items-center gap-1.5 border-t pt-3 text-[11px] font-semibold uppercase tracking-wide text-red-700">
+                        <AlertTriangle className="size-3" /> Overdue ({data.overdueJobs.length} job{data.overdueJobs.length !== 1 ? "s" : ""}{data.overdueDeliveries.length > 0 ? `, ${data.overdueDeliveries.length} deliver${data.overdueDeliveries.length !== 1 ? "ies" : "y"}` : ""})
+                        {!bulkMode && (() => {
+                          const completable = data.overdueJobs.filter((j) => j.status === "IN_PROGRESS");
+                          return completable.length > 1 ? (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="ml-auto h-6 gap-1 border-red-200 px-2 text-[10px] text-red-700 hover:bg-red-50"
+                              disabled={bulkProcessing}
+                              onClick={(e) => { e.stopPropagation(); handleQuickBulk(completable.map((j) => j.id), "complete"); }}
+                            >
+                              {bulkProcessing ? <Loader2 className="size-3 animate-spin" /> : <CheckCircle2 className="size-2.5" />}
+                              Complete All ({completable.length})
+                            </Button>
+                          ) : null;
+                        })()}
+                      </p>
+                      {data.overdueJobs.slice(0, 10).map((j) => renderJobRow(j))}
+                      {data.overdueJobs.length > 10 && (
+                        <p className="text-xs text-muted-foreground">
+                          +{data.overdueJobs.length - 10} more overdue jobs
+                        </p>
+                      )}
+                      {data.overdueDeliveries.map((d) => (
+                        <div key={`od-${d.id}`} className="flex items-start justify-between gap-2 rounded border border-red-100 bg-red-50/40 p-2 text-sm">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-1.5">
+                              <Package className="size-3 shrink-0 text-red-600" />
+                              <Link href={`/suppliers/${d.supplier.id}`} className="font-medium text-blue-600 hover:underline">{d.supplier.name}</Link>
+                            </div>
+                            <p className="text-xs text-muted-foreground">{d.itemsDescription || "—"}</p>
+                            <p className="text-xs text-muted-foreground">
+                              <Link href={`/jobs/${d.job.id}`} className="hover:underline hover:text-blue-600">{d.job.name}</Link>
+                              {" · "}{d.job.plot.plotNumber ? `Plot ${d.job.plot.plotNumber}` : d.job.plot.name}
+                              {d.expectedDeliveryDate && (
+                                <span className="ml-1 font-medium text-red-600">
+                                  · Due {format(new Date(d.expectedDeliveryDate), "dd MMM")}
+                                </span>
+                              )}
+                            </p>
+                          </div>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-7 shrink-0 border-green-200 px-2 text-[10px] text-green-700 hover:bg-green-50"
+                            disabled={pendingOrderActions.has(d.id)}
+                            onClick={() => handleOrderAction(d.id, "DELIVERED")}
+                          >
+                            {pendingOrderActions.has(d.id) ? <Loader2 className="size-3 animate-spin" /> : <CheckCircle2 className="size-3" />}
+                            <span className="ml-1">Received</span>
+                          </Button>
+                        </div>
+                      ))}
+                    </>
+                  )}
+
+                  {/* ── Awaiting Sign Off ── */}
+                  {(data.awaitingSignOff?.length || 0) > 0 && (
+                    <>
+                      <p id="section-awaiting-signoff" className="mt-3 flex items-center gap-1.5 border-t pt-3 text-[11px] font-semibold uppercase tracking-wide text-amber-700">
+                        <FileCheck className="size-3" /> Awaiting Sign Off ({data.awaitingSignOff!.length})
+                      </p>
+                      {data.awaitingSignOff!.map((j) => {
+                        const daysSince = j.actualEndDate ? differenceInCalendarDays(date, new Date(j.actualEndDate)) : 0;
+                        const plotLbl = j.plot.plotNumber ? `Plot ${j.plot.plotNumber}` : j.plot.name;
+                        const contractor = j.contractors?.[0]?.contact;
+                        return (
+                          <div key={`signoff-${j.id}`} className="rounded border border-amber-100 bg-amber-50 p-2 text-sm">
+                            <div className="flex items-center gap-2">
+                              <Link href={`/jobs/${j.id}`} className="font-medium text-foreground hover:underline">{j.name}</Link>
+                              <Badge variant="outline" className="shrink-0 border-amber-200 text-[10px] text-amber-700">Sign Off</Badge>
+                            </div>
+                            <p className="text-xs text-muted-foreground">
+                              <Link href={`/sites/${siteId}/plots/${j.plotId}`} className="hover:underline hover:text-blue-600">{plotLbl}</Link>
+                              {contractor && ` · ${contractor.company || contractor.name}`}
+                              {daysSince > 0 && ` · Completed ${daysSince} day${daysSince !== 1 ? "s" : ""} ago`}
+                            </p>
+                            <div className="mt-1.5 flex flex-wrap items-center gap-1 border-t border-amber-200 pt-1.5">
+                              <span className="w-full text-[10px] font-medium text-muted-foreground sm:mr-auto sm:w-auto">Actions</span>
+                              <Button size="sm" variant="outline" className="h-6 gap-1 border-amber-300 px-2 text-[10px] text-amber-700 hover:bg-amber-100"
+                                onClick={() => setSignOffTarget({ id: j.id, name: j.name, status: "COMPLETED", plot: j.plot })}>
+                                <FileCheck className="size-2.5" /> Sign Off
+                              </Button>
+                              <Button variant="outline" size="sm" className="h-6 gap-1 px-2 text-[10px]" onClick={() => setInlineSnagTarget({ jobId: j.id, plotId: j.plotId, contactId: (j.contractors as Array<{ contactId?: string }>)?.[0]?.contactId })}>
+                                <AlertTriangle className="size-2.5" /> Snag
+                              </Button>
+                              <Button variant="outline" size="sm" className="h-6 gap-1 px-2 text-[10px]" onClick={() => setNoteTarget({ jobId: j.id, jobName: j.name })}>
+                                <StickyNote className="size-2.5" /> Note
+                              </Button>
+                              <Button variant="outline" size="sm" className="h-6 gap-1 px-2 text-[10px]" onClick={() => setPhotoTarget({ jobId: j.id, jobName: j.name })}>
+                                <Camera className="size-2.5" /> Photos
+                              </Button>
+                              {pendingActions.has(j.id) ? (
+                                <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
+                              ) : (
+                                <Button variant="outline" size="sm" className="h-6 gap-1 border-slate-300 px-2 text-[10px] text-slate-600 hover:bg-slate-50" onClick={() => handleReopenJob(j.id, j.name)}>
+                                  <RotateCcw className="size-2.5" /> Reopen
+                                </Button>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </>
+                  )}
                 </div>
               )}
             </CardContent>
           )}
         </Card>
 
-        {/* Blocked jobs — late starts that are waiting on a predecessor */}
-        {data.blockedJobs && data.blockedJobs.length > 0 && (
-          <Card id="section-blocked" className="border-slate-200">
-            <CardHeader className="cursor-pointer select-none pb-2" onClick={() => toggleSection("blocked")}>
-              <CardTitle className={cn("flex items-center gap-2 text-sm text-slate-500")}>
-                <Lock className="size-4" />
-                Blocked Jobs ({data.blockedJobs.length})
-                <ChevronDown className={cn("ml-auto size-3.5 shrink-0 transition-transform duration-200", openSections.has("blocked") && "rotate-180")} />
-              </CardTitle>
-              <CardDescription className="text-xs">Jobs that can&apos;t start yet because a predecessor job isn&apos;t complete</CardDescription>
-            </CardHeader>
-            {openSections.has("blocked") && (
-              <CardContent>
-                <div className="space-y-2">
-                  {data.blockedJobs.map((j) => (
-                    <div key={j.id} className="flex items-center gap-2 rounded border border-slate-200 bg-slate-50/50 p-2 text-sm opacity-70">
-                      <div className="min-w-0 flex-1">
-                        <Link href={`/jobs/${j.id}`} className="truncate font-medium text-slate-600 hover:underline">{j.name}</Link>
-                        <p className="text-xs text-muted-foreground">
-                          {j.plot.plotNumber ? `Plot ${j.plot.plotNumber}` : j.plot.name}
-                          {j.assignedTo && <span> &middot; {j.assignedTo.name}</span>}
-                        </p>
-                        <p className="mt-0.5 flex items-center gap-1 text-xs text-slate-500">
-                          <Lock className="size-3" /> Blocked by: {j.blockedBy}
-                        </p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            )}
-          </Card>
-        )}
-
-        {/* Overdue items */}
-        {(data.overdueJobs.length > 0 || data.overdueDeliveries.length > 0) && (
-          <Card id="section-overdue" className="border-red-200">
-            <CardHeader className="cursor-pointer select-none pb-2" onClick={() => toggleSection("overdue")}>
-              <CardTitle className="flex items-center gap-2 text-sm text-red-700">
-                <AlertTriangle className="size-4" />
-                Overdue ({data.overdueJobs.length} jobs, {data.overdueDeliveries.length} deliveries)
-                {!bulkMode && (() => {
-                  const completable = data.overdueJobs.filter((j) => j.status === "IN_PROGRESS");
-                  return completable.length > 1 ? (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="ml-auto h-6 gap-1 border-red-200 px-2 text-[10px] text-red-700 hover:bg-red-50"
-                      disabled={bulkProcessing}
-                      onClick={(e) => { e.stopPropagation(); handleQuickBulk(completable.map((j) => j.id), "complete"); }}
-                    >
-                      {bulkProcessing ? <Loader2 className="size-3 animate-spin" /> : <CheckCircle2 className="size-2.5" />}
-                      Complete All ({completable.length})
-                    </Button>
-                  ) : null;
-                })()}
-                <ChevronDown className={cn("ml-auto size-3.5 shrink-0 transition-transform duration-200", openSections.has("overdue") && "rotate-180")} />
-              </CardTitle>
-            </CardHeader>
-            {openSections.has("overdue") && (
-              <CardContent>
+        {/* Materials — Deliveries + Orders to Place */}
+        <Card id="section-deliveries" className="md:col-span-2">
+          <CardHeader className="cursor-pointer select-none pb-2" onClick={() => toggleSection("materials")}>
+            <CardTitle className="flex items-center gap-2 text-sm">
+              <Package className="size-4 text-blue-600" />
+              Materials ({data.deliveriesToday.length + data.ordersToPlace.length})
+              <ChevronDown className={cn("ml-auto size-3.5 shrink-0 transition-transform duration-200", openSections.has("materials") && "rotate-180")} />
+            </CardTitle>
+          </CardHeader>
+          {openSections.has("materials") && (
+            <CardContent>
               <div className="space-y-2">
-                {data.overdueJobs.slice(0, 10).map((j) => renderJobRow(j))}
-                {data.overdueJobs.length > 10 && (
-                  <p className="text-xs text-muted-foreground">
-                    +{data.overdueJobs.length - 10} more overdue jobs
-                  </p>
-                )}
-                {data.overdueDeliveries.length > 0 && (
-                  <>
-                    {data.overdueJobs.length > 0 && <div className="border-t pt-2" />}
-                    {data.overdueDeliveries.map((d) => (
-                      <div key={d.id} className="flex items-start justify-between gap-2 rounded border border-red-100 bg-red-50/40 p-2 text-sm">
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-1.5">
-                            <Package className="size-3 shrink-0 text-red-600" />
-                            <Link href={`/suppliers/${d.supplier.id}`} className="font-medium text-blue-600 hover:underline">{d.supplier.name}</Link>
-                          </div>
-                          <p className="text-xs text-muted-foreground">{d.itemsDescription || "—"}</p>
-                          <p className="text-xs text-muted-foreground">
-                            <Link href={`/jobs/${d.job.id}`} className="hover:underline hover:text-blue-600">{d.job.name}</Link>
-                            {" · "}{d.job.plot.plotNumber ? `Plot ${d.job.plot.plotNumber}` : d.job.plot.name}
-                            {d.expectedDeliveryDate && (
-                              <span className="ml-1 font-medium text-red-600">
-                                · Due {format(new Date(d.expectedDeliveryDate), "dd MMM")}
-                              </span>
-                            )}
-                          </p>
-                        </div>
+                {/* ── Deliveries Today ── */}
+                <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-blue-700">
+                  <Truck className="size-3" /> Deliveries Today ({data.deliveriesToday.length})
+                </p>
+                {data.deliveriesToday.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">No deliveries expected today</p>
+                ) : (
+                  data.deliveriesToday.map((d) => (
+                    <div key={d.id} className="rounded border p-2 text-sm">
+                      <Link href={`/suppliers/${d.supplier.id}`} className="font-medium text-blue-600 hover:underline">{d.supplier.name}</Link>
+                      <p className="text-xs text-muted-foreground">{d.itemsDescription || "—"}</p>
+                      <p className="text-xs text-muted-foreground">
+                        <Link href={`/jobs/${d.job.id}`} className="hover:underline hover:text-blue-600">{d.job.name}</Link>
+                        {" · "}{d.job.plot.plotNumber ? `Plot ${d.job.plot.plotNumber}` : d.job.plot.name}
+                      </p>
+                      <div className="mt-1.5 flex items-center gap-1 border-t pt-1.5">
+                        <span className="mr-auto text-[10px] font-medium text-muted-foreground">Actions</span>
                         <Button
                           variant="outline"
                           size="sm"
-                          className="h-7 shrink-0 border-green-200 px-2 text-[10px] text-green-700 hover:bg-green-50"
+                          className="h-6 border-green-200 px-2 text-[10px] text-green-700 hover:bg-green-50"
                           disabled={pendingOrderActions.has(d.id)}
                           onClick={() => handleOrderAction(d.id, "DELIVERED")}
                         >
@@ -1734,189 +2071,334 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                           <span className="ml-1">Received</span>
                         </Button>
                       </div>
-                    ))}
-                  </>
+                    </div>
+                  ))
+                )}
+
+                {/* ── Orders to Place ── */}
+                <p id="section-orders" className="mt-3 flex items-center gap-1.5 border-t pt-3 text-[11px] font-semibold uppercase tracking-wide text-violet-700">
+                  <ShoppingCart className="size-3" /> Orders to Place ({data.ordersToPlace.length})
+                </p>
+                {data.ordersToPlace.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">No orders to place</p>
+                ) : (
+                  groupedOrdersToPlace.map((group) => {
+                    const o = group[0];
+                    const groupIds = group.map((g) => g.id);
+                    const anyPending = groupIds.some((id) => pendingOrderActions.has(id));
+                    const mailto = o.supplier.contactEmail
+                      ? buildOrderMailto(o.supplier.contactEmail, {
+                          supplierName: o.supplier.name,
+                          supplierContactName: o.supplier.contactName,
+                          supplierAccountNumber: o.supplier.accountNumber,
+                          jobName: o.job.name,
+                          siteName: data.site.name,
+                          siteAddress: data.site.address,
+                          sitePostcode: data.site.postcode,
+                          plotNumbers: group.map((g) => g.job.plot.plotNumber ? `Plot ${g.job.plot.plotNumber}` : g.job.plot.name),
+                          items: (o.orderItems || []).map((i) => ({ name: i.name, quantity: i.quantity, unit: i.unit, unitCost: i.unitCost })),
+                          itemsDescriptionFallback: o.itemsDescription,
+                          expectedDeliveryDate: o.expectedDeliveryDate,
+                          orderDate: o.dateOfOrder,
+                        })
+                      : null;
+                    return (
+                      <div key={`${o.supplier.id}__${o.job.name}`} className="rounded border p-2 text-sm">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <Link href={`/suppliers/${o.supplier.id}`} className="truncate font-medium text-blue-600 hover:underline">
+                            {o.supplier.name}
+                          </Link>
+                        </div>
+                        <p className="text-xs text-muted-foreground">{o.itemsDescription || "—"}</p>
+                        <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-muted-foreground">
+                          {o.dateOfOrder && (
+                            <span>Order by <span className="font-medium text-purple-600">{format(new Date(o.dateOfOrder), "dd MMM")}</span></span>
+                          )}
+                          {o.expectedDeliveryDate && (
+                            <span>Delivery by <span className="font-medium text-teal-600">{format(new Date(o.expectedDeliveryDate), "dd MMM")}</span></span>
+                          )}
+                        </div>
+                        <div className="flex flex-wrap items-center gap-1 pt-0.5">
+                          <Link href={`/jobs/${o.job.id}`} className="text-xs hover:underline hover:text-blue-600">{o.job.name}</Link>
+                          <span className="text-xs text-muted-foreground">·</span>
+                          {group.slice(0, 5).map((g) => (
+                            <span key={g.id} className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600">
+                              {g.job.plot.plotNumber ? `Plot ${g.job.plot.plotNumber}` : g.job.plot.name}
+                            </span>
+                          ))}
+                          {group.length > 5 && (
+                            <span className="text-[10px] text-muted-foreground">+{group.length - 5} more</span>
+                          )}
+                        </div>
+                        <div className="mt-1.5 flex flex-wrap items-center gap-1 border-t pt-1.5">
+                          <span className="mr-auto text-[10px] font-medium text-muted-foreground">Actions</span>
+                          {anyPending ? (
+                            <Loader2 className="size-4 animate-spin text-muted-foreground" />
+                          ) : (
+                            <>
+                              {mailto && (
+                                <Button variant="outline" size="sm" className="h-6 border-violet-200 px-2 text-[10px] text-violet-700 hover:bg-violet-50"
+                                  onClick={() => { window.open(mailto, "_blank"); handleGroupOrderAction(groupIds, "ORDERED"); }}>
+                                  <Mail className="mr-1 size-2.5" />{group.length > 1 ? `Send (${group.length})` : "Send Order"}
+                                </Button>
+                              )}
+                              <Button variant="outline" size="sm" className="h-6 border-blue-200 px-2 text-[10px] text-blue-700 hover:bg-blue-50"
+                                onClick={() => handleGroupOrderAction(groupIds, "ORDERED")}>
+                                <Package className="mr-1 size-2.5" />{mailto ? "Mark Sent" : "Place Order"}
+                              </Button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })
                 )}
               </div>
-              </CardContent>
-            )}
-          </Card>
-        )}
-
-        {/* Jobs starting tomorrow */}
-        <Card id="section-starting-tomorrow">
-          <CardHeader className="cursor-pointer select-none pb-2" onClick={() => toggleSection("starting-tomorrow")}>
-            <CardTitle className="flex items-center gap-2 text-sm">
-              <CalendarClock className="size-4 text-indigo-600" />
-              Starting Tomorrow ({data.jobsStartingTomorrow.length})
-              <ChevronDown className={cn("ml-auto size-3.5 shrink-0 transition-transform duration-200", openSections.has("starting-tomorrow") && "rotate-180")} />
-            </CardTitle>
-          </CardHeader>
-          {openSections.has("starting-tomorrow") && (
-            <CardContent>
-              {data.jobsStartingTomorrow.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No jobs starting tomorrow</p>
-              ) : (
-                <div className="space-y-2">
-                  {data.jobsStartingTomorrow.map((j) => renderJobRow(j, false))}
-                </div>
-              )}
             </CardContent>
           )}
         </Card>
       </div>
 
-      {/* Orders to Place */}
-      {data.ordersToPlace.length > 0 && (
-        <Card id="section-orders">
-          <CardHeader className="cursor-pointer select-none pb-2" onClick={() => toggleSection("orders-to-place")}>
+      {/* In Progress jobs — separate card */}
+      {data.activeJobs.length > 0 && (
+        <Card>
+          <CardHeader className="cursor-pointer select-none pb-2" onClick={() => toggleSection("in-progress")}>
             <CardTitle className="flex items-center gap-2 text-sm">
-              <ShoppingCart className="size-4 text-violet-600" />
-              Orders to Place ({groupedOrdersToPlace.length})
-              <ChevronDown className={cn("ml-auto size-3.5 shrink-0 transition-transform duration-200", openSections.has("orders-to-place") && "rotate-180")} />
+              <Activity className="size-4 text-blue-600" />
+              In Progress ({data.activeJobs.length})
+              <ChevronDown className={cn("ml-auto size-3.5 shrink-0 transition-transform duration-200", openSections.has("in-progress") && "rotate-180")} />
             </CardTitle>
-            <CardDescription className="text-xs">Orders created but not yet sent to supplier</CardDescription>
+            <CardDescription className="text-xs">Active jobs across all plots</CardDescription>
           </CardHeader>
-          {openSections.has("orders-to-place") && (
+          {openSections.has("in-progress") && (
             <CardContent>
-            <div className="space-y-2">
-              {groupedOrdersToPlace.map((group) => {
-                const o = group[0];
-                const groupIds = group.map((g) => g.id);
-                const anyPending = groupIds.some((id) => pendingOrderActions.has(id));
-                const mailto = o.supplier.contactEmail
-                  ? `mailto:${encodeURIComponent(o.supplier.contactEmail)}?subject=${encodeURIComponent(`Material Order — ${o.job.name}`)}&body=${encodeURIComponent(`Hi ${o.supplier.contactName || o.supplier.name},\n\nPlease supply the following for ${o.job.name} (${group.length} plot${group.length !== 1 ? "s" : ""}):\n\n${o.itemsDescription || "Materials as discussed"}${o.expectedDeliveryDate ? `\n\nRequired by: ${format(new Date(o.expectedDeliveryDate), "dd MMM yyyy")}` : ""}\n\nPlease confirm receipt.\n\nRegards`)}`
-                  : null;
-                return (
-                  <div key={`${o.supplier.id}__${o.job.name}`} className="flex items-start justify-between gap-2 rounded border p-2 text-sm">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <Link href={`/suppliers/${o.supplier.id}`} className="truncate font-medium text-blue-600 hover:underline">
-                          {o.supplier.name}
-                        </Link>
-                        {o.expectedDeliveryDate && (
-                          <span className="text-[10px] text-muted-foreground">
-                            needed {format(new Date(o.expectedDeliveryDate), "dd MMM")}
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-xs text-muted-foreground">{o.itemsDescription || "—"}</p>
-                      <div className="flex flex-wrap items-center gap-1 pt-0.5">
-                        <Link href={`/jobs/${o.job.id}`} className="text-xs hover:underline hover:text-blue-600">{o.job.name}</Link>
-                        <span className="text-xs text-muted-foreground">·</span>
-                        {group.slice(0, 5).map((g) => (
-                          <span key={g.id} className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600">
-                            {g.job.plot.plotNumber ? `Plot ${g.job.plot.plotNumber}` : g.job.plot.name}
-                          </span>
-                        ))}
-                        {group.length > 5 && (
-                          <span className="text-[10px] text-muted-foreground">+{group.length - 5} more</span>
-                        )}
-                      </div>
+              <div className="space-y-2">
+                {data.activeJobs.map((j) => (
+                  <div key={j.id} className="rounded border p-2 text-sm">
+                    <div className="flex items-center gap-2">
+                      <Link href={`/jobs/${j.id}`} className="truncate font-medium text-blue-600 hover:underline">{j.name}</Link>
+                      <Badge className="shrink-0 text-[10px]">IN PROGRESS</Badge>
                     </div>
-                    <div className="flex shrink-0 flex-col items-end gap-1">
-                      {anyPending ? (
-                        <Loader2 className="size-4 animate-spin text-muted-foreground" />
+                    <p className="text-xs text-muted-foreground">
+                      <Link href={`/sites/${siteId}/plots/${(j as { plotId?: string }).plotId}`} className="hover:underline hover:text-blue-600">{j.plot.plotNumber ? `Plot ${j.plot.plotNumber}` : j.plot.name}</Link>
+                      {j.assignedTo && <span className="hidden sm:inline"> · {j.assignedTo.name}</span>}
+                      {(j as { contractors?: Array<{ contact: { company: string | null; name: string } }> }).contractors?.[0]?.contact && (
+                        <span className="hidden sm:inline"> · {(j as { contractors?: Array<{ contact: { company: string | null; name: string } }> }).contractors![0].contact.company || (j as { contractors?: Array<{ contact: { company: string | null; name: string } }> }).contractors![0].contact.name}</span>
+                      )}
+                      {j.endDate && <span> · Due {format(new Date(j.endDate), "dd MMM")}</span>}
+                    </p>
+                    <div className="mt-1.5 flex flex-wrap items-center gap-1 border-t pt-1.5">
+                      <span className="mr-auto text-[10px] font-medium text-muted-foreground">Actions</span>
+                      {pendingActions.has(j.id) ? (
+                        <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
                       ) : (
                         <>
-                          {mailto && (
-                            <Button variant="outline" size="sm" className="h-6 border-violet-200 px-2 text-[10px] text-violet-700 hover:bg-violet-50"
-                              onClick={() => { window.open(mailto, "_blank"); handleGroupOrderAction(groupIds, "ORDERED"); }}>
-                              <Mail className="mr-1 size-2.5" />{group.length > 1 ? `Send (${group.length})` : "Send Order"}
-                            </Button>
-                          )}
-                          <Button variant="outline" size="sm" className="h-6 border-blue-200 px-2 text-[10px] text-blue-700 hover:bg-blue-50"
-                            onClick={() => handleGroupOrderAction(groupIds, "ORDERED")}>
-                            <Package className="mr-1 size-2.5" />{mailto ? "Mark Sent" : "Place Order"}
+                          <Button variant="outline" size="sm" className="h-6 gap-1 border-blue-200 px-2 text-[10px] text-blue-700 hover:bg-blue-50" onClick={() => handleJobAction(j.id, "complete")}>
+                            <CheckCircle2 className="size-2.5" /> Complete
+                          </Button>
+                          <Button variant="outline" size="sm" className="h-6 gap-1 border-orange-200 px-2 text-[10px] text-orange-700 hover:bg-orange-50" onClick={() => handleExtendOpen(j.id)}>
+                            <Clock className="size-2.5" /> Extend
+                          </Button>
+                          <Button variant="outline" size="sm" className="h-6 gap-1 px-2 text-[10px]" onClick={() => setInlineSnagTarget({ jobId: j.id, plotId: (j as { plotId?: string }).plotId || "", contactId: (j as { contractors?: Array<{ contactId?: string }> }).contractors?.[0]?.contactId })}>
+                            <AlertTriangle className="size-2.5" /> Snag
+                          </Button>
+                          <Button variant="outline" size="sm" className="h-6 gap-1 px-2 text-[10px]" onClick={() => setNoteTarget({ jobId: j.id, jobName: j.name })}>
+                            <StickyNote className="size-2.5" /> Note
                           </Button>
                         </>
                       )}
                     </div>
                   </div>
-                );
-              })}
-            </div>
+                ))}
+              </div>
             </CardContent>
           )}
         </Card>
       )}
 
-      {/* Upcoming Orders (future, scheduled) — collapsible */}
-      {data.upcomingOrders.length > 0 && (
-        <Card>
-          <CardHeader className="cursor-pointer select-none pb-2" onClick={() => setUpcomingOrdersOpen((o) => !o)}>
-            <CardTitle className="flex items-center gap-2 text-sm">
-              <ShoppingCart className="size-4 text-slate-500" />
-              Upcoming Orders ({groupedUpcomingOrders.length})
-              <ChevronDown className={cn("ml-auto size-4 text-muted-foreground transition-transform duration-200", upcomingOrdersOpen && "rotate-180")} />
-            </CardTitle>
-            <CardDescription className="text-xs">Orders scheduled for future placement — click to expand</CardDescription>
-          </CardHeader>
-          {upcomingOrdersOpen && (
-          <CardContent>
-            <div className="space-y-2">
-              {groupedUpcomingOrders.map((group) => {
-                const o = group[0];
-                const groupIds = group.map((g) => g.id);
-                const anyPending = groupIds.some((id) => pendingOrderActions.has(id));
-                const mailto = o.supplier.contactEmail
-                  ? `mailto:${encodeURIComponent(o.supplier.contactEmail)}?subject=${encodeURIComponent(`Material Order — ${o.job.name}`)}&body=${encodeURIComponent(`Hi ${o.supplier.contactName || o.supplier.name},\n\nPlease supply the following for ${o.job.name} (${group.length} plot${group.length !== 1 ? "s" : ""}):\n\n${o.itemsDescription || "Materials as discussed"}${o.expectedDeliveryDate ? `\n\nRequired by: ${format(new Date(o.expectedDeliveryDate), "dd MMM yyyy")}` : ""}\n\nPlease confirm receipt.\n\nRegards`)}`
-                  : null;
-                return (
-                  <div key={`${o.supplier.id}__${o.job.name}`} className="flex items-start justify-between gap-2 rounded border p-2 text-sm">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <Link href={`/suppliers/${o.supplier.id}`} className="truncate font-medium text-blue-600 hover:underline">
-                          {o.supplier.name}
-                        </Link>
-                        {o.expectedDeliveryDate && (
-                          <span className="text-[10px] text-muted-foreground">
-                            needed {format(new Date(o.expectedDeliveryDate), "dd MMM")}
-                          </span>
-                        )}
+      {/* Delayed jobs — pushed forward, not yet started */}
+      {(data.delayedJobs?.length || 0) > 0 && (
+        <>
+          <div className="mt-6 flex items-center gap-2 border-b-2 border-purple-200 pb-1">
+            <CalendarClock className="size-4 text-purple-600" />
+            <h2 className="text-xs font-bold text-purple-900 uppercase tracking-widest">Delayed</h2>
+            <span className="rounded-full bg-purple-100 px-2 py-0.5 text-[10px] font-semibold text-purple-700">
+              {data.delayedJobs!.length} job{data.delayedJobs!.length !== 1 ? "s" : ""} pushed
+            </span>
+          </div>
+          <Card>
+            <CardHeader className="cursor-pointer select-none pb-2" onClick={() => toggleSection("delayed")}>
+              <CardTitle className="flex items-center gap-2 text-sm">
+                <CalendarClock className="size-4 text-purple-600" />
+                Delayed Jobs ({data.delayedJobs!.length})
+                <ChevronDown className={cn("ml-auto size-3.5 shrink-0 transition-transform duration-200", openSections.has("delayed") && "rotate-180")} />
+              </CardTitle>
+              <CardDescription className="text-xs">Jobs that have been pushed forward — originally due earlier</CardDescription>
+            </CardHeader>
+            {openSections.has("delayed") && (
+              <CardContent>
+                <div className="space-y-2">
+                  {data.delayedJobs!.map((j) => (
+                    <div key={j.id} className="rounded border border-purple-100 bg-purple-50/30 p-2 text-sm">
+                      <div className="flex items-center gap-2">
+                        <Link href={`/jobs/${j.id}`} className="truncate font-medium text-blue-600 hover:underline">{j.name}</Link>
+                        <Badge variant="outline" className="shrink-0 border-purple-200 text-[10px] text-purple-700">Delayed</Badge>
                       </div>
-                      <p className="text-xs text-muted-foreground">{o.itemsDescription || "—"}</p>
-                      <div className="flex flex-wrap items-center gap-1 pt-0.5">
-                        <Link href={`/jobs/${o.job.id}`} className="text-xs hover:underline hover:text-blue-600">{o.job.name}</Link>
-                        <span className="text-xs text-muted-foreground">·</span>
-                        {group.slice(0, 5).map((g) => (
-                          <span key={g.id} className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600">
-                            {g.job.plot.plotNumber ? `Plot ${g.job.plot.plotNumber}` : g.job.plot.name}
-                          </span>
-                        ))}
-                        {group.length > 5 && (
-                          <span className="text-[10px] text-muted-foreground">+{group.length - 5} more</span>
-                        )}
+                      <p className="text-xs text-muted-foreground">
+                        {j.plot.plotNumber ? `Plot ${j.plot.plotNumber}` : j.plot.name}
+                        {j.assignedTo && <span className="hidden sm:inline"> · {j.assignedTo.name}</span>}
+                        {j.contractors?.[0]?.contact && <span className="hidden sm:inline"> · {j.contractors[0].contact.company || j.contractors[0].contact.name}</span>}
+                      </p>
+                      <p className="text-[10px] text-purple-600">
+                        Originally {j.originalStartDate ? format(new Date(j.originalStartDate), "dd MMM") : "earlier"}
+                        {j.startDate && ` → now ${format(new Date(j.startDate), "dd MMM")}`}
+                      </p>
+                      <div className="mt-1.5 flex flex-wrap items-center gap-1 border-t border-purple-100 pt-1.5">
+                        <span className="mr-auto text-[10px] font-medium text-muted-foreground">Actions</span>
+                        <Button variant="outline" size="sm" className="h-6 gap-1 border-green-200 px-2 text-[10px] text-green-700 hover:bg-green-50" onClick={() => triggerJobAction({ id: j.id, name: j.name, status: "NOT_STARTED", startDate: j.startDate, endDate: j.endDate }, "start")}>
+                          <Play className="size-2.5" /> Start Now
+                        </Button>
+                        <Button variant="outline" size="sm" className="h-6 gap-1 border-purple-200 px-2 text-[10px] text-purple-700 hover:bg-purple-50" onClick={() => { setPushTarget({ id: j.id, name: j.name, startDate: j.startDate, endDate: j.endDate }); setPushDays(1); }}>
+                          <CalendarClock className="size-2.5" /> Push Further
+                        </Button>
                       </div>
                     </div>
-                    <div className="flex shrink-0 flex-col items-end gap-1">
-                      {anyPending ? (
-                        <Loader2 className="size-4 animate-spin text-muted-foreground" />
-                      ) : (
-                        <>
-                          {mailto && (
-                            <Button variant="outline" size="sm" className="h-6 border-violet-200 px-2 text-[10px] text-violet-700 hover:bg-violet-50"
-                              onClick={() => { window.open(mailto, "_blank"); handleGroupOrderAction(groupIds, "ORDERED"); }}>
-                              <Mail className="mr-1 size-2.5" />{group.length > 1 ? `Send (${group.length})` : "Send Order"}
-                            </Button>
+                  ))}
+                </div>
+              </CardContent>
+            )}
+          </Card>
+        </>
+      )}
+
+      {/* ═══════════════ OTHER ACTIONS ═══════════════ */}
+      <div className="mt-6 flex items-center gap-2 border-b-2 border-slate-200 pb-1">
+        <ListChecks className="size-4 text-slate-600" />
+        <h2 className="text-xs font-bold text-slate-900 uppercase tracking-widest">Other Actions</h2>
+      </div>
+
+      {/* Needs Attention — collapsible */}
+      {data.needsAttention && data.needsAttention.length > 0 && (
+        <Card id="section-needs-attention">
+          <CardHeader className="cursor-pointer select-none pb-2" onClick={() => toggleSection("needs-attention")}>
+            <CardTitle className="flex items-center gap-2 text-sm">
+              <AlertTriangle className="size-4 text-amber-500" />
+              Needs Attention ({data.needsAttention.length})
+              <ChevronDown className={cn("ml-auto size-3.5 shrink-0 transition-transform duration-200", openSections.has("needs-attention") && "rotate-180")} />
+            </CardTitle>
+            <CardDescription className="text-xs">Items with missing information — click to resolve</CardDescription>
+          </CardHeader>
+          {openSections.has("needs-attention") && (
+            <CardContent>
+              <div className="space-y-2">
+                {data.needsAttention.map((item) => {
+                  const itemKey = `${item.type}-${item.id}`;
+                  const isExpanded = expandedAttentionItem === itemKey;
+                  const TypeIcon =
+                    item.type === "snag" ? Bug : item.type === "job" ? Briefcase : Package;
+                  return (
+                    <div key={itemKey}>
+                      <button
+                        type="button"
+                        onClick={() => setExpandedAttentionItem(isExpanded ? null : itemKey)}
+                        className="flex w-full flex-col gap-1 rounded-lg border border-amber-200 bg-amber-50/50 p-3 text-left transition-colors hover:bg-amber-50"
+                      >
+                        <div className="flex items-center gap-1.5">
+                          <TypeIcon className="size-3.5 text-amber-600 shrink-0" />
+                          <p className="text-sm font-medium text-foreground line-clamp-1">{item.title}</p>
+                          <ChevronDown className={cn("ml-auto size-3.5 shrink-0 text-amber-500 transition-transform duration-200", isExpanded && "rotate-180")} />
+                        </div>
+                        <p className="text-xs text-muted-foreground">{item.subtitle}</p>
+                        <div className="flex flex-wrap gap-1 mt-0.5">
+                          {item.missing.map((m) => (
+                            <span key={m} className="inline-flex items-center gap-0.5 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700">
+                              <AlertTriangle className="size-2.5" />
+                              {m}
+                            </span>
+                          ))}
+                        </div>
+                      </button>
+                      {isExpanded && (
+                        <div className="ml-2 mt-1 space-y-1.5 rounded-b-lg border border-t-0 border-amber-200 bg-amber-50/30 p-3">
+                          <p className="text-[10px] font-semibold text-amber-700 uppercase tracking-wide">Fix Actions</p>
+                          <div className="flex flex-wrap gap-1.5">
+                            {item.missing.map((m) => {
+                              const mLower = m.toLowerCase();
+                              if (mLower.includes("sign-off") || mLower.includes("signoff") || mLower.includes("sign off")) {
+                                return (
+                                  <Button key={m} variant="outline" size="sm" className="h-7 gap-1 border-amber-300 px-2.5 text-[10px] text-amber-700 hover:bg-amber-100"
+                                    onClick={() => setSignOffTarget({ id: item.id, name: item.title, status: "COMPLETED", plot: undefined })}>
+                                    <FileCheck className="size-3" /> Add Sign-Off Notes
+                                  </Button>
+                                );
+                              }
+                              if (mLower.includes("photo")) {
+                                return (
+                                  <Button key={m} variant="outline" size="sm" className="h-7 gap-1 border-amber-300 px-2.5 text-[10px] text-amber-700 hover:bg-amber-100"
+                                    onClick={() => setPhotoTarget({ jobId: item.id, jobName: item.title })}>
+                                    <Camera className="size-3" /> Upload Photos
+                                  </Button>
+                                );
+                              }
+                              if (mLower.includes("assignee") || mLower.includes("assigned")) {
+                                return (
+                                  <Button key={m} variant="outline" size="sm" className="h-7 gap-1 border-amber-300 px-2.5 text-[10px] text-amber-700 hover:bg-amber-100"
+                                    onClick={() => { setChecklistExpand({ jobId: item.id, item: "assignee" }); }}>
+                                    <UserPlus className="size-3" /> Assign Team Member
+                                  </Button>
+                                );
+                              }
+                              if (mLower.includes("contractor")) {
+                                return (
+                                  <Button key={m} variant="outline" size="sm" className="h-7 gap-1 border-amber-300 px-2.5 text-[10px] text-amber-700 hover:bg-amber-100"
+                                    onClick={() => handleContractorAssignOpen(item.id, item.title)}>
+                                    <HardHat className="size-3" /> Assign Contractor
+                                  </Button>
+                                );
+                              }
+                              return (
+                                <Link key={m} href={item.type === "snag" ? `/sites/${siteId}?tab=snags&snagId=${item.id}` : item.type === "job" ? `/jobs/${item.id}` : `/orders`}
+                                  className="inline-flex h-7 items-center gap-1 rounded-md border border-amber-300 px-2.5 text-[10px] text-amber-700 hover:bg-amber-100">
+                                  <AlertTriangle className="size-3" /> Fix: {m}
+                                </Link>
+                              );
+                            })}
+                            <Link href={item.type === "snag" ? `/sites/${siteId}?tab=snags&snagId=${item.id}` : item.type === "job" ? `/jobs/${item.id}` : `/orders`}
+                              className="inline-flex h-7 items-center gap-1 rounded-md border px-2.5 text-[10px] text-muted-foreground hover:bg-slate-100">
+                              <Briefcase className="size-3" /> Open Full View
+                            </Link>
+                          </div>
+
+                          {/* Inline assignee picker */}
+                          {item.type === "job" && checklistExpand?.jobId === item.id && checklistExpand.item === "assignee" && (
+                            <div className="rounded border border-amber-200 bg-white p-2">
+                              <p className="text-[10px] font-semibold text-amber-700 mb-1">Assign Team Member</p>
+                              <div className="flex gap-1">
+                                <select value={selectedAssigneeId} onChange={(e) => setSelectedAssigneeId(e.target.value)}
+                                  className="flex-1 rounded border px-2 py-1 text-[10px]">
+                                  <option value="">Select...</option>
+                                  {availableUsers.map((u) => (
+                                    <option key={u.id} value={u.id}>{u.name}</option>
+                                  ))}
+                                </select>
+                                <Button size="sm" className="h-6 px-2 text-[10px]" disabled={!selectedAssigneeId || assigningUser} onClick={() => handleAssigneeConfirm(item.id)}>
+                                  {assigningUser ? <Loader2 className="size-3 animate-spin" /> : "Assign"}
+                                </Button>
+                              </div>
+                            </div>
                           )}
-                          <Button variant="outline" size="sm" className="h-6 border-blue-200 px-2 text-[10px] text-blue-700 hover:bg-blue-50"
-                            onClick={() => handleGroupOrderAction(groupIds, "ORDERED")}>
-                            <Package className="mr-1 size-2.5" />{mailto ? "Mark Sent" : "Place Order"}
-                          </Button>
-                        </>
+                        </div>
                       )}
                     </div>
-                  </div>
-                );
-              })}
-            </div>
-          </CardContent>
+                  );
+                })}
+              </div>
+            </CardContent>
           )}
         </Card>
       )}
 
-      {/* Open snags */}
+      {/* Open Snags — collapsible (moved from Pipeline) */}
       {data.openSnagsList.length > 0 && (
         <Card id="section-snags">
           <CardHeader className="cursor-pointer select-none pb-2" onClick={() => toggleSection("snags")}>
@@ -2004,134 +2486,380 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
         </Card>
       )}
 
-      {/* Pending Sign-offs — jobs started without the previous one being signed off */}
+      {/* Pending Sign-offs — collapsible */}
       {data.pendingSignOffs && data.pendingSignOffs.length > 0 && (
         <Card id="section-pending-signoffs" className="border-amber-200">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-2 mb-3">
+          <CardHeader className="cursor-pointer select-none pb-2" onClick={() => toggleSection("pending-signoffs")}>
+            <CardTitle className="flex items-center gap-2 text-sm text-amber-800">
               <AlertTriangle className="size-4 text-amber-500" />
-              <span className="text-sm font-semibold text-amber-800">
-                Pending Sign-offs ({data.pendingSignOffs.length})
-              </span>
-              <span className="text-xs text-amber-600">— jobs still open while subsequent work has started</span>
-            </div>
-            <div className="space-y-2">
-              {data.pendingSignOffs.map((j) => (
-                <a
-                  key={j.id}
-                  href={`/jobs/${j.id}`}
-                  className="flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 hover:bg-amber-100 transition-colors"
-                >
-                  <div>
-                    <p className="text-sm font-medium text-amber-900">{j.name}</p>
-                    <p className="text-xs text-amber-600">
-                      {j.plot.plotNumber ? `Plot ${j.plot.plotNumber}` : j.plot.name}
-                    </p>
-                  </div>
-                  <span className="rounded-full bg-amber-200 px-2 py-0.5 text-[10px] font-semibold text-amber-800">
-                    Sign Off
-                  </span>
-                </a>
-              ))}
-            </div>
-          </CardContent>
+              Pending Sign-offs ({data.pendingSignOffs.length})
+              <ChevronDown className={cn("ml-auto size-3.5 shrink-0 transition-transform duration-200", openSections.has("pending-signoffs") && "rotate-180")} />
+            </CardTitle>
+            <CardDescription className="text-xs">Jobs still open while subsequent work has started</CardDescription>
+          </CardHeader>
+          {openSections.has("pending-signoffs") && (
+            <CardContent>
+              <div className="space-y-2">
+                {data.pendingSignOffs.map((j) => (
+                  <a
+                    key={j.id}
+                    href={`/jobs/${j.id}`}
+                    className="flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 hover:bg-amber-100 transition-colors"
+                  >
+                    <div>
+                      <p className="text-sm font-medium text-amber-900">{j.name}</p>
+                      <p className="text-xs text-amber-600">
+                        {j.plot.plotNumber ? `Plot ${j.plot.plotNumber}` : j.plot.name}
+                      </p>
+                    </div>
+                    <span className="rounded-full bg-amber-200 px-2 py-0.5 text-[10px] font-semibold text-amber-800">
+                      Sign Off
+                    </span>
+                  </a>
+                ))}
+              </div>
+            </CardContent>
+          )}
         </Card>
       )}
 
-      {/* Needs Attention — all incomplete items across the site */}
-      {data.needsAttention && data.needsAttention.length > 0 && (
-        <Card id="section-needs-attention">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-2 mb-3">
-              <AlertTriangle className="size-4 text-amber-500" />
-              <span className="text-sm font-semibold">
-                Needs Attention ({data.needsAttention.length})
-              </span>
-            </div>
-            <p className="text-xs text-muted-foreground mb-3">
-              Items with missing information — click to resolve
-            </p>
-            <div className="space-y-2">
-              {data.needsAttention.map((item) => {
-                const href =
-                  item.type === "snag"
-                    ? `/sites/${siteId}?tab=snags&snagId=${item.id}`
-                    : item.type === "job"
-                      ? `/jobs/${item.id}`
-                      : `/orders`;
-                const TypeIcon =
-                  item.type === "snag" ? Bug : item.type === "job" ? Briefcase : Package;
-                return (
-                  <a
-                    key={`${item.type}-${item.id}`}
-                    href={href}
-                    className="flex flex-col gap-1 rounded-lg border border-amber-200 bg-amber-50/50 p-3 no-underline hover:bg-amber-50 transition-colors"
-                  >
-                    <div className="flex items-center gap-1.5">
-                      <TypeIcon className="size-3.5 text-amber-600 shrink-0" />
-                      <p className="text-sm font-medium text-foreground line-clamp-1">{item.title}</p>
+      {/* Inactive Plots section header */}
+      <div className="mt-6 flex items-center gap-2 border-b-2 border-amber-200 pb-1">
+        <PauseCircle className="size-4 text-amber-600" />
+        <h2 className="text-xs font-bold text-amber-900 uppercase tracking-widest">Inactive Plots</h2>
+        <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-700">{(data.inactivePlots?.length || 0)} plots need decisions</span>
+      </div>
+
+      {/* Awaiting Contractor Confirmation */}
+      {(data.inactivePlots ?? []).filter((p) => p.inactivityType === "awaiting_contractor").length > 0 && (
+        <Card id="section-contractor-confirmations" className="border-orange-200 bg-orange-50/40">
+          <CardHeader className="cursor-pointer select-none pb-2" onClick={() => toggleSection("contractor-confirmations")}>
+            <CardTitle className="flex items-center gap-2 text-sm text-orange-700">
+              <HardHat className="size-4" />
+              Awaiting Contractor Confirmation ({(data.inactivePlots ?? []).filter((p) => p.inactivityType === "awaiting_contractor").length})
+              <ChevronDown className={cn("ml-auto size-3.5 shrink-0 transition-transform duration-200", openSections.has("contractor-confirmations") && "rotate-180")} />
+            </CardTitle>
+            <p className="text-xs text-orange-600">Contractor needs to confirm availability before work can begin</p>
+          </CardHeader>
+          {openSections.has("contractor-confirmations") && (
+            <CardContent className="space-y-2 pt-0">
+              {(data.inactivePlots ?? []).filter((p) => p.inactivityType === "awaiting_contractor").map((p) => (
+                <div key={p.id} className="rounded-xl border border-orange-200 bg-white p-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-semibold text-foreground">
+                        {p.plotNumber ? `Plot ${p.plotNumber}` : p.name}
+                        {p.houseType && <span className="ml-1.5 text-xs font-normal text-muted-foreground">({p.houseType})</span>}
+                      </p>
+                      <p className="text-xs text-orange-700 mt-0.5">{p.nextJob?.name || "Next job"}</p>
+                      {p.nextJob?.contractorName && (
+                        <p className="text-xs font-medium mt-1">{p.nextJob.contractorName}</p>
+                      )}
                     </div>
-                    <p className="text-xs text-muted-foreground">{item.subtitle}</p>
-                    <div className="flex flex-wrap gap-1 mt-0.5">
-                      {item.missing.map((m) => (
-                        <span key={m} className="inline-flex items-center gap-0.5 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700">
-                          <AlertTriangle className="size-2.5" />
-                          {m}
+                    <span className="rounded px-2 py-0.5 text-[10px] font-semibold bg-orange-100 text-orange-700">Awaiting</span>
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {p.nextJob?.contractorPhone && (
+                      <a href={`tel:${p.nextJob.contractorPhone}`}
+                        className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors">
+                        <Phone className="size-3" /> Call
+                      </a>
+                    )}
+                    {p.nextJob?.contractorEmail && (
+                      <a href={`mailto:${p.nextJob.contractorEmail}`}
+                        className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors">
+                        <Mail className="size-3" /> Email
+                      </a>
+                    )}
+                    {p.nextJob && (
+                      <button
+                        onClick={() => triggerJobAction({ id: p.nextJob!.id, name: p.nextJob!.name, status: "NOT_STARTED", startDate: p.nextJob!.startDate ?? null, endDate: p.nextJob!.endDate ?? null }, "start")}
+                        className="flex items-center gap-1.5 rounded-lg bg-green-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-green-700 transition-colors">
+                        <CheckCircle className="size-3" /> Confirmed — Start Job
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </CardContent>
+          )}
+        </Card>
+      )}
+
+      {/* Inactive Plots — plots with no in-progress jobs that need attention */}
+      {(data.inactivePlots ?? []).length > 0 && (
+        <Card id="section-inactive-plots" className="border-amber-200 bg-amber-50/40">
+          <CardHeader className="cursor-pointer select-none pb-2" onClick={() => toggleSection("inactive-plots")}>
+            <CardTitle className="flex items-center gap-2 text-sm text-amber-700">
+              <PauseCircle className="size-4" />
+              Inactive Plots ({data.inactivePlots!.length})
+              <ChevronDown className={cn("ml-auto size-3.5 shrink-0 transition-transform duration-200", openSections.has("inactive-plots") && "rotate-180")} />
+            </CardTitle>
+            <CardDescription className="text-xs text-amber-600/80">
+              Plots with no active jobs — need attention
+            </CardDescription>
+          </CardHeader>
+          {openSections.has("inactive-plots") && (
+            <CardContent className="space-y-2">
+              {data.inactivePlots!.map((p) => {
+                const hasContractor = p.hasContractor ?? !!p.nextJob?.contractorName;
+                const ordersPending = p.ordersPending ?? 0;
+                const ordersOrdered = p.ordersOrdered ?? 0;
+                const ordersTotal = p.ordersTotal ?? 0;
+                const allDelivered = ordersTotal === 0 || (ordersPending === 0 && ordersOrdered === 0);
+                const allSent = ordersPending === 0;
+                return (
+                  <div key={p.id} className="rounded-xl border border-amber-200 bg-white p-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-semibold text-foreground">
+                          {p.plotNumber ? `Plot ${p.plotNumber}` : p.name}
+                          {p.houseType && <span className="ml-1.5 text-xs font-normal text-muted-foreground">({p.houseType})</span>}
+                        </p>
+                        <p className="text-xs text-amber-700 mt-0.5">{p.label}</p>
+                      </div>
+                      <span className={cn("rounded px-2 py-0.5 text-[10px] font-semibold",
+                        p.inactivityType === "not_started" ? "bg-slate-100 text-slate-600" :
+                        p.inactivityType === "deferred" ? "bg-amber-100 text-amber-700" :
+                        p.inactivityType === "awaiting_contractor" ? "bg-orange-100 text-orange-700" :
+                        p.inactivityType === "awaiting_materials" ? "bg-red-100 text-red-700" :
+                        "bg-blue-100 text-blue-700"
+                      )}>
+                        {p.inactivityType === "not_started" ? "Not Started" :
+                         p.inactivityType === "deferred" ? "Deferred" :
+                         p.inactivityType === "awaiting_contractor" ? "Contractor" :
+                         p.inactivityType === "awaiting_materials" ? "Materials" :
+                         "Waiting"}
+                      </span>
+                    </div>
+                    {/* Checklist */}
+                    {p.nextJob && (
+                      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs">
+                        <span className={hasContractor ? "text-green-700" : "text-red-600"}>
+                          {hasContractor ? <Check className="inline size-3 mr-0.5" /> : <X className="inline size-3 mr-0.5" />}
+                          Contractor {hasContractor ? "assigned" : "not assigned"}
+                        </span>
+                        <span className={allSent ? "text-green-700" : "text-red-600"}>
+                          {allSent ? <Check className="inline size-3 mr-0.5" /> : <X className="inline size-3 mr-0.5" />}
+                          {ordersPending > 0 ? `${ordersPending} order${ordersPending !== 1 ? "s" : ""} not sent` : "Orders sent"}
+                        </span>
+                        <span className={allDelivered ? "text-green-700" : "text-amber-600"}>
+                          {allDelivered ? <Check className="inline size-3 mr-0.5" /> : <Clock className="inline size-3 mr-0.5" />}
+                          {allDelivered ? "Materials on site" : `${ordersOrdered} awaiting delivery`}
+                        </span>
+                      </div>
+                    )}
+                    {p.nextJob && (
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        <button
+                          onClick={() => triggerJobAction({ id: p.nextJob!.id, name: p.nextJob!.name, status: "NOT_STARTED", startDate: p.nextJob!.startDate ?? null, endDate: p.nextJob!.endDate ?? null }, "start")}
+                          className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 transition-colors"
+                        >
+                          <PlayCircle className="size-3" /> Start {p.nextJob.name}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </CardContent>
+          )}
+        </Card>
+      )}
+
+      {/* Pipeline section header */}
+      <div className="mt-6 flex items-center gap-2 border-b-2 border-indigo-200 pb-1">
+        <GitBranch className="size-4 text-indigo-600" />
+        <h2 className="text-xs font-bold text-indigo-900 uppercase tracking-widest">Pipeline</h2>
+        <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-semibold text-indigo-700">upcoming</span>
+      </div>
+
+        {/* Jobs starting tomorrow */}
+        <Card id="section-starting-tomorrow">
+          <CardHeader className="cursor-pointer select-none pb-2" onClick={() => toggleSection("starting-tomorrow")}>
+            <CardTitle className="flex items-center gap-2 text-sm">
+              <CalendarClock className="size-4 text-indigo-600" />
+              Starting Tomorrow ({data.jobsStartingTomorrow.length})
+              <ChevronDown className={cn("ml-auto size-3.5 shrink-0 transition-transform duration-200", openSections.has("starting-tomorrow") && "rotate-180")} />
+            </CardTitle>
+          </CardHeader>
+          {openSections.has("starting-tomorrow") && (
+            <CardContent>
+              {data.jobsStartingTomorrow.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No jobs starting tomorrow</p>
+              ) : (
+                <div className="space-y-2">
+                  {data.jobsStartingTomorrow.map((j) => renderJobRow(j, false))}
+                </div>
+              )}
+            </CardContent>
+          )}
+        </Card>
+
+        {/* Upcoming Deliveries — grouped by supplier + job name */}
+        <Card id="section-upcoming-deliveries">
+          <CardHeader className="cursor-pointer select-none pb-2" onClick={() => toggleSection("upcoming-deliveries")}>
+            <CardTitle className="flex items-center gap-2 text-sm">
+              <Truck className="size-4 text-blue-600" />
+              Upcoming Deliveries ({data.upcomingDeliveries?.length || 0})
+              <ChevronDown className={cn("ml-auto size-3.5 shrink-0 transition-transform duration-200", openSections.has("upcoming-deliveries") && "rotate-180")} />
+            </CardTitle>
+            <CardDescription className="text-xs">Orders sent to suppliers — awaiting delivery</CardDescription>
+          </CardHeader>
+          {openSections.has("upcoming-deliveries") && (
+            <CardContent>
+              {(!data.upcomingDeliveries || data.upcomingDeliveries.length === 0) ? (
+                <p className="text-sm text-muted-foreground">No upcoming deliveries</p>
+              ) : (
+                <div className="space-y-1.5">
+                  {(() => {
+                    // Group by supplier + job name
+                    const grouped = new Map<string, typeof data.upcomingDeliveries>();
+                    for (const d of data.upcomingDeliveries!) {
+                      const key = `${d.supplier.id}__${d.job.name}`;
+                      const existing = grouped.get(key) ?? [];
+                      existing.push(d);
+                      grouped.set(key, existing);
+                    }
+                    return Array.from(grouped.values()).map((group) => {
+                      const first = group[0];
+                      const plotLabels = group.map((d) => d.job.plot.plotNumber ? `P${d.job.plot.plotNumber}` : d.job.plot.name);
+                      const allIds = group.map((d) => d.id);
+                      const anyPending = allIds.some((id) => pendingOrderActions.has(id));
+                      return (
+                        <div key={`${first.supplier.id}__${first.job.name}`} className="rounded border p-2 text-sm">
+                          <div className="flex items-center gap-2">
+                            <Link href={`/suppliers/${first.supplier.id}`} className="font-medium text-blue-600 hover:underline">{first.supplier.name}</Link>
+                            <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-medium text-blue-700">Ordered</span>
+                            {first.expectedDeliveryDate && (
+                              <span className="ml-auto text-xs font-medium">{format(new Date(first.expectedDeliveryDate), "d MMM")}</span>
+                            )}
+                          </div>
+                          <p className="text-xs text-muted-foreground">{first.itemsDescription || first.job.name}</p>
+                          <p className="text-[11px] text-muted-foreground">
+                            {first.job.name} · {plotLabels.join(", ")}{group.length > 1 ? ` (${group.length} plots)` : ""}
+                          </p>
+                          <div className="mt-1.5 flex flex-wrap items-center gap-1 border-t pt-1.5">
+                            <span className="mr-auto text-[10px] font-medium text-muted-foreground">Actions</span>
+                            <input
+                              type="date"
+                              className="h-6 rounded border px-1 text-[10px] w-[110px]"
+                              defaultValue={first.expectedDeliveryDate ? format(new Date(first.expectedDeliveryDate), "yyyy-MM-dd") : ""}
+                              onChange={async (e) => {
+                                if (!e.target.value) return;
+                                for (const id of allIds) {
+                                  await fetch(`/api/orders/${id}`, {
+                                    method: "PUT",
+                                    headers: { "Content-Type": "application/json" },
+                                    body: JSON.stringify({ expectedDeliveryDate: e.target.value }),
+                                  });
+                                }
+                                setRefreshKey((k) => k + 1);
+                              }}
+                            />
+                            <Button size="sm" variant="outline" className="h-6 gap-1 text-[10px]"
+                              disabled={anyPending}
+                              onClick={() => allIds.forEach((id) => handleOrderAction(id, "DELIVERED"))}>
+                              {anyPending ? <Loader2 className="size-3 animate-spin" /> : <CheckCircle2 className="size-3" />}
+                              <span className="ml-1">Received</span>
+                            </Button>
+                          </div>
+                        </div>
+                      );
+                    });
+                  })()}
+                </div>
+              )}
+            </CardContent>
+          )}
+        </Card>
+
+      {/* Upcoming Orders (future, scheduled) — collapsible */}
+      {data.upcomingOrders.length > 0 && (
+        <Card>
+          <CardHeader className="cursor-pointer select-none pb-2" onClick={() => setUpcomingOrdersOpen((o) => !o)}>
+            <CardTitle className="flex items-center gap-2 text-sm">
+              <ShoppingCart className="size-4 text-slate-500" />
+              Upcoming Orders ({groupedUpcomingOrders.length})
+              <ChevronDown className={cn("ml-auto size-4 text-muted-foreground transition-transform duration-200", upcomingOrdersOpen && "rotate-180")} />
+            </CardTitle>
+            <CardDescription className="text-xs">Orders scheduled for future placement — click to expand</CardDescription>
+          </CardHeader>
+          {upcomingOrdersOpen && (
+          <CardContent>
+            <div className="space-y-2">
+              {groupedUpcomingOrders.map((group) => {
+                const o = group[0];
+                const groupIds = group.map((g) => g.id);
+                const anyPending = groupIds.some((id) => pendingOrderActions.has(id));
+                const mailto = o.supplier.contactEmail
+                  ? buildOrderMailto(o.supplier.contactEmail, {
+                      supplierName: o.supplier.name,
+                      supplierContactName: o.supplier.contactName,
+                      supplierAccountNumber: o.supplier.accountNumber,
+                      jobName: o.job.name,
+                      siteName: data.site.name,
+                      siteAddress: data.site.address,
+                      sitePostcode: data.site.postcode,
+                      plotNumbers: group.map((g) => g.job.plot.plotNumber ? `Plot ${g.job.plot.plotNumber}` : g.job.plot.name),
+                      items: (o.orderItems || []).map((i) => ({ name: i.name, quantity: i.quantity, unit: i.unit, unitCost: i.unitCost })),
+                      itemsDescriptionFallback: o.itemsDescription,
+                      expectedDeliveryDate: o.expectedDeliveryDate,
+                      orderDate: o.dateOfOrder,
+                    })
+                  : null;
+                return (
+                  <div key={`${o.supplier.id}__${o.job.name}`} className="rounded border p-2 text-sm">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <Link href={`/suppliers/${o.supplier.id}`} className="truncate font-medium text-blue-600 hover:underline">
+                        {o.supplier.name}
+                      </Link>
+                    </div>
+                    <p className="text-xs text-muted-foreground">{o.itemsDescription || "—"}</p>
+                    <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-muted-foreground">
+                      {o.dateOfOrder && (
+                        <span>Order by <span className="font-medium text-purple-600">{format(new Date(o.dateOfOrder), "dd MMM")}</span></span>
+                      )}
+                      {o.expectedDeliveryDate && (
+                        <span>Delivery by <span className="font-medium text-teal-600">{format(new Date(o.expectedDeliveryDate), "dd MMM")}</span></span>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-1 pt-0.5">
+                      <Link href={`/jobs/${o.job.id}`} className="text-xs hover:underline hover:text-blue-600">{o.job.name}</Link>
+                      <span className="text-xs text-muted-foreground">·</span>
+                      {group.slice(0, 5).map((g) => (
+                        <span key={g.id} className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600">
+                          {g.job.plot.plotNumber ? `Plot ${g.job.plot.plotNumber}` : g.job.plot.name}
                         </span>
                       ))}
+                      {group.length > 5 && (
+                        <span className="text-[10px] text-muted-foreground">+{group.length - 5} more</span>
+                      )}
                     </div>
-                  </a>
+                    <div className="mt-1.5 flex flex-wrap items-center gap-1 border-t pt-1.5">
+                      <span className="mr-auto text-[10px] font-medium text-muted-foreground">Actions</span>
+                      {anyPending ? (
+                        <Loader2 className="size-4 animate-spin text-muted-foreground" />
+                      ) : (
+                        <>
+                          {mailto && (
+                            <Button variant="outline" size="sm" className="h-6 border-violet-200 px-2 text-[10px] text-violet-700 hover:bg-violet-50"
+                              onClick={() => { window.open(mailto, "_blank"); handleGroupOrderAction(groupIds, "ORDERED"); }}>
+                              <Mail className="mr-1 size-2.5" />{group.length > 1 ? `Send (${group.length})` : "Send Order"}
+                            </Button>
+                          )}
+                          <Button variant="outline" size="sm" className="h-6 border-blue-200 px-2 text-[10px] text-blue-700 hover:bg-blue-50"
+                            onClick={() => handleGroupOrderAction(groupIds, "ORDERED")}>
+                            <Package className="mr-1 size-2.5" />{mailto ? "Mark Sent" : "Place Order"}
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                  </div>
                 );
               })}
             </div>
           </CardContent>
-        </Card>
-      )}
-
-      {/* Awaiting Restart — plots where "leave for now" was chosen */}
-      {data.awaitingRestartPlots && data.awaitingRestartPlots.length > 0 && (
-        <Card className="border-amber-200 bg-amber-50/40">
-          <CardHeader className="cursor-pointer select-none pb-2" onClick={() => toggleSection("awaiting-restart")}>
-            <CardTitle className="flex items-center gap-2 text-sm text-amber-700">
-              <PauseCircle className="size-4" />
-              Plots Awaiting Decision ({data.awaitingRestartPlots.length})
-              <ChevronDown className={cn("ml-auto size-3.5 shrink-0 transition-transform duration-200", openSections.has("awaiting-restart") && "rotate-180")} />
-            </CardTitle>
-            <CardDescription className="text-xs text-amber-600/80">
-              These plots are inactive — next job needs a start decision
-            </CardDescription>
-          </CardHeader>
-          {openSections.has("awaiting-restart") && (
-            <CardContent className="space-y-3">
-              {data.awaitingRestartPlots.map((p: { id: string; plotNumber: string | null; name: string; nextJob: { id: string; name: string; contractorName: string | null; assignedToName: string | null } | null }) => (
-                <div key={p.id} className="rounded-xl border border-amber-200 bg-white p-3">
-                  <div className="mb-2 flex items-center justify-between">
-                    <p className="text-sm font-semibold text-foreground">
-                      {p.plotNumber ? `Plot ${p.plotNumber}` : p.name}
-                    </p>
-                    {p.nextJob && (
-                      <span className="text-xs text-muted-foreground">{p.nextJob.name}</span>
-                    )}
-                  </div>
-                  {p.nextJob && (
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        onClick={() => setCompletionContext({ completedJobName: "", daysDeviation: 0, nextJob: p.nextJob, plotId: p.id })}
-                        className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 transition-colors"
-                      >
-                        <PlayCircle className="size-3" /> Start today
-                      </button>
-                      <button
-                        onClick={() => setCompletionContext({ completedJobName: "", daysDeviation: 0, nextJob: p.nextJob, plotId: p.id })}
-                        className="flex items-center gap-1.5 rounded-lg border border-border/60 bg-white px-3 py-1.5 text-xs font-medium text-foreground hover:bg-accent transition-colors"
-                      >
-                        <CalendarDays className="size-3" /> Reschedule…
-                      </button>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </CardContent>
           )}
         </Card>
       )}
@@ -2327,7 +3055,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
             <DialogDescription>
               <span className="font-medium text-foreground">{signOffTarget?.name}</span>
               {" — "}
-              {signOffTarget?.plot.plotNumber ? `Plot ${signOffTarget.plot.plotNumber}` : signOffTarget?.plot.name}
+              {signOffTarget?.plot?.plotNumber ? `Plot ${signOffTarget.plot.plotNumber}` : signOffTarget?.plot?.name}
               {signOffTarget?.assignedTo && ` · ${signOffTarget.assignedTo.name}`}
             </DialogDescription>
           </DialogHeader>
@@ -2394,44 +3122,14 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
         </DialogContent>
       </Dialog>
 
-      {/* Cascade after Complete Dialog */}
-      <Dialog open={!!cascadeTarget} onOpenChange={(open) => { if (!open) { setCascadeTarget(null); setCascadePreview(null); } }}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Shift Plot Programme?</DialogTitle>
-            <DialogDescription>
-              &ldquo;{cascadeTarget?.jobName}&rdquo; finished{" "}
-              {cascadeTarget && Math.abs(cascadeTarget.deltaDays)} day{cascadeTarget && Math.abs(cascadeTarget.deltaDays) !== 1 ? "s" : ""}{" "}
-              {cascadeTarget && cascadeTarget.deltaDays > 0 ? "late" : "early"}.
-              Would you like to shift the remaining jobs on this plot?
-            </DialogDescription>
-          </DialogHeader>
-          {cascadePreview && (
-            <div className="rounded bg-blue-50 p-2 text-xs">
-              <p className="font-medium text-blue-800">
-                {cascadePreview.deltaDays > 0 ? "+" : ""}{cascadePreview.deltaDays} day{Math.abs(cascadePreview.deltaDays) !== 1 ? "s" : ""} — {cascadePreview.jobUpdates.length} job{cascadePreview.jobUpdates.length !== 1 ? "s" : ""} and {cascadePreview.orderUpdates.length} order{cascadePreview.orderUpdates.length !== 1 ? "s" : ""} will shift
-              </p>
-            </div>
-          )}
-          <DialogFooter>
-            <Button variant="outline" size="sm" onClick={() => { setCascadeTarget(null); setCascadePreview(null); }}>
-              No, Keep As Is
-            </Button>
-            <Button onClick={handleCascadeConfirm} disabled={cascadeLoading || !cascadePreview} size="sm">
-              {cascadeLoading ? <Loader2 className="mr-1 size-3.5 animate-spin" /> : null}
-              Yes, Shift Programme
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Post-Completion Decision Dialog */}
+      {/* Post-Completion Decision Dialog (unified — replaces legacy cascade dialog) */}
       <PostCompletionDialog
         open={!!completionContext}
         completedJobName={completionContext?.completedJobName ?? ""}
         daysDeviation={completionContext?.daysDeviation ?? 0}
         nextJob={completionContext?.nextJob ?? null}
         plotId={completionContext?.plotId ?? ""}
+        signOffNotes={completionContext?.signOffNotes}
         onClose={() => setCompletionContext(null)}
         onDecisionMade={() => setRefreshKey((k) => k + 1)}
       />
@@ -2577,6 +3275,84 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
           {toast.message}
         </div>
       )}
+      {jobActionDialogs}
+
+      {/* Inline Snag Dialog */}
+      {inlineSnagTarget && (
+        <SnagDialog
+          open={!!inlineSnagTarget}
+          onOpenChange={(open) => { if (!open) setInlineSnagTarget(null); }}
+          plotId={inlineSnagTarget.plotId}
+          initialJobId={inlineSnagTarget.jobId}
+          initialContactId={inlineSnagTarget.contactId}
+          onSaved={() => {
+            setInlineSnagTarget(null);
+            setRefreshKey((k) => k + 1);
+          }}
+        />
+      )}
+
+      {/* Inline Note Dialog */}
+      <Dialog open={!!noteTarget} onOpenChange={(o) => { if (!o) { setNoteTarget(null); setNoteText(""); } }}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <StickyNote className="size-4" />
+              Add Note
+            </DialogTitle>
+            <DialogDescription>
+              Note for <span className="font-medium">{noteTarget?.jobName}</span>
+            </DialogDescription>
+          </DialogHeader>
+          <Textarea
+            placeholder="Enter note..."
+            value={noteText}
+            onChange={(e) => setNoteText(e.target.value)}
+            rows={3}
+            className="resize-none text-sm"
+            autoFocus
+          />
+          <DialogFooter>
+            <DialogClose render={<Button variant="outline" size="sm" />}>Cancel</DialogClose>
+            <Button size="sm" disabled={noteSubmitting || !noteText.trim()} onClick={handleAddNote}>
+              {noteSubmitting ? <Loader2 className="size-3.5 animate-spin mr-1" /> : <StickyNote className="size-3.5 mr-1" />}
+              Save Note
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Inline Photo Upload Dialog */}
+      <Dialog open={!!photoTarget} onOpenChange={(o) => { if (!o) { setPhotoTarget(null); setPhotoFiles([]); } }}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Camera className="size-4" />
+              Upload Photos
+            </DialogTitle>
+            <DialogDescription>
+              Photos for <span className="font-medium">{photoTarget?.jobName}</span>
+            </DialogDescription>
+          </DialogHeader>
+          <input
+            type="file"
+            accept="image/*"
+            multiple
+            onChange={(e) => setPhotoFiles(Array.from(e.target.files ?? []))}
+            className="w-full text-sm file:mr-3 file:rounded-md file:border-0 file:bg-blue-50 file:px-3 file:py-2 file:text-sm file:font-medium file:text-blue-700"
+          />
+          {photoFiles.length > 0 && (
+            <p className="text-xs text-muted-foreground">{photoFiles.length} photo{photoFiles.length !== 1 ? "s" : ""} selected</p>
+          )}
+          <DialogFooter>
+            <DialogClose render={<Button variant="outline" size="sm" />}>Cancel</DialogClose>
+            <Button size="sm" disabled={photoSubmitting || photoFiles.length === 0} onClick={handleUploadPhotos}>
+              {photoSubmitting ? <Loader2 className="size-3.5 animate-spin mr-1" /> : <Camera className="size-3.5 mr-1" />}
+              Upload {photoFiles.length > 0 ? `(${photoFiles.length})` : ""}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -153,19 +153,36 @@ function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: boolean; on
       .catch(() => {});
   }, []);
 
-  // Auto-select site from URL — either from /sites/[id] path or ?site= param
+  // Auto-select site from URL — either from /sites/[id] path or ?site= param or localStorage
   useEffect(() => {
     if (siteIdFromPath) {
       setSelectedSiteId(siteIdFromPath);
+      // Persist to localStorage so navigation to global pages remembers the site
+      try { localStorage.setItem("sight-manager-last-site", siteIdFromPath); } catch {}
     } else {
-      setSelectedSiteId(searchParams.get("site") ?? "");
+      const fromParam = searchParams.get("site");
+      if (fromParam) {
+        setSelectedSiteId(fromParam);
+        try { localStorage.setItem("sight-manager-last-site", fromParam); } catch {}
+      } else {
+        // Fallback to localStorage
+        try {
+          const stored = localStorage.getItem("sight-manager-last-site");
+          if (stored) setSelectedSiteId(stored);
+        } catch {}
+      }
     }
   }, [siteIdFromPath, searchParams]);
 
-  // Context-aware daily brief href
+  // Get the effective site ID (from URL or localStorage)
+  const effectiveSiteId = siteIdFromPath || selectedSiteId;
+
+  // Context-aware nav href — always pass site context to global pages
   const getNavHref = (href: string) => {
-    if (href === "/daily-brief" && siteIdFromPath) {
-      return `/daily-brief?site=${siteIdFromPath}`;
+    const globalPages = ["/daily-brief", "/dashboard", "/analytics", "/events-log"];
+    if (effectiveSiteId && globalPages.some((p) => href.startsWith(p))) {
+      const sep = href.includes("?") ? "&" : "?";
+      return `${href}${sep}site=${effectiveSiteId}`;
     }
     return href;
   };

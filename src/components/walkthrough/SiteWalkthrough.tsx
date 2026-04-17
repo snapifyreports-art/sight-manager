@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import {
   ChevronLeft,
   ChevronRight,
@@ -25,10 +26,16 @@ import {
   ImagePlus,
   ClipboardCheck,
   ChevronsUpDown,
+  Mail,
+  Package,
+  Truck,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useRefreshOnFocus } from "@/hooks/useRefreshOnFocus";
 import { format, parseISO } from "date-fns";
 import { PostCompletionDialog } from "@/components/PostCompletionDialog";
+import { useJobAction } from "@/hooks/useJobAction";
+import { Breadcrumbs } from "@/components/ui/breadcrumbs";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -42,6 +49,8 @@ interface WalkthroughJob {
   endDate: string | null;
   photoCount: number;
   hasSignOffNotes: boolean;
+  parentStageName?: string | null;
+  orders?: Array<{ id: string; status: string; expectedDeliveryDate: string | null; supplier: { name: string } }>;
 }
 
 interface WalkthroughPlot {
@@ -51,11 +60,12 @@ interface WalkthroughPlot {
   houseType: string | null;
   totalJobs: number;
   completedJobs: number;
+  inProgressJobs: number;
   progressPercent: number;
   scheduleStatus: "ahead" | "on_track" | "behind" | "not_started" | "complete";
   scheduleDays: number;
   currentJob: WalkthroughJob | null;
-  nextJob: { id: string; name: string; status: string } | null;
+  nextJob: { id: string; name: string; status: string; startDate: string | null; endDate: string | null; orderCount?: number } | null;
   openSnags: number;
   snagsList: Array<{
     id: string;
@@ -185,9 +195,16 @@ export default function SiteWalkthrough({
 
   // Modal state
   const [noteText, setNoteText] = useState("");
+  const [noteJobId, setNoteJobId] = useState<string | null>(null); // null = current job
   const [snagDesc, setSnagDesc] = useState("");
   const [snagPriority, setSnagPriority] = useState("MEDIUM");
   const [snagLocation, setSnagLocation] = useState("");
+  const [snagJobId, setSnagJobId] = useState<string | null>(null); // null = current job
+  const [snagContactId, setSnagContactId] = useState<string | null>(null); // auto-filled from job
+  const [snagPhotos, setSnagPhotos] = useState<File[]>([]);
+  const [showJobPicker, setShowJobPicker] = useState<"snag" | "note" | null>(null);
+  const [snagEmailPrompt, setSnagEmailPrompt] = useState<{ snagId: string; contractorName: string; contractorEmail: string; description: string } | null>(null);
+  const [plotJobs, setPlotJobs] = useState<Array<{ id: string; name: string; status: string; parentStage: string | null; contractor: { id: string; name: string; company: string | null; email: string | null } | null }>>([]);
   const [signOffNotes, setSignOffNotes] = useState("");
   const [signOffPhotos, setSignOffPhotos] = useState<File[]>([]);
   const [photoFiles, setPhotoFiles] = useState<File[]>([]);
@@ -201,8 +218,19 @@ export default function SiteWalkthrough({
     plotId: string;
   } | null>(null);
 
+  // Centralised job action hook — handles full pre-start flow for any job
+  const { triggerAction: triggerJobAction, isLoading: jobActionLoading, dialogs: jobActionDialogs } = useJobAction(
+    async (_action, _jobId) => {
+      showToast("Done", "success");
+      // Small delay to let server-side cascade finish writing before re-fetch
+      await new Promise((r) => setTimeout(r, 500));
+      await fetchData(true);
+    }
+  );
+
   // Touch/swipe
   const touchStart = useRef<number | null>(null);
+  const touchDelta = useRef<number>(0);
 
   const fetchData = useCallback(async (quiet = false) => {
     if (!quiet) setLoading(true);
@@ -222,6 +250,8 @@ export default function SiteWalkthrough({
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  useRefreshOnFocus(fetchData);
 
   // Keyboard navigation
   useEffect(() => {
@@ -252,9 +282,14 @@ export default function SiteWalkthrough({
   const closeModal = () => {
     setActiveModal(null);
     setNoteText("");
+    setNoteJobId(null);
     setSnagDesc("");
     setSnagLocation("");
     setSnagPriority("MEDIUM");
+    setSnagJobId(null);
+    setSnagContactId(null);
+    setSnagPhotos([]);
+    setShowJobPicker(null);
     setSignOffNotes("");
     setSignOffPhotos([]);
     setPhotoFiles([]);
@@ -268,46 +303,64 @@ export default function SiteWalkthrough({
 
   // ── Actions ──────────────────────────────────────────────────────────────
 
+  // Fetch all jobs on a plot for the job picker
+  const fetchPlotJobs = async (plotId: string, autoFillJobId?: string) => {
+    try {
+      const res = await fetch(`/api/plots/${plotId}/jobs`);
+      if (res.ok) {
+        const jobs = await res.json();
+        const mapped = jobs.map((j: { id: string; name: string; status: string; parentStage: string | null; contractors?: Array<{ contact: { id: string; name: string; company: string | null; email: string | null } }> }) => ({
+          id: j.id, name: j.name, status: j.status, parentStage: j.parentStage,
+          contractor: j.contractors?.[0]?.contact ?? null,
+        }));
+        setPlotJobs(mapped);
+        // Auto-fill contractor from the current/selected job
+        const targetId = autoFillJobId || job?.id;
+        if (targetId) {
+          const match = mapped.find((j: { id: string; contractor: { id: string } | null }) => j.id === targetId);
+          if (match?.contractor) {
+            setSnagContactId(match.contractor.id);
+          }
+        }
+      }
+    } catch { /* non-critical */ }
+  };
+
+  // Fetch orders for a job on demand (avoids loading all orders upfront)
+  const fetchJobOrders = async (jobId: string) => {
+    try {
+      const res = await fetch(`/api/jobs/${jobId}`);
+      if (res.ok) {
+        const data = await res.json();
+        return (data.orders ?? []).map((o: { id: string; status: string; expectedDeliveryDate: string | null; supplier: { name: string } }) => ({ id: o.id, status: o.status, expectedDeliveryDate: o.expectedDeliveryDate ?? null, supplier: { name: o.supplier?.name || "Unknown" } }));
+      }
+    } catch { /* non-critical */ }
+    return [];
+  };
+
   const handleStartNext = async () => {
     if (!plot?.nextJob) return;
-    setActionLoading(true);
-    try {
-      const res = await fetch(`/api/jobs/${plot.nextJob.id}/actions`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "start" }),
-      });
-      if (res.ok) {
-        showToast(`Started: ${plot.nextJob.name}`, "success");
-        await refresh();
-      } else {
-        const err = await res.json().catch(() => ({}));
-        showToast(err.error || "Failed to start job", "error");
-      }
-    } finally {
-      setActionLoading(false);
-    }
+    const orders = await fetchJobOrders(plot.nextJob.id);
+    await triggerJobAction(
+      { id: plot.nextJob.id, name: plot.nextJob.name, status: plot.nextJob.status, startDate: plot.nextJob.startDate ?? null, endDate: plot.nextJob.endDate ?? null, orders },
+      "start"
+    );
   };
 
   const handleStartCurrentJob = async () => {
     if (!plot?.currentJob || plot.currentJob.status !== "NOT_STARTED") return;
-    setActionLoading(true);
-    try {
-      const res = await fetch(`/api/jobs/${plot.currentJob.id}/actions`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "start" }),
-      });
-      if (res.ok) {
-        showToast(`Started: ${plot.currentJob.name}`, "success");
-        await refresh();
-      } else {
-        const err = await res.json().catch(() => ({}));
-        showToast(err.error || "Failed to start job", "error");
-      }
-    } finally {
-      setActionLoading(false);
-    }
+    const orders = await fetchJobOrders(plot.currentJob.id);
+    await triggerJobAction(
+      {
+        id: plot.currentJob.id,
+        name: plot.currentJob.name,
+        status: plot.currentJob.status,
+        startDate: plot.currentJob.startDate,
+        endDate: plot.currentJob.endDate,
+        orders,
+      },
+      "start"
+    );
   };
 
   const handleFinishJob = async () => {
@@ -359,7 +412,8 @@ export default function SiteWalkthrough({
     if (!plot?.currentJob || !noteText.trim()) return;
     setActionLoading(true);
     try {
-      const res = await fetch(`/api/jobs/${plot.currentJob.id}/actions`, {
+      const targetJobId = noteJobId || plot.currentJob.id;
+      const res = await fetch(`/api/jobs/${targetJobId}/actions`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "note", notes: noteText.trim() }),
@@ -385,7 +439,11 @@ export default function SiteWalkthrough({
         priority: snagPriority,
       };
       if (snagLocation.trim()) body.location = snagLocation.trim();
-      if (plot.currentJob?.id) body.jobId = plot.currentJob.id;
+      // Use selected job or default to current job
+      const targetJobId = snagJobId || plot.currentJob?.id;
+      if (targetJobId) body.jobId = targetJobId;
+      // Include contractor
+      if (snagContactId) body.contactId = snagContactId;
 
       const res = await fetch(`/api/plots/${plot.id}/snags`, {
         method: "POST",
@@ -393,9 +451,29 @@ export default function SiteWalkthrough({
         body: JSON.stringify(body),
       });
       if (res.ok) {
+        const snagData = await res.json();
+        // Upload photos if any were taken
+        if (snagPhotos.length > 0) {
+          const fd = new FormData();
+          snagPhotos.forEach((f) => fd.append("photos", f));
+          await fetch(`/api/snags/${snagData.id}/photos`, { method: "POST", body: fd });
+        }
         closeModal();
         showToast("Snag raised", "success");
         await refresh();
+
+        // Prompt to email contractor if they have an email
+        const contractor = snagContactId
+          ? plotJobs.find((j) => j.contractor?.id === snagContactId)?.contractor
+          : null;
+        if (contractor?.email) {
+          setSnagEmailPrompt({
+            snagId: snagData.id,
+            contractorName: contractor.company || contractor.name,
+            contractorEmail: contractor.email,
+            description: snagDesc.trim(),
+          });
+        }
       } else {
         showToast("Failed to raise snag", "error");
       }
@@ -471,14 +549,20 @@ export default function SiteWalkthrough({
 
   const handleTouchStart = (e: React.TouchEvent) => {
     touchStart.current = e.targetTouches[0].clientX;
+    touchDelta.current = 0;
   };
 
-  const handleTouchEnd = (e: React.TouchEvent) => {
+  const handleTouchMove = (e: React.TouchEvent) => {
     if (touchStart.current === null) return;
-    const dist = touchStart.current - e.changedTouches[0].clientX;
-    if (dist > 60) goNext();
-    else if (dist < -60) goPrev();
+    touchDelta.current = touchStart.current - e.targetTouches[0].clientX;
+  };
+
+  const handleTouchEnd = () => {
+    if (touchStart.current === null) return;
+    if (touchDelta.current > 50) goNext();
+    else if (touchDelta.current < -50) goPrev();
     touchStart.current = null;
+    touchDelta.current = 0;
   };
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -518,7 +602,7 @@ export default function SiteWalkthrough({
       {/* Header */}
       <div className="flex items-center gap-3 border-b border-border/40 bg-white px-4 py-3">
         <button
-          onClick={() => router.push(`/sites/${siteId}?tab=daily-brief`)}
+          onClick={() => router.back()}
           className="rounded-lg p-1.5 text-muted-foreground hover:bg-accent"
         >
           <ArrowLeft className="size-4" />
@@ -527,7 +611,11 @@ export default function SiteWalkthrough({
           <p className="truncate text-[13px] font-semibold text-foreground">
             {data.siteName}
           </p>
-          <p className="text-[11px] text-muted-foreground">Site Walkthrough</p>
+          <Breadcrumbs items={[
+            { label: "Sites", href: "/sites" },
+            { label: data.siteName, href: `/sites/${siteId}` },
+            { label: "Walkthrough" },
+          ]} />
         </div>
         <button
           onClick={refresh}
@@ -621,6 +709,7 @@ export default function SiteWalkthrough({
       <div
         className="flex-1 overflow-y-auto"
         onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
       >
         {plot && (
@@ -644,7 +733,9 @@ export default function SiteWalkthrough({
                       Plot {plot.plotNumber} · {plots.length > 1 ? `${currentIndex + 1} of ${plots.length}` : "only plot"}
                     </p>
                     <h2 className="mt-0.5 text-lg font-bold text-foreground">
-                      {plot.plotName || plot.houseType || `Plot ${plot.plotNumber}`}
+                      <Link href={`/sites/${siteId}/plots/${plot.id}`} className="hover:underline">
+                        {plot.plotName || plot.houseType || `Plot ${plot.plotNumber}`}
+                      </Link>
                     </h2>
                     {plot.houseType && plot.plotName && (
                       <p className="text-xs text-muted-foreground">{plot.houseType}</p>
@@ -672,6 +763,23 @@ export default function SiteWalkthrough({
                       style={{ width: `${plot.progressPercent}%` }}
                     />
                   </div>
+                  {/* Job stage timeline mini-bar */}
+                  {plot.totalJobs > 0 && (
+                    <div className="mt-1 flex h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
+                      {plot.completedJobs > 0 && (
+                        <div
+                          className="bg-emerald-500"
+                          style={{ width: `${(plot.completedJobs / plot.totalJobs) * 100}%` }}
+                        />
+                      )}
+                      {plot.inProgressJobs > 0 && (
+                        <div
+                          className="bg-blue-500"
+                          style={{ width: `${(plot.inProgressJobs / plot.totalJobs) * 100}%` }}
+                        />
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -683,6 +791,9 @@ export default function SiteWalkthrough({
                       <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                         {job.status === "IN_PROGRESS" ? "Current Job" : "Next to Start"}
                       </p>
+                      {job.parentStageName && (
+                        <p className="text-[11px] font-medium text-muted-foreground mb-0.5">{job.parentStageName}</p>
+                      )}
                       <div className="flex items-center gap-2">
                         <div
                           className={cn(
@@ -692,7 +803,7 @@ export default function SiteWalkthrough({
                               : "bg-slate-300"
                           )}
                         />
-                        <p className="text-base font-semibold text-foreground">{job.name}</p>
+                        <Link href={`/jobs/${job.id}`} className="text-base font-semibold text-blue-600 hover:underline">{job.name}</Link>
                       </div>
                     </div>
 
@@ -722,6 +833,47 @@ export default function SiteWalkthrough({
                         </div>
                       )}
                     </div>
+
+                    {/* Order / delivery status summary */}
+                    {(() => {
+                      const orders = job.orders ?? [];
+                      const nonCancelled = orders.filter((o) => o.status !== "CANCELLED");
+                      if (nonCancelled.length === 0) return null;
+                      const allDelivered = nonCancelled.every((o) => o.status === "DELIVERED");
+                      if (allDelivered) {
+                        return (
+                          <p className="flex items-center gap-1.5 text-xs text-emerald-600">
+                            <Package className="size-3.5" />
+                            All materials on site
+                          </p>
+                        );
+                      }
+                      const pending = nonCancelled.filter((o) => o.status === "PENDING").length;
+                      const ordered = nonCancelled.filter((o) => o.status === "ORDERED" || o.status === "CONFIRMED").length;
+                      const upcoming = nonCancelled.filter((o) => o.status !== "DELIVERED" && o.expectedDeliveryDate);
+                      const nextDelivery = upcoming.length > 0
+                        ? upcoming.sort((a, b) => a.expectedDeliveryDate!.localeCompare(b.expectedDeliveryDate!))[0]
+                        : null;
+                      const parts: string[] = [];
+                      if (pending > 0) parts.push(`${pending} pending`);
+                      if (ordered > 0) parts.push(`${ordered} ordered`);
+                      return (
+                        <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                          {parts.length > 0 && (
+                            <span className="flex items-center gap-1">
+                              <Package className="size-3.5 shrink-0" />
+                              {parts.join(" \u00B7 ")}
+                            </span>
+                          )}
+                          {nextDelivery && (
+                            <span className="flex items-center gap-1">
+                              <Truck className="size-3.5 shrink-0" />
+                              {upcoming.length} due {format(parseISO(nextDelivery.expectedDeliveryDate!), "d MMM")}
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })()}
 
                     {!job.contractorName && !job.assignedToName && (
                       <p className="flex items-center gap-1.5 text-xs text-amber-600">
@@ -755,9 +907,9 @@ export default function SiteWalkthrough({
                             snag.priority === "HIGH" ? "text-orange-600" :
                             "text-amber-600";
                           return (
-                            <button
+                            <Link
                               key={snag.id}
-                              onClick={() => router.push(`/sites/${siteId}?tab=snags&snagId=${snag.id}`)}
+                              href={`/sites/${siteId}?tab=snags&snagId=${snag.id}`}
                               className="flex w-full items-start gap-2 rounded-lg border border-amber-100 bg-white px-3 py-2 text-left hover:bg-amber-50 transition-colors"
                             >
                               <AlertTriangle className={cn("size-3.5 mt-0.5 shrink-0", priorityColor)} />
@@ -770,7 +922,7 @@ export default function SiteWalkthrough({
                               <span className={cn("shrink-0 text-[10px] font-semibold uppercase", priorityColor)}>
                                 {snag.priority}
                               </span>
-                            </button>
+                            </Link>
                           );
                         })}
                       </div>
@@ -784,7 +936,7 @@ export default function SiteWalkthrough({
                     <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
                       Up next
                     </p>
-                    <p className="mt-0.5 text-sm font-medium text-foreground">{plot.nextJob.name}</p>
+                    <Link href={`/jobs/${plot.nextJob.id}`} className="mt-0.5 text-sm font-medium text-blue-600 hover:underline">{plot.nextJob.name}</Link>
                   </div>
                 )}
               </div>
@@ -808,29 +960,29 @@ export default function SiteWalkthrough({
                 {canStart && (
                   <button
                     onClick={handleStartCurrentJob}
-                    disabled={actionLoading}
+                    disabled={actionLoading || jobActionLoading}
                     className="flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-3.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 active:scale-95 disabled:opacity-60 transition-all"
                   >
-                    {actionLoading ? (
+                    {jobActionLoading ? (
                       <Loader2 className="size-4 animate-spin" />
                     ) : (
                       <PlayCircle className="size-4" />
                     )}
-                    Start Job
+                    Start {plot.currentJob?.name || "Job"}
                   </button>
                 )}
                 {canStartNext && (
                   <button
                     onClick={handleStartNext}
-                    disabled={actionLoading}
+                    disabled={actionLoading || jobActionLoading}
                     className="flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-3.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 active:scale-95 disabled:opacity-60 transition-all"
                   >
-                    {actionLoading ? (
+                    {jobActionLoading ? (
                       <Loader2 className="size-4 animate-spin" />
                     ) : (
                       <PlayCircle className="size-4" />
                     )}
-                    Start Next
+                    Start {plot.nextJob?.name || "Next"}
                   </button>
                 )}
                 {/* If no primary action, show "All done" placeholder */}
@@ -860,7 +1012,7 @@ export default function SiteWalkthrough({
                     Note
                   </button>
                   <button
-                    onClick={() => setActiveModal("snag")}
+                    onClick={() => { setActiveModal("snag"); if (plot) fetchPlotJobs(plot.id); }}
                     className="flex flex-col items-center gap-1.5 rounded-xl border border-border/60 bg-white px-3 py-3 text-xs font-medium text-foreground hover:bg-accent active:scale-95 transition-all shadow-sm"
                   >
                     <AlertTriangle className="size-5 text-amber-500" />
@@ -872,7 +1024,7 @@ export default function SiteWalkthrough({
               {/* Snag only row — when no active job */}
               {!job && (
                 <button
-                  onClick={() => setActiveModal("snag")}
+                  onClick={() => { setActiveModal("snag"); if (plot) fetchPlotJobs(plot.id); }}
                   className="flex w-full items-center justify-center gap-2 rounded-xl border border-border/60 bg-white px-4 py-3 text-sm font-medium text-amber-700 hover:bg-amber-50 active:scale-95 transition-all shadow-sm"
                 >
                   <AlertTriangle className="size-4" />
@@ -880,24 +1032,30 @@ export default function SiteWalkthrough({
                 </button>
               )}
 
-              {/* Delay row */}
-              {canFinish && (
+              {/* Delay row — available for both IN_PROGRESS and NOT_STARTED */}
+              {(canFinish || canStart) && (
                 <button
                   onClick={() => setActiveModal("delay")}
                   className="flex w-full items-center justify-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700 hover:bg-red-100 active:scale-95 transition-all"
                 >
                   <Clock className="size-4" />
-                  Delay / Push Job
+                  {canFinish ? "Delay / Push Job" : "Push Job Forward"}
                 </button>
               )}
 
               {/* Quick plot navigation */}
               <div className="mt-2 flex gap-2">
-                <button
-                  onClick={() => router.push(`/sites/${siteId}?tab=plots`)}
-                  className="flex-1 rounded-xl border border-border/40 bg-white px-3 py-2.5 text-xs text-muted-foreground hover:bg-accent transition-colors"
+                <Link
+                  href={`/sites/${siteId}/plots/${plot.id}`}
+                  className="flex-1 rounded-xl border border-border/40 bg-white px-3 py-2.5 text-xs text-muted-foreground hover:bg-accent transition-colors text-center"
                 >
                   View Plot Detail
+                </Link>
+                <button
+                  onClick={() => router.push(`/sites/${siteId}?tab=programme`)}
+                  className="flex-1 rounded-xl border border-border/40 bg-white px-3 py-2.5 text-xs text-muted-foreground hover:bg-accent transition-colors"
+                >
+                  View Programme
                 </button>
                 <button
                   onClick={() => router.push(`/sites/${siteId}?tab=snags`)}
@@ -968,7 +1126,7 @@ export default function SiteWalkthrough({
 
       {/* Add Note */}
       {activeModal === "note" && job && (
-        <Modal title={`Add Note: ${job.name}`} onClose={closeModal}>
+        <Modal title={`Add Note: ${noteJobId ? plotJobs.find((j) => j.id === noteJobId)?.name || "Selected job" : job.name}`} onClose={closeModal}>
           <div className="space-y-4">
             <textarea
               value={noteText}
@@ -978,6 +1136,31 @@ export default function SiteWalkthrough({
               autoFocus
               className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
+            {/* Job assignment */}
+            <div className="text-xs text-muted-foreground">
+              For: <span className="font-medium text-foreground">
+                {noteJobId ? plotJobs.find((j) => j.id === noteJobId)?.name || "Selected job" : job.name}
+              </span>
+              <button
+                onClick={() => { setShowJobPicker("note"); if (plot) fetchPlotJobs(plot.id); }}
+                className="ml-2 text-blue-600 hover:underline"
+              >
+                Change job
+              </button>
+            </div>
+            {showJobPicker === "note" && plotJobs.length > 0 && (
+              <select
+                value={noteJobId || job.id}
+                onChange={(e) => { setNoteJobId(e.target.value || null); setShowJobPicker(null); }}
+                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                {plotJobs.map((j) => (
+                  <option key={j.id} value={j.id}>
+                    {j.parentStage ? `  ${j.name}` : j.name} ({j.status === "COMPLETED" ? "Completed" : j.status === "IN_PROGRESS" ? "In Progress" : "Not Started"})
+                  </option>
+                ))}
+              </select>
+            )}
             <div className="flex gap-2">
               <button onClick={closeModal} className="flex-1 rounded-xl border border-border py-2.5 text-sm font-medium hover:bg-accent">
                 Cancel
@@ -999,6 +1182,21 @@ export default function SiteWalkthrough({
       {activeModal === "snag" && (
         <Modal title="Raise Snag" onClose={closeModal}>
           <div className="space-y-3">
+            {/* Quick Snap button */}
+            <div className="flex gap-2">
+              <label className="flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-xl border-2 border-dashed border-amber-300 bg-amber-50 py-3 text-sm font-medium text-amber-700 hover:bg-amber-100 transition-colors">
+                <Camera className="size-4" />
+                {snagPhotos.length > 0 ? `${snagPhotos.length} photo${snagPhotos.length > 1 ? "s" : ""} attached` : "Take Photo"}
+                <input
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  multiple
+                  className="hidden"
+                  onChange={(e) => { if (e.target.files) setSnagPhotos(Array.from(e.target.files)); }}
+                />
+              </label>
+            </div>
             <div>
               <label className="mb-1 block text-xs font-medium text-muted-foreground">
                 Description *
@@ -1037,11 +1235,64 @@ export default function SiteWalkthrough({
                 />
               </div>
             </div>
-            {job && (
-              <p className="text-xs text-muted-foreground">
-                Will be linked to: <span className="font-medium text-foreground">{job.name}</span>
-              </p>
+            {/* Job assignment — smart default + change */}
+            <div className="text-xs text-muted-foreground">
+              Linked to: <span className="font-medium text-foreground">
+                {snagJobId ? plotJobs.find((j) => j.id === snagJobId)?.name || "Selected job" : job?.name || "Current job"}
+              </span>
+              <button
+                onClick={() => { setShowJobPicker("snag"); if (plot) fetchPlotJobs(plot.id); }}
+                className="ml-2 text-blue-600 hover:underline"
+              >
+                Change job
+              </button>
+            </div>
+            {showJobPicker === "snag" && plotJobs.length > 0 && (
+              <select
+                value={snagJobId || job?.id || ""}
+                onChange={(e) => {
+                  const selectedId = e.target.value || null;
+                  setSnagJobId(selectedId);
+                  setShowJobPicker(null);
+                  // Auto-fill contractor from selected job
+                  const selectedJob = plotJobs.find((j) => j.id === selectedId);
+                  if (selectedJob?.contractor) {
+                    setSnagContactId(selectedJob.contractor.id);
+                  }
+                }}
+                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                {plotJobs.map((j) => (
+                  <option key={j.id} value={j.id}>
+                    {j.parentStage ? `  ${j.name}` : j.name} ({j.status === "COMPLETED" ? "Completed" : j.status === "IN_PROGRESS" ? "In Progress" : "Not Started"})
+                  </option>
+                ))}
+              </select>
             )}
+            {/* Contractor — auto-filled from job, can override */}
+            <div>
+              <label className="mb-1 block text-xs font-medium text-muted-foreground">Contractor</label>
+              <select
+                value={snagContactId || ""}
+                onChange={(e) => setSnagContactId(e.target.value || null)}
+                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">None</option>
+                {(() => {
+                  // Deduplicate contractors from plotJobs
+                  const seen = new Set<string>();
+                  return plotJobs.filter((j) => {
+                    if (!j.contractor || seen.has(j.contractor.id)) return false;
+                    seen.add(j.contractor.id);
+                    return true;
+                  }).map((j) => (
+                    <option key={j.contractor!.id} value={j.contractor!.id}>
+                      {j.contractor!.company || j.contractor!.name}{j.contractor!.email ? "" : " (no email)"}
+                    </option>
+                  ));
+                })()}
+              </select>
+            </div>
             <div className="flex gap-2 pt-1">
               <button onClick={closeModal} className="flex-1 rounded-xl border border-border py-2.5 text-sm font-medium hover:bg-accent">
                 Cancel
@@ -1054,6 +1305,33 @@ export default function SiteWalkthrough({
                 {actionLoading ? <Loader2 className="size-4 animate-spin" /> : <AlertTriangle className="size-4" />}
                 Raise Snag
               </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Email contractor prompt after snag */}
+      {snagEmailPrompt && (
+        <Modal title="Notify Contractor?" onClose={() => setSnagEmailPrompt(null)}>
+          <div className="space-y-3 p-1">
+            <p className="text-sm text-muted-foreground">
+              Snag raised and assigned to <span className="font-medium text-foreground">{snagEmailPrompt.contractorName}</span>. Would you like to email them?
+            </p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setSnagEmailPrompt(null)}
+                className="flex-1 rounded-xl border border-border py-2.5 text-sm font-medium hover:bg-accent"
+              >
+                Skip
+              </button>
+              <a
+                href={`mailto:${snagEmailPrompt.contractorEmail}?subject=${encodeURIComponent(`Snag Raised — ${data?.siteName || "Site"}`)}&body=${encodeURIComponent(`Hi,\n\nA snag has been raised that requires your attention:\n\n${snagEmailPrompt.description}\n\nPlease review and action at your earliest convenience.\n\nRegards`)}`}
+                onClick={() => setSnagEmailPrompt(null)}
+                className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-blue-600 py-2.5 text-sm font-semibold text-white hover:bg-blue-700"
+              >
+                <Mail className="size-4" />
+                Email
+              </a>
             </div>
           </div>
         </Modal>
@@ -1186,6 +1464,9 @@ export default function SiteWalkthrough({
           onDecisionMade={() => { setCompletionContext(null); refresh(); }}
         />
       )}
+
+      {/* Centralised pre-start / early-start / order-conflict dialogs */}
+      {jobActionDialogs}
     </div>
   );
 }

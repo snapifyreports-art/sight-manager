@@ -72,6 +72,14 @@ export async function GET(req: NextRequest) {
 
       logged++;
 
+      // Send daily weather summary push notification for every site
+      await sendPushToAll("WEATHER_ALERT" as NotificationType, {
+        title: `Weather — ${site.name}`,
+        body: `Today: ${CATEGORY_LABELS[today.category] ?? today.category}, ${today.tempMin}°C–${today.tempMax}°C`,
+        url: `/sites/${site.id}?tab=programme`,
+        tag: `weather-daily-${site.id}`,
+      });
+
       // Check tomorrow's forecast for weather alert
       const tomorrowStr = addDays(now, 1).toISOString().split("T")[0];
       const tomorrow = forecast.find((d) => d.date === tomorrowStr);

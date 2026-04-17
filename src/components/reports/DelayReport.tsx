@@ -167,6 +167,18 @@ export function DelayReport({ siteId }: DelayReportProps) {
   const [loading, setLoading] = useState(true);
   const [showImpactDays, setShowImpactDays] = useState(false);
   const [showTrend, setShowTrend] = useState(false);
+  const [expandedSuppliers, setExpandedSuppliers] = useState<Set<string>>(new Set());
+  const [plots, setPlots] = useState<Array<{ id: string; plotNumber: string | null; name: string }>>([]);
+  const [selectedPlots, setSelectedPlots] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    fetch(`/api/sites/${siteId}`)
+      .then((r) => r.json())
+      .then((site) => {
+        if (site.plots) setPlots(site.plots.map((p: { id: string; plotNumber: string | null; name: string }) => ({ id: p.id, plotNumber: p.plotNumber, name: p.name })));
+      })
+      .catch(() => {});
+  }, [siteId]);
 
   useEffect(() => {
     setLoading(true);
@@ -186,19 +198,56 @@ export function DelayReport({ siteId }: DelayReportProps) {
 
   if (!data) return null;
 
+  // Apply plot filter (by plot number since plot.id not available here)
+  const filterByPlot = (job: DelayedJob) =>
+    selectedPlots.size === 0 || selectedPlots.has(job.plot?.plotNumber || job.plot?.name || "");
+
   const s = data.summary;
-  const weatherExcusedJobs = data.delayedJobs.filter((j) => j.isWeatherExcused);
-  const nonWeatherJobs = data.delayedJobs.filter((j) => !j.isWeatherExcused);
+  const filteredJobs = data.delayedJobs.filter(filterByPlot);
+  const weatherExcusedJobs = filteredJobs.filter((j) => j.isWeatherExcused);
+  const nonWeatherJobs = filteredJobs.filter((j) => !j.isWeatherExcused);
+  // Split non-weather into contractor delays (has contractor) vs other
+  const contractorDelays = nonWeatherJobs.filter((j) => j.contractor);
+  const otherDelays = nonWeatherJobs.filter((j) => !j.contractor);
   const totalImpactDays = data.totalWeatherImpactDays ?? data.totalRainedOffDays;
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-lg font-semibold">Delay Justification Report</h3>
         <p className="text-xs text-muted-foreground">
           Generated {format(new Date(data.generatedAt), "dd MMM yyyy HH:mm")}
         </p>
       </div>
+
+      {/* Plot filter */}
+      {plots.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs font-medium text-muted-foreground">Filter plots:</span>
+          <button
+            onClick={() => setSelectedPlots(new Set())}
+            className={`rounded-full px-2.5 py-1 text-[10px] font-medium transition-colors ${selectedPlots.size === 0 ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}
+          >
+            All
+          </button>
+          {plots.map((p) => {
+            const key = p.plotNumber || p.name;
+            return (
+              <button
+                key={p.id}
+                onClick={() => setSelectedPlots((prev) => {
+                  const next = new Set(prev);
+                  next.has(key) ? next.delete(key) : next.add(key);
+                  return next;
+                })}
+                className={`rounded-full px-2.5 py-1 text-[10px] font-medium transition-colors ${selectedPlots.has(key) ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}
+              >
+                {p.plotNumber ? `P${p.plotNumber}` : p.name}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* Summary cards */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
@@ -273,18 +322,19 @@ export function DelayReport({ siteId }: DelayReportProps) {
         </Card>
       )}
 
-      {/* Non-weather delays */}
-      {nonWeatherJobs.length > 0 && (
+      {/* Contractor delays */}
+      {contractorDelays.length > 0 && (
         <Card className="border-red-200">
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-sm text-red-700">
               <AlertTriangle className="size-4" />
-              Non-Weather Delays ({nonWeatherJobs.length})
+              Contractor Delays ({contractorDelays.length})
             </CardTitle>
+            <p className="text-xs text-red-600">Delays attributable to contractor performance</p>
           </CardHeader>
           <CardContent>
             <div className="space-y-3">
-              {nonWeatherJobs.map((job) => (
+              {contractorDelays.map((job) => (
                 <JobDelayCard key={job.id} job={job} />
               ))}
             </div>
@@ -292,34 +342,103 @@ export function DelayReport({ siteId }: DelayReportProps) {
         </Card>
       )}
 
-      {/* Overdue deliveries */}
-      {data.overdueDeliveries.length > 0 && (
-        <Card className="border-orange-200">
+      {/* Other delays (no contractor assigned) */}
+      {otherDelays.length > 0 && (
+        <Card className="border-slate-200">
           <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2 text-sm text-orange-700">
-              <Package className="size-4" />
-              Overdue Deliveries ({data.overdueDeliveries.length})
+            <CardTitle className="flex items-center gap-2 text-sm text-slate-700">
+              <Clock className="size-4" />
+              Other Delays ({otherDelays.length})
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="divide-y rounded-lg border">
-              {data.overdueDeliveries.map((d) => (
-                <div key={d.id} className="flex items-center justify-between px-3 py-2 text-sm">
-                  <div>
-                    <p className="font-medium">{d.supplier}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {d.items || "Materials"} · {d.job} · {d.plot.plotNumber ? `Plot ${d.plot.plotNumber}` : d.plot.name}
-                    </p>
-                  </div>
-                  <Badge variant="outline" className="text-orange-600">
-                    {d.daysOverdue}d late
-                  </Badge>
-                </div>
+            <div className="space-y-3">
+              {otherDelays.map((job) => (
+                <JobDelayCard key={job.id} job={job} />
               ))}
             </div>
           </CardContent>
         </Card>
       )}
+
+      {/* Supplier delays — overdue deliveries, grouped by supplier */}
+      {data.overdueDeliveries.length > 0 && (() => {
+        const bySupplier = data.overdueDeliveries.reduce<Record<string, typeof data.overdueDeliveries>>((acc, d) => {
+          const key = d.supplier || "Unknown Supplier";
+          if (!acc[key]) acc[key] = [];
+          acc[key].push(d);
+          return acc;
+        }, {});
+        const supplierNames = Object.keys(bySupplier).sort();
+
+        return (
+          <Card className="border-orange-200">
+            <CardHeader className="pb-2">
+              <CardTitle className="flex items-center gap-2 text-sm text-orange-700">
+                <Package className="size-4" />
+                Supplier Delays — Overdue Deliveries ({data.overdueDeliveries.length})
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                {supplierNames.map((supplier) => {
+                  const orders = bySupplier[supplier];
+                  const totalDaysLate = orders.reduce((sum, o) => sum + o.daysOverdue, 0);
+                  const isExpanded = expandedSuppliers.has(supplier);
+
+                  return (
+                    <div key={supplier} className="rounded-lg border border-orange-100">
+                      <button
+                        className="flex w-full items-center justify-between px-3 py-2 text-left hover:bg-orange-50/50 transition-colors"
+                        onClick={() =>
+                          setExpandedSuppliers((prev) => {
+                            const next = new Set(prev);
+                            next.has(supplier) ? next.delete(supplier) : next.add(supplier);
+                            return next;
+                          })
+                        }
+                      >
+                        <div className="flex items-center gap-2">
+                          {isExpanded ? (
+                            <ChevronDown className="size-4 text-orange-500" />
+                          ) : (
+                            <ChevronRight className="size-4 text-orange-500" />
+                          )}
+                          <span className="text-sm font-medium">{supplier}</span>
+                          <span className="text-xs text-muted-foreground">
+                            ({orders.length} order{orders.length !== 1 ? "s" : ""})
+                          </span>
+                        </div>
+                        <Badge variant="outline" className="text-orange-600">
+                          {totalDaysLate}d total
+                        </Badge>
+                      </button>
+                      {isExpanded && (
+                        <div className="divide-y border-t border-orange-100">
+                          {orders.map((d) => (
+                            <div key={d.id} className="flex items-center justify-between px-3 py-2 pl-9 text-sm">
+                              <div>
+                                <p className="font-medium text-sm">{d.items || "Materials"}</p>
+                                <p className="text-xs text-muted-foreground">
+                                  {d.job} · {d.plot.plotNumber ? `Plot ${d.plot.plotNumber}` : d.plot.name}
+                                  {d.expectedDate && ` · Expected ${format(new Date(d.expectedDate), "dd MMM")}`}
+                                </p>
+                              </div>
+                              <Badge variant="outline" className="text-orange-600">
+                                {d.daysOverdue}d late
+                              </Badge>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </CardContent>
+          </Card>
+        );
+      })()}
 
       {/* Weather impact days (collapsible) */}
       {totalImpactDays > 0 && (

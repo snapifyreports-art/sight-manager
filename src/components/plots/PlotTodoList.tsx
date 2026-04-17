@@ -1,32 +1,31 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import {
-  differenceInDays,
-  addWeeks,
-  isBefore,
-  isAfter,
-  format,
-  subWeeks,
-} from "date-fns";
+import { useJobAction } from "@/hooks/useJobAction";
+import { PostCompletionDialog } from "@/components/PostCompletionDialog";
+import { differenceInCalendarDays, isSameDay, format } from "date-fns";
 import { getCurrentDate } from "@/lib/dev-date";
+import { cn } from "@/lib/utils";
 import {
   Package,
   Truck,
   AlertTriangle,
-  CheckCircle,
+  CheckCircle2,
   Clock,
   Mail,
   Play,
-  CheckCircle2,
   Briefcase,
   Loader2,
   Check,
+  X,
+  ChevronDown,
+  FileCheck,
+  Bug,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 // ---------- Types ----------
 
@@ -57,331 +56,22 @@ interface JobData {
   startDate: string | null;
   endDate: string | null;
   status: string;
+  signedOffAt: string | null;
   assignedTo: { id: string; name: string } | null;
+  contractors: Array<{
+    contact: { id: string; name: string; company: string | null } | null;
+  }>;
   orders: OrderData[];
 }
 
-interface TodoItem {
-  type: "order-needed" | "pending-order" | "upcoming-delivery" | "overdue" | "completed";
-  jobId: string;
-  jobName: string;
-  order?: OrderData;
-  daysUntilStart?: number;
-  daysOverdue?: number;
+interface PlotTodoListProps {
+  jobs: JobData[];
+  snagSummary: Record<string, number>;
+  siteId: string;
+  plotId: string;
 }
 
-// ---------- Component ----------
-
-export function PlotTodoList({ jobs }: { jobs: JobData[] }) {
-  const router = useRouter();
-  const now = getCurrentDate();
-  const fourWeeksFromNow = addWeeks(now, 4);
-  const twoWeeksAgo = subWeeks(now, 2);
-  const [pendingJobActions, setPendingJobActions] = useState<Set<string>>(new Set());
-  const [completedJobIds, setCompletedJobIds] = useState<Set<string>>(new Set());
-
-  async function handleJobAction(jobId: string, action: "start" | "complete") {
-    setPendingJobActions((prev) => new Set(prev).add(jobId));
-    try {
-      const res = await fetch(`/api/jobs/${jobId}/actions`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action }),
-      });
-      if (res.ok) {
-        if (action === "complete") {
-          setCompletedJobIds((prev) => new Set(prev).add(jobId));
-        }
-        router.refresh();
-      }
-    } finally {
-      setPendingJobActions((prev) => { const n = new Set(prev); n.delete(jobId); return n; });
-    }
-  }
-
-  // Derive job sections
-  const activeJobs = jobs.filter((j) => j.status === "IN_PROGRESS");
-  const overdueStartJobs = jobs.filter((j) => {
-    if (j.status !== "NOT_STARTED" || !j.startDate) return false;
-    return new Date(j.startDate) < now;
-  });
-  const overdueEndJobs = jobs.filter((j) => {
-    if (j.status === "COMPLETED" || j.status === "NOT_STARTED") return false;
-    if (!j.endDate) return false;
-    return new Date(j.endDate) < now;
-  });
-  const hasJobItems = activeJobs.length > 0 || overdueStartJobs.length > 0;
-
-  // Derive todo items from jobs and orders
-  const ordersToPlace: TodoItem[] = [];
-  const upcomingDeliveries: TodoItem[] = [];
-  const overdueItems: TodoItem[] = [];
-  const recentlyCompleted: TodoItem[] = [];
-
-  for (const job of jobs) {
-    // Jobs starting within 4 weeks with no orders
-    if (
-      job.startDate &&
-      job.orders.length === 0 &&
-      job.status !== "COMPLETED"
-    ) {
-      const startDate = new Date(job.startDate);
-      if (isBefore(startDate, fourWeeksFromNow) && isAfter(startDate, now)) {
-        const daysUntil = differenceInDays(startDate, now);
-        ordersToPlace.push({
-          type: "order-needed",
-          jobId: job.id,
-          jobName: job.name,
-          daysUntilStart: daysUntil,
-        });
-      }
-    }
-
-    for (const order of job.orders) {
-      // Pending orders (not yet sent to supplier)
-      if (order.status === "PENDING") {
-        ordersToPlace.push({
-          type: "pending-order",
-          jobId: job.id,
-          jobName: job.name,
-          order,
-        });
-      }
-
-      // Upcoming deliveries (next 4 weeks, status ORDERED or CONFIRMED)
-      if (
-        order.expectedDeliveryDate &&
-        (order.status === "ORDERED" || order.status === "CONFIRMED")
-      ) {
-        const expectedDate = new Date(order.expectedDeliveryDate);
-
-        if (isBefore(expectedDate, now)) {
-          // Past due -- goes to overdue section
-          const daysOverdue = differenceInDays(now, expectedDate);
-          overdueItems.push({
-            type: "overdue",
-            jobId: job.id,
-            jobName: job.name,
-            order,
-            daysOverdue,
-          });
-        } else if (isBefore(expectedDate, fourWeeksFromNow)) {
-          upcomingDeliveries.push({
-            type: "upcoming-delivery",
-            jobId: job.id,
-            jobName: job.name,
-            order,
-          });
-        }
-      }
-
-      // Overdue: expected date has passed and not delivered/cancelled (no expectedDeliveryDate case)
-      if (
-        order.expectedDeliveryDate &&
-        order.status !== "DELIVERED" &&
-        order.status !== "CANCELLED" &&
-        order.status !== "ORDERED" &&
-        order.status !== "CONFIRMED" &&
-        order.status !== "PENDING"
-      ) {
-        const expectedDate = new Date(order.expectedDeliveryDate);
-        if (isBefore(expectedDate, now)) {
-          const daysOverdue = differenceInDays(now, expectedDate);
-          overdueItems.push({
-            type: "overdue",
-            jobId: job.id,
-            jobName: job.name,
-            order,
-            daysOverdue,
-          });
-        }
-      }
-
-      // Recently completed (delivered in last 2 weeks)
-      if (order.status === "DELIVERED" && order.deliveredDate) {
-        const deliveredDate = new Date(order.deliveredDate);
-        if (isAfter(deliveredDate, twoWeeksAgo)) {
-          recentlyCompleted.push({
-            type: "completed",
-            jobId: job.id,
-            jobName: job.name,
-            order,
-          });
-        }
-      }
-    }
-  }
-
-  // Sort overdue items by most overdue first
-  overdueItems.sort((a, b) => (b.daysOverdue ?? 0) - (a.daysOverdue ?? 0));
-
-  // Sort upcoming deliveries by date
-  upcomingDeliveries.sort((a, b) => {
-    const dateA = a.order?.expectedDeliveryDate ?? "";
-    const dateB = b.order?.expectedDeliveryDate ?? "";
-    return dateA.localeCompare(dateB);
-  });
-
-  return (
-    <div className="space-y-6">
-      {/* Section 0: Active Jobs */}
-      {hasJobItems && (
-        <TodoSection
-          title="Jobs to Action"
-          icon={Briefcase}
-          iconColor="text-blue-600"
-          count={activeJobs.length + overdueStartJobs.length}
-          emptyMessage=""
-        >
-          {/* Jobs that should have started */}
-          {overdueStartJobs.map((job) => {
-            const isPending = pendingJobActions.has(job.id);
-            const isDone = completedJobIds.has(job.id);
-            return (
-              <Card key={job.id} size="sm" className="border-amber-200">
-                <CardContent className="flex items-center gap-3">
-                  <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-amber-500/10">
-                    <Briefcase className="size-4 text-amber-500" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium">
-                      <Link href={`/jobs/${job.id}`} className="hover:underline hover:text-blue-600">{job.name}</Link>
-                    </p>
-                    <p className="text-xs text-amber-700">
-                      Should have started {job.startDate ? format(new Date(job.startDate), "d MMM") : "—"}
-                      {job.assignedTo && <span className="text-muted-foreground"> · {job.assignedTo.name}</span>}
-                    </p>
-                  </div>
-                  {isDone ? (
-                    <span className="flex items-center gap-1 text-xs text-green-600"><Check className="size-3" /> Started</span>
-                  ) : isPending ? (
-                    <Loader2 className="size-4 animate-spin text-muted-foreground" />
-                  ) : (
-                    <Button variant="outline" size="xs" className="border-green-200 text-green-700 hover:bg-green-50"
-                      onClick={() => handleJobAction(job.id, "start")}>
-                      <Play className="size-3" /> Start
-                    </Button>
-                  )}
-                </CardContent>
-              </Card>
-            );
-          })}
-
-          {/* Active in-progress jobs */}
-          {activeJobs.map((job) => {
-            const isPending = pendingJobActions.has(job.id);
-            const isDone = completedJobIds.has(job.id);
-            const isOverdue = job.endDate && new Date(job.endDate) < now;
-            return (
-              <Card key={job.id} size="sm" className={isOverdue ? "border-red-200" : ""}>
-                <CardContent className="flex items-center gap-3">
-                  <div className={`flex size-8 shrink-0 items-center justify-center rounded-lg ${isOverdue ? "bg-red-500/10" : "bg-blue-500/10"}`}>
-                    <Briefcase className={`size-4 ${isOverdue ? "text-red-500" : "text-blue-500"}`} />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium">
-                      <Link href={`/jobs/${job.id}`} className="hover:underline hover:text-blue-600">{job.name}</Link>
-                    </p>
-                    <p className={`text-xs ${isOverdue ? "text-red-600" : "text-muted-foreground"}`}>
-                      {isOverdue
-                        ? `Overdue — due ${job.endDate ? format(new Date(job.endDate), "d MMM") : "—"}`
-                        : job.endDate ? `Due ${format(new Date(job.endDate), "d MMM")}` : "In Progress"}
-                      {job.assignedTo && <span className="text-muted-foreground"> · {job.assignedTo.name}</span>}
-                    </p>
-                  </div>
-                  {isDone ? (
-                    <span className="flex items-center gap-1 text-xs text-green-600"><Check className="size-3" /> Complete</span>
-                  ) : isPending ? (
-                    <Loader2 className="size-4 animate-spin text-muted-foreground" />
-                  ) : (
-                    <Button variant="outline" size="xs" className="border-blue-200 text-blue-700 hover:bg-blue-50"
-                      onClick={() => handleJobAction(job.id, "complete")}>
-                      <CheckCircle2 className="size-3" /> Complete
-                    </Button>
-                  )}
-                </CardContent>
-              </Card>
-            );
-          })}
-        </TodoSection>
-      )}
-
-      {/* Section 1: Orders to Place */}
-      <TodoSection
-        title="Orders to Place"
-        icon={Package}
-        iconColor="text-blue-500"
-        count={ordersToPlace.length}
-        emptyMessage="No orders need attention right now."
-      >
-        {ordersToPlace.map((item, idx) => (
-          <OrderToPlaceCard
-            key={`place-${idx}`}
-            item={item}
-            onUpdate={() => router.refresh()}
-          />
-        ))}
-      </TodoSection>
-
-      {/* Section 2: Upcoming Deliveries */}
-      <TodoSection
-        title="Upcoming Deliveries"
-        icon={Truck}
-        iconColor="text-amber-500"
-        count={upcomingDeliveries.length}
-        emptyMessage="No deliveries expected in the next 4 weeks."
-      >
-        {upcomingDeliveries.map((item, idx) => (
-          <UpcomingDeliveryCard
-            key={`delivery-${idx}`}
-            item={item}
-            onConfirmDelivery={async () => {
-              if (!item.order) return;
-              await updateOrderStatus(item.order.id, "DELIVERED");
-              router.refresh();
-            }}
-          />
-        ))}
-      </TodoSection>
-
-      {/* Section 3: Overdue */}
-      <TodoSection
-        title="Overdue"
-        icon={AlertTriangle}
-        iconColor="text-red-500"
-        count={overdueItems.length}
-        emptyMessage="No overdue orders. Everything is on track."
-      >
-        {overdueItems.map((item, idx) => (
-          <OverdueCard
-            key={`overdue-${idx}`}
-            item={item}
-            onMarkDelivered={async () => {
-              if (!item.order) return;
-              await updateOrderStatus(item.order.id, "DELIVERED");
-              router.refresh();
-            }}
-          />
-        ))}
-      </TodoSection>
-
-      {/* Section 4: Recently Completed */}
-      <TodoSection
-        title="Recently Completed"
-        icon={CheckCircle}
-        iconColor="text-green-500"
-        count={recentlyCompleted.length}
-        emptyMessage="No orders delivered in the last 2 weeks."
-      >
-        {recentlyCompleted.map((item, idx) => (
-          <CompletedCard key={`completed-${idx}`} item={item} />
-        ))}
-      </TodoSection>
-    </div>
-  );
-}
-
-// ---------- API Helper ----------
+// ---------- Helpers ----------
 
 async function updateOrderStatus(orderId: string, status: string) {
   const res = await fetch(`/api/orders/${orderId}`, {
@@ -392,367 +82,512 @@ async function updateOrderStatus(orderId: string, status: string) {
   if (!res.ok) throw new Error("Failed to update order");
 }
 
-// ---------- Section Wrapper ----------
+// ---------- Component ----------
 
-function TodoSection({
-  title,
-  icon: Icon,
-  iconColor,
-  count,
-  emptyMessage,
-  children,
-}: {
-  title: string;
-  icon: typeof Package;
-  iconColor: string;
-  count: number;
-  emptyMessage: string;
-  children: React.ReactNode;
-}) {
+export function PlotTodoList({ jobs, snagSummary, siteId, plotId }: PlotTodoListProps) {
+  const router = useRouter();
+  const now = getCurrentDate();
+
+  const [openSections, setOpenSections] = useState<Set<string>>(
+    new Set(["jobs", "materials", "snags"])
+  );
+  const [pendingJobActions, setPendingJobActions] = useState<Set<string>>(new Set());
+  const [pendingOrderActions, setPendingOrderActions] = useState<Set<string>>(new Set());
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [completionContext, setCompletionContext] = useState<any>(null);
+
+  const toggleSection = (id: string) =>
+    setOpenSections((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+
+  // Centralised pre-start flow
+  const { triggerAction: triggerJobAction, dialogs: jobActionDialogs } = useJobAction(
+    (_action, _jobId) => { router.refresh(); }
+  );
+
+  async function handleJobAction(jobId: string, action: "start" | "complete") {
+    const jobData = jobs.find((j) => j.id === jobId);
+    if (action === "start" && jobData) {
+      await triggerJobAction(
+        {
+          id: jobData.id,
+          name: jobData.name,
+          status: jobData.status,
+          startDate: jobData.startDate,
+          endDate: jobData.endDate,
+          orders: jobData.orders.map((o) => ({ id: o.id, status: o.status, supplier: o.supplier })),
+        },
+        "start"
+      );
+      return;
+    }
+    // Complete action
+    setPendingJobActions((prev) => new Set(prev).add(jobId));
+    try {
+      const res = await fetch(`/api/jobs/${jobId}/actions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action }),
+      });
+      if (res.ok) {
+        const result = await res.json();
+        router.refresh();
+        if (result._completionContext) {
+          const jobName = jobs.find((j) => j.id === jobId)?.name || "";
+          setCompletionContext({ completedJobName: jobName, ...result._completionContext });
+        }
+      }
+    } finally {
+      setPendingJobActions((prev) => { const n = new Set(prev); n.delete(jobId); return n; });
+    }
+  }
+
+  async function handleSignOff(jobId: string) {
+    setPendingJobActions((prev) => new Set(prev).add(jobId));
+    try {
+      const res = await fetch(`/api/jobs/${jobId}/actions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "signoff" }),
+      });
+      if (res.ok) router.refresh();
+    } finally {
+      setPendingJobActions((prev) => { const n = new Set(prev); n.delete(jobId); return n; });
+    }
+  }
+
+  async function handleOrderStatus(orderId: string, status: string) {
+    setPendingOrderActions((prev) => new Set(prev).add(orderId));
+    try {
+      await updateOrderStatus(orderId, status);
+      router.refresh();
+    } finally {
+      setPendingOrderActions((prev) => { const n = new Set(prev); n.delete(orderId); return n; });
+    }
+  }
+
+  // ---------- Derive sections ----------
+
+  const sections = useMemo(() => {
+    // Jobs: Starting today (NOT_STARTED with startDate <= today)
+    const starting = jobs.filter((j) => {
+      if (j.status !== "NOT_STARTED" || !j.startDate) return false;
+      return new Date(j.startDate) <= now;
+    });
+
+    // Jobs: In Progress
+    const inProgress = jobs.filter((j) => j.status === "IN_PROGRESS");
+
+    // Jobs: Awaiting Sign Off (COMPLETED but not signed off)
+    const awaitingSignOff = jobs.filter(
+      (j) => j.status === "COMPLETED" && !j.signedOffAt
+    );
+
+    // Materials: Deliveries today
+    const allOrders = jobs.flatMap((j) =>
+      j.orders.map((o) => ({ ...o, jobId: j.id, jobName: j.name }))
+    );
+
+    const deliveriesToday = allOrders.filter((o) => {
+      if (o.status !== "ORDERED" || !o.expectedDeliveryDate) return false;
+      return isSameDay(new Date(o.expectedDeliveryDate), now);
+    });
+
+    // Materials: Orders to place (PENDING, dateOfOrder <= today)
+    const ordersToPlace = allOrders.filter((o) => {
+      if (o.status !== "PENDING") return false;
+      return new Date(o.dateOfOrder) <= now;
+    });
+
+    // Snag counts
+    const openSnags = (snagSummary["OPEN"] || 0) + (snagSummary["IN_PROGRESS"] || 0);
+
+    return { starting, inProgress, awaitingSignOff, deliveriesToday, ordersToPlace, openSnags };
+  }, [jobs, snagSummary, now]);
+
+  const jobCount = sections.starting.length + sections.inProgress.length + sections.awaitingSignOff.length;
+  const materialCount = sections.deliveriesToday.length + sections.ordersToPlace.length;
+
   return (
-    <div>
-      <div className="mb-3 flex items-center gap-2">
-        <Icon className={`size-4 ${iconColor}`} />
-        <h3 className="text-sm font-semibold">{title}</h3>
-        {count > 0 && (
-          <span className="inline-flex size-5 items-center justify-center rounded-full bg-muted text-xs font-medium">
-            {count}
-          </span>
-        )}
-      </div>
+    <div className="space-y-4">
+      {jobActionDialogs}
+      <PostCompletionDialog
+        open={!!completionContext}
+        completedJobName={completionContext?.completedJobName ?? ""}
+        daysDeviation={completionContext?.daysDeviation ?? 0}
+        nextJob={completionContext?.nextJob ?? null}
+        plotId={completionContext?.plotId ?? plotId}
+        onClose={() => setCompletionContext(null)}
+        onDecisionMade={() => { setCompletionContext(null); router.refresh(); }}
+      />
 
-      {count === 0 ? (
-        <Card>
-          <CardContent className="flex items-center justify-center py-8">
-            <p className="text-sm text-muted-foreground">{emptyMessage}</p>
+      {/* ========== JOBS SECTION ========== */}
+      <Card>
+        <CardHeader className="cursor-pointer select-none pb-2" onClick={() => toggleSection("jobs")}>
+          <CardTitle className="flex items-center gap-2 text-sm">
+            <Briefcase className="size-4 text-blue-600" />
+            Jobs ({jobCount})
+            <ChevronDown className={cn("ml-auto size-3.5 shrink-0 transition-transform duration-200", openSections.has("jobs") && "rotate-180")} />
+          </CardTitle>
+        </CardHeader>
+        {openSections.has("jobs") && (
+          <CardContent>
+            {jobCount === 0 ? (
+              <p className="text-sm text-muted-foreground">No jobs need action today</p>
+            ) : (
+              <div className="space-y-2">
+                {/* Starting */}
+                {sections.starting.length > 0 && (
+                  <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-green-700">
+                    <Play className="size-3" /> Starting ({sections.starting.length})
+                  </p>
+                )}
+                {sections.starting.map((j) => (
+                  <JobRow
+                    key={j.id}
+                    job={j}
+                    variant="start"
+                    isPending={pendingJobActions.has(j.id)}
+                    onAction={handleJobAction}
+                    now={now}
+                  />
+                ))}
+
+                {/* In Progress */}
+                {sections.inProgress.length > 0 && (
+                  <p className={cn("flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-blue-700", sections.starting.length > 0 && "mt-3 border-t pt-3")}>
+                    <Clock className="size-3" /> In Progress ({sections.inProgress.length})
+                  </p>
+                )}
+                {sections.inProgress.map((j) => (
+                  <JobRow
+                    key={j.id}
+                    job={j}
+                    variant="progress"
+                    isPending={pendingJobActions.has(j.id)}
+                    onAction={handleJobAction}
+                    now={now}
+                  />
+                ))}
+
+                {/* Awaiting Sign Off */}
+                {sections.awaitingSignOff.length > 0 && (
+                  <p className={cn("flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-amber-700", (sections.starting.length > 0 || sections.inProgress.length > 0) && "mt-3 border-t pt-3")}>
+                    <FileCheck className="size-3" /> Awaiting Sign Off ({sections.awaitingSignOff.length})
+                  </p>
+                )}
+                {sections.awaitingSignOff.map((j) => (
+                  <SignOffRow
+                    key={j.id}
+                    job={j}
+                    isPending={pendingJobActions.has(j.id)}
+                    onSignOff={handleSignOff}
+                    now={now}
+                  />
+                ))}
+              </div>
+            )}
           </CardContent>
-        </Card>
-      ) : (
-        <div className="space-y-2">{children}</div>
-      )}
+        )}
+      </Card>
+
+      {/* ========== MATERIALS SECTION ========== */}
+      <Card>
+        <CardHeader className="cursor-pointer select-none pb-2" onClick={() => toggleSection("materials")}>
+          <CardTitle className="flex items-center gap-2 text-sm">
+            <Package className="size-4 text-violet-600" />
+            Materials ({materialCount})
+            <ChevronDown className={cn("ml-auto size-3.5 shrink-0 transition-transform duration-200", openSections.has("materials") && "rotate-180")} />
+          </CardTitle>
+        </CardHeader>
+        {openSections.has("materials") && (
+          <CardContent>
+            {materialCount === 0 ? (
+              <p className="text-sm text-muted-foreground">No materials need action today</p>
+            ) : (
+              <div className="space-y-2">
+                {/* Deliveries Today */}
+                {sections.deliveriesToday.length > 0 && (
+                  <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-amber-700">
+                    <Truck className="size-3" /> Deliveries Today ({sections.deliveriesToday.length})
+                  </p>
+                )}
+                {sections.deliveriesToday.map((o) => (
+                  <OrderRow
+                    key={o.id}
+                    order={o}
+                    variant="delivery"
+                    isPending={pendingOrderActions.has(o.id)}
+                    onAction={handleOrderStatus}
+                  />
+                ))}
+
+                {/* Orders to Place */}
+                {sections.ordersToPlace.length > 0 && (
+                  <p className={cn("flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-blue-700", sections.deliveriesToday.length > 0 && "mt-3 border-t pt-3")}>
+                    <Package className="size-3" /> Orders to Place ({sections.ordersToPlace.length})
+                  </p>
+                )}
+                {sections.ordersToPlace.map((o) => (
+                  <OrderRow
+                    key={o.id}
+                    order={o}
+                    variant="place"
+                    isPending={pendingOrderActions.has(o.id)}
+                    onAction={handleOrderStatus}
+                  />
+                ))}
+              </div>
+            )}
+          </CardContent>
+        )}
+      </Card>
+
+      {/* ========== SNAGS SECTION ========== */}
+      <Card>
+        <CardHeader className="cursor-pointer select-none pb-2" onClick={() => toggleSection("snags")}>
+          <CardTitle className="flex items-center gap-2 text-sm">
+            <Bug className="size-4 text-orange-600" />
+            Open Snags ({sections.openSnags})
+            <ChevronDown className={cn("ml-auto size-3.5 shrink-0 transition-transform duration-200", openSections.has("snags") && "rotate-180")} />
+          </CardTitle>
+        </CardHeader>
+        {openSections.has("snags") && (
+          <CardContent>
+            {sections.openSnags === 0 ? (
+              <p className="text-sm text-muted-foreground">No open snags on this plot</p>
+            ) : (
+              <div className="space-y-2">
+                <div className="flex items-center gap-3 text-sm">
+                  {(snagSummary["OPEN"] || 0) > 0 && (
+                    <span className="flex items-center gap-1 text-red-600">
+                      <AlertTriangle className="size-3" />
+                      {snagSummary["OPEN"]} open
+                    </span>
+                  )}
+                  {(snagSummary["IN_PROGRESS"] || 0) > 0 && (
+                    <span className="flex items-center gap-1 text-amber-600">
+                      <Clock className="size-3" />
+                      {snagSummary["IN_PROGRESS"]} in progress
+                    </span>
+                  )}
+                </div>
+                <Link
+                  href={`/sites/${siteId}?tab=snags`}
+                  className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 hover:underline"
+                >
+                  View all snags
+                </Link>
+              </div>
+            )}
+          </CardContent>
+        )}
+      </Card>
     </div>
   );
 }
 
-// ---------- Orders to Place Card ----------
+// ---------- Job Row ----------
 
-function OrderToPlaceCard({ item, onUpdate }: { item: TodoItem; onUpdate: () => void }) {
-  const [pending, setPending] = useState(false);
-  const [sent, setSent] = useState(false);
+function JobRow({
+  job,
+  variant,
+  isPending,
+  onAction,
+  now,
+}: {
+  job: JobData;
+  variant: "start" | "progress";
+  isPending: boolean;
+  onAction: (id: string, action: "start" | "complete") => void;
+  now: Date;
+}) {
+  const contractor = job.contractors?.[0]?.contact;
+  const isOverdue = variant === "progress" && job.endDate && new Date(job.endDate) < now;
 
-  async function markSent() {
-    if (!item.order) return;
-    setPending(true);
-    try {
-      await updateOrderStatus(item.order.id, "ORDERED");
-      setSent(true);
-      onUpdate();
-    } finally {
-      setPending(false);
-    }
-  }
-
-  if (item.type === "order-needed") {
-    return (
-      <Card size="sm">
-        <CardContent className="flex items-center gap-3">
-          <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-blue-500/10">
-            <Package className="size-4 text-blue-500" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="text-sm font-medium">
-              <Link href={`/jobs/${item.jobId}`} className="hover:underline hover:text-blue-600">{item.jobName}</Link>
-            </p>
-            <p className="text-xs text-muted-foreground">
-              Job starts in {item.daysUntilStart} day
-              {item.daysUntilStart !== 1 ? "s" : ""} -- no orders placed yet
-            </p>
-          </div>
-          <div className="flex shrink-0 items-center gap-1.5">
-            <TimingIndicator days={item.daysUntilStart ?? 0} />
-          </div>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  // Pending order
-  const order = item.order!;
-  const mailto = order.supplier.contactEmail
-    ? `mailto:${encodeURIComponent(order.supplier.contactEmail)}?subject=${encodeURIComponent(`Material Order — ${item.jobName}`)}&body=${encodeURIComponent(`Hi ${order.supplier.contactName || order.supplier.name},\n\nPlease supply the following for ${item.jobName}:\n\n${order.itemsDescription || "Materials as discussed"}${order.expectedDeliveryDate ? `\n\nRequired by: ${format(new Date(order.expectedDeliveryDate), "dd MMM yyyy")}` : ""}\n\nPlease confirm receipt.\n\nRegards`)}`
-    : null;
+  // Readiness checklist for NOT_STARTED jobs
+  const readiness = variant === "start" ? {
+    hasContractor: (job.contractors?.length || 0) > 0 && !!job.contractors[0]?.contact,
+    hasAssignee: !!job.assignedTo,
+    ordersSent: job.orders.filter((o) => o.status === "PENDING").length === 0,
+    materialsOnSite: job.orders.filter((o) => o.status === "ORDERED").length === 0 && job.orders.filter((o) => o.status === "PENDING").length === 0,
+  } : null;
 
   return (
-    <Card size="sm">
-      <CardContent className="flex items-center gap-3">
-        <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-blue-500/10">
-          <Package className="size-4 text-blue-500" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium">
-            {order.supplier.id ? (
-              <Link href={`/suppliers/${order.supplier.id}`} className="hover:underline hover:text-blue-600">{order.supplier.name}</Link>
-            ) : order.supplier.name}
-            {order.orderDetails && (
-              <span className="font-normal text-muted-foreground">
-                {" "}
-                -- {order.orderDetails}
-              </span>
-            )}
-          </p>
-          <p className="text-xs text-muted-foreground">
-            Pending order for{" "}
-            <Link href={`/jobs/${item.jobId}`} className="font-medium text-foreground hover:underline hover:text-blue-600">{item.jobName}</Link>
-          </p>
-        </div>
-        <div className="flex shrink-0 gap-1.5">
-          {sent ? (
-            <span className="flex items-center gap-1 text-xs text-green-600">
-              <Check className="size-3" /> Sent
-            </span>
-          ) : pending ? (
-            <Loader2 className="size-4 animate-spin text-muted-foreground" />
+    <div className={cn("rounded border p-2 text-sm", isOverdue && "border-red-200 bg-red-50/30")}>
+      <div className="flex items-center gap-2">
+        <Link href={`/jobs/${job.id}`} className="truncate font-medium text-blue-600 hover:underline">
+          {job.name}
+        </Link>
+        {isOverdue && (
+          <span className="shrink-0 rounded-full bg-red-100 px-1.5 py-0.5 text-[10px] font-medium text-red-700">
+            Overdue
+          </span>
+        )}
+      </div>
+      <p className="text-xs text-muted-foreground">
+        {variant === "start" && job.startDate && (
+          <>Should have started {format(new Date(job.startDate), "d MMM")}</>
+        )}
+        {variant === "progress" && job.endDate && (
+          <>{isOverdue ? "Due" : "Due"} {format(new Date(job.endDate), "d MMM")}</>
+        )}
+        {job.assignedTo && <span> &middot; {job.assignedTo.name}</span>}
+        {contractor && <span className="hidden sm:inline"> &middot; {contractor.company || contractor.name}</span>}
+      </p>
+
+      {/* Readiness checklist */}
+      {readiness && (
+        <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px]">
+          {readiness.hasContractor ? (
+            <span className="text-green-700"><Check className="inline size-3 mr-0.5" />Contractor</span>
           ) : (
-            <>
-              {mailto && (
-                <Button variant="outline" size="xs"
-                  onClick={() => { window.open(mailto, "_blank"); markSent(); }}>
-                  <Mail className="size-3" />
-                  <span className="hidden sm:inline">Send Order</span>
-                </Button>
-              )}
-              <Button variant="outline" size="xs"
-                onClick={markSent}>
-                <Package className="size-3" />
-                <span className="hidden sm:inline">{mailto ? "Mark Sent" : "Place Order"}</span>
-              </Button>
-            </>
+            <span className="text-red-600"><X className="inline size-3 mr-0.5" />Contractor</span>
+          )}
+          {readiness.hasAssignee ? (
+            <span className="text-green-700"><Check className="inline size-3 mr-0.5" />Assignee</span>
+          ) : (
+            <span className="text-red-600"><X className="inline size-3 mr-0.5" />Assignee</span>
+          )}
+          {readiness.ordersSent ? (
+            <span className="text-green-700"><Check className="inline size-3 mr-0.5" />Orders Sent</span>
+          ) : (
+            <span className="text-red-600"><X className="inline size-3 mr-0.5" />{job.orders.filter((o) => o.status === "PENDING").length} not sent</span>
+          )}
+          {readiness.materialsOnSite ? (
+            <span className="text-green-700"><Check className="inline size-3 mr-0.5" />Materials</span>
+          ) : (
+            <span className="text-amber-600"><Clock className="inline size-3 mr-0.5" />{job.orders.filter((o) => o.status === "ORDERED").length} awaiting</span>
           )}
         </div>
-      </CardContent>
-    </Card>
-  );
-}
+      )}
 
-// ---------- Upcoming Delivery Card ----------
-
-function UpcomingDeliveryCard({
-  item,
-  onConfirmDelivery,
-}: {
-  item: TodoItem;
-  onConfirmDelivery: () => void;
-}) {
-  const [loading, setLoading] = useState(false);
-
-  async function handleConfirm() {
-    setLoading(true);
-    try {
-      await onConfirmDelivery();
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  if (!item.order) return null;
-
-  const expectedDate = item.order.expectedDeliveryDate
-    ? new Date(item.order.expectedDeliveryDate)
-    : null;
-  const daysUntil = expectedDate ? differenceInDays(expectedDate, getCurrentDate()) : null;
-
-  return (
-    <Card size="sm">
-      <CardContent className="flex items-center gap-3">
-        <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-amber-500/10">
-          <Truck className="size-4 text-amber-500" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium">
-            <Link href={`/suppliers/${item.order.supplier.id}`} className="hover:underline hover:text-blue-600">{item.order.supplier.name}</Link>
-            {item.order.orderDetails && (
-              <span className="font-normal text-muted-foreground">
-                {" "}
-                -- {item.order.orderDetails}
-              </span>
-            )}
-          </p>
-          <div className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
-            <span>
-              For{" "}
-              <Link href={`/jobs/${item.jobId}`} className="font-medium text-foreground hover:underline hover:text-blue-600">
-                {item.jobName}
-              </Link>
-            </span>
-            {expectedDate && (
-              <>
-                <span className="text-border">&middot;</span>
-                <span className="inline-flex items-center gap-1">
-                  <Clock className="size-3" />
-                  {format(expectedDate, "dd MMM yyyy")}
-                  {daysUntil !== null && (
-                    <span>
-                      ({daysUntil} day{daysUntil !== 1 ? "s" : ""})
-                    </span>
-                  )}
-                </span>
-              </>
-            )}
-          </div>
-        </div>
-        <Button
-          variant="outline"
-          size="xs"
-          onClick={handleConfirm}
-          disabled={loading}
-        >
-          {loading ? "Confirming..." : "Confirm Delivery"}
-        </Button>
-      </CardContent>
-    </Card>
-  );
-}
-
-// ---------- Overdue Card ----------
-
-function OverdueCard({
-  item,
-  onMarkDelivered,
-}: {
-  item: TodoItem;
-  onMarkDelivered: () => void;
-}) {
-  const [loading, setLoading] = useState<string | null>(null);
-
-  async function handleMarkDelivered() {
-    setLoading("delivered");
-    try {
-      await onMarkDelivered();
-    } finally {
-      setLoading(null);
-    }
-  }
-
-  if (!item.order) return null;
-
-  const chaseMailto = item.order.supplier.contactEmail
-    ? `mailto:${encodeURIComponent(item.order.supplier.contactEmail)}?subject=${encodeURIComponent(`Chasing Order — ${item.jobName}`)}&body=${encodeURIComponent(`Hi ${item.order.supplier.contactName || item.order.supplier.name},\n\nI'm chasing the following order which is now ${item.daysOverdue} day${item.daysOverdue !== 1 ? "s" : ""} overdue:\n\n${item.order.itemsDescription || item.order.orderDetails || "Materials as discussed"}\n\nFor: ${item.jobName}\n\nPlease advise on the revised delivery date.\n\nRegards`)}`
-    : null;
-
-  return (
-    <Card size="sm" className="border-red-200 ring-red-500/20 dark:border-red-900">
-      <CardContent className="flex items-center gap-3">
-        <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-red-500/10">
-          <AlertTriangle className="size-4 text-red-500" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium">
-            <Link href={`/suppliers/${item.order.supplier.id}`} className="hover:underline hover:text-blue-600">{item.order.supplier.name}</Link>
-            {item.order.orderDetails && (
-              <span className="font-normal text-muted-foreground">
-                {" "}
-                -- {item.order.orderDetails}
-              </span>
-            )}
-          </p>
-          <div className="mt-0.5 flex items-center gap-2 text-xs">
-            <span className="font-medium text-red-600 dark:text-red-400">
-              {item.daysOverdue} day{item.daysOverdue !== 1 ? "s" : ""} overdue
-            </span>
-            <span className="text-border">&middot;</span>
-            <span className="text-muted-foreground">
-              For{" "}
-              <Link href={`/jobs/${item.jobId}`} className="font-medium text-foreground hover:underline hover:text-blue-600">
-                {item.jobName}
-              </Link>
-            </span>
-          </div>
-        </div>
-        <div className="flex shrink-0 items-center gap-1.5">
-          <Button
-            variant="outline"
-            size="xs"
-            onClick={handleMarkDelivered}
-            disabled={loading !== null}
-          >
-            {loading === "delivered" ? "Updating..." : "Mark Delivered"}
+      {/* Actions line */}
+      <div className="mt-1.5 flex flex-wrap items-center gap-1 border-t pt-1.5">
+        <span className="w-full text-[10px] font-medium text-muted-foreground sm:mr-auto sm:w-auto">Actions</span>
+        {isPending ? (
+          <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
+        ) : variant === "start" ? (
+          <Button size="sm" variant="outline" className="h-6 gap-1 border-green-200 px-2 text-[10px] text-green-700 hover:bg-green-50"
+            onClick={() => onAction(job.id, "start")}>
+            <Play className="size-2.5" /> Start
           </Button>
-          {chaseMailto && (
-            <Button
-              variant="ghost"
-              size="xs"
-              className="text-amber-600"
-              onClick={() => window.open(chaseMailto, "_blank")}
-            >
-              Chase Supplier
-            </Button>
-          )}
-        </div>
-      </CardContent>
-    </Card>
+        ) : (
+          <Button size="sm" variant="outline" className="h-6 gap-1 border-blue-200 px-2 text-[10px] text-blue-700 hover:bg-blue-50"
+            onClick={() => onAction(job.id, "complete")}>
+            <CheckCircle2 className="size-2.5" /> Complete
+          </Button>
+        )}
+      </div>
+    </div>
   );
 }
 
-// ---------- Completed Card ----------
+// ---------- Sign Off Row ----------
 
-function CompletedCard({ item }: { item: TodoItem }) {
-  if (!item.order) return null;
+function SignOffRow({
+  job,
+  isPending,
+  onSignOff,
+  now,
+}: {
+  job: JobData;
+  isPending: boolean;
+  onSignOff: (id: string) => void;
+  now: Date;
+}) {
+  const contractor = job.contractors?.[0]?.contact;
+  const daysSinceComplete = job.endDate ? differenceInCalendarDays(now, new Date(job.endDate)) : 0;
 
-  const deliveredDate = item.order.deliveredDate
-    ? new Date(item.order.deliveredDate)
+  return (
+    <div className="rounded border border-amber-100 bg-amber-50/50 p-2 text-sm">
+      <div className="flex items-center gap-2">
+        <Link href={`/jobs/${job.id}`} className="font-medium text-foreground hover:underline">
+          {job.name}
+        </Link>
+        <span className="shrink-0 rounded-full border border-amber-200 bg-white px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
+          Sign Off
+        </span>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        {contractor && <>{contractor.company || contractor.name}</>}
+        {daysSinceComplete > 0 && <span> &middot; Completed {daysSinceComplete} day{daysSinceComplete !== 1 ? "s" : ""} ago</span>}
+      </p>
+      <div className="mt-1.5 flex flex-wrap items-center gap-1 border-t border-amber-200 pt-1.5">
+        <span className="w-full text-[10px] font-medium text-muted-foreground sm:mr-auto sm:w-auto">Actions</span>
+        {isPending ? (
+          <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
+        ) : (
+          <Button size="sm" variant="outline" className="h-6 gap-1 border-amber-300 px-2 text-[10px] text-amber-700 hover:bg-amber-100"
+            onClick={() => onSignOff(job.id)}>
+            <FileCheck className="size-2.5" /> Sign Off
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---------- Order Row ----------
+
+function OrderRow({
+  order,
+  variant,
+  isPending,
+  onAction,
+}: {
+  order: OrderData & { jobId: string; jobName: string };
+  variant: "delivery" | "place";
+  isPending: boolean;
+  onAction: (orderId: string, status: string) => void;
+}) {
+  const mailto = variant === "place" && order.supplier.contactEmail
+    ? `mailto:${encodeURIComponent(order.supplier.contactEmail)}?subject=${encodeURIComponent(`Material Order — ${order.jobName}`)}&body=${encodeURIComponent(`Hi ${order.supplier.contactName || order.supplier.name},\n\nPlease supply the following for ${order.jobName}:\n\n${order.itemsDescription || "Materials as discussed"}${order.expectedDeliveryDate ? `\n\nRequired by: ${format(new Date(order.expectedDeliveryDate), "dd MMM yyyy")}` : ""}\n\nPlease confirm receipt.\n\nRegards`)}`
     : null;
 
   return (
-    <Card size="sm">
-      <CardContent className="flex items-center gap-3">
-        <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-green-500/10">
-          <CheckCircle className="size-4 text-green-500" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium">
-            <Link href={`/suppliers/${item.order.supplier.id}`} className="hover:underline hover:text-blue-600">{item.order.supplier.name}</Link>
-            {item.order.orderDetails && (
-              <span className="font-normal text-muted-foreground">
-                {" "}
-                -- {item.order.orderDetails}
-              </span>
+    <div className={cn("rounded border p-2 text-sm", variant === "delivery" && "border-amber-100 bg-amber-50/30")}>
+      <div className="flex items-center gap-2">
+        <Link href={`/suppliers/${order.supplier.id}`} className="font-medium text-blue-600 hover:underline">
+          {order.supplier.name}
+        </Link>
+        {order.orderDetails && (
+          <span className="truncate text-xs text-muted-foreground">-- {order.orderDetails}</span>
+        )}
+      </div>
+      <p className="text-xs text-muted-foreground">
+        For <Link href={`/jobs/${order.jobId}`} className="font-medium text-foreground hover:underline">{order.jobName}</Link>
+        {variant === "delivery" && order.expectedDeliveryDate && (
+          <span> &middot; Expected {format(new Date(order.expectedDeliveryDate), "d MMM")}</span>
+        )}
+      </p>
+      <div className="mt-1.5 flex flex-wrap items-center gap-1 border-t pt-1.5">
+        <span className="w-full text-[10px] font-medium text-muted-foreground sm:mr-auto sm:w-auto">Actions</span>
+        {isPending ? (
+          <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
+        ) : variant === "delivery" ? (
+          <Button size="sm" variant="outline" className="h-6 gap-1 border-green-200 px-2 text-[10px] text-green-700 hover:bg-green-50"
+            onClick={() => onAction(order.id, "DELIVERED")}>
+            <CheckCircle2 className="size-2.5" /> Mark Received
+          </Button>
+        ) : (
+          <>
+            {mailto && (
+              <Button size="sm" variant="outline" className="h-6 gap-1 border-violet-200 px-2 text-[10px] text-violet-700 hover:bg-violet-50"
+                onClick={() => { window.open(mailto, "_blank"); onAction(order.id, "ORDERED"); }}>
+                <Mail className="size-2.5" /> Send Order
+              </Button>
             )}
-          </p>
-          <div className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
-            <span>
-              For{" "}
-              <Link href={`/jobs/${item.jobId}`} className="font-medium text-foreground hover:underline hover:text-blue-600">
-                {item.jobName}
-              </Link>
-            </span>
-            {deliveredDate && (
-              <>
-                <span className="text-border">&middot;</span>
-                <span>Delivered {format(deliveredDate, "dd MMM yyyy")}</span>
-              </>
-            )}
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-// ---------- Timing Indicator ----------
-
-function TimingIndicator({ days }: { days: number }) {
-  let color = "bg-green-500";
-  if (days <= 7) {
-    color = "bg-red-500";
-  } else if (days <= 14) {
-    color = "bg-amber-500";
-  }
-
-  return (
-    <span
-      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium text-white ${color}`}
-    >
-      {days}d
-    </span>
+            <Button size="sm" variant="outline" className="h-6 gap-1 border-blue-200 px-2 text-[10px] text-blue-700 hover:bg-blue-50"
+              onClick={() => onAction(order.id, "ORDERED")}>
+              <Package className="size-2.5" /> {mailto ? "Mark Sent" : "Place Order"}
+            </Button>
+          </>
+        )}
+      </div>
+    </div>
   );
 }

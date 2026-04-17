@@ -40,13 +40,18 @@ export async function GET(
   if (category && category !== "all" && CATEGORY_TYPES[category]) {
     const types = CATEGORY_TYPES[category];
     if (category === "weather") {
-      // Weather entries are SYSTEM type with "🌤 Weather:" prefix
+      // Weather entries are SYSTEM type — forecast, rained-off days, weather impacts
       where.type = "SYSTEM";
-      where.description = { startsWith: "🌤 Weather:" };
+      where.OR = [
+        { description: { startsWith: "🌤" } },
+        { description: { startsWith: "☔" } },
+        { description: { startsWith: "🌡" } },
+        { description: { contains: "Weather impact" } },
+      ];
     } else if (category === "system") {
       // System excludes weather entries
       where.type = { in: types };
-      where.NOT = { description: { startsWith: "🌤 Weather:" } };
+      where.NOT = { AND: [{ type: "SYSTEM" }] };
     } else {
       where.type = { in: types };
     }

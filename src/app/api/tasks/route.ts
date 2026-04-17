@@ -16,10 +16,10 @@ export async function GET(req: NextRequest) {
   const in7Days = addDays(now, 7);
   const in3Days = addDays(now, 3);
 
-  // 1. Confirm Delivery — orders ORDERED/CONFIRMED with delivery within 7 days (not overdue)
+  // 1. Confirm Delivery — orders ORDERED with delivery within 7 days (not overdue)
   const confirmDelivery = await prisma.materialOrder.findMany({
     where: {
-      status: { in: ["ORDERED", "CONFIRMED"] },
+      status: "ORDERED",
       expectedDeliveryDate: { gte: now, lte: in7Days },
     },
     include: {
@@ -112,10 +112,10 @@ export async function GET(req: NextRequest) {
     orderBy: { startDate: "asc" },
   });
 
-  // 5. Overdue Materials — ORDERED/CONFIRMED orders past expected delivery date
+  // 5. Overdue Materials — ORDERED orders past expected delivery date
   const overdueOrders = await prisma.materialOrder.findMany({
     where: {
-      status: { in: ["ORDERED", "CONFIRMED"] },
+      status: "ORDERED",
       expectedDeliveryDate: { lt: now },
     },
     include: {
@@ -134,10 +134,10 @@ export async function GET(req: NextRequest) {
     orderBy: { expectedDeliveryDate: "asc" },
   });
 
-  // 5b. Waiting on Delivery — ORDERED/CONFIRMED orders with delivery date in the future (beyond 7-day confirm window)
+  // 5b. Waiting on Delivery — ORDERED orders with delivery date in the future (beyond 7-day confirm window)
   const awaitingDelivery = await prisma.materialOrder.findMany({
     where: {
-      status: { in: ["ORDERED", "CONFIRMED"] },
+      status: "ORDERED",
       expectedDeliveryDate: { gt: in7Days },
     },
     include: {
@@ -175,7 +175,7 @@ export async function GET(req: NextRequest) {
 
   const upcomingDeliveries = await prisma.materialOrder.findMany({
     where: {
-      status: { in: ["ORDERED", "CONFIRMED"] },
+      status: "ORDERED",
       expectedDeliveryDate: { gte: now, lte: in7Days },
     },
     include: {

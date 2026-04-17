@@ -89,9 +89,35 @@ export async function PUT(
       : null;
   }
 
+  // Accept explicit dateOfOrder
+  if (body.dateOfOrder !== undefined) {
+    data.dateOfOrder = body.dateOfOrder
+      ? new Date(body.dateOfOrder)
+      : null;
+  }
+
   // Handle status changes
   if (body.status !== undefined) {
+    // Block invalid PENDING → DELIVERED direct transition (must go via ORDERED)
+    if (existing.status === "PENDING" && body.status === "DELIVERED") {
+      return NextResponse.json(
+        { error: "Cannot mark PENDING order as DELIVERED — transition to ORDERED first" },
+        { status: 400 }
+      );
+    }
+
     data.status = body.status;
+
+    // Auto-set dateOfOrder when status changes to ORDERED (if not explicitly set)
+    // Mirrors the behavior of start → PENDING→ORDERED auto-progression
+    if (
+      body.status === "ORDERED" &&
+      existing.status !== "ORDERED" &&
+      !existing.dateOfOrder &&
+      body.dateOfOrder === undefined
+    ) {
+      data.dateOfOrder = getServerCurrentDate(req);
+    }
 
     // Auto-set deliveredDate when status changes to DELIVERED (if not explicitly set)
     if (
@@ -114,7 +140,7 @@ export async function PUT(
       await prisma.eventLog.create({
         data: {
           type: eventType,
-          description: `Order for ${existing.supplier.name} — ${existing.job.name} ${body.status === "DELIVERED" ? "delivery confirmed" : `status changed to ${body.status}`}`,
+          description: `[${existing.supplier.name}] Order for ${existing.job.name} ${body.status === "DELIVERED" ? "delivery confirmed" : `status changed to ${body.status}`}`,
           siteId: existing.job.plot.siteId,
           plotId: existing.job.plotId,
           jobId: existing.jobId,
@@ -172,7 +198,7 @@ export async function DELETE(
   await prisma.eventLog.create({
     data: {
       type: "ORDER_CANCELLED",
-      description: `Order for ${existing.supplier.name} — ${existing.job.name} was deleted`,
+      description: `[${existing.supplier.name}] Order for ${existing.job.name} was deleted`,
       siteId: existing.job.plot.siteId,
       plotId: existing.job.plotId,
       jobId: existing.jobId,

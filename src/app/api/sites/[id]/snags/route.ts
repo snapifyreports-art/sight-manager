@@ -26,7 +26,9 @@ export async function GET(
     include: {
       plot: { select: { id: true, plotNumber: true, name: true } },
       assignedTo: { select: { id: true, name: true } },
+      contact: { select: { id: true, name: true, company: true } },
       raisedBy: { select: { id: true, name: true } },
+      job: { select: { id: true, name: true, parentStage: true, parent: { select: { name: true } } } },
       _count: { select: { photos: true } },
     },
     orderBy: { createdAt: "desc" },

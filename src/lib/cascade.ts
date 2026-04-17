@@ -1,4 +1,5 @@
-import { addDays, differenceInDays } from "date-fns";
+import { differenceInDays } from "date-fns";
+import { addWorkingDays, snapToWorkingDay } from "@/lib/working-days";
 
 interface CascadeJob {
   id: string;
@@ -26,6 +27,7 @@ export interface CascadeJobUpdate {
 
 export interface CascadeOrderUpdate {
   orderId: string;
+  jobId: string;
   originalOrderDate: Date;
   originalDeliveryDate: Date | null;
   newOrderDate: Date;
@@ -58,7 +60,13 @@ export function calculateCascade(
     return { deltaDays: 0, jobUpdates: [], orderUpdates: [] };
   }
 
-  // Find subsequent jobs (higher sort order, or same sort order but later start)
+  // Find jobs to cascade.
+  // When pulling forward (negative delta): include ALL jobs that start at or after
+  // the changed job's start — this catches siblings in the same stage.
+  // When pushing back (positive delta): only include jobs with higher sortOrder
+  // to avoid shifting earlier jobs that shouldn't move.
+  const changedStart = changedJob.startDate;
+  const isPullForward = deltaDays < 0;
   const subsequentJobs = allPlotJobs
     .filter(
       (j) =>
@@ -66,19 +74,26 @@ export function calculateCascade(
         j.startDate &&
         j.endDate &&
         (j.sortOrder > changedJob.sortOrder ||
-          (j.sortOrder === changedJob.sortOrder &&
-            j.startDate > changedJob.endDate!))
+          (isPullForward && changedStart && j.startDate >= changedStart))
     )
     .sort((a, b) => a.sortOrder - b.sortOrder);
 
   const jobUpdates: CascadeJobUpdate[] = [];
   const orderUpdates: CascadeOrderUpdate[] = [];
 
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
   for (const job of subsequentJobs) {
     if (!job.startDate || !job.endDate) continue;
 
-    const newStart = addDays(job.startDate, deltaDays);
-    const newEnd = addDays(job.endDate, deltaDays);
+    let newStart = addWorkingDays(job.startDate, deltaDays);
+    const duration = differenceInDays(job.endDate, job.startDate);
+    // Never push start date into the past, snap to working day
+    if (newStart < today) newStart = snapToWorkingDay(today, "forward");
+    else newStart = snapToWorkingDay(newStart, "forward");
+    const newEnd = new Date(newStart);
+    newEnd.setDate(newEnd.getDate() + duration); // duration stays calendar days
 
     jobUpdates.push({
       jobId: job.id,
@@ -89,16 +104,21 @@ export function calculateCascade(
       newEnd,
     });
 
-    // Shift orders for this job
+    // Shift orders for this job — cap at today
     const jobOrders = allOrders.filter((o) => o.jobId === job.id);
     for (const order of jobOrders) {
-      const newOrderDate = addDays(order.dateOfOrder, deltaDays);
-      const newDeliveryDate = order.expectedDeliveryDate
-        ? addDays(order.expectedDeliveryDate, deltaDays)
+      let newOrderDate = addWorkingDays(order.dateOfOrder, deltaDays);
+      if (newOrderDate < today) newOrderDate = snapToWorkingDay(today, "forward");
+      else newOrderDate = snapToWorkingDay(newOrderDate, "back"); // orders snap to Friday if landing on weekend
+      let newDeliveryDate = order.expectedDeliveryDate
+        ? addWorkingDays(order.expectedDeliveryDate, deltaDays)
         : null;
+      if (newDeliveryDate && newDeliveryDate < today) newDeliveryDate = snapToWorkingDay(today, "forward");
+      else if (newDeliveryDate) newDeliveryDate = snapToWorkingDay(newDeliveryDate, "back");
 
       orderUpdates.push({
         orderId: order.id,
+        jobId: order.jobId,
         originalOrderDate: order.dateOfOrder,
         originalDeliveryDate: order.expectedDeliveryDate,
         newOrderDate,

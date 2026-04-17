@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import {
   getWeeksBetween,
   getPositionForDate,
+  getBarWidth,
   getTimelineRange,
   getStatusColor,
   formatWeekLabel,
@@ -24,6 +25,8 @@ interface GanttJob {
   name: string;
   startDate: string | null;
   endDate: string | null;
+  originalStartDate?: string | null;
+  originalEndDate?: string | null;
   status: string;
   parentId?: string | null;
   parentStage?: string | null;
@@ -38,6 +41,9 @@ interface GanttJob {
     supplier: { name: string };
   }>;
 }
+
+type DateMode = "current" | "original";
+
 
 /** A parent stage group header (synthetic row) */
 interface ParentGroup {
@@ -61,6 +67,8 @@ type DisplayRow = ParentGroup | JobRow;
 
 interface GanttChartProps {
   jobs: GanttJob[];
+  /** Whether to show original/current toggle and overlay controls. Requires original dates on jobs. */
+  enableDateControls?: boolean;
 }
 
 /** Compute aggregate status from child jobs */
@@ -87,8 +95,19 @@ function computeProgress(children: GanttJob[]): number {
 /** Parent row height — same as regular row */
 const PARENT_ROW_HEIGHT = ROW_HEIGHT;
 
-export function GanttChart({ jobs }: GanttChartProps) {
+export function GanttChart({ jobs, enableDateControls = false }: GanttChartProps) {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+
+  // Date mode: show bars using current or original dates
+  const [dateMode, setDateMode] = useState<DateMode>("current");
+  // Overlay: show ghost bars for original dates behind current bars
+  const [showOverlay, setShowOverlay] = useState(false);
+
+  // Check if any job has original dates different from current
+  const hasOriginalDates = useMemo(
+    () => jobs.some((j) => j.originalStartDate || j.originalEndDate),
+    [jobs]
+  );
 
   // Track which parent stages are expanded
   const [expandedParents, setExpandedParents] = useState<Set<string>>(
@@ -107,6 +126,17 @@ export function GanttChart({ jobs }: GanttChartProps) {
     });
   }, []);
 
+  // Transform jobs based on dateMode — swap dates when viewing "original"
+  const displayJobs = useMemo(() => {
+    if (dateMode === "current") return jobs;
+    // "original" mode: use originalStartDate/originalEndDate, fallback to current
+    return jobs.map((job) => ({
+      ...job,
+      startDate: job.originalStartDate ?? job.startDate,
+      endDate: job.originalEndDate ?? job.endDate,
+    }));
+  }, [jobs, dateMode]);
+
   // Build grouped structure: parent stages with children, plus standalone jobs
   const allRows = useMemo(() => {
     const rows: DisplayRow[] = [];
@@ -114,7 +144,7 @@ export function GanttChart({ jobs }: GanttChartProps) {
     const standalone: GanttJob[] = [];
 
     // Separate jobs into groups and standalone
-    for (const job of jobs) {
+    for (const job of displayJobs) {
       if (job.parentStage) {
         const arr = grouped.get(job.parentStage) || [];
         arr.push(job);
@@ -126,7 +156,7 @@ export function GanttChart({ jobs }: GanttChartProps) {
 
     // If there are no grouped jobs, return flat list
     if (grouped.size === 0) {
-      return jobs.map(
+      return displayJobs.map(
         (job): JobRow => ({ type: "job", job, indented: false })
       );
     }
@@ -229,7 +259,7 @@ export function GanttChart({ jobs }: GanttChartProps) {
     }
 
     return rows;
-  }, [jobs]);
+  }, [displayJobs]);
 
   // Filter visible rows based on expand state
   const visibleRows = useMemo(() => {
@@ -270,10 +300,10 @@ export function GanttChart({ jobs }: GanttChartProps) {
     return result;
   }, [allRows]);
 
-  // Calculate timeline range from all jobs
+  // Calculate timeline range from all jobs (include original dates when overlay is on)
   const { timelineStart, timelineEnd } = useMemo(
-    () => getTimelineRange(allJobs),
-    [allJobs]
+    () => getTimelineRange(allJobs, showOverlay || dateMode === "original"),
+    [allJobs, showOverlay, dateMode]
   );
 
   // Week columns
@@ -311,6 +341,61 @@ export function GanttChart({ jobs }: GanttChartProps) {
   }
 
   return (
+    <div className="space-y-2">
+      {/* Date mode + overlay controls */}
+      {enableDateControls && hasOriginalDates && (
+        <div className="flex items-center gap-3">
+          {/* Original / Current toggle */}
+          <div className="flex items-center gap-1 rounded-lg border p-0.5">
+            <button
+              onClick={() => setDateMode("current")}
+              className={cn(
+                "rounded px-3 py-1 text-xs font-medium transition-colors",
+                dateMode === "current"
+                  ? "bg-slate-900 text-white"
+                  : "text-muted-foreground hover:bg-accent"
+              )}
+            >
+              Current
+            </button>
+            <button
+              onClick={() => setDateMode("original")}
+              className={cn(
+                "rounded px-3 py-1 text-xs font-medium transition-colors",
+                dateMode === "original"
+                  ? "bg-slate-900 text-white"
+                  : "text-muted-foreground hover:bg-accent"
+              )}
+            >
+              Original
+            </button>
+          </div>
+
+          {/* Overlay toggle */}
+          {dateMode === "current" && (
+            <button
+              onClick={() => setShowOverlay((v) => !v)}
+              className={cn(
+                "rounded-lg border px-3 py-1 text-xs font-medium transition-colors",
+                showOverlay
+                  ? "bg-slate-900 text-white border-slate-900"
+                  : "text-muted-foreground hover:bg-accent"
+              )}
+            >
+              Overlay
+            </button>
+          )}
+
+          {/* Legend hint when overlay is active */}
+          {showOverlay && dateMode === "current" && (
+            <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+              <div className="h-2.5 w-6 rounded-sm bg-gray-300 border border-dashed border-gray-400" />
+              <span>Original plan</span>
+            </div>
+          )}
+        </div>
+      )}
+
     <div className="border border-gray-200 rounded-lg overflow-hidden bg-white">
       <div className="flex">
         {/* Left Panel (sticky job names) */}
@@ -524,6 +609,36 @@ export function GanttChart({ jobs }: GanttChartProps) {
                 );
               })}
 
+              {/* Ghost bars — original date overlay (rendered behind regular bars) */}
+              {showOverlay && dateMode === "current" && visibleRows.map((row, index) => {
+                if (row.type === "parent") return null;
+                const { job } = row;
+                const origStart = job.originalStartDate ?? job.startDate;
+                const origEnd = job.originalEndDate ?? job.endDate;
+                if (!origStart || !origEnd) return null;
+                // Skip if original == current (no drift)
+                if (origStart === job.startDate && origEnd === job.endDate) return null;
+                const oStart = new Date(origStart);
+                const oEnd = new Date(origEnd);
+                const left = getPositionForDate(oStart, timelineStart, DAY_WIDTH);
+                const width = getBarWidth(oStart, oEnd, DAY_WIDTH);
+                const barHeight = 28;
+                const barTop = (ROW_HEIGHT - barHeight) / 2 + 4;
+                return (
+                  <div
+                    key={`ghost-${job.id}`}
+                    className="absolute rounded-md border border-dashed border-gray-400 bg-gray-200/50"
+                    style={{
+                      left: `${left}px`,
+                      top: `${index * ROW_HEIGHT + barTop}px`,
+                      width: `${width}px`,
+                      height: `${barHeight}px`,
+                    }}
+                    title={`Original: ${origStart.slice(0, 10)} \u2013 ${origEnd.slice(0, 10)}`}
+                  />
+                );
+              })}
+
               {/* Bars — parent aggregate bars and job bars */}
               {visibleRows.map((row, index) => {
                 if (row.type === "parent") {
@@ -618,6 +733,7 @@ export function GanttChart({ jobs }: GanttChartProps) {
           </div>
         </div>
       </div>
+    </div>
     </div>
   );
 }

@@ -6,17 +6,22 @@ import { templateJobsInclude } from "@/lib/template-includes";
 
 export const dynamic = "force-dynamic";
 
-export default async function SettingsPage() {
+export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
+  const { tab: initialTab } = await searchParams;
   const session = await auth();
   if (!session) redirect("/login");
 
-  const [templates, users] = await Promise.all([
+  const [templates, users, sites] = await Promise.all([
     prisma.plotTemplate.findMany({
       orderBy: { createdAt: "desc" },
       include: { jobs: templateJobsInclude },
     }),
     prisma.user.findMany({
       select: { id: true, name: true, email: true, role: true, jobTitle: true, company: true, phone: true, createdAt: true },
+      orderBy: { name: "asc" },
+    }),
+    prisma.site.findMany({
+      select: { id: true, name: true },
       orderBy: { name: "asc" },
     }),
   ]);
@@ -33,6 +38,8 @@ export default async function SettingsPage() {
       templates={JSON.parse(JSON.stringify(templates))}
       users={serializedUsers}
       currentUserId={session.user.id}
+      sites={sites}
+      initialTab={initialTab}
     />
   );
 }

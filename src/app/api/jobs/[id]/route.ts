@@ -86,6 +86,16 @@ export async function PUT(
     updateData.endDate = body.endDate ? new Date(body.endDate) : null;
   }
 
+  // Validate startDate <= endDate
+  const finalStart = updateData.startDate ?? existing.startDate;
+  const finalEnd = updateData.endDate ?? existing.endDate;
+  if (finalStart && finalEnd && new Date(finalStart as string | Date) > new Date(finalEnd as string | Date)) {
+    return NextResponse.json(
+      { error: "Start date cannot be after end date" },
+      { status: 400 }
+    );
+  }
+
   const job = await prisma.job.update({
     where: { id },
     data: updateData,

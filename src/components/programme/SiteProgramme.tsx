@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { useRefreshOnFocus } from "@/hooks/useRefreshOnFocus";
+import { useJobAction } from "@/hooks/useJobAction";
 import {
   format,
   startOfWeek,
@@ -17,7 +19,7 @@ import {
 } from "date-fns";
 import { getCurrentDate } from "@/lib/dev-date";
 import { useDevDate } from "@/lib/dev-date-context";
-import { Loader2, Columns3, ChevronRight, Download, FileText, Search, X, Camera, StickyNote, CalendarDays, Calendar, Layers, List, CheckSquare, Clock, ZoomIn, ZoomOut, Maximize2, Minimize2 } from "lucide-react";
+import { Loader2, Columns3, ChevronRight, Download, FileText, Search, X, Camera, StickyNote, CalendarDays, Calendar, Layers, List, CheckSquare, Clock, ZoomIn, ZoomOut, Maximize2, Minimize2, Play } from "lucide-react";
 import Link from "next/link";
 import { getStageCode, getStageColor } from "@/lib/stage-codes";
 import { Input } from "@/components/ui/input";
@@ -201,6 +203,15 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
   const [expanded, setExpanded] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  // Centralised job start hook for bulk actions
+  const { triggerAction: triggerBulkStart, dialogs: bulkStartDialogs } = useJobAction(
+    async () => {
+      // Refresh programme data after bulk action
+      const freshData = await fetch(`/api/sites/${siteId}/programme`, { cache: "no-store" }).then((r) => r.json());
+      setSite(freshData);
+    }
+  );
+
   // View mode state
   const [viewMode, setViewMode] = useState<"week" | "day">("week");
   const [jobView, setJobView] = useState<"jobs" | "subjobs">("jobs");
@@ -295,6 +306,7 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
       const result = await res.json();
       const freshData = await fetch(`/api/sites/${siteId}/programme`, { cache: "no-store" }).then((r) => r.json());
       setSite(freshData);
+      setScrollTrigger((n) => n + 1);
       setDelayDialogOpen(false);
       setSelectedPlots(new Set());
       setSelectMode(false);
@@ -325,6 +337,7 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
       .then((r) => r.json())
       .then((data) => {
         setSite(data);
+        setScrollTrigger((n) => n + 1);
         if (data?.rainedOffDays) {
           const impactMap = new Map<string, Array<"RAIN" | "TEMPERATURE">>();
           const notesMap = new Map<string, string>();
@@ -346,6 +359,7 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
   useEffect(() => {
     fetchProgramme();
   }, [fetchProgramme, devDate]);
+  useRefreshOnFocus(fetchProgramme);
 
   // Fetch weather when postcode is available
   // When dev date is active, offset the returned forecast dates to align
@@ -615,6 +629,20 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
           .map((c) => c.startDate)
           .filter(Boolean) as string[];
 
+        // Aggregate original dates for overlay mode
+        const origStarts = children
+          .map((c) => c.originalStartDate)
+          .filter(Boolean) as string[];
+        const origEnds = children
+          .map((c) => c.originalEndDate)
+          .filter(Boolean) as string[];
+        const minOrigStart = origStarts.length
+          ? origStarts.reduce((a, b) => (a < b ? a : b))
+          : null;
+        const maxOrigEnd = origEnds.length
+          ? origEnds.reduce((a, b) => (a > b ? a : b))
+          : null;
+
         synthetic.push({
           id: `synth-${plot.id}-${stage}`,
           name: stage,
@@ -622,6 +650,8 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
           stageCode: firstChild?.stageCode || null,
           startDate: minStart,
           endDate: maxEnd,
+          originalStartDate: minOrigStart,
+          originalEndDate: maxOrigEnd,
           actualStartDate: minActualStart,
           actualEndDate: maxActualEnd,
           sortOrder: firstChild?.sortOrder ?? 0,
@@ -633,7 +663,14 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
         });
       }
 
-      const allJobs = [...topLevel, ...synthetic].sort(
+      // Remove top-level parents that have been replaced by synthetic aggregates
+      // (e.g. real "Groundworks" parent replaced by synthetic "GW" from children)
+      const syntheticStages = new Set(grouped.keys());
+      const filteredTopLevel = topLevel.filter(
+        (j) => !j.stageCode || !syntheticStages.has(j.stageCode)
+      );
+
+      const allJobs = [...filteredTopLevel, ...synthetic].sort(
         (a, b) => a.sortOrder - b.sortOrder
       );
       return { ...plot, jobs: allJobs };
@@ -666,6 +703,7 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
     date: Date;
     endDate: Date; // exclusive end
     label: string;
+    dayName?: string; // e.g. "Mon", "Tue" — day view only
     key: string;
     isWeekendDay?: boolean;
   }
@@ -697,6 +735,10 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
     if (!minDate || !maxDate) return { columns: [] as TimelineColumn[], todayIndex: -1, monthSpans: [] as MonthSpan[] };
 
     const now = getCurrentDate();
+
+    // Ensure today is always within the visible range
+    if (now < minDate) minDate = now;
+    if (now > maxDate) maxDate = now;
 
     if (viewMode === "week") {
       const start = addWeeks(startOfWeek(minDate, { weekStartsOn: 1 }), -2);
@@ -731,6 +773,7 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
         date: d,
         endDate: addDays(d, 1),
         label: format(d, "d"),
+        dayName: format(d, "EEE"), // Mon, Tue, Wed...
         key: format(d, "yyyy-MM-dd"),
         isWeekendDay: isWeekend(d),
       }));
@@ -757,13 +800,15 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
     }
   }, [site, viewMode, devDate]);
 
-  // Auto-scroll to today
+  // Track data version to re-trigger scroll after refreshes
+  const [scrollTrigger, setScrollTrigger] = useState(0);
+
+  // Auto-scroll to today on mount + after data refreshes — today at left edge
   useEffect(() => {
     if (todayIndex >= 0 && scrollRef.current) {
-      const scrollLeft = todayIndex * cellWidth - 200;
-      scrollRef.current.scrollLeft = Math.max(0, scrollLeft);
+      scrollRef.current.scrollLeft = Math.max(0, todayIndex * cellWidth);
     }
-  }, [todayIndex, cellWidth]);
+  }, [todayIndex, cellWidth, scrollTrigger]);
 
   // ---------- Export: Excel ----------
   const handleExportExcel = useCallback(async () => {
@@ -1364,7 +1409,7 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                     <div className="w-[52px] flex items-center gap-1 truncate px-1.5 font-semibold">
                       {scheduleStatuses[plot.id] && (() => {
                         const s = scheduleStatuses[plot.id];
-                        if (s.awaitingRestart) return <span className="size-2 shrink-0 rounded-full bg-amber-400" title="Awaiting restart" />;
+                        if (s.awaitingRestart) return <span className="size-2 shrink-0 rounded-full bg-amber-400" title="Deferred" />;
                         if (s.status === "ahead") return <span className="size-2 shrink-0 rounded-full bg-emerald-500" title={`${s.daysDeviation}d ahead`} />;
                         if (s.status === "behind") return <span className="size-2 shrink-0 rounded-full bg-red-500" title={`${Math.abs(s.daysDeviation)}d behind`} />;
                         if (s.status === "on_track") return <span className="size-2 shrink-0 rounded-full bg-blue-400" title="On programme" />;
@@ -1501,6 +1546,7 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                       }`}
                       style={{ width: cellWidth }}
                     >
+                      {col.dayName && <span className={`leading-none ${col.isWeekendDay ? "text-slate-400" : ""}`}>{col.dayName}</span>}
                       <span>{col.label}</span>
                     </div>
                   ))}
@@ -1511,13 +1557,37 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
               <div className="relative" style={{ height: totalHeight }}>
                 {/* Today line */}
                 {todayIndex >= 0 && (
-                  <div
-                    className="absolute top-0 z-10 w-0.5 bg-red-500"
-                    style={{
-                      left: todayIndex * cellWidth + cellWidth / 2,
-                      height: totalHeight,
-                    }}
-                  />
+                  <>
+                    {/* Semi-transparent highlight column behind today */}
+                    <div
+                      className="absolute top-0 z-[5] bg-red-500/[0.06]"
+                      style={{
+                        left: todayIndex * cellWidth,
+                        width: cellWidth,
+                        height: totalHeight,
+                      }}
+                    />
+                    {/* Today label at top */}
+                    <div
+                      className="absolute z-20 -translate-x-1/2 rounded-b bg-red-500 px-1.5 py-0.5 text-[9px] font-bold leading-none text-white shadow-sm"
+                      style={{
+                        left: todayIndex * cellWidth + cellWidth / 2,
+                        top: 0,
+                      }}
+                    >
+                      Today
+                    </div>
+                    {/* Red vertical line */}
+                    <div
+                      className="absolute top-0 z-10 bg-red-500"
+                      style={{
+                        left: todayIndex * cellWidth + cellWidth / 2 - 1,
+                        width: 2,
+                        height: totalHeight,
+                        boxShadow: "0 0 4px rgba(239, 68, 68, 0.5)",
+                      }}
+                    />
+                  </>
                 )}
 
                 {/* Row backgrounds + stage code cells */}
@@ -1549,10 +1619,13 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                           return { barStart: s, barEnd: e, ghostStart: null as string | null, ghostEnd: null as string | null };
                         }
                         // overlay: current bar + ghost original
+                        // Use actualStart if available, otherwise current planned start
                         const s = job.actualStartDate ?? job.startDate;
                         const e = job.actualEndDate ?? job.endDate;
-                        const gs = job.originalStartDate || null;
-                        const ge = job.originalEndDate || null;
+                        // Ghost = original planned dates; fall back to current planned if
+                        // no original recorded (job never shifted — ghost == current, hides naturally)
+                        const gs = job.originalStartDate ?? job.startDate ?? null;
+                        const ge = job.originalEndDate ?? job.endDate ?? null;
                         return { barStart: s, barEnd: e, ghostStart: gs, ghostEnd: ge };
                       };
                       const { barStart, barEnd, ghostStart, ghostEnd } = resolveBarDates();
@@ -1600,17 +1673,20 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                           : isFirstJobCell;
 
                         // Check if any order dates fall in this cell
-                        // If order date is before job starts, show on first job cell
+                        // Use string comparison (YYYY-MM-DD) to avoid UTC vs local timezone
+                        // mismatch (e.g. UTC midnight stored dates shift by 1 day in BST).
+                        // If order date is before job starts, show on first job cell.
+                        const barStartStr = barStart ? barStart.slice(0, 10) : null;
                         const hasOrderInCell = orders.some((o) => {
-                          const d = new Date(o.dateOfOrder);
-                          if (d < jobStart && isFirstJobCell) return true;
-                          return d >= col.date && d < col.endDate;
+                          const ds = o.dateOfOrder.slice(0, 10);
+                          if (barStartStr && ds < barStartStr && isFirstJobCell) return true;
+                          return ds >= colDateStr && ds < colEndStr;
                         });
                         const hasDeliveryInCell = orders.some((o) => {
                           if (!o.expectedDeliveryDate) return false;
-                          const d = new Date(o.expectedDeliveryDate);
-                          if (d < jobStart && isFirstJobCell) return true;
-                          return d >= col.date && d < col.endDate;
+                          const ds = o.expectedDeliveryDate.slice(0, 10);
+                          if (barStartStr && ds < barStartStr && isFirstJobCell) return true;
+                          return ds >= colDateStr && ds < colEndStr;
                         });
 
                         // Ghost-only cell (overlay mode: original dates but not current)
@@ -1623,7 +1699,7 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                             >
                               <div
                                 className="absolute bottom-1 left-px right-px rounded-sm"
-                                style={{ height: 6, backgroundColor: "#94a3b8", opacity: 0.4 }}
+                                style={{ height: 8, backgroundColor: "#94a3b8", opacity: 0.5, border: "1px dashed #64748b" }}
                                 title={`${job.name} — original planned period`}
                               />
                             </div>
@@ -1667,6 +1743,8 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                               className={`relative flex items-center justify-center rounded font-bold transition-all hover:brightness-90 hover:shadow-sm ${
                                 viewMode === "day" ? "text-[7px]" : "text-[8px]"
                               } ${
+                                job.status === "IN_PROGRESS" && ganttMode !== "original" ? "animate-[pulse-glow_2s_ease-in-out_infinite]" : ""
+                              } ${
                                 (() => {
                                   if (!job.weatherAffected || viewMode !== "day") return "";
                                   const types = weatherImpactMap.get(format(col.date, "yyyy-MM-dd")) ?? [];
@@ -1695,6 +1773,9 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                                   if (types.includes("RAIN")) return "#991b1b";
                                   return colors.text;
                                 })(),
+                                ...(job.status === "IN_PROGRESS" && ganttMode !== "original"
+                                  ? { boxShadow: "0 0 6px 1px rgba(59,130,246,0.4)" }
+                                  : {}),
                               }}
                             >
                               {(() => {
@@ -1723,21 +1804,11 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                               {ganttMode === "overlay" && ghostOverlaps && (
                                 <div
                                   className="absolute bottom-0 left-0 right-0 rounded-b"
-                                  style={{ height: 3, backgroundColor: "#475569", opacity: 0.35 }}
+                                  style={{ height: 4, backgroundColor: "#475569", opacity: 0.5, borderBottom: "1px dashed #334155" }}
                                   title="Original planned period"
                                 />
                               )}
-                              {/* Order/delivery indicators */}
-                              {(hasOrderInCell || hasDeliveryInCell) && (
-                                <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 flex gap-px p-1 cursor-pointer" onClick={(e) => { e.stopPropagation(); window.location.href = "/orders"; }} title="Click to view orders">
-                                  {hasOrderInCell && (
-                                    <div className="size-[5px] rounded-full bg-purple-500" />
-                                  )}
-                                  {hasDeliveryInCell && (
-                                    <div className="size-[5px] rounded-full bg-teal-500" />
-                                  )}
-                                </div>
-                              )}
+                              {/* Order/delivery dots rendered separately below */}
                             </div>
                           </div>
                         );
@@ -1746,6 +1817,43 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                   </div>
                 ))}
 
+                {/* Order/delivery dots — rendered as a separate layer on actual calendar dates */}
+                {processedPlots.map((plot, plotIndex) => {
+                  // Collect ALL orders from ALL jobs on this plot
+                  const allOrders = plot.jobs.flatMap((j) => (j.orders ?? []).map((o) => ({ ...o, jobName: j.name })));
+                  if (allOrders.length === 0) return null;
+
+                  return columns.map((col, colIdx) => {
+                    const colDateStr = format(col.date, "yyyy-MM-dd");
+                    const colEndStr = format(col.endDate, "yyyy-MM-dd");
+
+                    const hasOrder = allOrders.some((o) => {
+                      const ds = o.dateOfOrder?.slice(0, 10);
+                      return ds && ds >= colDateStr && ds < colEndStr;
+                    });
+                    const hasDelivery = allOrders.some((o) => {
+                      if (!o.expectedDeliveryDate) return false;
+                      const ds = o.expectedDeliveryDate.slice(0, 10);
+                      return ds >= colDateStr && ds < colEndStr;
+                    });
+
+                    if (!hasOrder && !hasDelivery) return null;
+
+                    return (
+                      <div
+                        key={`dots-${plot.id}-${col.key}`}
+                        className="absolute pointer-events-none"
+                        style={{ left: colIdx * cellWidth, top: plotIndex * ROW_HEIGHT, width: cellWidth, height: ROW_HEIGHT }}
+                      >
+                        <div className="absolute bottom-0.5 left-1/2 -translate-x-1/2 flex gap-0.5">
+                          {hasOrder && <div className="size-[5px] rounded-full bg-purple-500" />}
+                          {hasDelivery && <div className="size-[5px] rounded-full bg-teal-500" />}
+                        </div>
+                      </div>
+                    );
+                  });
+                })}
+
                 {/* Weekend background stripes (day view) */}
                 {viewMode === "day" &&
                   columns.map(
@@ -1753,7 +1861,7 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                       col.isWeekendDay && (
                         <div
                           key={`wknd-${col.key}`}
-                          className="pointer-events-none absolute top-0 bg-slate-50/40"
+                          className="pointer-events-none absolute top-0 bg-slate-200/30"
                           style={{
                             left: i * cellWidth,
                             width: cellWidth,
@@ -1818,7 +1926,7 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                   );
                 })}
                 <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
-                  <div className="h-4 w-0.5 bg-red-500" />
+                  <div className="h-4 w-[2px] bg-red-500 shadow-[0_0_4px_rgba(239,68,68,0.5)]" />
                   Today
                 </div>
                 <div className="ml-2 flex items-center gap-1.5 text-[10px] text-muted-foreground">
@@ -1845,7 +1953,7 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
 
       {/* Floating action bar for bulk select */}
       {selectMode && selectedPlots.size > 0 && (
-        <div className="sticky bottom-0 z-30 flex items-center justify-between border-t bg-blue-50 px-4 py-2.5">
+        <div className="fixed bottom-0 left-0 right-0 z-50 flex items-center justify-between border-t bg-blue-50 px-4 py-2.5 shadow-lg md:left-64">
           <div className="flex items-center gap-2 text-sm">
             <CheckSquare className="size-4 text-blue-600" />
             <span className="font-medium text-blue-900">
@@ -1853,6 +1961,28 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
             </span>
           </div>
           <div className="flex items-center gap-2">
+            <button
+              onClick={async () => {
+                // Start next job on each selected plot
+                if (!site) return;
+                for (const plotId of selectedPlots) {
+                  const plot = site.plots.find((p) => p.id === plotId);
+                  if (!plot) continue;
+                  const nextJob = plot.jobs.find((j) => j.status === "NOT_STARTED");
+                  if (nextJob) {
+                    await triggerBulkStart(
+                      { id: nextJob.id, name: nextJob.name, status: nextJob.status, startDate: nextJob.startDate ?? null, endDate: nextJob.endDate ?? null },
+                      "start"
+                    );
+                  }
+                }
+                clearSelection();
+              }}
+              className="flex items-center gap-1.5 rounded-md bg-green-600 px-3 py-1.5 text-xs font-medium text-white shadow-sm hover:bg-green-700"
+            >
+              <Play className="size-3.5" />
+              Start All
+            </button>
             <button
               onClick={() => {
                 setDelayDays(1);
@@ -1874,6 +2004,7 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
         </div>
       )}
 
+      {bulkStartDialogs}
       {/* Delay dialog */}
       {delayDialogOpen && (
         <>
@@ -1906,13 +2037,13 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
 
             <div className="mt-4 space-y-3">
               <div>
-                <label className="mb-1 block text-xs font-medium">Days to delay</label>
+                <label className="mb-1 block text-xs font-medium">Working days to delay (Mon-Fri)</label>
                 <input
                   type="number"
-                  min={1}
+                  min={0}
                   max={365}
-                  value={delayDays}
-                  onChange={(e) => setDelayDays(Math.max(1, parseInt(e.target.value) || 1))}
+                  value={delayDays || ""}
+                  onChange={(e) => setDelayDays(parseInt(e.target.value) || 0)}
                   className="w-full rounded-md border px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
                 />
               </div>

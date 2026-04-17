@@ -40,6 +40,11 @@ import { PERMISSION_META, ALL_PERMISSIONS } from "@/lib/permissions";
 
 // ---------- Types ----------
 
+interface SiteData {
+  id: string;
+  name: string;
+}
+
 interface UserData {
   id: string;
   name: string;
@@ -100,14 +105,19 @@ function PermissionsDialog({
   open,
   onOpenChange,
   user,
+  sites,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   user: UserData | null;
+  sites: SiteData[];
 }) {
   const [permissions, setPermissions] = useState<string[]>([]);
+  const [assignedSiteIds, setAssignedSiteIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  const isAdmin = user?.role === "CEO" || user?.role === "DIRECTOR";
 
   const fetchPermissions = useCallback(async () => {
     if (!user) return;
@@ -116,7 +126,15 @@ function PermissionsDialog({
       const res = await fetch(`/api/users/${user.id}/permissions`);
       if (res.ok) {
         const data = await res.json();
-        setPermissions(data);
+        // API returns { permissions: string[], siteIds: string[] }
+        if (Array.isArray(data.permissions)) {
+          setPermissions(data.permissions);
+          setAssignedSiteIds(data.siteIds || []);
+        } else if (Array.isArray(data)) {
+          // Legacy format — just permissions array
+          setPermissions(data);
+          setAssignedSiteIds([]);
+        }
       }
     } catch (err) {
       console.error("Failed to fetch permissions:", err);
@@ -138,7 +156,10 @@ function PermissionsDialog({
       const res = await fetch(`/api/users/${user.id}/permissions`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ permissions }),
+        body: JSON.stringify({
+          permissions,
+          siteIds: isAdmin ? undefined : assignedSiteIds,
+        }),
       });
       if (res.ok) {
         onOpenChange(false);
@@ -153,6 +174,12 @@ function PermissionsDialog({
   function togglePermission(key: string, enabled: boolean) {
     setPermissions((prev) =>
       enabled ? [...prev, key] : prev.filter((p) => p !== key)
+    );
+  }
+
+  function toggleSite(siteId: string, enabled: boolean) {
+    setAssignedSiteIds((prev) =>
+      enabled ? [...prev, siteId] : prev.filter((id) => id !== siteId)
     );
   }
 
@@ -183,6 +210,39 @@ function PermissionsDialog({
           </div>
         ) : (
           <div className="max-h-[400px] space-y-6 overflow-y-auto py-2">
+            {/* Site Access */}
+            <div>
+              <h4 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                Site Access
+              </h4>
+              {isAdmin ? (
+                <p className="text-xs text-muted-foreground italic">
+                  All Sites (Admin) — {formatRole(user?.role || "")} users automatically have access to all sites.
+                </p>
+              ) : sites.length === 0 ? (
+                <p className="text-xs text-muted-foreground">No sites available.</p>
+              ) : (
+                <div className="space-y-3">
+                  {sites.map((site) => (
+                    <div
+                      key={site.id}
+                      className="flex items-center justify-between"
+                    >
+                      <div>
+                        <p className="text-sm font-medium">{site.name}</p>
+                      </div>
+                      <Switch
+                        checked={assignedSiteIds.includes(site.id)}
+                        onCheckedChange={(checked) =>
+                          toggleSite(site.id, checked)
+                        }
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
             {/* Page Access */}
             <div>
               <h4 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
@@ -265,9 +325,11 @@ function PermissionsDialog({
 export function UsersClient({
   users: initialUsers,
   currentUserId,
+  sites,
 }: {
   users: UserData[];
   currentUserId: string;
+  sites: SiteData[];
 }) {
   const router = useRouter();
   const [users, setUsers] = useState(initialUsers);
@@ -740,6 +802,7 @@ export function UsersClient({
         open={permissionsDialogOpen}
         onOpenChange={setPermissionsDialogOpen}
         user={permissionsUser}
+        sites={sites}
       />
     </div>
   );

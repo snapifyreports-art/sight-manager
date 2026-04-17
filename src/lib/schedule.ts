@@ -101,7 +101,7 @@ export function scheduleStatusLabel(status: ScheduleStatus, days: number): strin
     case "ahead":         return `${days}d ahead`;
     case "behind":        return `${Math.abs(days)}d behind`;
     case "on_track":      return "On track";
-    case "awaiting_restart": return "Awaiting restart";
+    case "awaiting_restart": return "Deferred";
     case "idle":          return "Idle";
     case "complete":      return "Complete";
     case "not_started":   return "Not started";

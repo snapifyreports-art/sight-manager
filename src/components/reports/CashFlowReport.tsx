@@ -7,7 +7,9 @@ import {
   DollarSign,
   BarChart3,
   Clock,
+  Info,
 } from "lucide-react";
+import { cn } from "@/lib/utils";
 import {
   Card,
   CardContent,
@@ -60,12 +62,16 @@ function formatMonth(m: string) {
   return `${months[parseInt(mo, 10) - 1]} ${y.slice(2)}`;
 }
 
+type DateMode = "current" | "original";
+
 export function CashFlowReport({ siteId }: { siteId: string }) {
   const [data, setData] = useState<CashFlowData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [dateMode, setDateMode] = useState<DateMode>("current");
 
   useEffect(() => {
-    fetch(`/api/sites/${siteId}/cash-flow`)
+    setLoading(true);
+    fetch(`/api/sites/${siteId}/cash-flow?dateMode=${dateMode}`)
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json();
@@ -73,7 +79,7 @@ export function CashFlowReport({ siteId }: { siteId: string }) {
       .then(setData)
       .catch(() => setData(null))
       .finally(() => setLoading(false));
-  }, [siteId]);
+  }, [siteId, dateMode]);
 
   if (loading) {
     return (
@@ -106,6 +112,43 @@ export function CashFlowReport({ siteId }: { siteId: string }) {
 
   return (
     <div className="space-y-4">
+      {/* Date mode toggle */}
+      <div className="flex items-center gap-3">
+        <div className="flex items-center gap-1 rounded-lg border p-0.5">
+          <button
+            onClick={() => setDateMode("current")}
+            className={cn(
+              "rounded px-3 py-1 text-xs font-medium transition-colors",
+              dateMode === "current"
+                ? "bg-slate-900 text-white"
+                : "text-muted-foreground hover:bg-accent"
+            )}
+          >
+            Current
+          </button>
+          <button
+            onClick={() => setDateMode("original")}
+            className={cn(
+              "rounded px-3 py-1 text-xs font-medium transition-colors",
+              dateMode === "original"
+                ? "bg-slate-900 text-white"
+                : "text-muted-foreground hover:bg-accent"
+            )}
+          >
+            Original
+          </button>
+        </div>
+        {dateMode === "original" && (
+          <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+            <Info className="size-3" />
+            <span>
+              Estimated from job original dates — orders don&apos;t track
+              original dates directly
+            </span>
+          </div>
+        )}
+      </div>
+
       {/* Summary cards */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
         <Card>

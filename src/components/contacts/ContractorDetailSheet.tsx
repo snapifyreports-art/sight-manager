@@ -99,7 +99,6 @@ const SNAG_STATUS_CONFIG: Record<string, { label: string; color: string }> = {
 const ORDER_STATUS_CONFIG: Record<string, { label: string; color: string }> = {
   PENDING: { label: "Pending", color: "text-slate-500" },
   ORDERED: { label: "Ordered", color: "text-blue-500" },
-  CONFIRMED: { label: "Confirmed", color: "text-violet-500" },
   DELIVERED: { label: "Delivered", color: "text-green-600" },
   CANCELLED: { label: "Cancelled", color: "text-red-500" },
 };

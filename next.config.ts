@@ -5,7 +5,7 @@ const nextConfig: NextConfig = {
     // Disable client-side router cache to prevent stale data on navigation
     staleTimes: {
       dynamic: 0,
-      static: 0,
+      static: 30,
     },
   },
 };

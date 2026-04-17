@@ -108,7 +108,7 @@ export async function GET(
           { deliveredDate: { gte: weekStart, lte: weekEnd } },
           {
             expectedDeliveryDate: { gte: weekStart, lte: weekEnd },
-            status: { in: ["ORDERED", "CONFIRMED"] },
+            status: "ORDERED",
           },
         ],
       },
@@ -191,7 +191,7 @@ export async function GET(
     where: {
       job: { plot: { siteId: id } },
       expectedDeliveryDate: { gte: nextWeekStart, lte: nextWeekEnd },
-      status: { in: ["ORDERED", "CONFIRMED"] },
+      status: "ORDERED",
     },
     select: {
       itemsDescription: true,

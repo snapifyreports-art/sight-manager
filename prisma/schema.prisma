@@ -112,6 +112,7 @@ model User {
   updatedAt     DateTime  @updatedAt
 
   sites         Site[]
+  assignedSites Site[]       @relation("AssignedSites")
   assignedJobs  Job[]        @relation("AssignedJobs")
   signedOffJobs Job[]        @relation("SignedOffJobs")
   events        EventLog[]
@@ -120,6 +121,7 @@ model User {
   pushSubscriptions       PushSubscription[]
   notificationPreferences NotificationPreference[]
   permissions             UserPermission[]
+  siteAccess              UserSite[]
   snagsAssigned    Snag[]         @relation("SnagAssigned")
   snagsRaised      Snag[]         @relation("SnagRaised")
   snagsResolved    Snag[]         @relation("SnagResolved")
@@ -128,22 +130,25 @@ model User {
 }
 
 model Site {
-  id          String     @id @default(cuid())
-  name        String
-  description String?
-  location    String?
-  address     String?
-  postcode    String?
-  status      SiteStatus @default(ACTIVE)
-  createdById String
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
+  id           String     @id @default(cuid())
+  name         String
+  description  String?
+  location     String?
+  address      String?
+  postcode     String?
+  status       SiteStatus @default(ACTIVE)
+  createdById  String
+  assignedToId String?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
 
   createdBy     User           @relation(fields: [createdById], references: [id])
+  assignedTo    User?          @relation("AssignedSites", fields: [assignedToId], references: [id])
   plots         Plot[]
   events        EventLog[]
   rainedOffDays RainedOffDay[]
   documents     SiteDocument[]
+  userAccess    UserSite[]
 }
 
 model RainedOffDay {
@@ -175,8 +180,9 @@ model Plot {
   approvalW            Boolean   @default(false)
   approvalKCO          Boolean   @default(false)
   buildCompletePercent Float     @default(0)
-  awaitingRestart      Boolean   @default(false)
-  createdAt            DateTime  @default(now())
+  awaitingRestart                Boolean   @default(false)
+  awaitingContractorConfirmation Boolean   @default(false)
+  createdAt                      DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
 
   site              Site               @relation(fields: [siteId], references: [id], onDelete: Cascade)
@@ -459,6 +465,19 @@ model UserPermission {
   user       User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, permission])
+}
+
+// ---------- User Site Access (many-to-many) ----------
+
+model UserSite {
+  id     String @id @default(cuid())
+  userId String
+  siteId String
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  site   Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, siteId])
 }
 
 // ---------- Snagging / Defects ----------

@@ -62,7 +62,8 @@ export async function createJobsFromTemplate(
   plotId: string,
   plotStartDate: Date,
   templateJobs: TemplateJobWithChildren[],
-  supplierMappings: Record<string, string> | null
+  supplierMappings: Record<string, string> | null,
+  assignedToId?: string | null
 ) {
   for (const templateJob of templateJobs) {
     if (templateJob.children && templateJob.children.length > 0) {
@@ -89,6 +90,7 @@ export async function createJobsFromTemplate(
             weatherAffectedType: child.weatherAffectedType ?? null,
             parentStage: templateJob.name,
             sortOrder: templateJob.sortOrder * 100 + child.sortOrder,
+            ...(assignedToId ? { assignedToId } : {}),
           },
         });
 
@@ -157,6 +159,7 @@ export async function createJobsFromTemplate(
           weatherAffected: templateJob.weatherAffected ?? false,
           weatherAffectedType: templateJob.weatherAffectedType ?? null,
           sortOrder: templateJob.sortOrder,
+          ...(assignedToId ? { assignedToId } : {}),
         },
       });
 

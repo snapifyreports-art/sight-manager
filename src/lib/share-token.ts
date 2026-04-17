@@ -22,8 +22,8 @@ export function verifyContractorToken(token: string): { contactId: string; siteI
     if (sigBuf.length !== expBuf.length) return null;
     if (!timingSafeEqual(sigBuf, expBuf)) return null;
     const payload = JSON.parse(fromB64url(data));
-    if (typeof payload.contactId !== "string" || typeof payload.siteId !== "string" || typeof payload.exp !== "number") return null;
-    if (Date.now() > payload.exp) return null;
+    if (typeof payload.contactId !== "string" || typeof payload.siteId !== "string") return null;
+    // Contractor links are permanent — no expiry check
     return payload;
   } catch {
     return null;

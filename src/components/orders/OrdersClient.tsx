@@ -1,6 +1,8 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
+import { useRefreshOnFocus } from "@/hooks/useRefreshOnFocus";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { format, isBefore } from "date-fns";
@@ -76,6 +78,8 @@ interface Site {
   id: string;
   name: string;
   description: string | null;
+  address: string | null;
+  postcode: string | null;
   status: string;
   createdAt: string;
   updatedAt: string;
@@ -140,7 +144,7 @@ interface Order {
   orderItems: OrderItem[];
 }
 
-type OrderStatus = "PENDING" | "ORDERED" | "CONFIRMED" | "DELIVERED" | "CANCELLED";
+type OrderStatus = "PENDING" | "ORDERED" | "DELIVERED" | "CANCELLED";
 
 interface OrdersClientProps {
   initialOrders: Order[];
@@ -162,10 +166,6 @@ const STATUS_CONFIG: Record<
     label: "Ordered",
     className: "bg-blue-500/15 text-blue-700 dark:text-blue-400",
   },
-  CONFIRMED: {
-    label: "Confirmed",
-    className: "bg-purple-500/15 text-purple-700 dark:text-purple-400",
-  },
   DELIVERED: {
     label: "Delivered",
     className: "bg-green-500/15 text-green-700 dark:text-green-400",
@@ -179,7 +179,6 @@ const STATUS_CONFIG: Record<
 const ALL_STATUSES: OrderStatus[] = [
   "PENDING",
   "ORDERED",
-  "CONFIRMED",
   "DELIVERED",
   "CANCELLED",
 ];
@@ -194,13 +193,15 @@ function isOverdue(order: Order): boolean {
 
 // ---------- Status Badge ----------
 
-function StatusBadge({ status }: { status: string }) {
+function StatusBadge({ status, onClick }: { status: string; onClick?: () => void }) {
   const config = STATUS_CONFIG[status as OrderStatus];
   if (!config) return <Badge variant="outline">{status}</Badge>;
 
   return (
     <span
-      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${config.className}`}
+      role={onClick ? "button" : undefined}
+      onClick={onClick ? (e) => { e.stopPropagation(); onClick(); } : undefined}
+      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${config.className}${onClick ? " cursor-pointer hover:ring-2 hover:ring-offset-1 hover:ring-current/20 transition-shadow" : ""}`}
     >
       {config.label}
     </span>
@@ -442,94 +443,309 @@ function CreateOrderDialog({
   );
 }
 
-// ---------- Edit Dialog ----------
+// ---------- Inline Editor Types ----------
 
-function EditOrderDialog({
+interface EditableItem {
+  id: string | null; // null = new item
+  name: string;
+  quantity: string;
+  unit: string;
+  unitCost: string;
+  _deleted?: boolean;
+}
+
+function itemsFromOrder(order: Order): EditableItem[] {
+  return order.orderItems.map((item) => ({
+    id: item.id,
+    name: item.name,
+    quantity: item.quantity.toString(),
+    unit: item.unit,
+    unitCost: item.unitCost.toString(),
+  }));
+}
+
+function calcItemTotal(item: EditableItem): number {
+  const qty = parseFloat(item.quantity) || 0;
+  const cost = parseFloat(item.unitCost) || 0;
+  return qty * cost;
+}
+
+// ---------- Inline Order Editor ----------
+
+function InlineOrderEditor({
   order,
   suppliers,
-  jobs,
-  onUpdated,
-  initialOpen = false,
-  onClose,
+  onSaved,
+  onCancel,
 }: {
   order: Order;
   suppliers: Supplier[];
-  jobs: Job[];
-  onUpdated: (order: Order) => void;
-  initialOpen?: boolean;
-  onClose?: () => void;
+  onSaved: (updated: Order) => void;
+  onCancel: () => void;
 }) {
-  const [open, setOpen] = useState(initialOpen);
-  const [form, setForm] = useState<OrderFormData>({
-    supplierId: order.supplierId,
-    jobId: order.jobId,
-    contactId: order.contactId || "",
-    orderDetails: order.orderDetails || "",
-    orderType: order.orderType || "",
-    expectedDeliveryDate: order.expectedDeliveryDate
-      ? order.expectedDeliveryDate.split("T")[0]
-      : "",
-    leadTimeDays: order.leadTimeDays?.toString() || "",
-    itemsDescription: order.itemsDescription || "",
-  });
-  const [submitting, setSubmitting] = useState(false);
+  const [supplierId, setSupplierId] = useState(order.supplierId);
+  const [expectedDeliveryDate, setExpectedDeliveryDate] = useState(
+    order.expectedDeliveryDate ? order.expectedDeliveryDate.split("T")[0] : ""
+  );
+  const [items, setItems] = useState<EditableItem[]>(itemsFromOrder(order));
+  const [saving, setSaving] = useState(false);
 
-  async function handleUpdate() {
-    if (!form.supplierId || !form.jobId) return;
-    setSubmitting(true);
+  const visibleItems = items.filter((i) => !i._deleted);
 
+  const grandTotal = visibleItems.reduce(
+    (sum, item) => sum + calcItemTotal(item),
+    0
+  );
+
+  function updateItem(index: number, field: keyof EditableItem, value: string) {
+    setItems((prev) => {
+      const next = [...prev];
+      const visIdx = visibleIndexToRealIndex(index);
+      next[visIdx] = { ...next[visIdx], [field]: value };
+      return next;
+    });
+  }
+
+  function visibleIndexToRealIndex(visIndex: number): number {
+    let count = -1;
+    for (let i = 0; i < items.length; i++) {
+      if (!items[i]._deleted) count++;
+      if (count === visIndex) return i;
+    }
+    return -1;
+  }
+
+  function removeItem(visIndex: number) {
+    setItems((prev) => {
+      const next = [...prev];
+      const realIdx = visibleIndexToRealIndex(visIndex);
+      if (next[realIdx].id) {
+        // Existing item: mark deleted
+        next[realIdx] = { ...next[realIdx], _deleted: true };
+      } else {
+        // New item: just remove
+        next.splice(realIdx, 1);
+      }
+      return next;
+    });
+  }
+
+  function addItem() {
+    setItems((prev) => [
+      ...prev,
+      { id: null, name: "", quantity: "1", unit: "units", unitCost: "0" },
+    ]);
+  }
+
+  async function handleSave() {
+    setSaving(true);
     try {
-      const res = await fetch(`/api/orders/${order.id}`, {
+      // 1. Update order-level fields
+      const orderRes = await fetch(`/api/orders/${order.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
+        body: JSON.stringify({
+          supplierId,
+          expectedDeliveryDate: expectedDeliveryDate || null,
+        }),
       });
+      if (!orderRes.ok) return;
 
-      if (res.ok) {
-        const updated = await res.json();
-        onUpdated(updated);
-        setOpen(false);
+      // 2. Process item changes
+      for (const item of items) {
+        if (item._deleted && item.id) {
+          // Delete existing item
+          await fetch(`/api/orders/${order.id}/items/${item.id}`, {
+            method: "DELETE",
+          });
+        } else if (!item._deleted && item.id) {
+          // Update existing item
+          await fetch(`/api/orders/${order.id}/items/${item.id}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              name: item.name,
+              quantity: item.quantity,
+              unit: item.unit,
+              unitCost: item.unitCost,
+            }),
+          });
+        } else if (!item._deleted && !item.id && item.name.trim()) {
+          // Create new item
+          await fetch(`/api/orders/${order.id}/items`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              name: item.name,
+              quantity: item.quantity,
+              unit: item.unit,
+              unitCost: item.unitCost,
+            }),
+          });
+        }
+      }
+
+      // 3. Refetch the full order
+      const freshRes = await fetch(`/api/orders/${order.id}`);
+      if (freshRes.ok) {
+        const freshOrder = await freshRes.json();
+        onSaved(freshOrder);
       }
     } finally {
-      setSubmitting(false);
+      setSaving(false);
     }
   }
 
   return (
-    <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v && onClose) onClose(); }}>
-      {!initialOpen && (
-        <DialogTrigger
-          render={
-            <button className="flex w-full cursor-default items-center gap-1.5 rounded-md px-1.5 py-1 text-sm outline-hidden select-none hover:bg-accent hover:text-accent-foreground">
-              <Pencil className="size-4" />
-              Edit
-            </button>
-          }
-        />
-      )}
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>Edit Order</DialogTitle>
-        </DialogHeader>
-        <OrderFormFields
-          form={form}
-          setForm={setForm}
-          suppliers={suppliers}
-          jobs={jobs}
-        />
-        <DialogFooter>
-          <DialogClose render={<Button variant="outline" />}>
-            Cancel
-          </DialogClose>
-          <Button
-            onClick={handleUpdate}
-            disabled={submitting || !form.supplierId || !form.jobId}
-          >
-            {submitting ? "Saving..." : "Save Changes"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <tr>
+      <td colSpan={8} className="p-0">
+        <div className="border-y border-blue-200 bg-blue-50/50 dark:border-blue-900 dark:bg-blue-950/20 p-4 space-y-4">
+          {/* Order-level fields */}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="grid gap-1.5">
+              <Label className="text-xs font-medium">Supplier</Label>
+              <Select
+                value={supplierId}
+                onValueChange={(val) => {
+                  if (val !== null) setSupplierId(val as string);
+                }}
+              >
+                <SelectTrigger className="h-9 bg-white dark:bg-background">
+                  <span className="flex flex-1 truncate text-left" data-slot="select-value">
+                    {suppliers.find((s) => s.id === supplierId)?.name ?? "Select supplier"}
+                  </span>
+                </SelectTrigger>
+                <SelectContent>
+                  {suppliers.map((s) => (
+                    <SelectItem key={s.id} value={s.id}>
+                      {s.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-1.5">
+              <Label className="text-xs font-medium">Expected Delivery</Label>
+              <Input
+                type="date"
+                value={expectedDeliveryDate}
+                onChange={(e) => setExpectedDeliveryDate(e.target.value)}
+                className="h-9 bg-white dark:bg-background"
+              />
+            </div>
+          </div>
+
+          {/* Items table */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <Label className="text-xs font-medium">
+                Items ({visibleItems.length})
+                {grandTotal > 0 && (
+                  <span className="ml-1 font-normal text-muted-foreground">
+                    &middot; Total: &pound;{grandTotal.toFixed(2)}
+                  </span>
+                )}
+              </Label>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 gap-1 px-2 text-xs"
+                onClick={addItem}
+              >
+                <Plus className="size-3" /> Add Item
+              </Button>
+            </div>
+
+            {visibleItems.length > 0 && (
+              <div className="rounded-md border bg-white dark:bg-background">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="text-xs">Name</TableHead>
+                      <TableHead className="text-xs w-20">Qty</TableHead>
+                      <TableHead className="text-xs w-24">Unit</TableHead>
+                      <TableHead className="text-xs w-28">Unit Cost</TableHead>
+                      <TableHead className="text-xs w-24 text-right">Total</TableHead>
+                      <TableHead className="w-10" />
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {visibleItems.map((item, idx) => (
+                      <TableRow key={item.id ?? `new-${idx}`}>
+                        <TableCell className="p-1.5">
+                          <Input
+                            value={item.name}
+                            onChange={(e) => updateItem(idx, "name", e.target.value)}
+                            placeholder="Item name"
+                            className="h-8 text-sm"
+                          />
+                        </TableCell>
+                        <TableCell className="p-1.5">
+                          <Input
+                            type="number"
+                            value={item.quantity}
+                            onChange={(e) => updateItem(idx, "quantity", e.target.value)}
+                            className="h-8 text-sm"
+                            min="0"
+                          />
+                        </TableCell>
+                        <TableCell className="p-1.5">
+                          <Input
+                            value={item.unit}
+                            onChange={(e) => updateItem(idx, "unit", e.target.value)}
+                            placeholder="units"
+                            className="h-8 text-sm"
+                          />
+                        </TableCell>
+                        <TableCell className="p-1.5">
+                          <Input
+                            type="number"
+                            value={item.unitCost}
+                            onChange={(e) => updateItem(idx, "unitCost", e.target.value)}
+                            step="0.01"
+                            min="0"
+                            className="h-8 text-sm"
+                          />
+                        </TableCell>
+                        <TableCell className="p-1.5 text-right text-sm font-medium">
+                          &pound;{calcItemTotal(item).toFixed(2)}
+                        </TableCell>
+                        <TableCell className="p-1.5">
+                          <Button
+                            variant="ghost"
+                            size="icon-xs"
+                            onClick={() => removeItem(idx)}
+                            className="text-muted-foreground hover:text-red-500"
+                          >
+                            <Trash2 className="size-3.5" />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+
+            {visibleItems.length === 0 && (
+              <p className="text-xs text-muted-foreground py-2">
+                No items. Click &quot;Add Item&quot; to add one.
+              </p>
+            )}
+          </div>
+
+          {/* Save / Cancel */}
+          <div className="flex items-center justify-end gap-2 border-t border-blue-200 dark:border-blue-900 pt-3">
+            <Button variant="outline" size="sm" onClick={onCancel} disabled={saving}>
+              Cancel
+            </Button>
+            <Button size="sm" onClick={handleSave} disabled={saving}>
+              {saving ? "Saving..." : "Save Changes"}
+            </Button>
+          </div>
+        </div>
+      </td>
+    </tr>
   );
 }
 
@@ -540,12 +756,39 @@ export function OrdersClient({
   suppliers,
   jobs,
 }: OrdersClientProps) {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const [orders, setOrders] = useState<Order[]>(initialOrders);
-  const [statusFilter, setStatusFilter] = useState<string>("ALL");
+
+  // Auto-refresh when user navigates back or tab regains focus
+  const refreshOrders = useCallback(() => { router.refresh(); }, [router]);
+  useRefreshOnFocus(refreshOrders);
+
+  // Sync orders when server re-renders
+  useEffect(() => { setOrders(initialOrders); }, [initialOrders]);
+
+  const initialStatus = searchParams.get("status") ?? "ALL";
+  const [statusFilter, setStatusFilter] = useState<string>(
+    initialStatus === "OVERDUE" || ALL_STATUSES.includes(initialStatus as OrderStatus) ? initialStatus : "ALL"
+  );
   const [supplierFilter, setSupplierFilter] = useState<string>("ALL");
+  const [plotFilter, setPlotFilter] = useState<string>("ALL");
+  const [dateFrom, setDateFrom] = useState<string>("");
+  const [dateTo, setDateTo] = useState<string>("");
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
-  const [editingOrder, setEditingOrder] = useState<Order | null>(null);
+  const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
+
+  // Update URL when status filter changes
+  useEffect(() => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (statusFilter === "ALL") {
+      params.delete("status");
+    } else {
+      params.set("status", statusFilter);
+    }
+    const newUrl = params.toString() ? `?${params.toString()}` : window.location.pathname;
+    window.history.replaceState(null, "", newUrl);
+  }, [statusFilter, searchParams]);
 
   // Auto-open order from URL param ?orderId=XXX
   useEffect(() => {
@@ -560,12 +803,34 @@ export function OrdersClient({
 
   const filteredOrders = useMemo(() => {
     return orders.filter((order) => {
-      if (statusFilter !== "ALL" && order.status !== statusFilter) return false;
+      if (statusFilter === "OVERDUE") {
+        if (!isOverdue(order)) return false;
+      } else if (statusFilter !== "ALL" && order.status !== statusFilter) {
+        return false;
+      }
       if (supplierFilter !== "ALL" && order.supplierId !== supplierFilter) return false;
+      if (plotFilter !== "ALL" && order.job.plotId !== plotFilter) return false;
       if (siteFilter && order.job.plot.siteId !== siteFilter) return false;
+      if (dateFrom && order.expectedDeliveryDate && order.expectedDeliveryDate.split("T")[0] < dateFrom) return false;
+      if (dateFrom && !order.expectedDeliveryDate) return false;
+      if (dateTo && order.expectedDeliveryDate && order.expectedDeliveryDate.split("T")[0] > dateTo) return false;
+      if (dateTo && !order.expectedDeliveryDate) return false;
       return true;
     });
-  }, [orders, statusFilter, supplierFilter, siteFilter]);
+  }, [orders, statusFilter, supplierFilter, plotFilter, siteFilter, dateFrom, dateTo]);
+
+  // Build plot options dynamically from order data
+  const plotOptions = useMemo(() => {
+    const plotMap = new Map<string, string>();
+    orders.forEach((o) => {
+      if (!plotMap.has(o.job.plotId)) {
+        plotMap.set(o.job.plotId, `${o.job.plot.site.name} > ${o.job.plot.name}`);
+      }
+    });
+    return Array.from(plotMap.entries())
+      .sort((a, b) => a[1].localeCompare(b[1]))
+      .map(([id, label]) => ({ id, label }));
+  }, [orders]);
 
   // Stats
   const stats = useMemo(() => {
@@ -633,7 +898,10 @@ export function OrdersClient({
 
       {/* Stats Cards */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Card>
+        <Card
+          className={`cursor-pointer transition-shadow hover:ring-2 hover:ring-yellow-400/50${statusFilter === "PENDING" ? " ring-2 ring-yellow-500" : ""}`}
+          onClick={() => setStatusFilter(statusFilter === "PENDING" ? "ALL" : "PENDING")}
+        >
           <CardContent className="flex items-center gap-3 pt-4">
             <div className="rounded-lg bg-yellow-500/10 p-2">
               <ShoppingCart className="size-4 text-yellow-600 dark:text-yellow-400" />
@@ -644,7 +912,10 @@ export function OrdersClient({
             </div>
           </CardContent>
         </Card>
-        <Card>
+        <Card
+          className={`cursor-pointer transition-shadow hover:ring-2 hover:ring-blue-400/50${statusFilter === "ORDERED" ? " ring-2 ring-blue-500" : ""}`}
+          onClick={() => setStatusFilter(statusFilter === "ORDERED" ? "ALL" : "ORDERED")}
+        >
           <CardContent className="flex items-center gap-3 pt-4">
             <div className="rounded-lg bg-blue-500/10 p-2">
               <Package className="size-4 text-blue-600 dark:text-blue-400" />
@@ -655,7 +926,10 @@ export function OrdersClient({
             </div>
           </CardContent>
         </Card>
-        <Card>
+        <Card
+          className={`cursor-pointer transition-shadow hover:ring-2 hover:ring-green-400/50${statusFilter === "DELIVERED" ? " ring-2 ring-green-500" : ""}`}
+          onClick={() => setStatusFilter(statusFilter === "DELIVERED" ? "ALL" : "DELIVERED")}
+        >
           <CardContent className="flex items-center gap-3 pt-4">
             <div className="rounded-lg bg-green-500/10 p-2">
               <Truck className="size-4 text-green-600 dark:text-green-400" />
@@ -666,7 +940,10 @@ export function OrdersClient({
             </div>
           </CardContent>
         </Card>
-        <Card>
+        <Card
+          className={`cursor-pointer transition-shadow hover:ring-2 hover:ring-red-400/50${statusFilter === "OVERDUE" ? " ring-2 ring-red-500" : ""}`}
+          onClick={() => setStatusFilter(statusFilter === "OVERDUE" ? "ALL" : "OVERDUE")}
+        >
           <CardContent className="flex items-center gap-3 pt-4">
             <div className="rounded-lg bg-red-500/10 p-2">
               <AlertTriangle className="size-4 text-red-600 dark:text-red-400" />
@@ -679,49 +956,91 @@ export function OrdersClient({
         </Card>
       </div>
 
-      {/* Filters */}
-      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3">
-        <Select
-          value={statusFilter}
-          onValueChange={(val) => { if (val !== null) setStatusFilter(val as string); }}
-        >
-          <SelectTrigger className="w-full sm:w-auto">
-            <SelectValue placeholder="Filter by status" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="ALL">All Statuses</SelectItem>
-            {ALL_STATUSES.map((s) => (
-              <SelectItem key={s} value={s}>
-                {STATUS_CONFIG[s].label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+      {/* Status Filter Pills */}
+      <div className="flex flex-wrap items-center gap-2">
+        {[
+          { key: "ALL", label: "All", count: orders.length },
+          { key: "PENDING", label: "Pending", count: stats.pending },
+          { key: "ORDERED", label: "Ordered", count: stats.ordered },
+          { key: "DELIVERED", label: "Delivered", count: stats.delivered },
+          { key: "OVERDUE", label: "Overdue", count: stats.overdue },
+          { key: "CANCELLED", label: "Cancelled", count: orders.filter((o) => o.status === "CANCELLED").length },
+        ].map((pill) => (
+          <button
+            key={pill.key}
+            onClick={() => setStatusFilter(pill.key)}
+            className={`rounded-full px-3 py-1 text-sm font-medium transition-colors ${
+              statusFilter === pill.key
+                ? "bg-primary text-primary-foreground"
+                : "bg-muted text-muted-foreground hover:bg-muted/80"
+            }`}
+          >
+            {pill.label} ({pill.count})
+          </button>
+        ))}
+      </div>
 
-        <Select
-          value={supplierFilter}
-          onValueChange={(val) => { if (val !== null) setSupplierFilter(val as string); }}
-        >
-          <SelectTrigger className="w-full sm:w-auto">
-            <SelectValue placeholder="Filter by supplier" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="ALL">All Suppliers</SelectItem>
+      {/* Additional Filters */}
+      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-end sm:gap-3">
+        <div className="grid gap-1">
+          <label className="text-xs font-medium text-muted-foreground">Plot</label>
+          <select
+            value={plotFilter}
+            onChange={(e) => setPlotFilter(e.target.value)}
+            className="h-9 rounded-md border border-input bg-background px-3 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring"
+          >
+            <option value="ALL">All Plots</option>
+            {plotOptions.map((p) => (
+              <option key={p.id} value={p.id}>{p.label}</option>
+            ))}
+          </select>
+        </div>
+
+        <div className="grid gap-1">
+          <label className="text-xs font-medium text-muted-foreground">Supplier</label>
+          <select
+            value={supplierFilter}
+            onChange={(e) => setSupplierFilter(e.target.value)}
+            className="h-9 rounded-md border border-input bg-background px-3 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring"
+          >
+            <option value="ALL">All Suppliers</option>
             {suppliers.map((s) => (
-              <SelectItem key={s.id} value={s.id}>
-                {s.name}
-              </SelectItem>
+              <option key={s.id} value={s.id}>{s.name}</option>
             ))}
-          </SelectContent>
-        </Select>
+          </select>
+        </div>
 
-        {(statusFilter !== "ALL" || supplierFilter !== "ALL") && (
+        <div className="grid gap-1">
+          <label className="text-xs font-medium text-muted-foreground">Delivery From</label>
+          <Input
+            type="date"
+            value={dateFrom}
+            onChange={(e) => setDateFrom(e.target.value)}
+            className="h-9 w-auto"
+          />
+        </div>
+
+        <div className="grid gap-1">
+          <label className="text-xs font-medium text-muted-foreground">Delivery To</label>
+          <Input
+            type="date"
+            value={dateTo}
+            onChange={(e) => setDateTo(e.target.value)}
+            className="h-9 w-auto"
+          />
+        </div>
+
+        {(statusFilter !== "ALL" || supplierFilter !== "ALL" || plotFilter !== "ALL" || dateFrom || dateTo) && (
           <Button
             variant="ghost"
             size="sm"
+            className="h-9"
             onClick={() => {
               setStatusFilter("ALL");
               setSupplierFilter("ALL");
+              setPlotFilter("ALL");
+              setDateFrom("");
+              setDateTo("");
             }}
           >
             Clear filters
@@ -765,6 +1084,23 @@ export function OrdersClient({
               <TableBody>
                 {filteredOrders.map((order) => {
                   const overdue = isOverdue(order);
+
+                  // Inline editor row
+                  if (editingOrderId === order.id) {
+                    return (
+                      <InlineOrderEditor
+                        key={`edit-${order.id}`}
+                        order={order}
+                        suppliers={suppliers}
+                        onSaved={(updated) => {
+                          handleUpdated(updated);
+                          setEditingOrderId(null);
+                        }}
+                        onCancel={() => setEditingOrderId(null)}
+                      />
+                    );
+                  }
+
                   return (
                     <TableRow key={order.id} className="cursor-pointer hover:bg-muted/50" onClick={() => setSelectedOrder(order)}>
                       <TableCell>
@@ -805,9 +1141,9 @@ export function OrdersClient({
                           </p>
                         </div>
                       </TableCell>
-                      <TableCell>
+                      <TableCell onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center gap-1.5">
-                          <StatusBadge status={order.status} />
+                          <StatusBadge status={order.status} onClick={() => setStatusFilter(order.status)} />
                           {overdue && (
                             <AlertTriangle className="size-3.5 text-red-500" />
                           )}
@@ -872,18 +1208,6 @@ export function OrdersClient({
                                   Mark as Ordered
                                 </DropdownMenuItem>
                               )}
-                            {order.status !== "CONFIRMED" &&
-                              order.status !== "DELIVERED" &&
-                              order.status !== "CANCELLED" && (
-                                <DropdownMenuItem
-                                  onClick={() =>
-                                    handleStatusChange(order.id, "CONFIRMED")
-                                  }
-                                >
-                                  <ClipboardCheck className="size-4" />
-                                  Mark as Confirmed
-                                </DropdownMenuItem>
-                              )}
                             {order.status !== "DELIVERED" &&
                               order.status !== "CANCELLED" && (
                                 <DropdownMenuItem
@@ -906,12 +1230,12 @@ export function OrdersClient({
                               </DropdownMenuItem>
                             )}
                             <DropdownMenuSeparator />
-                            <EditOrderDialog
-                              order={order}
-                              suppliers={suppliers}
-                              jobs={jobs}
-                              onUpdated={handleUpdated}
-                            />
+                            <DropdownMenuItem
+                              onClick={() => setEditingOrderId(order.id)}
+                            >
+                              <Pencil className="size-4" />
+                              Edit
+                            </DropdownMenuItem>
                             <DropdownMenuItem
                               variant="destructive"
                               onClick={() => handleDelete(order.id)}
@@ -942,26 +1266,11 @@ export function OrdersClient({
           setSelectedOrder(null);
         }}
         onEditClick={(order) => {
-          setEditingOrder(order);
+          setEditingOrderId(order.id);
           setSelectedOrder(null);
         }}
       />
 
-      {/* Standalone Edit Dialog (triggered from sheet) */}
-      {editingOrder && (
-        <EditOrderDialog
-          key={editingOrder.id}
-          order={editingOrder}
-          suppliers={suppliers}
-          jobs={jobs}
-          initialOpen
-          onUpdated={(updated) => {
-            handleUpdated(updated);
-            setEditingOrder(null);
-          }}
-          onClose={() => setEditingOrder(null)}
-        />
-      )}
     </div>
   );
 }

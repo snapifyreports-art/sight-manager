@@ -40,7 +40,7 @@ export async function GET(req: NextRequest) {
     }),
     prisma.materialOrder.count({
       where: {
-        status: { in: ["ORDERED", "CONFIRMED"] },
+        status: "ORDERED",
         expectedDeliveryDate: { lt: now },
       },
     }),
@@ -52,7 +52,7 @@ export async function GET(req: NextRequest) {
     }),
     prisma.materialOrder.count({
       where: {
-        status: { in: ["ORDERED", "CONFIRMED"] },
+        status: "ORDERED",
         expectedDeliveryDate: { gte: todayStart, lt: todayEnd },
       },
     }),
@@ -62,7 +62,9 @@ export async function GET(req: NextRequest) {
         endDate: { gte: now, lte: in3Days },
       },
     }),
-    prisma.materialOrder.count({ where: { status: "PENDING" } }),
+    prisma.materialOrder.count({
+      where: { status: "PENDING", dateOfOrder: { lte: todayEnd } },
+    }),
     // Late starts: NOT_STARTED jobs whose start date has already passed
     prisma.job.count({
       where: { status: "NOT_STARTED", startDate: { lt: todayStart } },
@@ -145,6 +147,41 @@ export async function GET(req: NextRequest) {
         body: `${lateStartCount} job${lateStartCount !== 1 ? "s have" : " has"} not started — start date passed`,
         url: "/tasks?tab=jobs",
         tag: "late-starts",
+      })
+    );
+  }
+
+  // Daily Brief notification — one per active site
+  const activeSites = await prisma.site.findMany({
+    where: { status: "ACTIVE" },
+    select: { id: true, name: true },
+  });
+  for (const site of activeSites) {
+    notifications.push(
+      sendPushToAll("JOBS_STARTING_TODAY", {
+        title: `Daily Brief — ${site.name}`,
+        body: `Your daily brief for ${site.name} is ready`,
+        url: `/daily-brief?site=${site.id}`,
+        tag: `daily-brief-${site.id}`,
+      })
+    );
+  }
+
+  // Snag re-inspection reminders — snags resolved 7+ days ago that aren't CLOSED
+  const sevenDaysAgo = addDays(now, -7);
+  const reinspectionSnags = await prisma.snag.count({
+    where: {
+      status: "RESOLVED",
+      resolvedAt: { lte: sevenDaysAgo },
+    },
+  });
+  if (reinspectionSnags > 0) {
+    notifications.push(
+      sendPushToAll("JOBS_READY_FOR_SIGNOFF", {
+        title: "Snag Re-Inspections Due",
+        body: `${reinspectionSnags} resolved snag${reinspectionSnags !== 1 ? "s" : ""} need re-inspection (7+ days since resolution)`,
+        url: "/tasks",
+        tag: "snag-reinspection",
       })
     );
   }

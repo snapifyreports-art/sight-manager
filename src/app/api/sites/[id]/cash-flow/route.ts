@@ -5,6 +5,29 @@ import { format } from "date-fns";
 
 export const dynamic = "force-dynamic";
 
+/**
+ * Remap an order date to the original job timeline.
+ * If the job was delayed, order dates shifted with it. This maps them back
+ * proportionally: how far through the current job window was this date?
+ * Place it the same fraction through the original window.
+ */
+function remapToOriginal(
+  orderDate: Date,
+  jobStart: Date,
+  jobEnd: Date,
+  origStart: Date,
+  origEnd: Date
+): Date {
+  const jobSpan = jobEnd.getTime() - jobStart.getTime();
+  const origSpan = origEnd.getTime() - origStart.getTime();
+  if (jobSpan <= 0 || origSpan <= 0) return orderDate;
+
+  const fraction = (orderDate.getTime() - jobStart.getTime()) / jobSpan;
+  // Clamp fraction to [0,1] — orders can precede or follow the job window
+  const clamped = Math.max(0, Math.min(1, fraction));
+  return new Date(origStart.getTime() + clamped * origSpan);
+}
+
 // GET /api/sites/[id]/cash-flow — cash flow data for a site
 export async function GET(
   _req: NextRequest,
@@ -16,8 +39,9 @@ export async function GET(
   }
 
   const { id } = await params;
+  const dateMode = _req.nextUrl.searchParams.get("dateMode") || "current";
 
-  // Single query: all orders for this site with items
+  // Single query: all orders for this site with items + job dates for original mode
   const orders = await prisma.materialOrder.findMany({
     where: {
       job: { plot: { siteId: id } },
@@ -31,6 +55,14 @@ export async function GET(
       deliveredDate: true,
       orderItems: {
         select: { quantity: true, unitCost: true },
+      },
+      job: {
+        select: {
+          startDate: true,
+          endDate: true,
+          originalStartDate: true,
+          originalEndDate: true,
+        },
       },
     },
   });
@@ -47,12 +79,34 @@ export async function GET(
     { committed: number; forecast: number; actual: number }
   >();
 
+  // Helper: remap a date to original timeline if in original mode and job has original dates
+  function resolveDate(date: Date, job: typeof orderValues[number]["job"]): Date {
+    if (
+      dateMode !== "original" ||
+      !job.startDate ||
+      !job.endDate ||
+      !job.originalStartDate ||
+      !job.originalEndDate
+    ) {
+      return date;
+    }
+    return remapToOriginal(
+      date,
+      new Date(job.startDate),
+      new Date(job.endDate),
+      new Date(job.originalStartDate),
+      new Date(job.originalEndDate)
+    );
+  }
+
   for (const o of orderValues) {
     if (o.total === 0) continue;
 
-    // Committed spend: orders that are ORDERED or CONFIRMED (not yet delivered)
-    if (["ORDERED", "CONFIRMED"].includes(o.status)) {
-      const month = format(new Date(o.dateOfOrder), "yyyy-MM");
+    // Committed spend: orders that are ORDERED (not yet delivered)
+    if (o.status === "ORDERED") {
+      const rawDate = new Date(o.dateOfOrder);
+      const date = resolveDate(rawDate, o.job);
+      const month = format(date, "yyyy-MM");
       const entry = monthMap.get(month) || { committed: 0, forecast: 0, actual: 0 };
       entry.committed += o.total;
       monthMap.set(month, entry);
@@ -60,8 +114,9 @@ export async function GET(
 
     // Forecast: PENDING orders by expected delivery date (fallback to dateOfOrder)
     if (o.status === "PENDING") {
-      const forecastDate = o.expectedDeliveryDate || o.dateOfOrder;
-      const month = format(new Date(forecastDate), "yyyy-MM");
+      const rawDate = new Date(o.expectedDeliveryDate || o.dateOfOrder);
+      const date = resolveDate(rawDate, o.job);
+      const month = format(date, "yyyy-MM");
       const entry = monthMap.get(month) || { committed: 0, forecast: 0, actual: 0 };
       entry.forecast += o.total;
       monthMap.set(month, entry);
@@ -69,8 +124,12 @@ export async function GET(
 
     // Actual delivered: by delivered date (fall back to expected/order date)
     if (o.status === "DELIVERED") {
-      const actualDate = o.deliveredDate || o.expectedDeliveryDate || o.dateOfOrder;
-      const month = format(new Date(actualDate), "yyyy-MM");
+      const rawDate = new Date(o.deliveredDate || o.expectedDeliveryDate || o.dateOfOrder);
+      // Delivered orders keep actual dates even in original mode
+      const date = dateMode === "original"
+        ? resolveDate(rawDate, o.job)
+        : rawDate;
+      const month = format(date, "yyyy-MM");
       const entry = monthMap.get(month) || { committed: 0, forecast: 0, actual: 0 };
       entry.actual += o.total;
       monthMap.set(month, entry);
@@ -101,7 +160,7 @@ export async function GET(
   });
 
   const totalCommitted = orderValues
-    .filter((o) => ["ORDERED", "CONFIRMED"].includes(o.status))
+    .filter((o) => o.status === "ORDERED")
     .reduce((s, o) => s + o.total, 0);
   const totalForecast = orderValues
     .filter((o) => o.status === "PENDING")

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { calculateCascade } from "@/lib/cascade";
+import { addWorkingDays, snapToWorkingDay } from "@/lib/working-days";
 
 export const dynamic = "force-dynamic";
 
@@ -37,13 +38,17 @@ export async function POST(
   }
 
   const allPlotJobs = await prisma.job.findMany({
-    where: { plotId: job.plotId },
+    where: {
+      plotId: job.plotId,
+      status: { not: "ON_HOLD" },
+    },
     orderBy: { sortOrder: "asc" },
   });
 
   const allOrders = await prisma.materialOrder.findMany({
     where: {
       jobId: { in: allPlotJobs.map((j) => j.id) },
+      status: { not: "CANCELLED" },
     },
   });
 
@@ -102,13 +107,17 @@ export async function PUT(
   }
 
   const allPlotJobs = await prisma.job.findMany({
-    where: { plotId: job.plotId },
+    where: {
+      plotId: job.plotId,
+      status: { not: "ON_HOLD" },
+    },
     orderBy: { sortOrder: "asc" },
   });
 
   const allOrders = await prisma.materialOrder.findMany({
     where: {
       jobId: { in: allPlotJobs.map((j) => j.id) },
+      status: { not: "CANCELLED" },
     },
   });
 
@@ -130,24 +139,41 @@ export async function PUT(
     }))
   );
 
-  // Apply in transaction
-  await prisma.$transaction(async (tx) => {
-    // Update the changed job's end date — preserve originalEndDate on first change
-    await tx.job.update({
+  // Apply updates directly (no transaction — all updates are on the same plot, safe without wrapping)
+  {
+    // Update the changed job — shift both start and end dates, preserve originals
+    // Snap endDate to working day to prevent weekend misalignment in downstream cascade
+    const rawEndDate = new Date(newEndDate);
+    const snappedEndDate = snapToWorkingDay(rawEndDate, "forward");
+    const triggerUpdate: Record<string, unknown> = {
+      endDate: snappedEndDate,
+    };
+    if (job.startDate && result.deltaDays !== 0) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      let newStart = addWorkingDays(job.startDate, result.deltaDays);
+      if (newStart < today) newStart = snapToWorkingDay(today, "forward");
+      else newStart = snapToWorkingDay(newStart, "forward");
+      triggerUpdate.startDate = newStart;
+    }
+    if (!job.originalEndDate && job.endDate) {
+      triggerUpdate.originalEndDate = job.endDate;
+    }
+    if (!job.originalStartDate && job.startDate) {
+      triggerUpdate.originalStartDate = job.startDate;
+    }
+    await prisma.job.update({
       where: { id },
-      data: {
-        endDate: new Date(newEndDate),
-        ...(!job.originalEndDate && job.endDate ? { originalEndDate: job.endDate } : {}),
-      },
+      data: triggerUpdate,
     });
 
     // Build a map of current job dates for preserving originals
     const jobMap = new Map(allPlotJobs.map((j) => [j.id, j]));
 
-    // Update subsequent jobs — preserve original dates on first change
-    for (const update of result.jobUpdates) {
+    // Batch update subsequent jobs using Promise.all for speed
+    await Promise.all(result.jobUpdates.map((update) => {
       const currentJob = jobMap.get(update.jobId);
-      await tx.job.update({
+      return prisma.job.update({
         where: { id: update.jobId },
         data: {
           startDate: update.newStart,
@@ -156,21 +182,21 @@ export async function PUT(
           ...(!currentJob?.originalEndDate && currentJob?.endDate ? { originalEndDate: currentJob.endDate } : {}),
         },
       });
-    }
+    }));
 
-    // Update orders
-    for (const update of result.orderUpdates) {
-      await tx.materialOrder.update({
+    // Batch update orders using Promise.all for speed
+    await Promise.all(result.orderUpdates.map((update) =>
+      prisma.materialOrder.update({
         where: { id: update.orderId },
         data: {
           dateOfOrder: update.newOrderDate,
           expectedDeliveryDate: update.newDeliveryDate,
         },
-      });
-    }
+      })
+    ));
 
     // Log event
-    await tx.eventLog.create({
+    await prisma.eventLog.create({
       data: {
         type: "SCHEDULE_CASCADED",
         description: `Schedule cascaded from "${job.name}" — ${result.deltaDays > 0 ? "+" : ""}${result.deltaDays} days, ${result.jobUpdates.length} jobs shifted`,
@@ -180,7 +206,7 @@ export async function PUT(
         userId: session.user.id,
       },
     });
-  });
+  }
 
   return NextResponse.json({
     applied: true,

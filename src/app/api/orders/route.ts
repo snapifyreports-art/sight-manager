@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/lib/auth";
+import { getUserSiteIds } from "@/lib/site-access";
 
 export const dynamic = "force-dynamic";
 
@@ -14,9 +15,16 @@ export async function GET(req: NextRequest) {
   const jobId = searchParams.get("jobId");
   const status = searchParams.get("status");
 
-  const where: Record<string, unknown> = {};
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const where: Record<string, any> = {};
   if (jobId) where.jobId = jobId;
   if (status) where.status = status;
+
+  // Filter by user's site access
+  const siteIds = await getUserSiteIds(session.user.id, session.user.role);
+  if (siteIds !== null) {
+    where.job = { plot: { siteId: { in: siteIds } } };
+  }
 
   const orders = await prisma.materialOrder.findMany({
     where,
@@ -112,7 +120,7 @@ export async function POST(req: NextRequest) {
   await prisma.eventLog.create({
     data: {
       type: "ORDER_PLACED",
-      description: `Order created for ${order.supplier.name} — ${order.job.name}`,
+      description: `[${order.supplier.name}] Order created for ${order.job.name}`,
       siteId: order.job.plot.siteId,
       plotId: order.job.plotId,
       jobId: order.jobId,

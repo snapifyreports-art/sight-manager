@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useRefreshOnFocus } from "@/hooks/useRefreshOnFocus";
 import { format, parseISO } from "date-fns";
 import {
   Loader2,
@@ -20,7 +21,10 @@ import {
   X,
   Building2,
   Send,
+  Package,
+  Camera,
 } from "lucide-react";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -33,6 +37,7 @@ interface Job {
   startDate: string | null;
   endDate: string | null;
   plot: { id: string; plotNumber: string | null; name: string };
+  signOffRequested?: boolean;
 }
 
 interface Snag {
@@ -42,6 +47,17 @@ interface Snag {
   priority: string;
   location: string | null;
   plot: { id: string; plotNumber: string | null; name: string };
+}
+
+interface ContractorOrder {
+  id: string;
+  status: string;
+  itemsDescription: string | null;
+  dateOfOrder: string;
+  expectedDeliveryDate: string | null;
+  deliveredDate: string | null;
+  supplier: { id: string; name: string };
+  items: Array<{ name: string; quantity: number; unit: string }>;
 }
 
 interface Contractor {
@@ -54,6 +70,7 @@ interface Contractor {
   liveJobs: Job[];
   nextJobs: Job[];
   openSnags: Snag[];
+  orders?: ContractorOrder[];
 }
 
 interface CommsData {
@@ -81,35 +98,36 @@ function ShareDialog({
   siteId,
   contractor,
   onClose,
+  onLinkGenerated,
 }: {
   siteId: string;
   contractor: Contractor;
   onClose: () => void;
+  onLinkGenerated?: () => void;
 }) {
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [url, setUrl] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const [expiryDays, setExpiryDays] = useState(30);
   const [emailBody, setEmailBody] = useState("");
 
-  const generate = async () => {
-    setLoading(true);
-    try {
-      const res = await fetch(`/api/sites/${siteId}/contractor-comms/share`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ contactId: contractor.id, expiryDays }),
-      });
-      const data = await res.json();
-      setUrl(data.url);
-      const name = contractor.company || contractor.name;
-      setEmailBody(
-        `Hi ${contractor.name},\n\nPlease find a link to your latest worksheets for ${name}:\n\n${data.url}\n\nThis link gives you a read-only view of your live jobs, upcoming work and any open snags. Please do not hesitate to get in touch if you have any queries.\n\nKind regards`
-      );
-    } finally {
-      setLoading(false);
-    }
-  };
+  // Auto-generate permanent link on open
+  useEffect(() => {
+    fetch(`/api/sites/${siteId}/contractor-comms/share`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ contactId: contractor.id }),
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        setUrl(data.url);
+        onLinkGenerated?.();
+        const name = contractor.company || contractor.name;
+        setEmailBody(
+          `Hi ${contractor.name},\n\nHere is your permanent link to view your live jobs, upcoming work, orders and any open snags for ${name}:\n\n${data.url}\n\nThis link stays up to date automatically — no need to request a new one. Please do not hesitate to get in touch if you have any queries.\n\nKind regards`
+        );
+      })
+      .finally(() => setLoading(false));
+  }, [siteId, contractor.id, contractor.name, contractor.company]);
 
   const copy = async () => {
     if (!url) return;
@@ -134,26 +152,12 @@ function ShareDialog({
         </div>
         <div className="space-y-4 p-5">
           <p className="text-sm text-muted-foreground">
-            Generate a read-only link showing this contractor their live jobs, upcoming work, and open snags. No login required.
+            Permanent read-only link showing live jobs, upcoming work, orders and open snags. Always up to date — no login required.
           </p>
-          <div className="flex items-center gap-3">
-            <label className="text-sm font-medium">Expires after</label>
-            <select
-              value={expiryDays}
-              onChange={(e) => setExpiryDays(Number(e.target.value))}
-              className="rounded border border-border/60 px-2 py-1 text-sm"
-            >
-              <option value={7}>7 days</option>
-              <option value={14}>14 days</option>
-              <option value={30}>30 days</option>
-              <option value={90}>90 days</option>
-            </select>
-          </div>
-          {!url ? (
-            <Button onClick={generate} disabled={loading} className="w-full">
-              {loading ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Link2 className="mr-2 size-4" />}
-              Generate Link
-            </Button>
+          {loading ? (
+            <div className="flex items-center justify-center py-4">
+              <Loader2 className="size-5 animate-spin text-muted-foreground" />
+            </div>
           ) : (
             <div className="space-y-2">
               <div className="flex items-center gap-2 rounded-lg border bg-slate-50 px-3 py-2">
@@ -169,9 +173,6 @@ function ShareDialog({
               <p className="text-[11px] text-muted-foreground">
                 {copied ? "Copied!" : "Click the icon to copy. Send this link directly to your contractor."}
               </p>
-              <Button variant="outline" onClick={generate} disabled={loading} className="w-full text-xs">
-                Regenerate
-              </Button>
               {/* Email compose */}
               <div className="space-y-1.5 border-t pt-3">
                 <p className="text-xs font-medium text-muted-foreground">Email body (editable before sending)</p>
@@ -200,6 +201,174 @@ function ShareDialog({
   );
 }
 
+function SnagCard({ snag, siteId }: { snag: Snag; siteId: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const [showForm, setShowForm] = useState(false);
+  const [notes, setNotes] = useState("");
+  const [photos, setPhotos] = useState<File[]>([]);
+  const [submitting, setSubmitting] = useState(false);
+  const [requested, setRequested] = useState(snag.status === "IN_PROGRESS");
+  const [snagPhotos, setSnagPhotos] = useState<Array<{ id: string; url: string; tag: string | null }>>([]);
+  const [snagNotes, setSnagNotes] = useState<string | null>(null);
+  const [loadingDetail, setLoadingDetail] = useState(false);
+
+  const handleExpand = async () => {
+    if (expanded) { setExpanded(false); return; }
+    setExpanded(true);
+    if (snagPhotos.length === 0 && !loadingDetail) {
+      setLoadingDetail(true);
+      try {
+        const res = await fetch(`/api/snags/${snag.id}`);
+        if (res.ok) {
+          const data = await res.json();
+          setSnagPhotos(data.photos ?? []);
+          setSnagNotes(data.notes ?? null);
+        }
+      } catch { /* non-critical */ }
+      finally { setLoadingDetail(false); }
+    }
+  };
+
+  const handleSubmit = async () => {
+    setSubmitting(true);
+    try {
+      if (photos.length > 0) {
+        const fd = new FormData();
+        photos.forEach((f) => fd.append("photos", f));
+        fd.append("tag", "after");
+        await fetch(`/api/snags/${snag.id}/photos`, { method: "POST", body: fd });
+      }
+      await fetch(`/api/snags/${snag.id}/request-signoff`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ notes: notes.trim() || undefined }),
+      });
+      setRequested(true);
+      setShowForm(false);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="rounded-lg bg-orange-50 px-3 py-2">
+      <div className="flex items-start justify-between gap-2 cursor-pointer" onClick={handleExpand}>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm">{snag.description}</p>
+          <p className="text-xs text-muted-foreground">
+            <Link href={`/sites/${siteId}/plots/${snag.plot.id}`} className="text-blue-600 hover:underline">{plotLabel(snag.plot)}</Link>{snag.location ? ` · ${snag.location}` : ""}
+          </p>
+        </div>
+        <div className="flex items-center gap-1.5 shrink-0">
+          <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-semibold", PRIORITY_COLORS[snag.priority] ?? "bg-slate-100 text-slate-600")}>
+            {snag.priority}
+          </span>
+          <ChevronRight className={cn("size-3.5 text-muted-foreground transition-transform", expanded && "rotate-90")} />
+        </div>
+      </div>
+
+      {/* Expanded detail */}
+      {expanded && (
+        <div className="mt-2 space-y-2 border-t border-orange-200 pt-2">
+          {loadingDetail && <Loader2 className="size-4 animate-spin text-muted-foreground" />}
+          {snagNotes && (
+            <div>
+              <p className="text-[10px] font-semibold text-muted-foreground">Notes</p>
+              <p className="text-xs">{snagNotes}</p>
+            </div>
+          )}
+          {snagPhotos.length > 0 && (
+            <div>
+              <p className="text-[10px] font-semibold text-muted-foreground mb-1">Photos ({snagPhotos.length})</p>
+              <div className="flex flex-wrap gap-1.5">
+                {snagPhotos.map((p) => (
+                  <a key={p.id} href={p.url} target="_blank" rel="noopener noreferrer" className="block">
+                    <img src={p.url} alt="" className="size-16 rounded border object-cover" />
+                    {p.tag && <span className="mt-0.5 block text-center text-[9px] text-muted-foreground">{p.tag}</span>}
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
+          {!loadingDetail && snagPhotos.length === 0 && !snagNotes && (
+            <p className="text-xs text-muted-foreground">No photos or notes yet</p>
+          )}
+        </div>
+      )}
+
+      <div className="mt-1.5 flex items-center justify-end">
+        {requested ? (
+          <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">Sign Off Requested</span>
+        ) : (
+          <Button variant="outline" size="sm" className="h-6 gap-1 border-amber-200 px-2 text-[10px] text-amber-700 hover:bg-amber-50"
+            onClick={() => setShowForm(!showForm)}>
+            <CheckCircle2 className="size-2.5" /> Request Sign Off
+          </Button>
+        )}
+      </div>
+      {showForm && !requested && (
+        <div className="mt-2 space-y-2 border-t border-orange-200 pt-2">
+          <textarea
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            placeholder="Add notes about the fix (optional)..."
+            rows={2}
+            className="w-full rounded border bg-white px-2 py-1.5 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-amber-400"
+          />
+          <div className="flex items-center gap-2">
+            <label className="flex cursor-pointer items-center gap-1 rounded border bg-white px-2 py-1 text-[10px] text-muted-foreground hover:bg-slate-50">
+              <Camera className="size-3" />
+              {photos.length > 0 ? `${photos.length} photo${photos.length > 1 ? "s" : ""}` : "Add Photos"}
+              <input type="file" accept="image/*" multiple capture="environment" className="hidden"
+                onChange={(e) => setPhotos(Array.from(e.target.files || []))} />
+            </label>
+            <div className="flex-1" />
+            <Button variant="outline" size="sm" className="h-6 px-2 text-[10px]" onClick={() => setShowForm(false)} disabled={submitting}>
+              Cancel
+            </Button>
+            <Button size="sm" className="h-6 gap-1 bg-amber-600 px-2 text-[10px] text-white hover:bg-amber-700" onClick={handleSubmit} disabled={submitting}>
+              {submitting ? <Loader2 className="size-2.5 animate-spin" /> : <CheckCircle2 className="size-2.5" />}
+              Submit
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function useLastShareSent(siteId: string, contactId: string) {
+  const key = `share-sent:${siteId}:${contactId}`;
+  const [lastSent, setLastSent] = useState<string | null>(null);
+
+  useEffect(() => {
+    try { setLastSent(localStorage.getItem(key)); } catch { /* SSR / private mode */ }
+  }, [key]);
+
+  const markSent = useCallback(() => {
+    const now = new Date().toISOString();
+    try { localStorage.setItem(key, now); } catch { /* ignore */ }
+    setLastSent(now);
+  }, [key]);
+
+  return { lastSent, markSent };
+}
+
+function formatRelativeDate(iso: string): string {
+  const sent = new Date(iso);
+  const now = new Date();
+  const diffMs = now.getTime() - sent.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  if (diffMins < 1) return "just now";
+  if (diffMins < 60) return `${diffMins}m ago`;
+  const diffHours = Math.floor(diffMins / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays === 1) return "yesterday";
+  if (diffDays < 30) return `${diffDays}d ago`;
+  return format(sent, "dd MMM");
+}
+
 function ContractorCard({
   contractor,
   siteId,
@@ -208,128 +377,277 @@ function ContractorCard({
   siteId: string;
 }) {
   const [shareOpen, setShareOpen] = useState(false);
+  const { lastSent, markSent } = useLastShareSent(siteId, contractor.id);
+  const [requestingSignOff, setRequestingSignOff] = useState<Set<string>>(new Set());
+  const [requestedSignOff, setRequestedSignOff] = useState<Set<string>>(
+    new Set(contractor.liveJobs.filter((j) => j.signOffRequested).map((j) => j.id))
+  );
+
+  const handleRequestSignOff = async (jobId: string) => {
+    setRequestingSignOff((prev) => new Set(prev).add(jobId));
+    try {
+      await fetch(`/api/jobs/${jobId}/request-signoff`, { method: "POST" });
+      setRequestedSignOff((prev) => new Set(prev).add(jobId));
+    } finally {
+      setRequestingSignOff((prev) => { const n = new Set(prev); n.delete(jobId); return n; });
+    }
+  };
 
   return (
     <div className="rounded-xl border bg-white shadow-sm print:break-inside-avoid print:shadow-none">
       {/* Header */}
-      <div className="flex items-start justify-between gap-4 border-b px-5 py-4">
+      <div className="border-b px-4 py-4 sm:px-5">
         <div className="flex items-start gap-3">
           <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-blue-100 text-blue-700">
             <HardHat className="size-5" />
           </div>
-          <div>
-            <h3 className="font-semibold">{contractor.name}</h3>
-            {contractor.company && (
-              <p className="text-sm text-muted-foreground">{contractor.company}</p>
-            )}
-            <div className="mt-1 flex flex-wrap gap-3">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <h3 className="font-semibold truncate">{contractor.name}</h3>
+                {contractor.company && (
+                  <p className="text-sm text-muted-foreground truncate">{contractor.company}</p>
+                )}
+              </div>
+              <div className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
+                <Building2 className="size-3" />
+                <span>{contractor.activePlotCount} plot{contractor.activePlotCount !== 1 ? "s" : ""}</span>
+              </div>
+            </div>
+            <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
               {contractor.phone && (
                 <a href={`tel:${contractor.phone}`} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
                   <Phone className="size-3" /> {contractor.phone}
                 </a>
               )}
               {contractor.email && (
-                <a href={`mailto:${contractor.email}`} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
-                  <Mail className="size-3" /> {contractor.email}
+                <a href={`mailto:${contractor.email}`} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground truncate">
+                  <Mail className="size-3 shrink-0" /> <span className="truncate">{contractor.email}</span>
                 </a>
               )}
+              <div className="flex items-center gap-2 print:hidden">
+                <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setShareOpen(true)}>
+                  <Link2 className="mr-1 size-3" />
+                  Send Link
+                </Button>
+                {lastSent && (
+                  <span className="text-[10px] text-muted-foreground">
+                    Sent {formatRelativeDate(lastSent)}
+                  </span>
+                )}
+              </div>
             </div>
           </div>
-        </div>
-        <div className="flex shrink-0 items-center gap-2 print:hidden">
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <Building2 className="size-3" />
-            <span>{contractor.activePlotCount} plot{contractor.activePlotCount !== 1 ? "s" : ""}</span>
-          </div>
-          <Button variant="outline" size="sm" onClick={() => setShareOpen(true)}>
-            <Link2 className="mr-1.5 size-3.5" />
-            Send Link
-          </Button>
         </div>
       </div>
 
       <div className="divide-y">
         {/* Live Jobs */}
-        <div className="px-5 py-3">
-          <div className="mb-2 flex items-center gap-2">
+        <details className="group">
+          <summary className="flex cursor-pointer items-center gap-2 px-4 py-3 sm:px-5 [&::-webkit-details-marker]:hidden">
             <PlayCircle className="size-4 text-green-600" />
             <span className="text-xs font-semibold uppercase tracking-wider text-green-700">
               Live Jobs ({contractor.liveJobs.length})
             </span>
+            <ChevronRight className="ml-auto size-3.5 text-muted-foreground transition-transform group-open:rotate-90" />
+          </summary>
+          <div className="px-4 pb-3 sm:px-5">
+            {contractor.liveJobs.length === 0 ? (
+              <p className="text-xs text-muted-foreground">No active jobs</p>
+            ) : (
+              <div className="space-y-1.5">
+                {contractor.liveJobs.map((job) => (
+                  <div key={job.id} className="rounded-lg bg-green-50 px-3 py-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium">
+                          <Link href={`/jobs/${job.id}`} className="text-blue-600 hover:underline">{job.name}</Link>
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          <Link href={`/sites/${siteId}/plots/${job.plot.id}`} className="text-blue-600 hover:underline">{plotLabel(job.plot)}</Link>
+                        </p>
+                      </div>
+                      <span className="shrink-0 text-xs text-muted-foreground">Due {fmtDate(job.endDate)}</span>
+                    </div>
+                    <div className="mt-1.5 flex items-center justify-end">
+                      {requestedSignOff.has(job.id) ? (
+                        <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">Sign Off Requested</span>
+                      ) : (
+                        <Button variant="outline" size="sm" className="h-6 gap-1 border-amber-200 px-2 text-[10px] text-amber-700 hover:bg-amber-50"
+                          disabled={requestingSignOff.has(job.id)}
+                          onClick={() => handleRequestSignOff(job.id)}>
+                          {requestingSignOff.has(job.id) ? <Loader2 className="size-2.5 animate-spin" /> : <CheckCircle2 className="size-2.5" />}
+                          Request Sign Off
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
-          {contractor.liveJobs.length === 0 ? (
-            <p className="text-xs text-muted-foreground">No active jobs</p>
-          ) : (
-            <div className="space-y-1.5">
-              {contractor.liveJobs.map((job) => (
-                <div key={job.id} className="flex items-center justify-between rounded-lg bg-green-50 px-3 py-2">
-                  <div>
-                    <p className="text-sm font-medium">{job.name}</p>
-                    <p className="text-xs text-muted-foreground">{plotLabel(job.plot)}</p>
-                  </div>
-                  <div className="text-right text-xs text-muted-foreground">
-                    <p>Due {fmtDate(job.endDate)}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+        </details>
 
         {/* Next Jobs */}
-        <div className="px-5 py-3">
-          <div className="mb-2 flex items-center gap-2">
+        <details className="group">
+          <summary className="flex cursor-pointer items-center gap-2 px-4 py-3 sm:px-5 [&::-webkit-details-marker]:hidden">
             <Clock className="size-4 text-blue-500" />
             <span className="text-xs font-semibold uppercase tracking-wider text-blue-700">
               Coming Up ({contractor.nextJobs.length})
             </span>
+            <ChevronRight className="ml-auto size-3.5 text-muted-foreground transition-transform group-open:rotate-90" />
+          </summary>
+          <div className="px-4 pb-3 sm:px-5">
+            {contractor.nextJobs.length === 0 ? (
+              <p className="text-xs text-muted-foreground">No upcoming jobs</p>
+            ) : (
+              <div className="space-y-1.5">
+                {contractor.nextJobs.map((job) => (
+                  <div key={job.id} className="flex items-center justify-between rounded-lg bg-blue-50 px-3 py-2">
+                    <div>
+                      <p className="text-sm font-medium">
+                        <Link href={`/jobs/${job.id}`} className="text-blue-600 hover:underline">{job.name}</Link>
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        <Link href={`/sites/${siteId}/plots/${job.plot.id}`} className="text-blue-600 hover:underline">{plotLabel(job.plot)}</Link>
+                      </p>
+                    </div>
+                    <div className="text-right text-xs text-muted-foreground">
+                      <p>Starts {fmtDate(job.startDate)}</p>
+                      <p>Due {fmtDate(job.endDate)}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
-          {contractor.nextJobs.length === 0 ? (
-            <p className="text-xs text-muted-foreground">No upcoming jobs</p>
-          ) : (
-            <div className="space-y-1.5">
-              {contractor.nextJobs.map((job) => (
-                <div key={job.id} className="flex items-center justify-between rounded-lg bg-blue-50 px-3 py-2">
-                  <div>
-                    <p className="text-sm font-medium">{job.name}</p>
-                    <p className="text-xs text-muted-foreground">{plotLabel(job.plot)}</p>
-                  </div>
-                  <div className="text-right text-xs text-muted-foreground">
-                    <p>Starts {fmtDate(job.startDate)}</p>
-                    <p>Due {fmtDate(job.endDate)}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+        </details>
 
         {/* Open Snags */}
         {contractor.openSnags.length > 0 && (
-          <div className="px-5 py-3">
-            <div className="mb-2 flex items-center gap-2">
+          <details className="group">
+            <summary className="flex cursor-pointer items-center gap-2 px-4 py-3 sm:px-5 [&::-webkit-details-marker]:hidden">
               <AlertTriangle className="size-4 text-orange-500" />
               <span className="text-xs font-semibold uppercase tracking-wider text-orange-700">
                 Open Snags ({contractor.openSnags.length})
               </span>
-            </div>
-            <div className="space-y-1.5">
+              <ChevronRight className="ml-auto size-3.5 text-muted-foreground transition-transform group-open:rotate-90" />
+            </summary>
+            <div className="px-4 pb-3 sm:px-5 space-y-1.5">
               {contractor.openSnags.map((snag) => (
-                <div key={snag.id} className="flex items-start justify-between rounded-lg bg-orange-50 px-3 py-2">
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm">{snag.description}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {plotLabel(snag.plot)}{snag.location ? ` · ${snag.location}` : ""}
-                    </p>
-                  </div>
-                  <span className={cn("ml-2 shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold", PRIORITY_COLORS[snag.priority] ?? "bg-slate-100 text-slate-600")}>
-                    {snag.priority}
-                  </span>
-                </div>
+                <SnagCard key={snag.id} snag={snag} siteId={siteId} />
               ))}
             </div>
-          </div>
+          </details>
         )}
+
+        {/* Material Orders & Deliveries — split into 3 categories */}
+        {(() => {
+          const allOrders = contractor.orders ?? [];
+          if (allOrders.length === 0) return null;
+          const now = new Date();
+          const in14Days = new Date(now);
+          in14Days.setDate(in14Days.getDate() + 14);
+
+          // Materials on site (delivered)
+          const onSite = allOrders.filter((o) => o.status === "DELIVERED");
+          // Next 14 days (not delivered, order or delivery date within 14 days)
+          const upcoming = allOrders.filter((o) => {
+            if (o.status === "DELIVERED") return false;
+            const relevantDate = o.expectedDeliveryDate || o.dateOfOrder;
+            if (!relevantDate) return false;
+            return new Date(relevantDate) <= in14Days;
+          });
+          // Future (over 14 days away, not delivered)
+          const future = allOrders.filter((o) => {
+            if (o.status === "DELIVERED") return false;
+            const relevantDate = o.expectedDeliveryDate || o.dateOfOrder;
+            if (!relevantDate) return true;
+            return new Date(relevantDate) > in14Days;
+          });
+
+          const renderOrder = (order: ContractorOrder) => {
+            const isSent = order.status === "ORDERED";
+            const statusColor = order.status === "DELIVERED"
+              ? "bg-green-100 text-green-700"
+              : isSent ? "bg-blue-100 text-blue-700"
+              : "bg-amber-100 text-amber-700";
+            // Fix terminology: "Order due" for unsent, "Ordered" for sent
+            const dateLabel = isSent
+              ? `Ordered ${fmtDate(order.dateOfOrder)}${order.expectedDeliveryDate ? ` · Delivery due ${fmtDate(order.expectedDeliveryDate)}` : ""}`
+              : order.status === "DELIVERED"
+              ? `Delivered ${fmtDate(order.deliveredDate)}${order.dateOfOrder ? ` · Ordered ${fmtDate(order.dateOfOrder)}` : ""}`
+              : `Order due ${fmtDate(order.dateOfOrder)}${order.expectedDeliveryDate ? ` · Delivery due ${fmtDate(order.expectedDeliveryDate)}` : ""}`;
+
+            return (
+              <div key={order.id} className="rounded-lg bg-slate-50 px-3 py-2">
+                <div className="flex items-start justify-between">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium">
+                      <Link href={`/suppliers/${order.supplier.id}`} className="text-blue-600 hover:underline">{order.supplier.name}</Link>
+                    </p>
+                    {order.items.length > 0 ? (
+                      <ul className="mt-0.5 space-y-0.5">
+                        {order.items.map((item, idx) => (
+                          <li key={idx} className="text-xs text-muted-foreground">
+                            {item.quantity} {item.unit} — {item.name}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : order.itemsDescription ? (
+                      <p className="text-xs text-muted-foreground">{order.itemsDescription}</p>
+                    ) : null}
+                    <p className="mt-0.5 text-[11px] text-muted-foreground">{dateLabel}</p>
+                  </div>
+                  <span className={cn("ml-2 shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold", statusColor)}>
+                    {isSent ? "Sent" : order.status === "DELIVERED" ? "On Site" : "Not Ordered"}
+                  </span>
+                </div>
+              </div>
+            );
+          };
+
+          return (
+            <>
+              {upcoming.length > 0 && (
+                <details className="group border-t">
+                  <summary className="flex cursor-pointer items-center gap-2 px-4 py-3 sm:px-5 [&::-webkit-details-marker]:hidden">
+                    <Package className="size-4 text-blue-500" />
+                    <span className="text-xs font-semibold uppercase tracking-wider text-blue-700">
+                      Orders & Deliveries — Next 14 Days ({upcoming.length})
+                    </span>
+                    <ChevronRight className="ml-auto size-3.5 text-muted-foreground transition-transform group-open:rotate-90" />
+                  </summary>
+                  <div className="px-4 pb-3 sm:px-5 space-y-1.5">{upcoming.map(renderOrder)}</div>
+                </details>
+              )}
+              {onSite.length > 0 && (
+                <details className="group border-t">
+                  <summary className="flex cursor-pointer items-center gap-2 px-4 py-3 sm:px-5 [&::-webkit-details-marker]:hidden">
+                    <CheckCircle2 className="size-4 text-green-500" />
+                    <span className="text-xs font-semibold uppercase tracking-wider text-green-700">
+                      Materials on Site ({onSite.length})
+                    </span>
+                    <ChevronRight className="ml-auto size-3.5 text-muted-foreground transition-transform group-open:rotate-90" />
+                  </summary>
+                  <div className="px-4 pb-3 sm:px-5 space-y-1.5">{onSite.map(renderOrder)}</div>
+                </details>
+              )}
+              {future.length > 0 && (
+                <details className="group border-t">
+                  <summary className="flex cursor-pointer items-center gap-2 px-4 py-3 sm:px-5 [&::-webkit-details-marker]:hidden">
+                    <Clock className="size-4 text-slate-400" />
+                    <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                      Future Orders & Deliveries ({future.length})
+                    </span>
+                    <ChevronRight className="ml-auto size-3.5 text-muted-foreground transition-transform group-open:rotate-90" />
+                  </summary>
+                  <div className="px-4 pb-3 sm:px-5 space-y-1.5">{future.map(renderOrder)}</div>
+                </details>
+              )}
+            </>
+          );
+        })()}
       </div>
 
       {shareOpen && (
@@ -337,6 +655,7 @@ function ContractorCard({
           siteId={siteId}
           contractor={contractor}
           onClose={() => setShareOpen(false)}
+          onLinkGenerated={markSent}
         />
       )}
     </div>
@@ -355,6 +674,7 @@ export function ContractorComms({ siteId }: { siteId: string }) {
   }, [siteId]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+  useRefreshOnFocus(fetchData);
 
   if (loading) {
     return (

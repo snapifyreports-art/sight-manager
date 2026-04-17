@@ -16,6 +16,11 @@ export async function GET(
 
   const { id } = await params;
 
+  const site = await prisma.site.findUnique({
+    where: { id },
+    select: { name: true, address: true, postcode: true },
+  });
+
   const orders = await prisma.materialOrder.findMany({
     where: {
       job: {
@@ -25,7 +30,7 @@ export async function GET(
       },
     },
     include: {
-      supplier: { select: { id: true, name: true, contactEmail: true, contactName: true } },
+      supplier: { select: { id: true, name: true, contactEmail: true, contactName: true, accountNumber: true } },
       job: {
         select: {
           id: true,
@@ -52,5 +57,5 @@ export async function GET(
     orderBy: { createdAt: "desc" },
   });
 
-  return NextResponse.json(orders);
+  return NextResponse.json({ orders, site });
 }

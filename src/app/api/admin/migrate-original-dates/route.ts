@@ -26,7 +26,8 @@ export async function GET(req: NextRequest) {
 
     await prisma.$executeRawUnsafe(`
       ALTER TABLE "Plot"
-        ADD COLUMN IF NOT EXISTS "awaitingRestart" BOOLEAN NOT NULL DEFAULT false;
+        ADD COLUMN IF NOT EXISTS "awaitingRestart" BOOLEAN NOT NULL DEFAULT false,
+        ADD COLUMN IF NOT EXISTS "awaitingContractorConfirmation" BOOLEAN NOT NULL DEFAULT false;
     `);
 
     // Backfill: copy current startDate → originalStartDate (only where null)

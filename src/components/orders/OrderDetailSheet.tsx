@@ -18,6 +18,7 @@ import {
   AlertTriangle,
   Mail,
 } from "lucide-react";
+import { buildOrderMailto } from "@/lib/order-email";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -48,6 +49,8 @@ interface Site {
   id: string;
   name: string;
   description: string | null;
+  address: string | null;
+  postcode: string | null;
   status: string;
   createdAt: string;
   updatedAt: string;
@@ -112,14 +115,13 @@ interface Order {
   orderItems: OrderItem[];
 }
 
-type OrderStatus = "PENDING" | "ORDERED" | "CONFIRMED" | "DELIVERED" | "CANCELLED";
+type OrderStatus = "PENDING" | "ORDERED" | "DELIVERED" | "CANCELLED";
 
 // ---------- Status helpers ----------
 
 const STATUS_CONFIG: Record<string, { label: string; className: string }> = {
   PENDING: { label: "Pending", className: "bg-yellow-500/15 text-yellow-700" },
   ORDERED: { label: "Ordered", className: "bg-blue-500/15 text-blue-700" },
-  CONFIRMED: { label: "Confirmed", className: "bg-purple-500/15 text-purple-700" },
   DELIVERED: { label: "Delivered", className: "bg-green-500/15 text-green-700" },
   CANCELLED: { label: "Cancelled", className: "bg-red-500/15 text-red-700" },
 };
@@ -240,9 +242,6 @@ export function OrderDetailSheet({
   if (order.status !== "ORDERED" && order.status !== "DELIVERED" && order.status !== "CANCELLED") {
     statusActions.push({ status: "ORDERED", label: "Mark as Ordered", icon: <Package className="size-3.5" /> });
   }
-  if (order.status !== "CONFIRMED" && order.status !== "DELIVERED" && order.status !== "CANCELLED") {
-    statusActions.push({ status: "CONFIRMED", label: "Mark as Confirmed", icon: <ClipboardCheck className="size-3.5" /> });
-  }
   if (order.status !== "DELIVERED" && order.status !== "CANCELLED") {
     statusActions.push({ status: "DELIVERED", label: "Mark as Delivered", icon: <PackageCheck className="size-3.5" /> });
   }
@@ -262,9 +261,6 @@ export function OrderDetailSheet({
               <span className="flex items-center gap-1 text-xs text-red-600">
                 <AlertTriangle className="size-3" /> Overdue
               </span>
-            )}
-            {order.automated && (
-              <Badge variant="outline" className="text-[10px]">Auto</Badge>
             )}
           </div>
           <SheetTitle>{order.orderDetails || "Order"}</SheetTitle>
@@ -342,7 +338,20 @@ export function OrderDetailSheet({
               <p className="text-xs font-medium text-muted-foreground">Actions</p>
               <div className="flex flex-wrap gap-1.5">
                 {order.status === "PENDING" && order.supplier.contactEmail && (() => {
-                  const mailto = `mailto:${encodeURIComponent(order.supplier.contactEmail!)}?subject=${encodeURIComponent(`Material Order — ${order.job.name}`)}&body=${encodeURIComponent(`Hi ${order.supplier.contactName || order.supplier.name},\n\nPlease supply the following for ${order.job.name} at ${order.job.plot.name}:\n\n${order.itemsDescription || "Materials as discussed"}${order.expectedDeliveryDate ? `\n\nRequired by: ${format(new Date(order.expectedDeliveryDate), "dd MMM yyyy")}` : ""}\n\nPlease confirm receipt.\n\nRegards`)}`;
+                  const mailto = buildOrderMailto(order.supplier.contactEmail!, {
+                    supplierName: order.supplier.name,
+                    supplierContactName: order.supplier.contactName,
+                    supplierAccountNumber: order.supplier.accountNumber,
+                    jobName: order.job.name,
+                    siteName: order.job.plot.site.name,
+                    siteAddress: order.job.plot.site.address,
+                    sitePostcode: order.job.plot.site.postcode,
+                    plotNumbers: [order.job.plot.name],
+                    items: (order.orderItems ?? []).map((i) => ({ name: i.name, quantity: i.quantity, unit: i.unit, unitCost: i.unitCost })),
+                    itemsDescriptionFallback: order.itemsDescription,
+                    expectedDeliveryDate: order.expectedDeliveryDate,
+                    orderDate: order.dateOfOrder,
+                  });
                   return (
                     <Button
                       variant="secondary"

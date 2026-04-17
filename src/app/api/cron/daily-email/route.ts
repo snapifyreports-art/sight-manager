@@ -57,14 +57,14 @@ export async function GET(req: NextRequest) {
           where: {
             job: { plot: { siteId: site.id } },
             expectedDeliveryDate: { gte: todayStart, lt: new Date(todayStart.getTime() + 86400000) },
-            status: { in: ["ORDERED", "CONFIRMED"] },
+            status: "ORDERED",
           },
         }),
         prisma.materialOrder.count({
           where: {
             job: { plot: { siteId: site.id } },
             expectedDeliveryDate: { lt: todayStart },
-            status: { in: ["ORDERED", "CONFIRMED"] },
+            status: "ORDERED",
           },
         }),
         prisma.materialOrder.count({

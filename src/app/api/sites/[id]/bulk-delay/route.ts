@@ -3,7 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { calculateCascade } from "@/lib/cascade";
 import { getTodayWeatherSummary } from "@/lib/weather";
-import { addDays } from "date-fns";
+import { addWorkingDays } from "@/lib/working-days";
 
 export const dynamic = "force-dynamic";
 
@@ -76,7 +76,7 @@ export async function POST(
       continue;
     }
 
-    const newEndDate = addDays(currentJob.endDate, days);
+    const newEndDate = addWorkingDays(currentJob.endDate, days);
 
     const allPlotJobs = await prisma.job.findMany({
       where: { plotId },
@@ -106,22 +106,41 @@ export async function POST(
     );
 
     await prisma.$transaction(async (tx) => {
+      // Preserve original dates on first shift (only if not already set)
+      const triggerData: Record<string, unknown> = { endDate: newEndDate };
+      if (!currentJob.originalEndDate && currentJob.endDate) {
+        triggerData.originalEndDate = currentJob.endDate;
+      }
+      if (currentJob.status === "NOT_STARTED" && currentJob.startDate) {
+        triggerData.startDate = addWorkingDays(currentJob.startDate, days);
+        if (!currentJob.originalStartDate) {
+          triggerData.originalStartDate = currentJob.startDate;
+        }
+      }
       await tx.job.update({
         where: { id: currentJob.id },
-        data: { endDate: newEndDate },
+        data: triggerData,
       });
 
-      if (currentJob.status === "NOT_STARTED" && currentJob.startDate) {
-        await tx.job.update({
-          where: { id: currentJob.id },
-          data: { startDate: addDays(currentJob.startDate, days) },
-        });
-      }
-
+      // Preserve originals on cascaded siblings too
       for (const update of cascade.jobUpdates) {
+        const sibling = await tx.job.findUnique({
+          where: { id: update.jobId },
+          select: { startDate: true, endDate: true, originalStartDate: true, originalEndDate: true },
+        });
+        const siblingData: Record<string, unknown> = {
+          startDate: update.newStart,
+          endDate: update.newEnd,
+        };
+        if (sibling && !sibling.originalStartDate && sibling.startDate) {
+          siblingData.originalStartDate = sibling.startDate;
+        }
+        if (sibling && !sibling.originalEndDate && sibling.endDate) {
+          siblingData.originalEndDate = sibling.endDate;
+        }
         await tx.job.update({
           where: { id: update.jobId },
-          data: { startDate: update.newStart, endDate: update.newEnd },
+          data: siblingData,
         });
       }
 

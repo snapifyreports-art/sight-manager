@@ -316,7 +316,6 @@ export async function GET(req: NextRequest) {
   const ordersByStatus = {
     PENDING: 0,
     ORDERED: 0,
-    CONFIRMED: 0,
     DELIVERED: 0,
     CANCELLED: 0,
   };
@@ -331,7 +330,8 @@ export async function GET(req: NextRequest) {
   >();
 
   for (const order of orders) {
-    ordersByStatus[order.status]++;
+    const statusKey = order.status === "CONFIRMED" ? "ORDERED" : order.status;
+    if (statusKey in ordersByStatus) ordersByStatus[statusKey as keyof typeof ordersByStatus]++;
 
     const orderSpend = order.orderItems.reduce(
       (sum, item) => sum + item.totalCost,

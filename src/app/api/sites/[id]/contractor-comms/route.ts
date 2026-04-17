@@ -117,6 +117,49 @@ export async function GET(
       .slice(0, 3);
   }
 
+  // Fetch material orders for all jobs linked to contractors on this site
+  const allJobIds = Array.from(contactMap.values()).flatMap((c) => c.allJobs.map((j) => j.id));
+  const materialOrders = allJobIds.length > 0
+    ? await prisma.materialOrder.findMany({
+        where: { jobId: { in: allJobIds } },
+        select: {
+          id: true,
+          status: true,
+          itemsDescription: true,
+          dateOfOrder: true,
+          expectedDeliveryDate: true,
+          deliveredDate: true,
+          jobId: true,
+          supplier: { select: { id: true, name: true } },
+          orderItems: { select: { name: true, quantity: true, unit: true } },
+        },
+        orderBy: { dateOfOrder: "asc" },
+      })
+    : [];
+
+  // Group orders by jobId for quick lookup
+  const ordersByJob = new Map<string, typeof materialOrders>();
+  for (const o of materialOrders) {
+    const existing = ordersByJob.get(o.jobId) ?? [];
+    existing.push(o);
+    ordersByJob.set(o.jobId, existing);
+  }
+
+  // Check sign-off requests for live jobs
+  const signOffRequests = allJobIds.length > 0
+    ? await prisma.jobAction.findMany({
+        where: { jobId: { in: allJobIds }, action: "request_signoff" },
+        select: { jobId: true },
+        distinct: ["jobId"],
+      })
+    : [];
+  const requestedJobIds = new Set(signOffRequests.map((r) => r.jobId));
+
+  // Attach orders to each contractor entry
+  for (const entry of contactMap.values()) {
+    (entry as Record<string, unknown>).orders = entry.allJobs.flatMap((j) => ordersByJob.get(j.id) ?? []);
+  }
+
   // Sort contractors: those with live jobs first, then by name
   const contractors = Array.from(contactMap.values())
     .sort((a, b) => {
@@ -138,6 +181,7 @@ export async function GET(
         startDate: j.startDate?.toISOString() ?? null,
         endDate: j.endDate?.toISOString() ?? null,
         plot: j.plot,
+        signOffRequested: requestedJobIds.has(j.id),
       })),
       nextJobs: c.nextJobs.map((j) => ({
         id: j.id,
@@ -154,6 +198,16 @@ export async function GET(
         priority: s.priority,
         location: s.location,
         plot: s.plot,
+      })),
+      orders: ((c as Record<string, unknown>).orders as typeof materialOrders || []).map((o) => ({
+        id: o.id,
+        status: o.status,
+        itemsDescription: o.itemsDescription,
+        dateOfOrder: o.dateOfOrder.toISOString(),
+        expectedDeliveryDate: o.expectedDeliveryDate?.toISOString() ?? null,
+        deliveredDate: o.deliveredDate?.toISOString() ?? null,
+        supplier: o.supplier,
+        items: o.orderItems,
       })),
     }));
 

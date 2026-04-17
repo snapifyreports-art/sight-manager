@@ -4,6 +4,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider } from "@/components/providers/SessionProvider";
 import { ServiceWorkerRegistrar } from "@/components/providers/ServiceWorkerProvider";
 import { DevDateProvider } from "@/lib/dev-date-context";
+import { FetchPatchProvider } from "@/components/providers/FetchPatchProvider";
 
 export const metadata: Metadata = {
   title: "Sight Manager",
@@ -34,6 +35,7 @@ export default function RootLayout({
             </TooltipProvider>
           </DevDateProvider>
         </AuthProvider>
+        <FetchPatchProvider />
         <ServiceWorkerRegistrar />
       </body>
     </html>

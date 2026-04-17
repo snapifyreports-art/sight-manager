@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import Link from "next/link";
 import {
   AlertTriangle,
   Camera,
@@ -55,6 +56,7 @@ interface SnagListProps {
   onRefresh?: () => void;
   showPlot?: boolean;
   highlightId?: string;
+  siteId?: string;
 }
 
 const PRIORITY_STYLES: Record<string, string> = {
@@ -78,10 +80,33 @@ const STATUS_LABELS: Record<string, string> = {
   CLOSED: "Closed",
 };
 
-export function SnagList({ snags, onSelect, onRefresh, showPlot, highlightId }: SnagListProps) {
+export function SnagList({ snags, onSelect, onRefresh, showPlot, highlightId, siteId }: SnagListProps) {
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [filterPriority, setFilterPriority] = useState<string>("all");
+  const [filterContractor, setFilterContractor] = useState<string>("all");
+  const [filterPlot, setFilterPlot] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState("");
+
+  // Build unique contractor and plot lists from snags data
+  const uniqueContractors = Array.from(
+    new Map(
+      snags
+        .filter((s) => s.contact)
+        .map((s) => [s.contact!.id, s.contact!])
+    ).values()
+  ).sort((a, b) => (a.company || a.name).localeCompare(b.company || b.name));
+
+  const uniquePlots = Array.from(
+    new Map(
+      snags
+        .filter((s) => s.plot)
+        .map((s) => [s.plot!.id, s.plot!])
+    ).values()
+  ).sort((a, b) => {
+    const aLabel = a.plotNumber || a.name;
+    const bLabel = b.plotNumber || b.name;
+    return aLabel.localeCompare(bLabel, undefined, { numeric: true });
+  });
 
   // Quick status action state
   const [pendingSnagActions, setPendingSnagActions] = useState<Set<string>>(new Set());
@@ -127,6 +152,8 @@ export function SnagList({ snags, onSelect, onRefresh, showPlot, highlightId }: 
   const filtered = snags.filter((s) => {
     if (filterStatus !== "all" && s.status !== filterStatus) return false;
     if (filterPriority !== "all" && s.priority !== filterPriority) return false;
+    if (filterContractor !== "all" && s.contact?.id !== filterContractor) return false;
+    if (filterPlot !== "all" && s.plot?.id !== filterPlot) return false;
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       const matchesDescription = s.description.toLowerCase().includes(q);
@@ -274,6 +301,39 @@ export function SnagList({ snags, onSelect, onRefresh, showPlot, highlightId }: 
             </button>
           ))}
 
+          {uniqueContractors.length > 0 && (
+            <>
+              <span className="mx-1 border-l" />
+              <select
+                value={filterContractor}
+                onChange={(e) => setFilterContractor(e.target.value)}
+                className="h-6 rounded-md border bg-white px-1.5 text-[11px] outline-none focus:ring-1 focus:ring-blue-500"
+              >
+                <option value="all">All Contractors</option>
+                {uniqueContractors.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.company ? `${c.company} — ${c.name}` : c.name}
+                  </option>
+                ))}
+              </select>
+            </>
+          )}
+
+          {uniquePlots.length > 0 && (
+            <select
+              value={filterPlot}
+              onChange={(e) => setFilterPlot(e.target.value)}
+              className="h-6 rounded-md border bg-white px-1.5 text-[11px] outline-none focus:ring-1 focus:ring-blue-500"
+            >
+              <option value="all">All Plots</option>
+              {uniquePlots.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.plotNumber ? `Plot ${p.plotNumber}` : p.name}
+                </option>
+              ))}
+            </select>
+          )}
+
           {snags.length > 0 && (
             <>
               <span className="mx-1 border-l" />
@@ -344,9 +404,15 @@ export function SnagList({ snags, onSelect, onRefresh, showPlot, highlightId }: 
                     )}
 
                     {showPlot && snag.plot && (
-                      <span className="text-[10px] text-muted-foreground">
-                        {snag.plot.plotNumber ? `Plot ${snag.plot.plotNumber}` : snag.plot.name}
-                      </span>
+                      siteId ? (
+                        <Link href={`/sites/${siteId}/plots/${snag.plot.id}`} className="text-[10px] text-blue-600 hover:underline" onClick={(e) => e.stopPropagation()}>
+                          {snag.plot.plotNumber ? `Plot ${snag.plot.plotNumber}` : snag.plot.name}
+                        </Link>
+                      ) : (
+                        <span className="text-[10px] text-muted-foreground">
+                          {snag.plot.plotNumber ? `Plot ${snag.plot.plotNumber}` : snag.plot.name}
+                        </span>
+                      )
                     )}
 
                     {snag._count.photos > 0 && (
@@ -359,15 +425,15 @@ export function SnagList({ snags, onSelect, onRefresh, showPlot, highlightId }: 
                   <div className="mt-2 flex items-center justify-between text-[10px] text-muted-foreground">
                     <div className="flex flex-col gap-0.5">
                       {snag.job && (
-                        <span className="flex items-center gap-1 text-blue-600">
+                        <Link href={`/jobs/${snag.job.id}`} className="flex items-center gap-1 text-blue-600 hover:underline" onClick={(e) => e.stopPropagation()}>
                           {snag.job.parent ? `${snag.job.parent.name} › ` : ""}{snag.job.name}
-                        </span>
+                        </Link>
                       )}
                       {snag.contact && (
-                        <span className="flex items-center gap-1">
+                        <Link href={`/contacts?highlight=${snag.contact.id}`} className="flex items-center gap-1 hover:underline hover:text-blue-600" onClick={(e) => e.stopPropagation()}>
                           <HardHat className="size-2.5" />
                           {snag.contact.company ? `${snag.contact.company} — ${snag.contact.name}` : snag.contact.name}
-                        </span>
+                        </Link>
                       )}
                       <span className="flex items-center gap-1">
                         <User className="size-2.5" />

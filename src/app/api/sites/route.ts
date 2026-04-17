@@ -1,17 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { getUserSiteIds } from "@/lib/site-access";
 
 export const dynamic = "force-dynamic";
 
-// GET /api/sites — list all sites with plot counts and creator
+// GET /api/sites — list sites the current user can access
 export async function GET() {
   const session = await auth();
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  // Build site filter based on user's access
+  const siteIds = await getUserSiteIds(session.user.id, session.user.role);
+  const where = siteIds !== null ? { id: { in: siteIds } } : {};
+
   const sites = await prisma.site.findMany({
+    where,
     orderBy: { createdAt: "desc" },
     include: {
       createdBy: {
@@ -34,7 +40,7 @@ export async function POST(request: NextRequest) {
   }
 
   const body = await request.json();
-  const { name, description, location, address, postcode } = body;
+  const { name, description, location, address, postcode, assignedToId } = body;
 
   if (!name || typeof name !== "string" || name.trim().length === 0) {
     return NextResponse.json(
@@ -51,6 +57,7 @@ export async function POST(request: NextRequest) {
       address: address?.trim() || null,
       postcode: postcode?.trim() || null,
       createdById: session.user.id,
+      ...(assignedToId ? { assignedToId } : {}),
     },
     include: {
       createdBy: {

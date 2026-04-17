@@ -30,5 +30,16 @@ export async function DELETE(
 
   await prisma.siteDocument.delete({ where: { id } });
 
+  await prisma.eventLog.create({
+    data: {
+      type: "USER_ACTION",
+      description: `Document "${doc.name}" deleted`,
+      siteId: doc.siteId,
+      plotId: doc.plotId,
+      jobId: doc.jobId,
+      userId: session.user.id,
+    },
+  });
+
   return NextResponse.json({ success: true });
 }

@@ -18,7 +18,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "orderIds required" }, { status: 400 });
   }
 
-  const validStatuses = ["ORDERED", "CONFIRMED", "DELIVERED", "CANCELLED"];
+  const validStatuses = ["ORDERED", "DELIVERED", "CANCELLED"];
   if (!status || !validStatuses.includes(status)) {
     return NextResponse.json(
       { error: `status must be one of: ${validStatuses.join(", ")}` },
@@ -42,8 +42,17 @@ export async function POST(req: NextRequest) {
 
       if (!existing) continue;
 
+      // Block invalid PENDING → DELIVERED direct transition (must go via ORDERED)
+      if (existing.status === "PENDING" && status === "DELIVERED") continue;
+      // Skip no-op transitions
+      if (existing.status === status) continue;
+
       const data: Record<string, unknown> = { status };
 
+      // Auto-set dateOfOrder when marking as ORDERED
+      if (status === "ORDERED" && !existing.dateOfOrder) {
+        data.dateOfOrder = now;
+      }
       // Auto-set deliveredDate when marking as DELIVERED
       if (status === "DELIVERED" && existing.status !== "DELIVERED") {
         data.deliveredDate = now;
@@ -66,7 +75,7 @@ export async function POST(req: NextRequest) {
         await prisma.eventLog.create({
           data: {
             type: eventType,
-            description: `Order for ${existing.supplier.name} — ${existing.job.name} status changed to ${status} (bulk)`,
+            description: `[${existing.supplier.name}] Order for ${existing.job.name} status changed to ${status} (bulk)`,
             siteId: existing.job.plot.siteId,
             plotId: existing.job.plotId,
             jobId: existing.jobId,

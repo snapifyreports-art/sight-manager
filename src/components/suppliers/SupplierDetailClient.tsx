@@ -19,7 +19,7 @@ import {
   X,
   Loader2,
 } from "lucide-react";
-import Link from "next/link";
+
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -262,11 +262,9 @@ export function SupplierDetailClient({ supplier: initial }: { supplier: Supplier
     <div className="space-y-4">
       {/* Header */}
       <div className="flex items-center gap-3">
-        <Link href="/suppliers">
-          <Button variant="ghost" size="icon" className="size-8">
-            <ArrowLeft className="size-4" />
-          </Button>
-        </Link>
+        <Button variant="ghost" size="icon" className="size-8" onClick={() => router.back()}>
+          <ArrowLeft className="size-4" />
+        </Button>
         <div className="flex-1">
           <div className="flex items-center gap-2">
             <h1 className="text-xl font-bold">{supplier.name}</h1>

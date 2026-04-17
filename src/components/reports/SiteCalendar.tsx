@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import {
   format,
   startOfMonth,
@@ -23,6 +23,11 @@ import {
   Package,
   CloudRain,
   Thermometer,
+  CheckCircle2,
+  PlayCircle,
+  Mail,
+  FileCheck,
+  Truck,
 } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -44,6 +49,7 @@ interface CalendarJob {
   startDate: string | null;
   endDate: string | null;
   weatherAffected: boolean;
+  signedOff: boolean;
   plot: { plotNumber: string | null; name: string };
   assignee: string | null;
 }
@@ -55,6 +61,17 @@ interface CalendarDelivery {
   expectedDate: string | null;
   deliveredDate: string | null;
   supplier: string;
+  supplierEmail: string | null;
+  job: string;
+  plot: { plotNumber: string | null; name: string };
+}
+
+interface CalendarOrder {
+  id: string;
+  items: string | null;
+  dateOfOrder: string;
+  supplier: string;
+  supplierEmail: string | null;
   job: string;
   plot: { plotNumber: string | null; name: string };
 }
@@ -63,6 +80,7 @@ interface CalendarData {
   month: string;
   jobs: CalendarJob[];
   deliveries: CalendarDelivery[];
+  ordersToPlace: CalendarOrder[];
   rainedOffDays: Array<{ date: string; note: string | null; type: string }>;
 }
 
@@ -70,6 +88,7 @@ interface DayEvents {
   jobsStarting: CalendarJob[];
   jobsEnding: CalendarJob[];
   deliveries: CalendarDelivery[];
+  ordersToPlace: CalendarOrder[];
   isRainedOff: boolean;
   rainNote: string | null;
   weatherType: "RAIN" | "TEMPERATURE" | "BOTH" | null;
@@ -110,6 +129,7 @@ export function SiteCalendar({ siteId }: SiteCalendarProps) {
           jobsStarting: [],
           jobsEnding: [],
           deliveries: [],
+          ordersToPlace: [],
           isRainedOff: false,
           rainNote: null,
           weatherType: null,
@@ -135,6 +155,11 @@ export function SiteCalendar({ siteId }: SiteCalendarProps) {
         const key = dateStr.slice(0, 10);
         getOrCreate(key).deliveries.push(del);
       }
+    }
+
+    for (const order of data.ordersToPlace) {
+      const key = order.dateOfOrder.slice(0, 10);
+      getOrCreate(key).ordersToPlace.push(order);
     }
 
     for (const rain of data.rainedOffDays) {
@@ -168,6 +193,44 @@ export function SiteCalendar({ siteId }: SiteCalendarProps) {
 
   const selectedKey = selectedDay ? format(selectedDay, "yyyy-MM-dd") : null;
   const selectedEvents = selectedKey ? dayEventsMap.get(selectedKey) : null;
+
+  // Action loading state
+  const [pendingActions, setPendingActions] = useState<Set<string>>(new Set());
+
+  const refreshData = useCallback(() => {
+    const monthStr = format(currentMonth, "yyyy-MM");
+    fetch(`/api/sites/${siteId}/calendar?month=${monthStr}`)
+      .then((r) => r.json())
+      .then(setData);
+  }, [siteId, currentMonth]);
+
+  const handleJobAction = useCallback(async (jobId: string, action: "start" | "complete" | "signoff") => {
+    setPendingActions((prev) => new Set(prev).add(jobId));
+    try {
+      const res = await fetch(`/api/jobs/${jobId}/actions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action }),
+      });
+      if (res.ok) refreshData();
+    } finally {
+      setPendingActions((prev) => { const n = new Set(prev); n.delete(jobId); return n; });
+    }
+  }, [refreshData]);
+
+  const handleOrderAction = useCallback(async (orderId: string, status: string) => {
+    setPendingActions((prev) => new Set(prev).add(orderId));
+    try {
+      const res = await fetch(`/api/orders/${orderId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+      if (res.ok) refreshData();
+    } finally {
+      setPendingActions((prev) => { const n = new Set(prev); n.delete(orderId); return n; });
+    }
+  }, [refreshData]);
 
   if (loading && !data) {
     return (
@@ -338,104 +401,294 @@ export function SiteCalendar({ siteId }: SiteCalendarProps) {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            {(!selectedEvents ||
-              (selectedEvents.jobsStarting.length === 0 &&
-                selectedEvents.jobsEnding.length === 0 &&
-                selectedEvents.deliveries.length === 0)) ? (
-              <p className="text-sm text-muted-foreground">
-                No events scheduled
-              </p>
-            ) : (
-              <div className="space-y-3">
-                {selectedEvents.jobsStarting.length > 0 && (
-                  <div>
-                    <h5 className="mb-1 flex items-center gap-1 text-xs font-semibold text-green-700">
-                      <Briefcase className="size-3" />
-                      Jobs Starting ({selectedEvents.jobsStarting.length})
-                    </h5>
-                    <div className="space-y-1">
-                      {selectedEvents.jobsStarting.map((j) => (
-                        <div
-                          key={j.id}
-                          className="flex items-center justify-between rounded border px-2 py-1.5 text-sm"
-                        >
-                          <div>
-                            <Link href={`/jobs/${j.id}`} className="font-medium text-blue-600 hover:underline">{j.name}</Link>
-                            <span className="ml-2 text-xs text-muted-foreground">
-                              {j.plot.plotNumber ? `Plot ${j.plot.plotNumber}` : j.plot.name}
-                            </span>
-                          </div>
-                          <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${STATUS_COLORS[j.status] || ""}`}>
-                            {j.status.replace("_", " ")}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
+            {(() => {
+              // Derived lists for this day
+              const ordersToPlace = selectedEvents?.ordersToPlace ?? [];
+              const signOffsNeeded = (selectedEvents?.jobsEnding ?? []).filter(
+                (j) => j.status === "COMPLETED" && !j.signedOff
+              );
+              const deliveriesExpected = (selectedEvents?.deliveries ?? []).filter(
+                (d) => d.status === "ORDERED"
+              );
+              const jobsStartingNotStarted = (selectedEvents?.jobsStarting ?? []).filter(
+                (j) => j.status === "NOT_STARTED"
+              );
 
-                {selectedEvents.jobsEnding.length > 0 && (
-                  <div>
-                    <h5 className="mb-1 flex items-center gap-1 text-xs font-semibold text-orange-700">
-                      <Briefcase className="size-3" />
-                      Jobs Due ({selectedEvents.jobsEnding.length})
-                    </h5>
-                    <div className="space-y-1">
-                      {selectedEvents.jobsEnding.map((j) => (
-                        <div
-                          key={j.id}
-                          className="flex items-center justify-between rounded border px-2 py-1.5 text-sm"
-                        >
-                          <div>
-                            <Link href={`/jobs/${j.id}`} className="font-medium text-blue-600 hover:underline">{j.name}</Link>
-                            <span className="ml-2 text-xs text-muted-foreground">
-                              {j.plot.plotNumber ? `Plot ${j.plot.plotNumber}` : j.plot.name}
-                              {j.assignee && ` · ${j.assignee}`}
-                            </span>
-                          </div>
-                          <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${STATUS_COLORS[j.status] || ""}`}>
-                            {j.status.replace("_", " ")}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
+              const hasAnything =
+                ordersToPlace.length > 0 ||
+                signOffsNeeded.length > 0 ||
+                deliveriesExpected.length > 0 ||
+                jobsStartingNotStarted.length > 0 ||
+                (selectedEvents &&
+                  (selectedEvents.jobsStarting.length > 0 ||
+                    selectedEvents.jobsEnding.length > 0 ||
+                    selectedEvents.deliveries.length > 0));
 
-                {selectedEvents.deliveries.length > 0 && (
-                  <div>
-                    <h5 className="mb-1 flex items-center gap-1 text-xs font-semibold text-purple-700">
-                      <Package className="size-3" />
-                      Deliveries ({selectedEvents.deliveries.length})
-                    </h5>
-                    <div className="space-y-1">
-                      {selectedEvents.deliveries.map((d) => (
-                        <div
-                          key={d.id}
-                          className="flex items-center justify-between rounded border px-2 py-1.5 text-sm"
-                        >
-                          <div>
-                            <span className="font-medium">{d.supplier}</span>
-                            <span className="ml-2 text-xs text-muted-foreground">
-                              {d.items || d.job} · {d.plot.plotNumber ? `Plot ${d.plot.plotNumber}` : d.plot.name}
+              if (!hasAnything) {
+                return (
+                  <p className="text-sm text-muted-foreground">
+                    No events scheduled
+                  </p>
+                );
+              }
+
+              return (
+                <div className="space-y-4">
+                  {/* Orders to place */}
+                  {ordersToPlace.length > 0 && (
+                    <div>
+                      <h5 className="mb-1 flex items-center gap-1 text-xs font-semibold text-violet-700">
+                        <Package className="size-3" />
+                        Orders to Place ({ordersToPlace.length})
+                      </h5>
+                      <div className="space-y-1">
+                        {ordersToPlace.map((o) => (
+                          <div
+                            key={o.id}
+                            className="flex items-center justify-between rounded border border-violet-100 bg-violet-50/30 px-2 py-1.5 text-sm"
+                          >
+                            <div className="min-w-0 flex-1">
+                              <span className="font-medium">{o.supplier}</span>
+                              <span className="ml-2 text-xs text-muted-foreground">
+                                {o.items || o.job} · {o.plot.plotNumber ? `Plot ${o.plot.plotNumber}` : o.plot.name}
+                              </span>
+                            </div>
+                            <div className="ml-2 flex shrink-0 items-center gap-1">
+                              {pendingActions.has(o.id) ? (
+                                <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
+                              ) : (
+                                <>
+                                  {o.supplierEmail && (
+                                    <a
+                                      href={`mailto:${o.supplierEmail}?subject=${encodeURIComponent(`Order — ${o.items || o.job}`)}`}
+                                      onClick={() => handleOrderAction(o.id, "ORDERED")}
+                                      className="inline-flex items-center gap-0.5 rounded border border-violet-200 bg-white px-1.5 py-0.5 text-[10px] font-medium text-violet-700 hover:bg-violet-50"
+                                    >
+                                      <Mail className="size-2.5" /> Send
+                                    </a>
+                                  )}
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-6 gap-0.5 border-blue-200 px-1.5 text-[10px] text-blue-700 hover:bg-blue-50"
+                                    onClick={() => handleOrderAction(o.id, "ORDERED")}
+                                  >
+                                    <Package className="size-2.5" /> Mark Sent
+                                  </Button>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Sign-offs needed */}
+                  {signOffsNeeded.length > 0 && (
+                    <div>
+                      <h5 className="mb-1 flex items-center gap-1 text-xs font-semibold text-amber-700">
+                        <FileCheck className="size-3" />
+                        Sign-offs Needed ({signOffsNeeded.length})
+                      </h5>
+                      <div className="space-y-1">
+                        {signOffsNeeded.map((j) => (
+                          <div
+                            key={`so-${j.id}`}
+                            className="flex items-center justify-between rounded border border-amber-100 bg-amber-50/30 px-2 py-1.5 text-sm"
+                          >
+                            <div className="min-w-0 flex-1">
+                              <Link href={`/jobs/${j.id}`} className="font-medium text-blue-600 hover:underline">{j.name}</Link>
+                              <span className="ml-2 text-xs text-muted-foreground">
+                                {j.plot.plotNumber ? `Plot ${j.plot.plotNumber}` : j.plot.name}
+                              </span>
+                            </div>
+                            <div className="ml-2 shrink-0">
+                              {pendingActions.has(j.id) ? (
+                                <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
+                              ) : (
+                                <Button
+                                  size="sm"
+                                  className="h-6 gap-0.5 bg-amber-600 px-2 text-[10px] text-white hover:bg-amber-700"
+                                  onClick={() => handleJobAction(j.id, "signoff")}
+                                >
+                                  <FileCheck className="size-2.5" /> Sign Off
+                                </Button>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Deliveries expected */}
+                  {deliveriesExpected.length > 0 && (
+                    <div>
+                      <h5 className="mb-1 flex items-center gap-1 text-xs font-semibold text-purple-700">
+                        <Truck className="size-3" />
+                        Deliveries Expected ({deliveriesExpected.length})
+                      </h5>
+                      <div className="space-y-1">
+                        {deliveriesExpected.map((d) => (
+                          <div
+                            key={`de-${d.id}`}
+                            className="flex items-center justify-between rounded border border-purple-100 bg-purple-50/30 px-2 py-1.5 text-sm"
+                          >
+                            <div className="min-w-0 flex-1">
+                              <span className="font-medium">{d.supplier}</span>
+                              <span className="ml-2 text-xs text-muted-foreground">
+                                {d.items || d.job} · {d.plot.plotNumber ? `Plot ${d.plot.plotNumber}` : d.plot.name}
+                              </span>
+                            </div>
+                            <div className="ml-2 shrink-0">
+                              {pendingActions.has(d.id) ? (
+                                <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
+                              ) : (
+                                <Button
+                                  size="sm"
+                                  className="h-6 gap-0.5 bg-purple-600 px-2 text-[10px] text-white hover:bg-purple-700"
+                                  onClick={() => handleOrderAction(d.id, "DELIVERED")}
+                                >
+                                  <CheckCircle2 className="size-2.5" /> Mark Received
+                                </Button>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Jobs starting (NOT_STARTED with start button) */}
+                  {jobsStartingNotStarted.length > 0 && (
+                    <div>
+                      <h5 className="mb-1 flex items-center gap-1 text-xs font-semibold text-green-700">
+                        <PlayCircle className="size-3" />
+                        Jobs Starting ({jobsStartingNotStarted.length})
+                      </h5>
+                      <div className="space-y-1">
+                        {jobsStartingNotStarted.map((j) => (
+                          <div
+                            key={`js-${j.id}`}
+                            className="flex items-center justify-between rounded border border-green-100 bg-green-50/30 px-2 py-1.5 text-sm"
+                          >
+                            <div className="min-w-0 flex-1">
+                              <Link href={`/jobs/${j.id}`} className="font-medium text-blue-600 hover:underline">{j.name}</Link>
+                              <span className="ml-2 text-xs text-muted-foreground">
+                                {j.plot.plotNumber ? `Plot ${j.plot.plotNumber}` : j.plot.name}
+                              </span>
+                            </div>
+                            <div className="ml-2 shrink-0">
+                              {pendingActions.has(j.id) ? (
+                                <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
+                              ) : (
+                                <Button
+                                  size="sm"
+                                  className="h-6 gap-0.5 bg-green-600 px-2 text-[10px] text-white hover:bg-green-700"
+                                  onClick={() => handleJobAction(j.id, "start")}
+                                >
+                                  <PlayCircle className="size-2.5" /> Start
+                                </Button>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* All jobs starting (full list, info only for already-started) */}
+                  {selectedEvents!.jobsStarting.filter((j) => j.status !== "NOT_STARTED").length > 0 && (
+                    <div>
+                      <h5 className="mb-1 flex items-center gap-1 text-xs font-semibold text-green-700">
+                        <Briefcase className="size-3" />
+                        Jobs Starting — In Progress ({selectedEvents!.jobsStarting.filter((j) => j.status !== "NOT_STARTED").length})
+                      </h5>
+                      <div className="space-y-1">
+                        {selectedEvents!.jobsStarting.filter((j) => j.status !== "NOT_STARTED").map((j) => (
+                          <div
+                            key={j.id}
+                            className="flex items-center justify-between rounded border px-2 py-1.5 text-sm"
+                          >
+                            <div>
+                              <Link href={`/jobs/${j.id}`} className="font-medium text-blue-600 hover:underline">{j.name}</Link>
+                              <span className="ml-2 text-xs text-muted-foreground">
+                                {j.plot.plotNumber ? `Plot ${j.plot.plotNumber}` : j.plot.name}
+                              </span>
+                            </div>
+                            <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${STATUS_COLORS[j.status] || ""}`}>
+                              {j.status.replace("_", " ")}
                             </span>
                           </div>
-                          <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
-                            d.status === "DELIVERED"
-                              ? "bg-green-100 text-green-700"
-                              : d.status === "CONFIRMED"
-                                ? "bg-blue-100 text-blue-700"
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Jobs due (non-signoff ones) */}
+                  {selectedEvents!.jobsEnding.filter((j) => !(j.status === "COMPLETED" && !j.signedOff)).length > 0 && (
+                    <div>
+                      <h5 className="mb-1 flex items-center gap-1 text-xs font-semibold text-orange-700">
+                        <Briefcase className="size-3" />
+                        Jobs Due ({selectedEvents!.jobsEnding.filter((j) => !(j.status === "COMPLETED" && !j.signedOff)).length})
+                      </h5>
+                      <div className="space-y-1">
+                        {selectedEvents!.jobsEnding.filter((j) => !(j.status === "COMPLETED" && !j.signedOff)).map((j) => (
+                          <div
+                            key={j.id}
+                            className="flex items-center justify-between rounded border px-2 py-1.5 text-sm"
+                          >
+                            <div>
+                              <Link href={`/jobs/${j.id}`} className="font-medium text-blue-600 hover:underline">{j.name}</Link>
+                              <span className="ml-2 text-xs text-muted-foreground">
+                                {j.plot.plotNumber ? `Plot ${j.plot.plotNumber}` : j.plot.name}
+                                {j.assignee && ` · ${j.assignee}`}
+                              </span>
+                            </div>
+                            <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${STATUS_COLORS[j.status] || ""}`}>
+                              {j.status.replace("_", " ")}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Non-ORDERED deliveries (already delivered, etc) */}
+                  {selectedEvents!.deliveries.filter((d) => d.status !== "ORDERED").length > 0 && (
+                    <div>
+                      <h5 className="mb-1 flex items-center gap-1 text-xs font-semibold text-purple-700">
+                        <Package className="size-3" />
+                        Other Deliveries ({selectedEvents!.deliveries.filter((d) => d.status !== "ORDERED").length})
+                      </h5>
+                      <div className="space-y-1">
+                        {selectedEvents!.deliveries.filter((d) => d.status !== "ORDERED").map((d) => (
+                          <div
+                            key={d.id}
+                            className="flex items-center justify-between rounded border px-2 py-1.5 text-sm"
+                          >
+                            <div>
+                              <span className="font-medium">{d.supplier}</span>
+                              <span className="ml-2 text-xs text-muted-foreground">
+                                {d.items || d.job} · {d.plot.plotNumber ? `Plot ${d.plot.plotNumber}` : d.plot.name}
+                              </span>
+                            </div>
+                            <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                              d.status === "DELIVERED"
+                                ? "bg-green-100 text-green-700"
                                 : "bg-slate-100 text-slate-600"
-                          }`}>
-                            {d.status}
-                          </span>
-                        </div>
-                      ))}
+                            }`}>
+                              {d.status}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                )}
-              </div>
-            )}
+                  )}
+                </div>
+              );
+            })()}
           </CardContent>
         </Card>
       )}

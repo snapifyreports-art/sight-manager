@@ -42,10 +42,10 @@ export function GanttOrderFlag({
 
   const left = getPositionForDate(date, timelineStart, DAY_WIDTH);
 
-  // Position flags above the bar area
+  // Position flags above the bar
   const barHeight = 28;
-  const barTop = (ROW_HEIGHT - barHeight) / 2 + 4;
-  const flagTop = barTop - 18;
+  const barTop = (ROW_HEIGHT - barHeight) / 2 + 4; // = 18
+  const flagTop = 0; // flush with top of row
 
   const isOrderType = type === "order";
 
@@ -59,9 +59,9 @@ export function GanttOrderFlag({
 
   return (
     <div
-      className="absolute z-20"
+      className="absolute z-30"
       style={{
-        left: `${left - 8}px`,
+        left: `${left - 10}px`,
         top: `${flagTop}px`,
       }}
       onMouseEnter={() => setShowTooltip(true)}
@@ -71,28 +71,29 @@ export function GanttOrderFlag({
       {/* Flag icon */}
       {isOrderType ? (
         // Purple diamond for order placed
-        <div className="relative w-4 h-4 flex items-center justify-center cursor-pointer">
-          <div className="absolute w-3 h-3 bg-purple-500 rotate-45 rounded-sm" />
-          <span className="relative text-[8px] font-bold text-white leading-none">
+        <div className="relative w-5 h-5 flex items-center justify-center cursor-pointer drop-shadow-sm">
+          <div className="absolute w-4 h-4 bg-purple-500 rotate-45 rounded-sm ring-1 ring-purple-700/30" />
+          <span className="relative text-[9px] font-bold text-white leading-none">
             O
           </span>
         </div>
       ) : (
         // Teal triangle for expected delivery
-        <div className="relative w-4 h-4 flex items-center justify-center cursor-pointer">
+        <div className="relative w-5 h-5 flex items-center justify-center cursor-pointer drop-shadow-sm">
           <svg
-            width="14"
-            height="14"
-            viewBox="0 0 14 14"
+            width="18"
+            height="18"
+            viewBox="0 0 18 18"
             className="absolute"
           >
-            <polygon points="7,1 13,13 1,13" fill="#0d9488" />
+            <polygon points="9,1 17,17 1,17" fill="#0d9488" stroke="#115e59" strokeWidth="0.5" />
           </svg>
-          <span className="relative text-[8px] font-bold text-white leading-none mt-0.5">
+          <span className="relative text-[9px] font-bold text-white leading-none mt-1">
             D
           </span>
         </div>
       )}
+
 
       {/* Tooltip */}
       {showTooltip && (

@@ -55,7 +55,7 @@ export async function GET(
                 {
                   deliveredDate: null,
                   expectedDeliveryDate: { lt: today },
-                  status: { in: ["ORDERED", "CONFIRMED"] },
+                  status: "ORDERED",
                 },
               ],
             },
@@ -91,7 +91,7 @@ export async function GET(
         where: {
           job: { plot: { siteId: id } },
           expectedDeliveryDate: { lt: today },
-          status: { in: ["ORDERED", "CONFIRMED"] },
+          status: "ORDERED",
           deliveredDate: null,
         },
         select: {

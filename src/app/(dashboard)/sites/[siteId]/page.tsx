@@ -38,6 +38,9 @@ export default async function SiteDetailPage({
       createdBy: {
         select: { id: true, name: true, email: true },
       },
+      assignedTo: {
+        select: { id: true, name: true },
+      },
       plots: {
         orderBy: [{ plotNumber: "asc" }, { createdAt: "asc" }],
         include: {
@@ -76,6 +79,7 @@ export default async function SiteDetailPage({
     createdAt: site.createdAt.toISOString(),
     updatedAt: site.updatedAt.toISOString(),
     createdBy: site.createdBy,
+    assignedTo: site.assignedTo ?? null,
     _count: site._count,
     plots: site.plots.sort((a, b) => {
       const numA = parseInt(a.plotNumber ?? "", 10);

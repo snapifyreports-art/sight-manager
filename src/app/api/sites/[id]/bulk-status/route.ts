@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { sendPushToUser } from "@/lib/push";
 import { getServerCurrentDate } from "@/lib/dev-date";
+import { sessionHasPermission } from "@/lib/permissions";
 import type { JobStatus } from "@prisma/client";
 
 export const dynamic = "force-dynamic";
@@ -34,6 +36,11 @@ export async function POST(
     );
   }
 
+  // Permission check for complete/signoff actions
+  if (action === "complete" && !sessionHasPermission(session.user as { role?: string; permissions?: string[] }, "SIGN_OFF_JOBS")) {
+    return NextResponse.json({ error: "You do not have permission to complete jobs" }, { status: 403 });
+  }
+
   const newStatus = ACTION_STATUS_MAP[action];
   const now = getServerCurrentDate(req);
   const results: Array<{ jobId: string; jobName: string; newStatus: string }> = [];
@@ -47,6 +54,12 @@ export async function POST(
       });
 
       if (!job || job.plot.siteId !== siteId) continue;
+
+      // Idempotency: skip jobs already in the target state
+      if (action === "start" && job.status === "IN_PROGRESS") continue;
+      if (action === "complete" && job.status === "COMPLETED") continue;
+      // Prevent completing a job that was never started (matches /api/jobs/[id]/actions)
+      if (action === "complete" && job.status === "NOT_STARTED") continue;
 
       // Build update data
       const updateData: Record<string, unknown> = { status: newStatus };
@@ -66,7 +79,7 @@ export async function POST(
         data: updateData,
       });
 
-      // Progress orders: start → ORDERED, complete → DELIVERED
+      // Progress orders: start → ORDERED; complete+signoff → DELIVERED
       if (action === "start") {
         await prisma.materialOrder.updateMany({
           where: { jobId, status: "PENDING" },
@@ -74,8 +87,10 @@ export async function POST(
         });
       }
       if (action === "complete") {
+        // Bulk-status "complete" performs sign-off in one step (sets signedOffAt above),
+        // so remaining ORDERED orders are confirmed as delivered — mirrors signoff in /api/jobs/[id]/actions
         await prisma.materialOrder.updateMany({
-          where: { jobId, status: { in: ["ORDERED", "CONFIRMED"] } },
+          where: { jobId, status: "ORDERED" },
           data: { status: "DELIVERED", deliveredDate: now },
         });
       }
@@ -101,6 +116,53 @@ export async function POST(
           userId: session.user.id,
         },
       });
+
+      // Recalculate plot buildCompletePercent — mirrors /api/jobs/[id]/actions
+      const plotJobs = await prisma.job.findMany({
+        where: { plotId: job.plotId },
+        select: { status: true },
+      });
+      const total = plotJobs.length;
+      const completed = plotJobs.filter((j) => j.status === "COMPLETED").length;
+      const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
+      await prisma.plot.update({
+        where: { id: job.plotId },
+        data: { buildCompletePercent: pct },
+      });
+
+      // Fire-and-forget push notifications — mirrors /api/jobs/[id]/actions
+      if (action === "start" && job.assignedToId && job.assignedToId !== session.user.id) {
+        sendPushToUser(job.assignedToId, "JOBS_STARTING_TODAY", {
+          title: "Job Started",
+          body: `"${job.name}" has been started (bulk)`,
+          url: `/jobs/${jobId}`,
+          tag: `job-started-${jobId}`,
+        }).catch(() => {});
+      }
+      if (action === "complete") {
+        // Notify next-stage assignee that predecessor is done
+        const allPlotJobs = await prisma.job.findMany({
+          where: { plotId: job.plotId },
+          orderBy: { sortOrder: "asc" },
+          select: { id: true, name: true, sortOrder: true, assignedToId: true },
+        });
+        const nextSortOrder = allPlotJobs
+          .filter((j) => j.sortOrder > job.sortOrder)
+          .reduce((min, j) => (j.sortOrder < min ? j.sortOrder : min), Infinity);
+        if (nextSortOrder !== Infinity) {
+          const nextJobs = allPlotJobs.filter((j) => j.sortOrder === nextSortOrder);
+          for (const nj of nextJobs) {
+            if (nj.assignedToId) {
+              sendPushToUser(nj.assignedToId, "NEXT_STAGE_READY", {
+                title: "Next Stage Ready",
+                body: `"${job.name}" is complete — "${nj.name}" can begin`,
+                url: `/jobs/${nj.id}`,
+                tag: `next-stage-${nj.id}`,
+              }).catch(() => {});
+            }
+          }
+        }
+      }
 
       // Auto-reorder on start (simplified — trigger template orders)
       if (action === "start" && job.stageCode) {

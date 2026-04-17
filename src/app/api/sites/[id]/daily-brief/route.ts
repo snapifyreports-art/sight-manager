@@ -27,19 +27,27 @@ export async function GET(
   const [site, jobsStartingToday, jobsDueToday] = await Promise.all([
     prisma.site.findUnique({
       where: { id },
-      select: { id: true, name: true, location: true, postcode: true, status: true },
+      select: { id: true, name: true, location: true, address: true, postcode: true, status: true },
     }),
     prisma.job.findMany({
       where: {
         plot: { siteId: id },
         startDate: { gte: dayStart, lte: dayEnd },
+        status: { in: ["NOT_STARTED", "IN_PROGRESS"] },
       },
       select: {
-        id: true, name: true, status: true,
+        id: true, name: true, status: true, sortOrder: true, plotId: true,
         plot: { select: { plotNumber: true, name: true } },
         assignedTo: { select: { name: true } },
         contractors: {
           include: { contact: { select: { name: true, company: true } } },
+        },
+        orders: {
+          where: { status: { not: "CANCELLED" } },
+          select: {
+            id: true, status: true, itemsDescription: true,
+            supplier: { select: { id: true, name: true, contactEmail: true } },
+          },
         },
       },
     }),
@@ -50,9 +58,18 @@ export async function GET(
         status: { not: "COMPLETED" },
       },
       select: {
-        id: true, name: true, status: true,
+        id: true, name: true, status: true, plotId: true,
         plot: { select: { plotNumber: true, name: true } },
         assignedTo: { select: { name: true } },
+        contractors: {
+          select: { contactId: true, contact: { select: { name: true, company: true } } },
+          orderBy: { createdAt: "asc" as const },
+          take: 1,
+        },
+        orders: {
+          where: { status: { not: "CANCELLED" } },
+          select: { id: true, status: true },
+        },
       },
     }),
   ]);
@@ -67,7 +84,7 @@ export async function GET(
     : Promise.resolve(null);
 
   // Batch 2
-  const [overdueJobs, lateStartJobs, activeJobs, deliveriesToday] = await Promise.all([
+  const [overdueJobs, lateStartJobs, delayedJobs, activeJobs, deliveriesToday] = await Promise.all([
     prisma.job.findMany({
       where: {
         plot: { siteId: id },
@@ -75,7 +92,7 @@ export async function GET(
         status: { not: "COMPLETED" },
       },
       select: {
-        id: true, name: true, status: true, endDate: true,
+        id: true, name: true, status: true, endDate: true, plotId: true,
         plot: { select: { plotNumber: true, name: true } },
         assignedTo: { select: { name: true } },
       },
@@ -97,19 +114,45 @@ export async function GET(
       },
       orderBy: { startDate: "asc" },
     }),
+    // Delayed jobs: NOT_STARTED, originally due before today, pushed to future
+    prisma.job.findMany({
+      where: {
+        plot: { siteId: id },
+        status: "NOT_STARTED",
+        originalStartDate: { lt: dayStart },
+        startDate: { gt: dayEnd },
+      },
+      select: {
+        id: true, name: true, startDate: true, endDate: true, originalStartDate: true, plotId: true,
+        plot: { select: { plotNumber: true, name: true } },
+        assignedTo: { select: { name: true } },
+        contractors: {
+          select: { contact: { select: { name: true, company: true } } },
+          orderBy: { createdAt: "asc" as const },
+          take: 1,
+        },
+      },
+      orderBy: { startDate: "asc" },
+      take: 20,
+    }),
     prisma.job.findMany({
       where: { plot: { siteId: id }, status: "IN_PROGRESS" },
       select: {
-        id: true, name: true, endDate: true,
+        id: true, name: true, endDate: true, plotId: true,
         plot: { select: { plotNumber: true, name: true } },
         assignedTo: { select: { name: true } },
+        contractors: {
+          select: { contactId: true, contact: { select: { name: true, company: true } } },
+          orderBy: { createdAt: "asc" as const },
+          take: 1,
+        },
       },
     }),
     prisma.materialOrder.findMany({
       where: {
         job: { plot: { siteId: id } },
         expectedDeliveryDate: { gte: dayStart, lte: dayEnd },
-        status: { in: ["ORDERED", "CONFIRMED"] },
+        status: "ORDERED",
       },
       select: {
         id: true, itemsDescription: true, status: true,
@@ -164,12 +207,12 @@ export async function GET(
   const tomorrowStart = startOfDay(addDays(targetDate, 1));
   const tomorrowEnd = endOfDay(addDays(targetDate, 1));
 
-  const [overdueDeliveries, openSnags, openSnagsList, incompleteSnags, rainedOff, outstandingOrders, upcomingOrders, jobsStartingTomorrow, unassignedJobs, unassignedInternalJobs, unsignedCompletions] = await Promise.all([
+  const [overdueDeliveries, openSnags, openSnagsList, incompleteSnags, rainedOff, outstandingOrders, upcomingOrders, upcomingDeliveries, jobsStartingTomorrow, unassignedJobs, unassignedInternalJobs, unsignedCompletions, awaitingSignOff] = await Promise.all([
     prisma.materialOrder.findMany({
       where: {
         job: { plot: { siteId: id } },
         expectedDeliveryDate: { lt: dayStart },
-        status: { in: ["ORDERED", "CONFIRMED"] },
+        status: "ORDERED",
       },
       select: {
         id: true, itemsDescription: true, expectedDeliveryDate: true,
@@ -228,9 +271,10 @@ export async function GET(
         dateOfOrder: { lte: dayEnd },
       },
       select: {
-        id: true, itemsDescription: true, status: true, expectedDeliveryDate: true,
-        supplier: { select: { id: true, name: true, contactEmail: true, contactName: true } },
+        id: true, itemsDescription: true, status: true, expectedDeliveryDate: true, dateOfOrder: true,
+        supplier: { select: { id: true, name: true, contactEmail: true, contactName: true, accountNumber: true } },
         job: { select: { id: true, name: true, plot: { select: { plotNumber: true, name: true } } } },
+        orderItems: { select: { id: true, name: true, quantity: true, unit: true, unitCost: true, totalCost: true } },
       },
       orderBy: { dateOfOrder: "asc" },
       take: 30,
@@ -243,12 +287,29 @@ export async function GET(
         dateOfOrder: { gt: dayEnd },
       },
       select: {
-        id: true, itemsDescription: true, status: true, expectedDeliveryDate: true,
-        supplier: { select: { id: true, name: true, contactEmail: true, contactName: true } },
+        id: true, itemsDescription: true, status: true, expectedDeliveryDate: true, dateOfOrder: true,
+        supplier: { select: { id: true, name: true, contactEmail: true, contactName: true, accountNumber: true } },
         job: { select: { id: true, name: true, plot: { select: { plotNumber: true, name: true } } } },
+        orderItems: { select: { id: true, name: true, quantity: true, unit: true, unitCost: true, totalCost: true } },
       },
       orderBy: { dateOfOrder: "asc" },
       take: 20,
+    }),
+    // Upcoming Deliveries: orders already SENT (ORDERED), delivery date in the future
+    prisma.materialOrder.findMany({
+      where: {
+        job: { plot: { siteId: id } },
+        status: "ORDERED",
+        expectedDeliveryDate: { gt: dayEnd },
+        deliveredDate: null,
+      },
+      select: {
+        id: true, itemsDescription: true, status: true, expectedDeliveryDate: true, dateOfOrder: true,
+        supplier: { select: { id: true, name: true } },
+        job: { select: { id: true, name: true, plot: { select: { plotNumber: true, name: true } } } },
+      },
+      orderBy: { expectedDeliveryDate: "asc" },
+      take: 30,
     }),
     prisma.job.findMany({
       where: {
@@ -304,6 +365,26 @@ export async function GET(
         plot: { select: { plotNumber: true, name: true, siteId: true } },
         _count: { select: { photos: true } },
       },
+      take: 20,
+    }),
+    // Jobs completed but NOT signed off
+    prisma.job.findMany({
+      where: {
+        plot: { siteId: id },
+        status: "COMPLETED",
+        signedOffAt: null,
+      },
+      select: {
+        id: true, name: true, status: true, actualEndDate: true, plotId: true,
+        plot: { select: { plotNumber: true, name: true } },
+        assignedTo: { select: { name: true } },
+        contractors: {
+          select: { contactId: true, contact: { select: { name: true, company: true } } },
+          orderBy: { createdAt: "asc" as const },
+          take: 1,
+        },
+      },
+      orderBy: { actualEndDate: "asc" },
       take: 20,
     }),
   ]);
@@ -433,48 +514,100 @@ export async function GET(
         },
       },
     }),
+    // Inactive plots: plots with NO in-progress jobs (need attention)
     prisma.plot.findMany({
-      where: { siteId: id, awaitingRestart: true },
+      where: {
+        siteId: id,
+        jobs: { none: { status: "IN_PROGRESS" } },
+        // Exclude fully completed plots
+        NOT: { jobs: { every: { status: "COMPLETED" } } },
+      },
       select: {
         id: true,
         plotNumber: true,
         name: true,
+        houseType: true,
+        awaitingRestart: true,
+        awaitingContractorConfirmation: true,
         jobs: {
-          where: { status: { not: "COMPLETED" } },
-          orderBy: { sortOrder: "asc" },
+          where: { status: { not: "COMPLETED" }, parentStage: { not: null } },
+          orderBy: { startDate: "asc" },
           take: 1,
           select: {
             id: true,
             name: true,
+            status: true,
             startDate: true,
+            endDate: true,
+            parentStage: true,
             contractors: {
-              select: { contact: { select: { name: true, company: true } } },
+              select: { contact: { select: { name: true, company: true, phone: true, email: true } } },
               orderBy: { createdAt: "asc" },
               take: 1,
             },
             assignedTo: { select: { name: true } },
+            orders: {
+              where: { status: { notIn: ["DELIVERED", "CANCELLED"] } },
+              select: { id: true, status: true },
+            },
           },
         },
+        _count: { select: { jobs: { where: { status: "COMPLETED" } } } },
       },
     }),
   ]);
 
-  const awaitingRestartPlots = awaitingRestartRaw.map((p) => {
+  const inactivePlots = awaitingRestartRaw.map((p) => {
     const nextJob = p.jobs[0] ?? null;
     const contractor = nextJob?.contractors?.[0]?.contact ?? null;
+    const hasUndeliveredOrders = (nextJob?.orders ?? []).length > 0;
+    const hasAnyCompleted = p._count.jobs > 0;
+
+    // Determine inactivity type
+    let inactivityType: "not_started" | "awaiting_next" | "awaiting_materials" | "deferred" | "awaiting_contractor" = "not_started";
+    if ((p as { awaitingContractorConfirmation?: boolean }).awaitingContractorConfirmation) {
+      inactivityType = "awaiting_contractor";
+    } else if (p.awaitingRestart) {
+      inactivityType = "deferred";
+    } else if (hasUndeliveredOrders && hasAnyCompleted) {
+      inactivityType = "awaiting_materials";
+    } else if (hasAnyCompleted) {
+      inactivityType = "awaiting_next";
+    }
+
+    const label = inactivityType === "not_started" ? "Not started"
+      : inactivityType === "awaiting_contractor" ? `Awaiting contractor for ${nextJob?.name || "next job"}`
+      : inactivityType === "deferred" ? "Deferred"
+      : inactivityType === "awaiting_materials" ? `Awaiting materials for ${nextJob?.name || "next job"}`
+      : `Next: ${nextJob?.name || "unknown"}`;
+
+    const orders = nextJob?.orders ?? [];
+    const pendingOrders = orders.filter((o) => o.status === "PENDING").length;
+    const orderedOrders = orders.filter((o) => o.status === "ORDERED").length;
+
     return {
       id: p.id,
       plotNumber: p.plotNumber,
       name: p.name,
+      houseType: p.houseType,
+      inactivityType,
+      label,
       nextJob: nextJob
         ? {
             id: nextJob.id,
             name: nextJob.name,
             startDate: nextJob.startDate?.toISOString() ?? null,
+            endDate: nextJob.endDate?.toISOString() ?? null,
             contractorName: contractor ? contractor.company || contractor.name : null,
+            contractorPhone: (contractor as { phone?: string })?.phone ?? null,
+            contractorEmail: (contractor as { email?: string })?.email ?? null,
             assignedToName: nextJob.assignedTo?.name ?? null,
           }
         : null,
+      hasContractor: !!contractor,
+      ordersPending: pendingOrders,
+      ordersOrdered: orderedOrders,
+      ordersTotal: orders.length,
     };
   });
 
@@ -520,10 +653,39 @@ export async function GET(
       blockedCount: blockedJobs.length,
       openSnagCount: openSnags,
       needsAttentionCount: needsAttention.length,
-      awaitingRestartCount: awaitingRestartRaw.length,
+      inactivePlotCount: inactivePlots.length,
       pendingSignOffCount: pendingSignOffs.length,
+      upcomingDeliveryCount: upcomingDeliveries.length,
+      awaitingSignOffCount: awaitingSignOff.length,
     },
-    jobsStartingToday,
+    jobsStartingToday: jobsStartingToday.map((j) => {
+      const orders = j.orders ?? [];
+      const pendingOrders = orders.filter((o) => o.status === "PENDING").length;
+      const orderedOrders = orders.filter((o) => o.status === "ORDERED").length;
+      const deliveredOrders = orders.filter((o) => o.status === "DELIVERED").length;
+      const hasContractor = j.contractors.length > 0;
+      const hasAssignee = !!j.assignedTo;
+      // Check predecessor: is there an incomplete job on same plot with lower sortOrder?
+      const hasPredecessorIssue = lateStartJobs.some(
+        (ls) => ls.plotId === j.plotId && ls.sortOrder < j.sortOrder
+      );
+      return {
+        ...j,
+        orders: undefined,
+        readiness: {
+          hasContractor,
+          hasAssignee,
+          predecessorComplete: !hasPredecessorIssue,
+          ordersPending: pendingOrders,
+          ordersOrdered: orderedOrders,
+          ordersDelivered: deliveredOrders,
+          ordersTotal: orders.length,
+          pendingOrdersList: orders
+            .filter((o) => o.status === "PENDING")
+            .map((o) => ({ id: o.id, description: o.itemsDescription, supplierName: (o.supplier as { name: string })?.name, supplierEmail: (o.supplier as { contactEmail: string | null })?.contactEmail })),
+        },
+      };
+    }),
     lateStartJobs: genuineLateStartJobs.map((j) => ({
       ...j,
       startDate: j.startDate?.toISOString() ?? null,
@@ -533,6 +695,12 @@ export async function GET(
       ...j,
       startDate: j.startDate?.toISOString() ?? null,
       endDate: j.endDate?.toISOString() ?? null,
+    })),
+    delayedJobs: delayedJobs.map((j) => ({
+      ...j,
+      startDate: j.startDate?.toISOString() ?? null,
+      endDate: j.endDate?.toISOString() ?? null,
+      originalStartDate: j.originalStartDate?.toISOString() ?? null,
     })),
     jobsStartingTomorrow,
     jobsDueToday,
@@ -553,14 +721,25 @@ export async function GET(
     openSnagsTruncated: openSnags > openSnagsList.length,
     needsAttention,
     pendingSignOffs,
-    awaitingRestartPlots,
+    inactivePlots,
     ordersToPlace: outstandingOrders.map((o) => ({
       ...o,
+      dateOfOrder: o.dateOfOrder.toISOString(),
       expectedDeliveryDate: o.expectedDeliveryDate?.toISOString() ?? null,
     })),
     upcomingOrders: upcomingOrders.map((o) => ({
       ...o,
+      dateOfOrder: o.dateOfOrder.toISOString(),
       expectedDeliveryDate: o.expectedDeliveryDate?.toISOString() ?? null,
+    })),
+    upcomingDeliveries: upcomingDeliveries.map((d) => ({
+      ...d,
+      dateOfOrder: d.dateOfOrder.toISOString(),
+      expectedDeliveryDate: d.expectedDeliveryDate?.toISOString() ?? null,
+    })),
+    awaitingSignOff: awaitingSignOff.map((j) => ({
+      ...j,
+      actualEndDate: j.actualEndDate?.toISOString() ?? null,
     })),
     recentEvents: recentEvents.map((e) => ({
       ...e,

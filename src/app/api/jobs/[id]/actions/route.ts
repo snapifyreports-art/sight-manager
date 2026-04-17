@@ -18,7 +18,9 @@ const ACTION_EVENT_MAP: Record<string, EventType> = {
   start: "JOB_STARTED",
   stop: "JOB_STOPPED",
   complete: "JOB_COMPLETED",
+  signoff: "JOB_SIGNED_OFF",
   edit: "JOB_EDITED",
+  note: "JOB_EDITED",
 };
 
 export async function POST(
@@ -32,7 +34,7 @@ export async function POST(
 
   const { id } = await params;
   const body = await req.json();
-  const { action, notes, signOffNotes } = body;
+  const { action, notes, signOffNotes, skipOrderProgression } = body;
 
   if (!action) {
     return NextResponse.json(
@@ -70,8 +72,16 @@ export async function POST(
     );
   }
 
+  // Signoff action: requires job to be COMPLETED already
+  if (action === "signoff" && existing.status !== "COMPLETED") {
+    return NextResponse.json(
+      { error: "Job must be completed before it can be signed off" },
+      { status: 400 }
+    );
+  }
+
   // Permission check: completing/signing off requires SIGN_OFF_JOBS
-  if (action === "complete" && !sessionHasPermission(session.user as { role?: string; permissions?: string[] }, "SIGN_OFF_JOBS")) {
+  if ((action === "complete" || action === "signoff") && !sessionHasPermission(session.user as { role?: string; permissions?: string[] }, "SIGN_OFF_JOBS")) {
     return NextResponse.json({ error: "You do not have permission to sign off jobs" }, { status: 403 });
   }
 
@@ -100,34 +110,28 @@ export async function POST(
       updateData.actualStartDate = now;
     }
     if (action === "start") {
-      // Progress PENDING material orders to ORDERED
-      await prisma.materialOrder.updateMany({
-        where: { jobId: id, status: "PENDING" },
-        data: { status: "ORDERED", dateOfOrder: now },
-      });
-      // If the plot was awaiting a restart decision (user chose "leave for now"),
-      // clear it — the job has now been started directly
-      if (existing.plot.awaitingRestart) {
+      // Progress PENDING material orders to ORDERED — unless user chose "start anyway"
+      // (user wants to handle orders themselves via Daily Brief / Orders page)
+      if (!skipOrderProgression) {
+        await prisma.materialOrder.updateMany({
+          where: { jobId: id, status: "PENDING" },
+          data: { status: "ORDERED", dateOfOrder: now },
+        });
+      }
+      // If the plot was awaiting a restart/contractor decision, clear both flags
+      if (existing.plot.awaitingRestart || existing.plot.awaitingContractorConfirmation) {
         await prisma.plot.update({
           where: { id: existing.plotId },
-          data: { awaitingRestart: false },
+          data: { awaitingRestart: false, awaitingContractorConfirmation: false },
         });
       }
     }
 
-    // Handle complete/sign-off action
+    // Handle complete action — set end date but do NOT sign off (separate action)
+    // Note: orders are NOT auto-progressed on complete — user manages delivery status
+    // via the Orders page or Daily Brief
     if (action === "complete") {
       updateData.actualEndDate = now;
-      updateData.signedOffById = session.user.id;
-      updateData.signedOffAt = now;
-      if (signOffNotes) {
-        updateData.signOffNotes = signOffNotes;
-      }
-      // Progress ORDERED/CONFIRMED material orders to DELIVERED
-      await prisma.materialOrder.updateMany({
-        where: { jobId: id, status: { in: ["ORDERED", "CONFIRMED"] } },
-        data: { status: "DELIVERED", deliveredDate: now },
-      });
     }
 
     job = await prisma.job.update({
@@ -138,6 +142,27 @@ export async function POST(
         assignedTo: true,
         _count: { select: { orders: true } },
       },
+    });
+  } else if (action === "signoff") {
+    // Sign off a COMPLETED job — set signedOffBy, signedOffAt, signOffNotes
+    job = await prisma.job.update({
+      where: { id },
+      data: {
+        signedOffById: session.user.id,
+        signedOffAt: now,
+        ...(signOffNotes ? { signOffNotes } : {}),
+      },
+      include: {
+        plot: { include: { site: true } },
+        assignedTo: true,
+        _count: { select: { orders: true } },
+      },
+    });
+    // Sign-off is the explicit approval — materials are confirmed used on site
+    // Progress any remaining ORDERED orders to DELIVERED
+    await prisma.materialOrder.updateMany({
+      where: { jobId: id, status: "ORDERED" },
+      data: { status: "DELIVERED", deliveredDate: now },
     });
   } else {
     job = await prisma.job.findUnique({
@@ -151,14 +176,17 @@ export async function POST(
   }
 
   // Create event log entry
-  const eventType =
-    action === "complete" ? "JOB_SIGNED_OFF" : ACTION_EVENT_MAP[action] || "USER_ACTION";
+  const eventType = ACTION_EVENT_MAP[action] || "USER_ACTION";
   const actionLabel = action.charAt(0).toUpperCase() + action.slice(1);
+  const actionVerb = action === "start" ? "started" : action === "stop" ? "stopped" : action === "complete" ? "completed" : action === "signoff" ? "signed off" : action === "note" ? "had a note added" : "updated";
+
+  // For note action with notes text, include it in the event description
+  const notesSuffix = action === "note" && notes ? `: "${notes.substring(0, 100)}"` : "";
 
   await prisma.eventLog.create({
     data: {
       type: eventType,
-      description: `Job "${existing.name}" was ${action === "start" ? "started" : action === "stop" ? "stopped" : action === "complete" ? "signed off" : "edited"}`,
+      description: `Job "${existing.name}" was ${actionVerb}${notesSuffix}`,
       siteId: existing.plot.siteId,
       plotId: existing.plotId,
       jobId: id,
@@ -246,6 +274,21 @@ export async function POST(
     }
   }
 
+  // Auto-update plot buildCompletePercent when job status changes
+  if (action === "complete" || action === "start") {
+    const plotJobs = await prisma.job.findMany({
+      where: { plotId: existing.plotId },
+      select: { status: true },
+    });
+    const total = plotJobs.length;
+    const completed = plotJobs.filter((j) => j.status === "COMPLETED").length;
+    const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
+    await prisma.plot.update({
+      where: { id: existing.plotId },
+      data: { buildCompletePercent: pct },
+    });
+  }
+
   // Fire-and-forget push notification for relevant actions
   if (action === "complete" && existing.assignedToId) {
     sendPushToUser(existing.assignedToId, "JOBS_READY_FOR_SIGNOFF", {
@@ -256,9 +299,25 @@ export async function POST(
     }).catch(() => {});
   }
 
+  // Notify contractors on job start — tell them work is ready
+  if (action === "start") {
+    const jobContractors = await prisma.jobContractor.findMany({
+      where: { jobId: id },
+      select: { contact: { select: { name: true, company: true } } },
+    });
+    // Notify assigned internal user that job has started (they may need to coordinate)
+    if (existing.assignedToId && existing.assignedToId !== session.user.id) {
+      sendPushToUser(existing.assignedToId, "JOBS_STARTING_TODAY", {
+        title: "Job Started",
+        body: `"${existing.name}" has been started${jobContractors.length > 0 ? ` — ${jobContractors[0].contact.company || jobContractors[0].contact.name}` : ""}`,
+        url: `/jobs/${id}`,
+        tag: `job-started-${id}`,
+      }).catch(() => {});
+    }
+  }
+
   // Push notification to next-stage contractors when a job is completed
   if (action === "complete") {
-    // Find next jobs on same plot
     const allPlotJobs = await prisma.job.findMany({
       where: { plotId: existing.plotId },
       orderBy: { sortOrder: "asc" },
@@ -291,8 +350,8 @@ export async function POST(
     }).catch(() => {});
   }
 
-  // For completion: attach context for the post-completion dialog
-  if (action === "complete" && job) {
+  // For completion or signoff: attach context for the post-completion dialog
+  if ((action === "complete" || action === "signoff") && job) {
     const allPlotJobs = await prisma.job.findMany({
       where: { plotId: existing.plotId },
       orderBy: { sortOrder: "asc" },
@@ -304,7 +363,7 @@ export async function POST(
         startDate: true,
         endDate: true,
         contractors: {
-          select: { contact: { select: { name: true, company: true } } },
+          select: { contact: { select: { id: true, name: true, company: true, email: true, phone: true } } },
           orderBy: { createdAt: "asc" },
           take: 1,
         },
@@ -316,8 +375,28 @@ export async function POST(
       (j) => j.sortOrder > existing.sortOrder && j.status !== "COMPLETED"
     ) ?? null;
 
+    // Fetch next job's orders if it exists
+    let nextJobOrders: Array<{
+      id: string;
+      status: string;
+      itemsDescription: string | null;
+      expectedDeliveryDate: Date | null;
+      supplier: { name: string; contactEmail: string | null; contactName: string | null };
+    }> = [];
+    if (nextJob) {
+      nextJobOrders = await prisma.materialOrder.findMany({
+        where: { jobId: nextJob.id },
+        select: {
+          id: true,
+          status: true,
+          itemsDescription: true,
+          expectedDeliveryDate: true,
+          supplier: { select: { name: true, contactEmail: true, contactName: true } },
+        },
+      });
+    }
+
     // Deviation: how far ahead/behind vs original schedule
-    // positive = finished early (ahead), negative = finished late (behind)
     const completedJobWithOriginal = await prisma.job.findUnique({
       where: { id },
       select: { originalEndDate: true, actualEndDate: true },
@@ -329,7 +408,7 @@ export async function POST(
       daysDeviation = differenceInCalendarDays(
         completedJobWithOriginal.originalEndDate,
         completedJobWithOriginal.actualEndDate
-      ); // positive = finished before original end = ahead
+      );
     }
 
     const contractor = nextJob?.contractors?.[0]?.contact ?? null;
@@ -343,10 +422,21 @@ export async function POST(
               id: nextJob.id,
               name: nextJob.name,
               status: nextJob.status,
-              contractorName: contractor
-                ? contractor.company || contractor.name
-                : null,
+              startDate: nextJob.startDate?.toISOString() ?? null,
+              endDate: nextJob.endDate?.toISOString() ?? null,
+              contractorName: contractor ? contractor.company || contractor.name : null,
+              contractorEmail: contractor?.email ?? null,
+              contractorPhone: contractor?.phone ?? null,
               assignedToName: nextJob.assignedTo?.name ?? null,
+              orders: nextJobOrders.map((o) => ({
+                id: o.id,
+                status: o.status,
+                itemsDescription: o.itemsDescription,
+                expectedDeliveryDate: o.expectedDeliveryDate?.toISOString() ?? null,
+                supplierName: o.supplier.name,
+                supplierEmail: o.supplier.contactEmail,
+                supplierContactName: o.supplier.contactName,
+              })),
             }
           : null,
         plotId: existing.plotId,

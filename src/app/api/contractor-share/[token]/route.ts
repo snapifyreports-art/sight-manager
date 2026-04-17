@@ -88,6 +88,26 @@ export async function GET(
     });
   const completedJobs = jobs.filter((j) => j.status === "COMPLETED");
 
+  // Material orders for this contractor's jobs
+  const jobIds = jobs.map((j) => j.id);
+  const materialOrders = jobIds.length > 0
+    ? await prisma.materialOrder.findMany({
+        where: { jobId: { in: jobIds } },
+        select: {
+          id: true,
+          status: true,
+          itemsDescription: true,
+          dateOfOrder: true,
+          expectedDeliveryDate: true,
+          deliveredDate: true,
+          supplier: { select: { name: true } },
+          job: { select: { name: true, plot: { select: { plotNumber: true, name: true } } } },
+          orderItems: { select: { name: true, quantity: true, unit: true } },
+        },
+        orderBy: { dateOfOrder: "asc" },
+      })
+    : [];
+
   return NextResponse.json({
     contractor: contact,
     site,
@@ -96,5 +116,16 @@ export async function GET(
     nextJobs,
     completedJobs,
     openSnags: snags,
+    orders: materialOrders.map((o) => ({
+      id: o.id,
+      status: o.status,
+      itemsDescription: o.itemsDescription,
+      dateOfOrder: o.dateOfOrder.toISOString(),
+      expectedDeliveryDate: o.expectedDeliveryDate?.toISOString() ?? null,
+      deliveredDate: o.deliveredDate?.toISOString() ?? null,
+      supplier: o.supplier,
+      job: o.job,
+      items: o.orderItems,
+    })),
   });
 }

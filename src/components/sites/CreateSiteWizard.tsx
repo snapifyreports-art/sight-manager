@@ -120,6 +120,12 @@ export function CreateSiteWizard({
   const [siteLocation, setSiteLocation] = useState("");
   const [siteAddress, setSiteAddress] = useState("");
   const [sitePostcode, setSitePostcode] = useState("");
+  const [siteManagerId, setSiteManagerId] = useState("");
+  const [users, setUsers] = useState<{ id: string; name: string }[]>([]);
+
+  useEffect(() => {
+    fetch("/api/users").then((r) => r.json()).then((data: { id: string; name: string }[]) => setUsers(data.map((u) => ({ id: u.id, name: u.name })))).catch(() => {});
+  }, []);
 
   // Step 2: Plot batches
   const [plotBatches, setPlotBatches] = useState<PlotBatch[]>([]);
@@ -382,6 +388,7 @@ export function CreateSiteWizard({
           location: siteLocation || null,
           address: siteAddress || null,
           postcode: sitePostcode || null,
+          assignedToId: siteManagerId || null,
         }),
       });
 
@@ -593,6 +600,20 @@ export function CreateSiteWizard({
                   onChange={(e) => setSitePostcode(e.target.value.toUpperCase())}
                   className="w-40"
                 />
+              </div>
+              <div className="space-y-2">
+                <Label>Site Manager</Label>
+                <Select value={siteManagerId || "none"} onValueChange={(v) => setSiteManagerId(!v || v === "none" ? "" : v)}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Unassigned" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Unassigned</SelectItem>
+                    {users.map((u) => (
+                      <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             </div>
             <DialogFooter>

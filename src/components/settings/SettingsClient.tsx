@@ -29,11 +29,18 @@ interface UserData {
   createdAt: string;
 }
 
+interface SiteData {
+  id: string;
+  name: string;
+}
+
 interface SettingsClientProps {
   user: { name: string; email: string; role: string };
   templates: TemplateData[];
   users: UserData[];
   currentUserId: string;
+  sites: SiteData[];
+  initialTab?: string;
 }
 
 function formatRole(role: string) {
@@ -43,8 +50,8 @@ function formatRole(role: string) {
     .join(" ");
 }
 
-export function SettingsClient({ user, templates, users, currentUserId }: SettingsClientProps) {
-  const [activeTab, setActiveTab] = useState("general");
+export function SettingsClient({ user, templates, users, currentUserId, sites, initialTab }: SettingsClientProps) {
+  const [activeTab, setActiveTab] = useState(initialTab || "general");
 
   return (
     <div className="space-y-6">
@@ -152,7 +159,7 @@ export function SettingsClient({ user, templates, users, currentUserId }: Settin
 
         {/* Users Tab */}
         <TabsContent value="users">
-          <UsersClient users={users} currentUserId={currentUserId} />
+          <UsersClient users={users} currentUserId={currentUserId} sites={sites} />
         </TabsContent>
       </Tabs>
     </div>

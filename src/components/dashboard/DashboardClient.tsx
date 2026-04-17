@@ -153,6 +153,7 @@ function StatsCards({ stats }: { stats: StatsData }) {
       icon: Building2,
       gradient: "from-blue-500 to-blue-600",
       shadow: "shadow-blue-500/20",
+      href: "/sites",
     },
     {
       title: "Total Jobs",
@@ -160,6 +161,7 @@ function StatsCards({ stats }: { stats: StatsData }) {
       icon: Briefcase,
       gradient: "from-slate-500 to-slate-600",
       shadow: "shadow-slate-500/20",
+      href: null as string | null,
     },
     {
       title: "Jobs In Progress",
@@ -167,6 +169,7 @@ function StatsCards({ stats }: { stats: StatsData }) {
       icon: Activity,
       gradient: "from-emerald-500 to-emerald-600",
       shadow: "shadow-emerald-500/20",
+      href: null as string | null,
     },
     {
       title: "Total Orders",
@@ -174,6 +177,7 @@ function StatsCards({ stats }: { stats: StatsData }) {
       icon: Package,
       gradient: "from-indigo-500 to-indigo-600",
       shadow: "shadow-indigo-500/20",
+      href: "/orders",
     },
     {
       title: "Future Orders",
@@ -181,6 +185,7 @@ function StatsCards({ stats }: { stats: StatsData }) {
       icon: Send,
       gradient: "from-amber-500 to-orange-500",
       shadow: "shadow-amber-500/20",
+      href: "/orders?status=PENDING",
     },
     {
       title: "Awaiting Delivery",
@@ -188,6 +193,7 @@ function StatsCards({ stats }: { stats: StatsData }) {
       icon: Truck,
       gradient: "from-cyan-500 to-teal-500",
       shadow: "shadow-cyan-500/20",
+      href: "/orders?status=ORDERED",
     },
     {
       title: "Delivered",
@@ -195,6 +201,7 @@ function StatsCards({ stats }: { stats: StatsData }) {
       icon: PackageCheck,
       gradient: "from-green-500 to-green-600",
       shadow: "shadow-green-500/20",
+      href: "/orders?status=DELIVERED",
     },
     {
       title: "Total Contacts",
@@ -202,6 +209,7 @@ function StatsCards({ stats }: { stats: StatsData }) {
       icon: Users,
       gradient: "from-violet-500 to-purple-600",
       shadow: "shadow-violet-500/20",
+      href: "/contacts",
     },
   ];
 
@@ -209,9 +217,8 @@ function StatsCards({ stats }: { stats: StatsData }) {
     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
       {cards.map((card) => {
         const Icon = card.icon;
-        return (
+        const inner = (
           <div
-            key={card.title}
             className="group relative overflow-hidden rounded-xl border border-border/50 bg-white p-5 shadow-sm transition-all hover:shadow-md"
           >
             <div className="flex items-start justify-between">
@@ -228,6 +235,13 @@ function StatsCards({ stats }: { stats: StatsData }) {
             {/* Subtle bottom accent */}
             <div className={`absolute bottom-0 left-0 right-0 h-[2px] bg-gradient-to-r ${card.gradient} opacity-40`} />
           </div>
+        );
+        return card.href ? (
+          <Link key={card.title} href={card.href} className="hover:opacity-80 transition-opacity">
+            {inner}
+          </Link>
+        ) : (
+          <div key={card.title}>{inner}</div>
         );
       })}
     </div>

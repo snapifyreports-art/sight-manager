@@ -37,7 +37,10 @@ export async function POST(
 
   const { id } = await params;
 
-  const snag = await prisma.snag.findUnique({ where: { id } });
+  const snag = await prisma.snag.findUnique({
+    where: { id },
+    include: { plot: { select: { siteId: true, plotNumber: true, name: true } } },
+  });
   if (!snag) {
     return NextResponse.json({ error: "Snag not found" }, { status: 404 });
   }
@@ -161,6 +164,21 @@ export async function POST(
     }
 
     createdPhotos.push(photo);
+  }
+
+  // Log event for snag photo uploads
+  if (createdPhotos.length > 0 && snag.plot) {
+    const plotLabel = snag.plot.plotNumber ? `Plot ${snag.plot.plotNumber}` : snag.plot.name;
+    await prisma.eventLog.create({
+      data: {
+        type: "PHOTO_UPLOADED" as import("@prisma/client").EventType,
+        description: `${createdPhotos.length} snag photo${createdPhotos.length !== 1 ? "s" : ""} uploaded — ${plotLabel}: "${snag.description?.substring(0, 60) || "Snag"}"`,
+        siteId: snag.plot.siteId,
+        plotId: snag.plotId,
+        jobId: snag.jobId,
+        userId: session.user.id,
+      },
+    });
   }
 
   return NextResponse.json(createdPhotos, { status: 201 });

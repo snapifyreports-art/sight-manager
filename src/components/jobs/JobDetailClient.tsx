@@ -31,9 +31,12 @@ import {
   Pencil,
   Check,
   Bug,
+  StickyNote,
 } from "lucide-react";
 import { JobSiblingNav } from "@/components/jobs/JobSiblingNav";
+import { SnagDialog } from "@/components/snags/SnagDialog";
 import { Button } from "@/components/ui/button";
+import { Breadcrumbs } from "@/components/ui/breadcrumbs";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -55,6 +58,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { PhotoUpload } from "./PhotoUpload";
+import { useJobAction } from "@/hooks/useJobAction";
 
 // ---------- Types ----------
 
@@ -242,7 +246,6 @@ const ORDER_STATUS_CONFIG: Record<
 > = {
   PENDING: { label: "Pending", variant: "outline" },
   ORDERED: { label: "Ordered", variant: "secondary" },
-  CONFIRMED: { label: "Confirmed", variant: "default" },
   DELIVERED: { label: "Delivered", variant: "default" },
   CANCELLED: { label: "Cancelled", variant: "destructive" },
 };
@@ -303,6 +306,41 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
   const router = useRouter();
   const [job, setJob] = useState(initialJob);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+
+  // Centralised pre-start / early-start flow
+  const { triggerAction: triggerJobAction, isLoading: jobActionLoading, dialogs: jobActionDialogs } = useJobAction(
+    (_action, _jobId, data) => {
+      if (data && typeof data === "object" && "status" in data) {
+        setJob((prev) => ({ ...prev, status: (data as { status: string }).status }));
+      }
+      router.refresh();
+    }
+  );
+
+  // Add note state
+  const [noteText, setNoteText] = useState("");
+  const [submittingNote, setSubmittingNote] = useState(false);
+  const handleAddNote = async () => {
+    if (!noteText.trim()) return;
+    setSubmittingNote(true);
+    try {
+      const res = await fetch(`/api/jobs/${job.id}/actions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "note", notes: noteText.trim() }),
+      });
+      if (res.ok) {
+        const newAction = await res.json();
+        setJob((prev) => ({ ...prev, actions: [newAction, ...prev.actions] }));
+        setNoteText("");
+      }
+    } finally {
+      setSubmittingNote(false);
+    }
+  };
+
+  // Add snag state
+  const [snagDialogOpen, setSnagDialogOpen] = useState(false);
 
   // Snags linked to this job
   const [jobSnags, setJobSnags] = useState<JobSnag[]>([]);
@@ -414,6 +452,13 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
       setSignOffDialogOpen(true);
       return;
     }
+    if (action === "start") {
+      await triggerJobAction(
+        { id: job.id, name: job.name, status: job.status, startDate: job.startDate, endDate: job.endDate, orders: job.orders.map((o) => ({ id: o.id, status: o.status, supplier: o.supplier })) },
+        "start"
+      );
+      return;
+    }
     setActionLoading(action);
     try {
       const res = await fetch(`/api/jobs/${job.id}/actions`, {
@@ -434,11 +479,17 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
   async function handleSignOff() {
     setSigningOff(true);
     try {
+      // Complete first, then sign off separately
+      await fetch(`/api/jobs/${job.id}/actions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "complete" }),
+      });
       const res = await fetch(`/api/jobs/${job.id}/actions`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          action: "complete",
+          action: "signoff",
           signOffNotes: signOffNotes || undefined,
         }),
       });
@@ -688,11 +739,18 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
           variant="ghost"
           size="sm"
           className="w-fit"
-          onClick={() => router.push(`/sites/${job.plot.site.id}/plots/${job.plotId}`)}
+          onClick={() => router.back()}
         >
           <ArrowLeft className="size-4" data-icon="inline-start" />
-          Back to Plot
+          Back
         </Button>
+
+        <Breadcrumbs items={[
+          { label: "Sites", href: "/sites" },
+          { label: job.plot.site.name, href: `/sites/${job.plot.site.id}` },
+          { label: job.plot.name, href: `/sites/${job.plot.siteId}/plots/${job.plotId}` },
+          { label: job.name },
+        ]} />
 
         <JobSiblingNav jobId={job.id} />
 
@@ -802,16 +860,6 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
             )}
           </CardContent>
         </Card>
-        <InfoCard
-          icon={MapPin}
-          label="Location"
-          value={job.location ?? "\u2014"}
-        />
-        <InfoCard
-          icon={MapPin}
-          label="Address"
-          value={job.address ?? "\u2014"}
-        />
         {/* Start Date - editable */}
         <Card>
           <CardContent className="pt-4">
@@ -993,6 +1041,36 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
           </CardContent>
         </Card>
 
+        {/* Add Note */}
+        <Card>
+          <CardHeader className="pb-3">
+            <div className="flex items-center gap-2">
+              <StickyNote className="size-4 text-muted-foreground" />
+              <CardTitle>Add Note</CardTitle>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="flex gap-2">
+              <Textarea
+                placeholder="Type a note…"
+                value={noteText}
+                onChange={(e) => setNoteText(e.target.value)}
+                rows={2}
+                className="resize-none text-sm"
+                onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) handleAddNote(); }}
+              />
+              <Button
+                size="sm"
+                onClick={handleAddNote}
+                disabled={submittingNote || !noteText.trim()}
+                className="self-end"
+              >
+                {submittingNote ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
         {/* Actions / History */}
         <Card>
           <CardHeader>
@@ -1101,12 +1179,18 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
               <Bug className="size-4 text-muted-foreground" />
               <CardTitle>Snags ({jobSnags.length})</CardTitle>
             </div>
-            <Link
-              href={`/sites/${job.plot.siteId}/plots/${job.plotId}?tab=snags`}
-              className="text-xs text-blue-600 hover:underline"
-            >
-              View all snags →
-            </Link>
+            <div className="flex items-center gap-3">
+              <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => setSnagDialogOpen(true)}>
+                <AlertTriangle className="size-3 mr-1" />
+                Raise Snag
+              </Button>
+              <Link
+                href={`/sites/${job.plot.siteId}/plots/${job.plotId}?tab=snags`}
+                className="text-xs text-blue-600 hover:underline"
+              >
+                View all →
+              </Link>
+            </div>
           </div>
           <CardDescription>Snags raised against this job</CardDescription>
         </CardHeader>
@@ -1879,6 +1963,25 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Raise Snag — full SnagDialog */}
+      <SnagDialog
+        open={snagDialogOpen}
+        onOpenChange={setSnagDialogOpen}
+        plotId={job.plotId}
+        initialJobId={job.id}
+        initialContactId={job.contractors?.[0]?.contactId}
+        onSaved={() => {
+          // Refresh snags list
+          fetch(`/api/jobs/${job.id}`)
+            .then((r) => r.ok ? r.json() : null)
+            .then((d) => { if (d?.snags) setJobSnags(d.snags); })
+            .catch(() => {});
+        }}
+      />
+
+      {/* Centralised pre-start / early-start / order-conflict dialogs */}
+      {jobActionDialogs}
     </div>
   );
 }

@@ -1,12 +1,14 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
+import { useRefreshOnFocus } from "@/hooks/useRefreshOnFocus";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { format, differenceInCalendarDays } from "date-fns";
 import { getCurrentDate } from "@/lib/dev-date";
 import { useDevDate } from "@/lib/dev-date-context";
 import {
+  ArrowLeft,
   ChevronRight,
   Plus,
   Briefcase,
@@ -34,6 +36,9 @@ import {
   HardHat,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Breadcrumbs } from "@/components/ui/breadcrumbs";
+import { useJobAction } from "@/hooks/useJobAction";
+import { PostCompletionDialog } from "@/components/PostCompletionDialog";
 import {
   Card,
   CardContent,
@@ -72,10 +77,13 @@ interface PlotData {
     description: string | null;
     startDate: string | null;
     endDate: string | null;
+    originalStartDate: string | null;
+    originalEndDate: string | null;
     status: string;
     parentId: string | null;
     parentStage: string | null;
     sortOrder: number;
+    signedOffAt: string | null;
     assignedTo: { id: string; name: string } | null;
     contractors: Array<{
       contact: { id: string; name: string; company: string | null } | null;
@@ -293,6 +301,20 @@ function PlotOverview({
   const [pendingJobActions, setPendingJobActions] = useState<Set<string>>(new Set());
   const [actionError, setActionError] = useState<string | null>(null);
 
+  // Post-completion dialog state
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [completionContext, setCompletionContext] = useState<any>(null);
+
+  // Force full page refresh after data-changing actions
+  const forceRefresh = useCallback(() => {
+    router.refresh();
+  }, [router]);
+
+  // Centralised pre-start / early-start flow
+  const { triggerAction: triggerJobAction, isLoading: jobActionLoading, dialogs: jobActionDialogs } = useJobAction(
+    (_action, _jobId) => { forceRefresh(); }
+  );
+
   async function handleOrderStatus(orderId: string, status: string) {
     setPendingOrderActions((prev) => new Set(prev).add(orderId));
     try {
@@ -302,7 +324,7 @@ function PlotOverview({
         body: JSON.stringify({ status }),
       });
       if (res.ok) {
-        router.refresh();
+        forceRefresh();
       } else {
         setActionError("Failed to update order status. Please try again.");
         setTimeout(() => setActionError(null), 4000);
@@ -316,6 +338,21 @@ function PlotOverview({
   }
 
   async function handleJobAction(jobId: string, action: "start" | "complete") {
+    const jobData = plot.jobs.find((j) => j.id === jobId);
+    if (action === "start" && jobData) {
+      await triggerJobAction(
+        {
+          id: jobData.id,
+          name: jobData.name,
+          status: jobData.status,
+          startDate: jobData.startDate,
+          endDate: jobData.endDate,
+          orders: jobData.orders.map((o) => ({ id: o.id, status: o.status, supplier: o.supplier })),
+        },
+        "start"
+      );
+      return;
+    }
     setPendingJobActions((prev) => new Set(prev).add(jobId));
     try {
       const res = await fetch(`/api/jobs/${jobId}/actions`, {
@@ -324,7 +361,13 @@ function PlotOverview({
         body: JSON.stringify({ action }),
       });
       if (res.ok) {
-        router.refresh();
+        const result = await res.json();
+        forceRefresh();
+        // Show post-completion dialog if context returned
+        if (result._completionContext) {
+          const jobName = plot.jobs.find((j) => j.id === jobId)?.name || "";
+          setCompletionContext({ completedJobName: jobName, ...result._completionContext });
+        }
       } else {
         setActionError("Failed to update job status. Please try again.");
         setTimeout(() => setActionError(null), 4000);
@@ -351,12 +394,10 @@ function PlotOverview({
       (o) => o.status === "PENDING" || o.status === "ORDERED"
     );
     const upcomingDeliveries = allOrders.filter((o) => {
-      if (!o.expectedDeliveryDate || o.deliveredDate) return false;
-      const days = differenceInCalendarDays(
-        new Date(o.expectedDeliveryDate),
-        today
-      );
-      return days >= 0 && days <= 14;
+      if (o.deliveredDate) return false; // already received
+      if (o.status === "PENDING") return false; // not sent yet
+      if (!o.expectedDeliveryDate) return false;
+      return differenceInCalendarDays(new Date(o.expectedDeliveryDate), today) >= 0;
     });
     const overdueDeliveries = allOrders.filter((o) => {
       if (!o.expectedDeliveryDate || o.deliveredDate) return false;
@@ -837,6 +878,18 @@ function PlotOverview({
           </CardContent>
         </Card>
       </div>
+
+      {/* Centralised pre-start / early-start / order-conflict dialogs */}
+      {jobActionDialogs}
+      <PostCompletionDialog
+        open={!!completionContext}
+        completedJobName={completionContext?.completedJobName ?? ""}
+        daysDeviation={completionContext?.daysDeviation ?? 0}
+        nextJob={completionContext?.nextJob ?? null}
+        plotId={completionContext?.plotId ?? plot.id}
+        onClose={() => setCompletionContext(null)}
+        onDecisionMade={() => { setCompletionContext(null); forceRefresh(); }}
+      />
     </div>
   );
 }
@@ -852,6 +905,10 @@ export function PlotDetailClient({
 }) {
   const router = useRouter();
   const { devDate } = useDevDate();
+
+  // Auto-refresh when user navigates back or tab regains focus
+  const refreshPlot = useCallback(() => { router.refresh(); }, [router]);
+  useRefreshOnFocus(refreshPlot);
 
   const jobsWithDates = plot.jobs.filter(
     (j) => j.startDate !== null || j.endDate !== null
@@ -901,24 +958,23 @@ export function PlotDetailClient({
 
   return (
     <div className="space-y-6">
-      {/* Breadcrumb */}
-      <nav className="flex items-center gap-1 text-sm text-muted-foreground">
-        <Link
-          href="/dashboard"
-          className="hidden transition-colors hover:text-foreground sm:inline"
+      {/* Back + Breadcrumb */}
+      <div className="space-y-1">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="w-fit"
+          onClick={() => router.back()}
         >
-          Sites
-        </Link>
-        <ChevronRight className="hidden size-3.5 sm:inline" />
-        <Link
-          href={`/sites/${plot.site.id}`}
-          className="transition-colors hover:text-foreground"
-        >
-          {plot.site.name}
-        </Link>
-        <ChevronRight className="size-3.5" />
-        <span className="font-medium text-foreground">{plot.name}</span>
-      </nav>
+          <ArrowLeft className="size-4" />
+          Back
+        </Button>
+        <Breadcrumbs items={[
+          { label: "Sites", href: "/sites" },
+          { label: plot.site.name, href: `/sites/${plot.site.id}` },
+          { label: plot.name },
+        ]} />
+      </div>
 
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -946,7 +1002,10 @@ export function PlotDetailClient({
             <Share2 className="size-3.5" />
             Share
           </Button>
-          <AddJobDialog plotId={plot.id} onCreated={handleJobCreated} />
+          {/* AddJobDialog hidden – functionality preserved */}
+          <div className="hidden">
+            <AddJobDialog plotId={plot.id} onCreated={handleJobCreated} />
+          </div>
         </div>
       </div>
 
@@ -998,13 +1057,13 @@ export function PlotDetailClient({
               </CardContent>
             </Card>
           ) : (
-            <GanttChart key={devDate ?? "live"} jobs={plot.jobs} />
+            <GanttChart key={devDate ?? "live"} jobs={plot.jobs} enableDateControls />
           )}
         </TabsContent>
 
         {/* To-Do List Tab */}
         <TabsContent value="todo">
-          <PlotTodoList jobs={plot.jobs} />
+          <PlotTodoList jobs={plot.jobs} snagSummary={snagSummary} siteId={plot.site.id} plotId={plot.id} />
         </TabsContent>
 
         {/* Jobs List Tab */}
@@ -1017,7 +1076,7 @@ export function PlotDetailClient({
                 <p className="mt-1 max-w-sm text-sm text-muted-foreground">
                   Create your first job to start tracking work on this plot.
                 </p>
-                <div className="mt-4">
+                <div className="mt-4 hidden">
                   <AddJobDialog
                     plotId={plot.id}
                     onCreated={handleJobCreated}
@@ -1089,7 +1148,7 @@ export function PlotDetailClient({
                 </Link>
               ))}
 
-              <div className="pt-2">
+              <div className="pt-2 hidden">
                 <AddJobDialog plotId={plot.id} onCreated={handleJobCreated} />
               </div>
             </div>

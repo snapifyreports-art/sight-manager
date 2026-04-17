@@ -110,6 +110,15 @@ export async function POST(
     });
   }
 
+  await prisma.eventLog.create({
+    data: {
+      type: "SYSTEM",
+      description: `${impactIcon} Weather impact logged: ${impactLabel} on ${format(dateObj, "dd MMM yyyy")}${note ? ` — ${note}` : ""} (${affectedJobs.length} job${affectedJobs.length !== 1 ? "s" : ""} affected)`,
+      siteId: siteId,
+      userId: session.user.id,
+    },
+  });
+
   return NextResponse.json(
     { day, affectedJobs: affectedJobs.length },
     { status: 201 }
@@ -146,6 +155,15 @@ export async function DELETE(
       where: { siteId: id, date: dateObj },
     });
   }
+
+  await prisma.eventLog.create({
+    data: {
+      type: "SYSTEM",
+      description: `Weather impact removed for ${format(dateObj, "dd MMM yyyy")}${type ? ` (${type})` : ""}`,
+      siteId: id,
+      userId: session.user.id,
+    },
+  });
 
   return NextResponse.json({ success: true });
 }

@@ -65,6 +65,7 @@ export async function GET(
           name: true,
           stageCode: true,
           sortOrder: true,
+          parentId: true,
           orders: {
             select: {
               items: {
@@ -75,6 +76,11 @@ export async function GET(
                 },
               },
             },
+          },
+          children: {
+            select: { name: true, sortOrder: true },
+            orderBy: { sortOrder: "asc" },
+            take: 1,
           },
         },
         orderBy: { sortOrder: "asc" },
@@ -99,7 +105,11 @@ export async function GET(
           jobBudget += item.quantity * item.unitCost;
         }
       }
-      jobBudgets[tj.name] = jobBudget;
+      // Parent-level orders get moved to the first child during template application.
+      // Attribute the budget to the first child's name to match where the actual orders land.
+      const firstChild = (tj.children as { name: string; sortOrder: number }[])?.[0];
+      const budgetKey = (firstChild && !tj.parentId && jobBudget > 0) ? firstChild.name : tj.name;
+      jobBudgets[budgetKey] = (jobBudgets[budgetKey] || 0) + jobBudget;
       templateTotal += jobBudget;
     }
 

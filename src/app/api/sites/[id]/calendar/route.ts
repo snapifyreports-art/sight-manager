@@ -25,7 +25,7 @@ export async function GET(
   const rangeStart = startOfMonth(subMonths(targetDate, 0));
   const rangeEnd = endOfMonth(addMonths(targetDate, 0));
 
-  const [jobs, deliveries, rainedOffDays] = await Promise.all([
+  const [jobs, deliveries, rainedOffDays, ordersToPlace] = await Promise.all([
     // Jobs with dates in range
     prisma.job.findMany({
       where: {
@@ -47,6 +47,7 @@ export async function GET(
         startDate: true,
         endDate: true,
         weatherAffected: true,
+        signedOffAt: true,
         plot: { select: { plotNumber: true, name: true } },
         assignedTo: { select: { name: true } },
         contractors: {
@@ -59,7 +60,7 @@ export async function GET(
       orderBy: { startDate: "asc" },
     }),
 
-    // Deliveries in range
+    // Deliveries in range (ORDERED with expected delivery date)
     prisma.materialOrder.findMany({
       where: {
         job: { plot: { siteId: id } },
@@ -74,7 +75,7 @@ export async function GET(
         status: true,
         expectedDeliveryDate: true,
         deliveredDate: true,
-        supplier: { select: { name: true } },
+        supplier: { select: { name: true, contactEmail: true } },
         job: {
           select: {
             name: true,
@@ -92,6 +93,28 @@ export async function GET(
       },
       select: { date: true, type: true, note: true },
     }),
+
+    // Orders to place (PENDING with dateOfOrder in range)
+    prisma.materialOrder.findMany({
+      where: {
+        job: { plot: { siteId: id } },
+        status: "PENDING",
+        dateOfOrder: { gte: rangeStart, lte: rangeEnd },
+      },
+      select: {
+        id: true,
+        itemsDescription: true,
+        status: true,
+        dateOfOrder: true,
+        supplier: { select: { name: true, contactEmail: true } },
+        job: {
+          select: {
+            name: true,
+            plot: { select: { plotNumber: true, name: true } },
+          },
+        },
+      },
+    }),
   ]);
 
   return NextResponse.json({
@@ -103,6 +126,7 @@ export async function GET(
       startDate: j.startDate?.toISOString() ?? null,
       endDate: j.endDate?.toISOString() ?? null,
       weatherAffected: j.weatherAffected,
+      signedOff: !!j.signedOffAt,
       plot: j.plot,
       assignee: j.assignedTo?.name ?? j.contractors[0]?.contact?.company ?? j.contractors[0]?.contact?.name ?? null,
     })),
@@ -113,8 +137,18 @@ export async function GET(
       expectedDate: d.expectedDeliveryDate?.toISOString() ?? null,
       deliveredDate: d.deliveredDate?.toISOString() ?? null,
       supplier: d.supplier.name,
+      supplierEmail: d.supplier.contactEmail ?? null,
       job: d.job.name,
       plot: d.job.plot,
+    })),
+    ordersToPlace: ordersToPlace.map((o) => ({
+      id: o.id,
+      items: o.itemsDescription,
+      dateOfOrder: o.dateOfOrder.toISOString(),
+      supplier: o.supplier.name,
+      supplierEmail: o.supplier.contactEmail ?? null,
+      job: o.job.name,
+      plot: o.job.plot,
     })),
     rainedOffDays: rainedOffDays.map((r) => ({
       date: r.date.toISOString(),

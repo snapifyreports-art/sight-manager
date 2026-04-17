@@ -91,10 +91,16 @@ const EVENT_TYPES = [
   "JOB_STARTED",
   "JOB_COMPLETED",
   "JOB_STOPPED",
+  "JOB_SIGNED_OFF",
   "JOB_EDITED",
   "ORDER_PLACED",
   "ORDER_DELIVERED",
   "ORDER_CANCELLED",
+  "DELIVERY_CONFIRMED",
+  "SCHEDULE_CASCADED",
+  "PHOTO_UPLOADED",
+  "SNAG_CREATED",
+  "SNAG_RESOLVED",
   "SITE_CREATED",
   "SITE_UPDATED",
   "PLOT_CREATED",
@@ -211,6 +217,48 @@ const EVENT_TYPE_CONFIG: Record<
     badgeVariant: "outline",
     iconBg: "bg-slate-500/15",
     iconColor: "text-slate-600 dark:text-slate-400",
+  },
+  JOB_SIGNED_OFF: {
+    label: "Job Signed Off",
+    icon: CheckCircle2,
+    badgeVariant: "default",
+    iconBg: "bg-emerald-500/15",
+    iconColor: "text-emerald-600 dark:text-emerald-400",
+  },
+  DELIVERY_CONFIRMED: {
+    label: "Delivery Confirmed",
+    icon: PackageCheck,
+    badgeVariant: "default",
+    iconBg: "bg-teal-500/15",
+    iconColor: "text-teal-600 dark:text-teal-400",
+  },
+  SCHEDULE_CASCADED: {
+    label: "Schedule Shifted",
+    icon: ScrollText,
+    badgeVariant: "secondary",
+    iconBg: "bg-amber-500/15",
+    iconColor: "text-amber-600 dark:text-amber-400",
+  },
+  PHOTO_UPLOADED: {
+    label: "Photo Uploaded",
+    icon: PlusCircle,
+    badgeVariant: "outline",
+    iconBg: "bg-pink-500/15",
+    iconColor: "text-pink-600 dark:text-pink-400",
+  },
+  SNAG_CREATED: {
+    label: "Snag Raised",
+    icon: PlusCircle,
+    badgeVariant: "destructive",
+    iconBg: "bg-orange-500/15",
+    iconColor: "text-orange-600 dark:text-orange-400",
+  },
+  SNAG_RESOLVED: {
+    label: "Snag Resolved",
+    icon: CheckCircle2,
+    badgeVariant: "default",
+    iconBg: "bg-green-500/15",
+    iconColor: "text-green-600 dark:text-green-400",
   },
 };
 
@@ -485,6 +533,15 @@ export function EventsClient({
                               onClick={(e) => e.stopPropagation()}
                             >
                               {event.site.name}
+                            </Link>
+                          )}
+                          {event.plot && (
+                            <Link
+                              href={`/sites/${event.plot.siteId}/plots/${event.plot.id}`}
+                              className="hover:text-foreground hover:underline"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              {event.plot.name}
                             </Link>
                           )}
                           {event.job && (

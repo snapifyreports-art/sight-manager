@@ -5,7 +5,7 @@ import { hasPermission, ALL_PERMISSIONS } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
 
-// GET — return user's permissions as string array
+// GET — return user's permissions and site assignments
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -20,15 +20,24 @@ export async function GET(
 
   const { id } = await params;
 
-  const perms = await prisma.userPermission.findMany({
-    where: { userId: id },
-    select: { permission: true },
-  });
+  const [perms, siteAccess] = await Promise.all([
+    prisma.userPermission.findMany({
+      where: { userId: id },
+      select: { permission: true },
+    }),
+    prisma.userSite.findMany({
+      where: { userId: id },
+      select: { siteId: true },
+    }),
+  ]);
 
-  return NextResponse.json(perms.map((p) => p.permission));
+  return NextResponse.json({
+    permissions: perms.map((p) => p.permission),
+    siteIds: siteAccess.map((s) => s.siteId),
+  });
 }
 
-// PUT — replace user's permissions
+// PUT — replace user's permissions and site assignments
 export async function PUT(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -43,7 +52,10 @@ export async function PUT(
 
   const { id } = await params;
   const body = await req.json();
-  const { permissions } = body as { permissions: string[] };
+  const { permissions, siteIds } = body as {
+    permissions: string[];
+    siteIds?: string[];
+  };
 
   if (!Array.isArray(permissions)) {
     return NextResponse.json(
@@ -63,13 +75,37 @@ export async function PUT(
     );
   }
 
-  // Delete all existing, create new
-  await prisma.$transaction([
+  // Build transaction operations
+  const ops = [
     prisma.userPermission.deleteMany({ where: { userId: id } }),
     prisma.userPermission.createMany({
       data: permissions.map((p) => ({ userId: id, permission: p })),
     }),
-  ]);
+  ];
+
+  // If siteIds provided, also update site assignments
+  if (Array.isArray(siteIds)) {
+    ops.push(
+      prisma.userSite.deleteMany({ where: { userId: id } }),
+      prisma.userSite.createMany({
+        data: siteIds.map((siteId) => ({ userId: id, siteId })),
+      })
+    );
+  }
+
+  await prisma.$transaction(ops);
+
+  const user = await prisma.user.findUnique({
+    where: { id },
+    select: { name: true },
+  });
+  await prisma.eventLog.create({
+    data: {
+      type: "USER_ACTION",
+      description: `Permissions updated for ${user?.name || "user"} (${permissions.length} permission${permissions.length !== 1 ? "s" : ""}${Array.isArray(siteIds) ? `, ${siteIds.length} site${siteIds.length !== 1 ? "s" : ""}` : ""})`,
+      userId: session.user.id,
+    },
+  });
 
   return NextResponse.json({ success: true });
 }

@@ -73,7 +73,7 @@ export async function GET(
       orders: {
         where: {
           expectedDeliveryDate: { gte: dayStart, lte: dayEnd },
-          status: { in: ["ORDERED", "CONFIRMED"] },
+          status: "ORDERED",
         },
         select: {
           id: true,

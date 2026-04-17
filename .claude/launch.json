@@ -2,10 +2,11 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "Next.js Dev Server",
+      "name": "sight-manager",
       "runtimeExecutable": "cmd",
-      "runtimeArgs": ["/c", "cd /d C:\\Users\\keith\\OneDrive\\Desktop\\sight-manager && node node_modules/next/dist/bin/next dev -p 3002"],
-      "port": 3002
+      "runtimeArgs": ["/c", "cd /d C:\\Users\\keith\\OneDrive\\Desktop\\sight-manager && node node_modules/next/dist/bin/next dev"],
+      "port": 3002,
+      "autoPort": true
     }
   ]
 }

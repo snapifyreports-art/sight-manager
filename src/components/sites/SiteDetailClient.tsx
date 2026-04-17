@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import { useRefreshOnFocus } from "@/hooks/useRefreshOnFocus";
 import { format, addWeeks, addDays } from "date-fns";
 import {
   AlertTriangle,
@@ -30,6 +31,7 @@ import {
   PauseCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Breadcrumbs } from "@/components/ui/breadcrumbs";
 import {
   Card,
   CardContent,
@@ -110,6 +112,7 @@ interface SiteDetail {
   createdAt: string;
   updatedAt: string;
   createdBy: { id: string; name: string; email: string };
+  assignedTo: { id: string; name: string } | null;
   _count: { plots: number };
   plots: PlotItem[];
 }
@@ -260,7 +263,7 @@ function SiteSnags({ siteId, plots, initialSnagId }: { siteId: string; plots: Ar
 
       {showAgeingReport && <SnagAgeingReport siteId={siteId} />}
 
-      <SnagList snags={snags} onSelect={(s) => { setSelectedSnag(s); setDialogOpen(true); }} onRefresh={loadSnags} showPlot highlightId={initialSnagId} />
+      <SnagList snags={snags} onSelect={(s) => { setSelectedSnag(s); setDialogOpen(true); }} onRefresh={loadSnags} showPlot highlightId={initialSnagId} siteId={siteId} />
       {selectedSnag && (
         <SnagDialog
           open={dialogOpen}
@@ -382,6 +385,21 @@ export function SiteDetailClient({
     setSite(initialSite);
   }, [initialSite]);
 
+  // Auto-refresh when user navigates back or tab regains focus
+  const refreshSite = useCallback(() => { router.refresh(); }, [router]);
+  useRefreshOnFocus(refreshSite);
+
+  // Users list for site manager picker — seed with current assignee so name shows immediately
+  const [siteUsers, setSiteUsers] = useState<{ id: string; name: string }[]>(
+    site.assignedTo ? [{ id: site.assignedTo.id, name: site.assignedTo.name }] : []
+  );
+  useEffect(() => {
+    fetch("/api/users")
+      .then((r) => r.json())
+      .then((data: { id: string; name: string }[]) => setSiteUsers(data.map((u) => ({ id: u.id, name: u.name }))))
+      .catch(() => {});
+  }, []);
+
   // Edit site state
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [editName, setEditName] = useState(site.name);
@@ -392,6 +410,7 @@ export function SiteDetailClient({
   const [editAddress, setEditAddress] = useState(site.address ?? "");
   const [editPostcode, setEditPostcode] = useState(site.postcode ?? "");
   const [editStatus, setEditStatus] = useState(site.status);
+  const [editAssignedToId, setEditAssignedToId] = useState(site.assignedTo?.id ?? "");
   const [saving, setSaving] = useState(false);
   const [postcodeValid, setPostcodeValid] = useState<boolean | null>(null);
   const [postcodeChecking, setPostcodeChecking] = useState(false);
@@ -404,6 +423,7 @@ export function SiteDetailClient({
   >("choose");
   const [plotName, setPlotName] = useState("");
   const [plotDescription, setPlotDescription] = useState("");
+  const [plotHouseType, setPlotHouseType] = useState("");
   const [creatingPlot, setCreatingPlot] = useState(false);
 
   // Delete plot state
@@ -626,6 +646,7 @@ export function SiteDetailClient({
           address: editAddress,
           postcode: editPostcode,
           status: editStatus,
+          assignedToId: editAssignedToId || null,
         }),
       });
 
@@ -643,6 +664,7 @@ export function SiteDetailClient({
         address: updated.address,
         postcode: updated.postcode,
         status: updated.status,
+        assignedTo: updated.assignedTo ?? null,
         updatedAt: updated.updatedAt,
       }));
       setEditDialogOpen(false);
@@ -667,6 +689,7 @@ export function SiteDetailClient({
           name: plotName,
           plotNumber: plotName.match(/(\d+)/)?.[1] || null,
           description: plotDescription || null,
+          houseType: plotHouseType || null,
         }),
       });
 
@@ -783,14 +806,21 @@ export function SiteDetailClient({
     <div className="space-y-6">
       {/* Breadcrumb + Header */}
       <div className="space-y-4">
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => router.push("/sites")}
-        >
-          <ArrowLeft className="size-4" />
-          Back to Sites
-        </Button>
+        <div className="flex items-center gap-3">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => router.back()}
+          >
+            <ArrowLeft className="size-4" />
+            Back
+          </Button>
+        </div>
+
+        <Breadcrumbs items={[
+          { label: "Sites", href: "/sites" },
+          { label: site.name },
+        ]} />
 
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
           <div className="min-w-0 flex-1">
@@ -820,6 +850,12 @@ export function SiteDetailClient({
               )}
               <span className="hidden text-border sm:inline">&middot;</span>
               <span className="hidden sm:inline">Created by {site.createdBy.name}</span>
+              {site.assignedTo && (
+                <>
+                  <span className="hidden text-border sm:inline">&middot;</span>
+                  <span className="hidden sm:inline">Managed by {site.assignedTo.name}</span>
+                </>
+              )}
               <span className="hidden text-border sm:inline">&middot;</span>
               <span className="hidden sm:inline">
                 {format(new Date(site.createdAt), "d MMM yyyy")}
@@ -951,6 +987,15 @@ export function SiteDetailClient({
                             setPlotDescription(e.target.value)
                           }
                           rows={3}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="plot-house-type">House Type</Label>
+                        <Input
+                          id="plot-house-type"
+                          placeholder="e.g. Semi-Detached 3-Bed"
+                          value={plotHouseType}
+                          onChange={(e) => setPlotHouseType(e.target.value)}
                         />
                       </div>
                     </div>
@@ -1498,6 +1543,7 @@ export function SiteDetailClient({
                   setEditLocation(site.location ?? "");
                   setEditAddress(site.address ?? "");
                   setEditStatus(site.status);
+                  setEditAssignedToId(site.assignedTo?.id ?? "");
                 }
               }}
             >
@@ -1595,6 +1641,24 @@ export function SiteDetailClient({
                         <SelectItem value="ARCHIVED">Archived</SelectItem>
                       </SelectContent>
                     </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Site Manager</Label>
+                    <Select
+                      value={editAssignedToId || "none"}
+                      onValueChange={(v) => setEditAssignedToId(!v || v === "none" ? "" : v)}
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="Unassigned" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Unassigned</SelectItem>
+                        {siteUsers.map((u) => (
+                          <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">Assigns this person to all jobs on this site</p>
                   </div>
                 </div>
                 <DialogFooter>
@@ -1756,7 +1820,7 @@ export function SiteDetailClient({
                           const s = scheduleStatuses[plot.id];
                           if (s.awaitingRestart) return (
                             <span className="mt-1.5 inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700">
-                              <PauseCircle className="size-2.5" /> Awaiting restart
+                              <PauseCircle className="size-2.5" /> Deferred
                             </span>
                           );
                           if (s.status === "ahead") return (

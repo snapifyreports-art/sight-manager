@@ -183,6 +183,16 @@
   }
 }
 
+/* Subtle pulse-glow animation for in-progress Gantt bars */
+@keyframes pulse-glow {
+  0%, 100% {
+    box-shadow: 0 0 6px 1px rgba(59, 130, 246, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 10px 2px rgba(59, 130, 246, 0.6);
+  }
+}
+
 /* ─── Print styles for Daily Brief ──────────────────────────────────────── */
 @media print {
   /* Hide navigation chrome */

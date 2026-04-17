@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { format, addDays, differenceInCalendarDays } from "date-fns";
 import { getCurrentDate } from "@/lib/dev-date";
 import { useDevDate } from "@/lib/dev-date-context";
+import { useJobAction } from "@/hooks/useJobAction";
 import {
   Users,
   HardHat,
@@ -257,6 +258,11 @@ export function ContractorDaySheets({ siteId }: ContractorDaySheetsProps) {
   const [pendingActions, setPendingActions] = useState<Set<string>>(new Set());
   const [refreshKey, setRefreshKey] = useState(0);
 
+  // Centralised job action hook for start actions
+  const { triggerAction: triggerJobStart, dialogs: jobActionDialogs } = useJobAction(
+    async () => { setRefreshKey((k) => k + 1); }
+  );
+
   // Extend dialog state
   const [extendTarget, setExtendTarget] = useState<JobItem | null>(null);
   const [extendDays, setExtendDays] = useState(1);
@@ -296,6 +302,17 @@ export function ContractorDaySheets({ siteId }: ContractorDaySheetsProps) {
   };
 
   const handleJobAction = async (jobId: string, action: "start" | "complete") => {
+    // Start actions go through centralised hook with full pre-start checks
+    if (action === "start") {
+      const job = findJob(jobId);
+      if (job) {
+        await triggerJobStart(
+          { id: job.id, name: job.name, status: job.status, startDate: job.startDate ?? null, endDate: job.endDate ?? null },
+          "start"
+        );
+      }
+      return;
+    }
     setPendingActions((prev) => new Set(prev).add(jobId));
     try {
       const job = findJob(jobId);
@@ -444,6 +461,7 @@ export function ContractorDaySheets({ siteId }: ContractorDaySheetsProps) {
 
   return (
     <div className="space-y-4">
+      {jobActionDialogs}
       {/* Date nav + print */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">

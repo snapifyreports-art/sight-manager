@@ -26,11 +26,13 @@ export async function GET(
 
   const siblings = await prisma.job.findMany({
     where: { plotId: job.plotId },
-    orderBy: { sortOrder: "asc" },
+    orderBy: { startDate: "asc" },
     select: {
       id: true,
       name: true,
       sortOrder: true,
+      startDate: true,
+      endDate: true,
       status: true,
       parentStage: true,
     },

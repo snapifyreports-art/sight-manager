@@ -76,6 +76,31 @@ export async function POST(
     return NextResponse.json({ error: "Plot not found" }, { status: 404 });
   }
 
+  // Auto-fill assignedToId and contactId from job if not provided
+  let resolvedAssignedToId = assignedToId || null;
+  let resolvedContactId = contactId || null;
+  if (jobId && (!resolvedAssignedToId || !resolvedContactId)) {
+    const linkedJob = await prisma.job.findUnique({
+      where: { id: jobId },
+      select: {
+        assignedToId: true,
+        contractors: {
+          select: { contactId: true },
+          orderBy: { createdAt: "asc" as const },
+          take: 1,
+        },
+      },
+    });
+    if (linkedJob) {
+      if (!resolvedAssignedToId && linkedJob.assignedToId) {
+        resolvedAssignedToId = linkedJob.assignedToId;
+      }
+      if (!resolvedContactId && linkedJob.contractors[0]?.contactId) {
+        resolvedContactId = linkedJob.contractors[0].contactId;
+      }
+    }
+  }
+
   const snag = await prisma.snag.create({
     data: {
       plotId: id,
@@ -83,8 +108,8 @@ export async function POST(
       description: description.trim(),
       location: location || null,
       priority: priority || "MEDIUM",
-      assignedToId: assignedToId || null,
-      contactId: contactId || null,
+      assignedToId: resolvedAssignedToId,
+      contactId: resolvedContactId,
       raisedById: session.user.id,
       notes: notes || null,
       createdAt: getServerCurrentDate(req),

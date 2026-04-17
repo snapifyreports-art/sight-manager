@@ -30,7 +30,7 @@ export function NotificationBlockedBanner() {
           Enable in browser settings
         </Link>
         {" "}then go to{" "}
-        <Link href="/settings" className="font-semibold underline hover:text-red-100">
+        <Link href="/settings?tab=notifications" className="font-semibold underline hover:text-red-100">
           Notification Settings
         </Link>
         .

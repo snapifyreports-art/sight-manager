@@ -79,41 +79,40 @@ export function getTimelineRange(
   jobs: Array<{
     startDate: string | null;
     endDate: string | null;
+    originalStartDate?: string | null;
+    originalEndDate?: string | null;
     orders?: Array<{
       dateOfOrder: string;
       expectedDeliveryDate: string | null;
     }>;
-  }>
+  }>,
+  includeOriginalDates: boolean = false
 ): { timelineStart: Date; timelineEnd: Date } {
   const today = getCurrentDate();
   let earliest: Date | null = null;
   let latest: Date | null = null;
 
+  const consider = (dateStr: string | null | undefined) => {
+    if (!dateStr) return;
+    const d = new Date(dateStr);
+    if (!earliest || isBefore(d, earliest)) earliest = d;
+    if (!latest || isAfter(d, latest)) latest = d;
+  };
+
   for (const job of jobs) {
-    if (job.startDate) {
-      const d = new Date(job.startDate);
-      if (!earliest || isBefore(d, earliest)) earliest = d;
-      if (!latest || isAfter(d, latest)) latest = d;
-    }
-    if (job.endDate) {
-      const d = new Date(job.endDate);
-      if (!earliest || isBefore(d, earliest)) earliest = d;
-      if (!latest || isAfter(d, latest)) latest = d;
+    consider(job.startDate);
+    consider(job.endDate);
+
+    if (includeOriginalDates) {
+      consider(job.originalStartDate);
+      consider(job.originalEndDate);
     }
 
     // Also consider order dates for the range
     if (job.orders) {
       for (const order of job.orders) {
-        if (order.dateOfOrder) {
-          const d = new Date(order.dateOfOrder);
-          if (!earliest || isBefore(d, earliest)) earliest = d;
-          if (!latest || isAfter(d, latest)) latest = d;
-        }
-        if (order.expectedDeliveryDate) {
-          const d = new Date(order.expectedDeliveryDate);
-          if (!earliest || isBefore(d, earliest)) earliest = d;
-          if (!latest || isAfter(d, latest)) latest = d;
-        }
+        consider(order.dateOfOrder);
+        consider(order.expectedDeliveryDate);
       }
     }
   }
