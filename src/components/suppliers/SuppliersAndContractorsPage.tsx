@@ -17,6 +17,7 @@ interface Supplier {
   createdAt: string;
   updatedAt: string;
   _count: { orders: number; materials: number };
+  linkedSites?: Array<{ id: string; name: string; status: string; openOrders: number; totalOrders: number }>;
 }
 
 interface Contact {
@@ -29,6 +30,7 @@ interface Contact {
   notes: string | null;
   createdAt: string;
   updatedAt: string;
+  linkedSites?: Array<{ id: string; name: string; status: string; activeJobs: number; totalJobs: number; openOrders: number }>;
 }
 
 interface Props {

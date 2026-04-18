@@ -4,21 +4,66 @@ import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
 
-// GET /api/suppliers — list all suppliers
+// GET /api/suppliers — list all suppliers, with linked sites derived from orders
 export async function GET() {
   const session = await auth();
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  // Scope linked sites to what the caller can actually access — a contract manager
+  // shouldn't see that a supplier is connected to a site they don't have rights to.
+  const { getUserSiteIds } = await import("@/lib/site-access");
+  const accessibleSiteIds = await getUserSiteIds(session.user.id, session.user.role);
+  const orderWhere = accessibleSiteIds === null
+    ? {}
+    : { job: { plot: { siteId: { in: accessibleSiteIds } } } };
+
   const suppliers = await prisma.supplier.findMany({
     orderBy: { name: "asc" },
     include: {
       _count: { select: { orders: true, materials: true } },
+      orders: {
+        where: { ...orderWhere, status: { not: "CANCELLED" } },
+        select: {
+          status: true,
+          job: {
+            select: {
+              plot: {
+                select: { site: { select: { id: true, name: true, status: true } } },
+              },
+            },
+          },
+        },
+      },
     },
   });
 
-  return NextResponse.json(suppliers);
+  // Derive linked sites from order chain. Count live/total orders per site.
+  const result = suppliers.map((sup) => {
+    const siteMap = new Map<
+      string,
+      { id: string; name: string; status: string; openOrders: number; totalOrders: number }
+    >();
+    for (const o of sup.orders) {
+      const s = o.job.plot.site;
+      const existing = siteMap.get(s.id) ?? {
+        id: s.id,
+        name: s.name,
+        status: s.status,
+        openOrders: 0,
+        totalOrders: 0,
+      };
+      existing.totalOrders++;
+      if (o.status !== "DELIVERED") existing.openOrders++;
+      siteMap.set(s.id, existing);
+    }
+    // Don't leak order-level detail back, just the summary + site list
+    const { orders: _orders, ...rest } = sup;
+    return { ...rest, linkedSites: Array.from(siteMap.values()).sort((a, b) => a.name.localeCompare(b.name)) };
+  });
+
+  return NextResponse.json(result);
 }
 
 // POST /api/suppliers — create a supplier

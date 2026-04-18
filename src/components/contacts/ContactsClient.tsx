@@ -12,6 +12,7 @@ import {
   Pencil,
   Trash2,
   UserPlus,
+  MapPin,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -44,6 +45,14 @@ interface Contact {
   notes: string | null;
   createdAt: string;
   updatedAt: string;
+  linkedSites?: Array<{
+    id: string;
+    name: string;
+    status: string;
+    activeJobs: number;
+    totalJobs: number;
+    openOrders: number;
+  }>;
 }
 
 type ContactFormData = {
@@ -327,6 +336,30 @@ export function ContactsClient({
                     </div>
                   )}
                 </div>
+
+                {/* Linked sites — derived from jobs or orders */}
+                {contact.linkedSites && contact.linkedSites.length > 0 && (
+                  <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t pt-3">
+                    <MapPin className="size-3 text-muted-foreground" />
+                    {contact.linkedSites.map((site) => {
+                      const activity = site.activeJobs + site.openOrders;
+                      return (
+                        <span
+                          key={site.id}
+                          className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                            activity > 0 ? "bg-blue-50 text-blue-700" : "bg-slate-100 text-slate-600"
+                          }`}
+                          title={`${site.totalJobs} job${site.totalJobs !== 1 ? "s" : ""} (${site.activeJobs} active)${site.openOrders > 0 ? `, ${site.openOrders} open order${site.openOrders !== 1 ? "s" : ""}` : ""}`}
+                        >
+                          {site.name}
+                          {activity > 0 && (
+                            <span className="ml-1 font-semibold">· {activity}</span>
+                          )}
+                        </span>
+                      );
+                    })}
+                  </div>
+                )}
 
                 {/* Actions */}
                 <div className="mt-3 flex items-center gap-1 border-t pt-3">

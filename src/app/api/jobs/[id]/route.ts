@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { sessionHasPermission } from "@/lib/permissions";
 import { recomputeParentOf } from "@/lib/parent-job";
+import { canAccessSite } from "@/lib/site-access";
 
 export const dynamic = "force-dynamic";
 
@@ -41,6 +42,11 @@ export async function GET(
     return NextResponse.json({ error: "Job not found" }, { status: 404 });
   }
 
+  // Site-access check
+  if (!(await canAccessSite(session.user.id, (session.user as { role: string }).role, job.plot.siteId))) {
+    return NextResponse.json({ error: "You do not have access to this site" }, { status: 403 });
+  }
+
   return NextResponse.json(job);
 }
 
@@ -67,6 +73,11 @@ export async function PUT(
   });
   if (!existing) {
     return NextResponse.json({ error: "Job not found" }, { status: 404 });
+  }
+
+  // Base site-access check — caller must have access to the job's current site
+  if (!(await canAccessSite(session.user.id, (session.user as { role: string }).role, existing.plot.siteId))) {
+    return NextResponse.json({ error: "You do not have access to this site" }, { status: 403 });
   }
 
   // Guard cross-site plot reassignment — both source & target must be accessible to the caller
@@ -171,6 +182,11 @@ export async function DELETE(
   });
   if (!existing) {
     return NextResponse.json({ error: "Job not found" }, { status: 404 });
+  }
+
+  // Site-access check
+  if (!(await canAccessSite(session.user.id, (session.user as { role: string }).role, existing.plot.siteId))) {
+    return NextResponse.json({ error: "You do not have access to this site" }, { status: 403 });
   }
 
   // Write event log BEFORE deletion so siteId is captured; the event survives

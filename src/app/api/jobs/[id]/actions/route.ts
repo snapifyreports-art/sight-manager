@@ -5,6 +5,7 @@ import { sendPushToUser } from "@/lib/push";
 import { getServerCurrentDate } from "@/lib/dev-date";
 import { sessionHasPermission } from "@/lib/permissions";
 import { recomputeParentOf } from "@/lib/parent-job";
+import { canAccessSite } from "@/lib/site-access";
 import type { EventType, JobStatus } from "@prisma/client";
 
 export const dynamic = "force-dynamic";
@@ -50,6 +51,11 @@ export async function POST(
   });
   if (!existing) {
     return NextResponse.json({ error: "Job not found" }, { status: 404 });
+  }
+
+  // Site-access check — caller must have access to the job's site
+  if (!(await canAccessSite(session.user.id, (session.user as { role: string }).role, existing.plot.siteId))) {
+    return NextResponse.json({ error: "You do not have access to this site" }, { status: 403 });
   }
 
   // Guard against double-start and double-complete

@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { calculateCascade } from "@/lib/cascade";
 import { getTodayWeatherSummary } from "@/lib/weather";
 import { addWorkingDays } from "@/lib/working-days";
+import { canAccessSite } from "@/lib/site-access";
 
 export const dynamic = "force-dynamic";
 
@@ -35,6 +36,11 @@ export async function GET(
 
   if (!job) {
     return NextResponse.json({ error: "Job not found" }, { status: 404 });
+  }
+
+  // Site-access check (GET path)
+  if (!(await canAccessSite(session.user.id, (session.user as { role: string }).role, job.plot.siteId))) {
+    return NextResponse.json({ error: "You do not have access to this site" }, { status: 403 });
   }
 
   const weatherDays = job.startDate && job.endDate
@@ -100,6 +106,11 @@ export async function POST(
 
   if (!job || !job.endDate) {
     return NextResponse.json({ error: "Job not found or has no end date" }, { status: 404 });
+  }
+
+  // Site-access check (POST path)
+  if (!(await canAccessSite(session.user.id, (session.user as { role: string }).role, job.plot.siteId))) {
+    return NextResponse.json({ error: "You do not have access to this site" }, { status: 403 });
   }
 
   // Fetch today's weather to stamp on the delay note (fire-and-forget, never blocks)

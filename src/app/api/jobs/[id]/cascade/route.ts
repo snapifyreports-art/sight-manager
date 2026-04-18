@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { calculateCascade } from "@/lib/cascade";
 import { addWorkingDays, snapToWorkingDay } from "@/lib/working-days";
+import { canAccessSite } from "@/lib/site-access";
 
 export const dynamic = "force-dynamic";
 
@@ -35,6 +36,11 @@ export async function POST(
 
   if (!job) {
     return NextResponse.json({ error: "Job not found" }, { status: 404 });
+  }
+
+  // Site-access check
+  if (!(await canAccessSite(session.user.id, (session.user as { role: string }).role, job.plot.siteId))) {
+    return NextResponse.json({ error: "You do not have access to this site" }, { status: 403 });
   }
 
   const allPlotJobs = await prisma.job.findMany({
@@ -104,6 +110,11 @@ export async function PUT(
 
   if (!job) {
     return NextResponse.json({ error: "Job not found" }, { status: 404 });
+  }
+
+  // Site-access check
+  if (!(await canAccessSite(session.user.id, (session.user as { role: string }).role, job.plot.siteId))) {
+    return NextResponse.json({ error: "You do not have access to this site" }, { status: 403 });
   }
 
   const allPlotJobs = await prisma.job.findMany({

@@ -12,6 +12,7 @@ import {
   User,
   ShoppingCart,
   List,
+  MapPin,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -33,6 +34,7 @@ interface Supplier {
   createdAt: string;
   updatedAt: string;
   _count: { orders: number; materials: number };
+  linkedSites?: Array<{ id: string; name: string; status: string; openOrders: number; totalOrders: number }>;
 }
 
 export function SuppliersListClient({ suppliers: initial }: { suppliers: Supplier[] }) {
@@ -150,6 +152,29 @@ export function SuppliersListClient({ suppliers: initial }: { suppliers: Supplie
                   <span>{s._count.orders} order{s._count.orders !== 1 ? "s" : ""}</span>
                 </div>
               </div>
+
+              {/* Linked sites — derived from non-cancelled orders */}
+              {s.linkedSites && s.linkedSites.length > 0 && (
+                <div className="mt-2 flex flex-wrap items-center gap-1.5 border-t pt-2">
+                  <MapPin className="size-3 text-muted-foreground" />
+                  {s.linkedSites.map((site) => (
+                    <span
+                      key={site.id}
+                      className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                        site.openOrders > 0
+                          ? "bg-blue-50 text-blue-700"
+                          : "bg-slate-100 text-slate-600"
+                      }`}
+                      title={`${site.totalOrders} order${site.totalOrders !== 1 ? "s" : ""} (${site.openOrders} open)`}
+                    >
+                      {site.name}
+                      {site.openOrders > 0 && (
+                        <span className="ml-1 font-semibold">· {site.openOrders}</span>
+                      )}
+                    </span>
+                  ))}
+                </div>
+              )}
             </Link>
           ))}
         </div>

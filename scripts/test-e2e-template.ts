@@ -26,7 +26,8 @@ import { PrismaClient } from "@prisma/client";
 const BASE = "http://localhost:3002";
 const EMAIL = "keith@sightmanager.com";
 const PASSWORD = "keith1234";
-const TEMPLATE_NAME = "The Willow";
+// Can be set via CLI: npx tsx scripts/test-e2e-template.ts "The Oakwood"
+const TEMPLATE_NAME = process.argv[2] || "The Willow";
 
 const prisma = new PrismaClient();
 const jar: Record<string, string> = {};
@@ -84,8 +85,17 @@ async function main() {
   const userId = await login();
   console.log(`  ✓ uid=${userId}\n`);
 
-  const template = await prisma.plotTemplate.findFirst({ where: { name: TEMPLATE_NAME } });
+  const template = await prisma.plotTemplate.findFirst({
+    where: { name: TEMPLATE_NAME },
+    include: {
+      jobs: { where: { parentId: null }, include: { children: { select: { id: true } } } },
+    },
+  });
   if (!template) throw new Error(`Template "${TEMPLATE_NAME}" not found in DB`);
+  const expectedParents = template.jobs.filter((j) => j.children.length > 0).length;
+  const expectedChildren = template.jobs.reduce((n, j) => n + j.children.length, 0);
+  const expectedFlatTopLevel = template.jobs.filter((j) => j.children.length === 0).length;
+  const expectedTotal = expectedParents + expectedChildren + expectedFlatTopLevel;
 
   console.log(`Using template: ${template.name}\n`);
 
@@ -94,7 +104,7 @@ async function main() {
   const siteRes = await req("/api/sites", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name: "__E2E_TEST_SITE__", location: "Test Town", postcode: "SW1A 1AA" }),
+    body: JSON.stringify({ name: `__E2E_TEST_${Date.now()}__`, location: "Test Town", postcode: "SW1A 1AA" }),
   });
   const site = await siteRes.json();
   record("Site created via API", siteRes.ok && !!site.id, `id=${site.id}`);
@@ -124,9 +134,14 @@ async function main() {
   const parents = allJobs.filter((j) => j.children.length > 0);
   const leaves = allJobs.filter((j) => j.children.length === 0);
   record(
-    `Parent Jobs created (expected 9 from Willow template)`,
-    parents.length === 9,
+    `Parent Jobs created (expected ${expectedParents} from ${template.name})`,
+    parents.length === expectedParents,
     `parents=${parents.length}, leaves=${leaves.length}, total=${allJobs.length}`
+  );
+  record(
+    `Total jobs matches template`,
+    allJobs.length === expectedTotal,
+    `expected=${expectedTotal}, actual=${allJobs.length}`
   );
 
   // 4. Parent dates span children
