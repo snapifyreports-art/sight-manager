@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { apiError } from "@/lib/api-errors";
 
 export const dynamic = "force-dynamic";
 
@@ -80,19 +81,23 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "name is required" }, { status: 400 });
   }
 
-  const supplier = await prisma.supplier.create({
-    data: {
-      name: body.name.trim(),
-      contactName: body.contactName || null,
-      contactEmail: body.contactEmail || null,
-      contactNumber: body.contactNumber || null,
-      type: body.type || null,
-      accountNumber: body.accountNumber || null,
-    },
-    include: {
-      _count: { select: { orders: true, materials: true } },
-    },
-  });
+  try {
+    const supplier = await prisma.supplier.create({
+      data: {
+        name: body.name.trim(),
+        contactName: body.contactName || null,
+        contactEmail: body.contactEmail || null,
+        contactNumber: body.contactNumber || null,
+        type: body.type || null,
+        accountNumber: body.accountNumber || null,
+      },
+      include: {
+        _count: { select: { orders: true, materials: true } },
+      },
+    });
 
-  return NextResponse.json(supplier, { status: 201 });
+    return NextResponse.json(supplier, { status: 201 });
+  } catch (err) {
+    return apiError(err, "Failed to create supplier");
+  }
 }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { apiError } from "@/lib/api-errors";
 import * as XLSX from "xlsx";
 
 export const dynamic = "force-dynamic";
@@ -57,33 +58,37 @@ export async function POST(
   let created = 0;
   let updated = 0;
 
-  // Process sequentially in a transaction (Supabase pool limit)
-  await prisma.$transaction(async (tx) => {
-    for (const row of validRows) {
-      const name = String(row.Name).trim();
-      const unit = row.Unit ? String(row.Unit).trim() : "each";
-      const unitCost = typeof row["Unit Cost"] === "number" ? row["Unit Cost"] : parseFloat(String(row["Unit Cost"])) || 0;
-      const category = row.Category ? String(row.Category).trim() : null;
-      const sku = row.SKU ? String(row.SKU).trim() : null;
+  try {
+    // Process sequentially in a transaction (Supabase pool limit)
+    await prisma.$transaction(async (tx) => {
+      for (const row of validRows) {
+        const name = String(row.Name).trim();
+        const unit = row.Unit ? String(row.Unit).trim() : "each";
+        const unitCost = typeof row["Unit Cost"] === "number" ? row["Unit Cost"] : parseFloat(String(row["Unit Cost"])) || 0;
+        const category = row.Category ? String(row.Category).trim() : null;
+        const sku = row.SKU ? String(row.SKU).trim() : null;
 
-      const existing = await tx.supplierMaterial.findUnique({
-        where: { supplierId_name: { supplierId: id, name } },
-      });
+        const existing = await tx.supplierMaterial.findUnique({
+          where: { supplierId_name: { supplierId: id, name } },
+        });
 
-      if (existing) {
-        await tx.supplierMaterial.update({
-          where: { id: existing.id },
-          data: { unit, unitCost, category, sku },
-        });
-        updated++;
-      } else {
-        await tx.supplierMaterial.create({
-          data: { supplierId: id, name, unit, unitCost, category, sku },
-        });
-        created++;
+        if (existing) {
+          await tx.supplierMaterial.update({
+            where: { id: existing.id },
+            data: { unit, unitCost, category, sku },
+          });
+          updated++;
+        } else {
+          await tx.supplierMaterial.create({
+            data: { supplierId: id, name, unit, unitCost, category, sku },
+          });
+          created++;
+        }
       }
-    }
-  });
+    });
 
-  return NextResponse.json({ imported: validRows.length, created, updated });
+    return NextResponse.json({ imported: validRows.length, created, updated });
+  } catch (err) {
+    return apiError(err, "Failed to upload pricelist");
+  }
 }

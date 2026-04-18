@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { ContactType } from "@prisma/client";
+import { apiError } from "@/lib/api-errors";
 
 export const dynamic = "force-dynamic";
 
@@ -110,24 +111,28 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const contact = await prisma.contact.create({
-    data: {
-      name,
-      email: email || null,
-      phone: phone || null,
-      type,
-      company: company || null,
-      notes: notes || null,
-    },
-  });
+  try {
+    const contact = await prisma.contact.create({
+      data: {
+        name,
+        email: email || null,
+        phone: phone || null,
+        type,
+        company: company || null,
+        notes: notes || null,
+      },
+    });
 
-  await prisma.eventLog.create({
-    data: {
-      type: "USER_ACTION",
-      description: `${type === "CONTRACTOR" ? "Contractor" : "Supplier"} "${name}"${company ? ` (${company})` : ""} added`,
-      userId: session.user.id,
-    },
-  });
+    await prisma.eventLog.create({
+      data: {
+        type: "USER_ACTION",
+        description: `${type === "CONTRACTOR" ? "Contractor" : "Supplier"} "${name}"${company ? ` (${company})` : ""} added`,
+        userId: session.user.id,
+      },
+    });
 
-  return NextResponse.json(contact, { status: 201 });
+    return NextResponse.json(contact, { status: 201 });
+  } catch (err) {
+    return apiError(err, "Failed to create contact");
+  }
 }

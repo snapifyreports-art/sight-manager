@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getSupabase, PHOTOS_BUCKET } from "@/lib/supabase";
 import { canAccessSite } from "@/lib/site-access";
+import { apiError } from "@/lib/api-errors";
 
 export const dynamic = "force-dynamic";
 
@@ -28,24 +29,28 @@ export async function DELETE(
     return NextResponse.json({ error: "You do not have access to this site" }, { status: 403 });
   }
 
-  // Delete from Supabase Storage
-  const urlParts = doc.url.split(`${PHOTOS_BUCKET}/`);
-  if (urlParts.length > 1) {
-    await getSupabase().storage.from(PHOTOS_BUCKET).remove([urlParts[1]]);
+  try {
+    // Delete from Supabase Storage
+    const urlParts = doc.url.split(`${PHOTOS_BUCKET}/`);
+    if (urlParts.length > 1) {
+      await getSupabase().storage.from(PHOTOS_BUCKET).remove([urlParts[1]]);
+    }
+
+    await prisma.siteDocument.delete({ where: { id } });
+
+    await prisma.eventLog.create({
+      data: {
+        type: "USER_ACTION",
+        description: `Document "${doc.name}" deleted`,
+        siteId: doc.siteId,
+        plotId: doc.plotId,
+        jobId: doc.jobId,
+        userId: session.user.id,
+      },
+    });
+
+    return NextResponse.json({ success: true });
+  } catch (err) {
+    return apiError(err, "Failed to delete document");
   }
-
-  await prisma.siteDocument.delete({ where: { id } });
-
-  await prisma.eventLog.create({
-    data: {
-      type: "USER_ACTION",
-      description: `Document "${doc.name}" deleted`,
-      siteId: doc.siteId,
-      plotId: doc.plotId,
-      jobId: doc.jobId,
-      userId: session.user.id,
-    },
-  });
-
-  return NextResponse.json({ success: true });
 }

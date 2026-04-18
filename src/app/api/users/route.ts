@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { hash } from "bcryptjs";
 import { hasPermission, DEFAULT_PERMISSIONS } from "@/lib/permissions";
 import type { UserRole } from "@prisma/client";
+import { apiError } from "@/lib/api-errors";
 
 export const dynamic = "force-dynamic";
 
@@ -65,36 +66,40 @@ export async function POST(req: NextRequest) {
 
   const hashedPassword = await hash(password, 12);
 
-  const user = await prisma.user.create({
-    data: {
-      name,
-      email,
-      password: hashedPassword,
-      role,
-      jobTitle: jobTitle || null,
-      company: company || null,
-      phone: phone || null,
-    },
-    select: {
-      id: true,
-      name: true,
-      email: true,
-      role: true,
-      jobTitle: true,
-      company: true,
-      phone: true,
-      createdAt: true,
-    },
-  });
-
-  // Populate default permissions for this role
-  const defaults = DEFAULT_PERMISSIONS[role as UserRole] || [];
-  if (defaults.length > 0) {
-    await prisma.userPermission.createMany({
-      data: defaults.map((p) => ({ userId: user.id, permission: p })),
-      skipDuplicates: true,
+  try {
+    const user = await prisma.user.create({
+      data: {
+        name,
+        email,
+        password: hashedPassword,
+        role,
+        jobTitle: jobTitle || null,
+        company: company || null,
+        phone: phone || null,
+      },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        jobTitle: true,
+        company: true,
+        phone: true,
+        createdAt: true,
+      },
     });
-  }
 
-  return NextResponse.json(user, { status: 201 });
+    // Populate default permissions for this role
+    const defaults = DEFAULT_PERMISSIONS[role as UserRole] || [];
+    if (defaults.length > 0) {
+      await prisma.userPermission.createMany({
+        data: defaults.map((p) => ({ userId: user.id, permission: p })),
+        skipDuplicates: true,
+      });
+    }
+
+    return NextResponse.json(user, { status: 201 });
+  } catch (err) {
+    return apiError(err, "Failed to create user");
+  }
 }

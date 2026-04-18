@@ -5,6 +5,7 @@ import { calculateCascade } from "@/lib/cascade";
 import { getTodayWeatherSummary } from "@/lib/weather";
 import { addWorkingDays } from "@/lib/working-days";
 import { canAccessSite } from "@/lib/site-access";
+import { apiError } from "@/lib/api-errors";
 
 export const dynamic = "force-dynamic";
 
@@ -167,6 +168,7 @@ export async function POST(
   // Build a map of current job dates for preserving originals
   const jobMap = new Map(allPlotJobs.map((j) => [j.id, j]));
 
+  try {
   await prisma.$transaction(async (tx) => {
     // Update triggering job — preserve originals on first change
     const triggerData: Record<string, unknown> = { endDate: newEndDate };
@@ -258,4 +260,7 @@ export async function POST(
     jobsShifted: cascade.jobUpdates.length,
     ordersShifted: cascade.orderUpdates.length,
   });
+  } catch (err) {
+    return apiError(err, "Failed to delay job");
+  }
 }

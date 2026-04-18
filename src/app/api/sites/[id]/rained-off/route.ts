@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { format } from "date-fns";
 import { canAccessSite } from "@/lib/site-access";
+import { apiError } from "@/lib/api-errors";
 
 export const dynamic = "force-dynamic";
 
@@ -65,73 +66,77 @@ export async function POST(
   const impactIcon = type === "TEMPERATURE" ? "🌡️" : "☔";
   const impactLabel = type === "TEMPERATURE" ? "Temperature impact" : "Rain day";
 
-  // Upsert the weather impact day record (unique by siteId + date + type)
-  const day = await prisma.rainedOffDay.upsert({
-    where: {
-      siteId_date_type: { siteId, date: dateObj, type },
-    },
-    update: { note: note || null },
-    create: {
-      siteId,
-      date: dateObj,
-      type,
-      note: note || null,
-    },
-  });
-
-  // Find all weather-affected jobs overlapping this date and log a note — no cascade
-  const plots = await prisma.plot.findMany({
-    where: { siteId },
-    select: { id: true },
-  });
-
-  const affectedJobs: Array<{ id: string }> = [];
-
-  for (const plot of plots) {
-    const jobs = await prisma.job.findMany({
+  try {
+    // Upsert the weather impact day record (unique by siteId + date + type)
+    const day = await prisma.rainedOffDay.upsert({
       where: {
-        plotId: plot.id,
-        weatherAffected: true,
-        // Only log notes on jobs whose weatherAffectedType matches (or is BOTH, or null/unset = legacy)
-        OR: [
-          { weatherAffectedType: null },
-          { weatherAffectedType: type },
-          { weatherAffectedType: "BOTH" },
-        ],
-        startDate: { lte: dateObj },
-        endDate: { gte: dateObj },
+        siteId_date_type: { siteId, date: dateObj, type },
       },
+      update: { note: note || null },
+      create: {
+        siteId,
+        date: dateObj,
+        type,
+        note: note || null,
+      },
+    });
+
+    // Find all weather-affected jobs overlapping this date and log a note — no cascade
+    const plots = await prisma.plot.findMany({
+      where: { siteId },
       select: { id: true },
     });
-    affectedJobs.push(...jobs);
-  }
 
-  const noteText = `${impactIcon} ${note || impactLabel} — ${format(dateObj, "dd MMM yyyy")}`;
+    const affectedJobs: Array<{ id: string }> = [];
 
-  for (const job of affectedJobs) {
-    await prisma.jobAction.create({
+    for (const plot of plots) {
+      const jobs = await prisma.job.findMany({
+        where: {
+          plotId: plot.id,
+          weatherAffected: true,
+          // Only log notes on jobs whose weatherAffectedType matches (or is BOTH, or null/unset = legacy)
+          OR: [
+            { weatherAffectedType: null },
+            { weatherAffectedType: type },
+            { weatherAffectedType: "BOTH" },
+          ],
+          startDate: { lte: dateObj },
+          endDate: { gte: dateObj },
+        },
+        select: { id: true },
+      });
+      affectedJobs.push(...jobs);
+    }
+
+    const noteText = `${impactIcon} ${note || impactLabel} — ${format(dateObj, "dd MMM yyyy")}`;
+
+    for (const job of affectedJobs) {
+      await prisma.jobAction.create({
+        data: {
+          jobId: job.id,
+          userId: session.user.id,
+          action: "note",
+          notes: noteText,
+        },
+      });
+    }
+
+    await prisma.eventLog.create({
       data: {
-        jobId: job.id,
+        type: "SYSTEM",
+        description: `${impactIcon} Weather impact logged: ${impactLabel} on ${format(dateObj, "dd MMM yyyy")}${note ? ` — ${note}` : ""} (${affectedJobs.length} job${affectedJobs.length !== 1 ? "s" : ""} affected)`,
+        siteId: siteId,
         userId: session.user.id,
-        action: "note",
-        notes: noteText,
       },
     });
+
+    return NextResponse.json(
+      { day, affectedJobs: affectedJobs.length },
+      { status: 201 }
+    );
+  } catch (err) {
+    return apiError(err, "Failed to mark rained off");
   }
-
-  await prisma.eventLog.create({
-    data: {
-      type: "SYSTEM",
-      description: `${impactIcon} Weather impact logged: ${impactLabel} on ${format(dateObj, "dd MMM yyyy")}${note ? ` — ${note}` : ""} (${affectedJobs.length} job${affectedJobs.length !== 1 ? "s" : ""} affected)`,
-      siteId: siteId,
-      userId: session.user.id,
-    },
-  });
-
-  return NextResponse.json(
-    { day, affectedJobs: affectedJobs.length },
-    { status: 201 }
-  );
 }
 
 // DELETE /api/sites/[id]/rained-off — remove a weather impact day entry
@@ -154,25 +159,29 @@ export async function DELETE(
   const dateObj = new Date(date);
   dateObj.setUTCHours(0, 0, 0, 0);
 
-  // If type provided, delete specific entry; otherwise delete all entries for that date
-  if (type) {
-    await prisma.rainedOffDay.deleteMany({
-      where: { siteId: id, date: dateObj, type },
+  try {
+    // If type provided, delete specific entry; otherwise delete all entries for that date
+    if (type) {
+      await prisma.rainedOffDay.deleteMany({
+        where: { siteId: id, date: dateObj, type },
+      });
+    } else {
+      await prisma.rainedOffDay.deleteMany({
+        where: { siteId: id, date: dateObj },
+      });
+    }
+
+    await prisma.eventLog.create({
+      data: {
+        type: "SYSTEM",
+        description: `Weather impact removed for ${format(dateObj, "dd MMM yyyy")}${type ? ` (${type})` : ""}`,
+        siteId: id,
+        userId: session.user.id,
+      },
     });
-  } else {
-    await prisma.rainedOffDay.deleteMany({
-      where: { siteId: id, date: dateObj },
-    });
+
+    return NextResponse.json({ success: true });
+  } catch (err) {
+    return apiError(err, "Failed to clear rained off");
   }
-
-  await prisma.eventLog.create({
-    data: {
-      type: "SYSTEM",
-      description: `Weather impact removed for ${format(dateObj, "dd MMM yyyy")}${type ? ` (${type})` : ""}`,
-      siteId: id,
-      userId: session.user.id,
-    },
-  });
-
-  return NextResponse.json({ success: true });
 }

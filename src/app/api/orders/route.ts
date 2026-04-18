@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/lib/auth";
 import { getUserSiteIds } from "@/lib/site-access";
+import { apiError } from "@/lib/api-errors";
 
 export const dynamic = "force-dynamic";
 
@@ -96,53 +97,57 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const order = await prisma.materialOrder.create({
-    data: {
-      supplierId,
-      jobId,
-      contactId: contactId || null,
-      orderDetails: orderDetails || null,
-      orderType: orderType || null,
-      expectedDeliveryDate: expectedDeliveryDate
-        ? new Date(expectedDeliveryDate)
-        : null,
-      leadTimeDays: leadTimeDays ? parseInt(String(leadTimeDays), 10) : null,
-      itemsDescription: itemsDescription || null,
-      ...(items && items.length > 0
-        ? {
-            orderItems: {
-              create: items.map((item) => ({
-                name: item.name,
-                quantity: item.quantity,
-                unit: item.unit,
-                unitCost: item.unitCost,
-              })),
-            },
-          }
-        : {}),
-    },
-    include: {
-      supplier: true,
-      contact: true,
-      orderItems: true,
-      job: {
-        include: {
-          plot: { include: { site: true } },
+  try {
+    const order = await prisma.materialOrder.create({
+      data: {
+        supplierId,
+        jobId,
+        contactId: contactId || null,
+        orderDetails: orderDetails || null,
+        orderType: orderType || null,
+        expectedDeliveryDate: expectedDeliveryDate
+          ? new Date(expectedDeliveryDate)
+          : null,
+        leadTimeDays: leadTimeDays ? parseInt(String(leadTimeDays), 10) : null,
+        itemsDescription: itemsDescription || null,
+        ...(items && items.length > 0
+          ? {
+              orderItems: {
+                create: items.map((item) => ({
+                  name: item.name,
+                  quantity: item.quantity,
+                  unit: item.unit,
+                  unitCost: item.unitCost,
+                })),
+              },
+            }
+          : {}),
+      },
+      include: {
+        supplier: true,
+        contact: true,
+        orderItems: true,
+        job: {
+          include: {
+            plot: { include: { site: true } },
+          },
         },
       },
-    },
-  });
+    });
 
-  await prisma.eventLog.create({
-    data: {
-      type: "ORDER_PLACED",
-      description: `[${order.supplier.name}] Order created for ${order.job?.name ?? "one-off order"}`,
-      siteId: order.job?.plot.siteId ?? order.siteId ?? null,
-      plotId: order.job?.plotId ?? order.plotId ?? null,
-      jobId: order.jobId,
-      userId: session.user?.id || null,
-    },
-  });
+    await prisma.eventLog.create({
+      data: {
+        type: "ORDER_PLACED",
+        description: `[${order.supplier.name}] Order created for ${order.job?.name ?? "one-off order"}`,
+        siteId: order.job?.plot.siteId ?? order.siteId ?? null,
+        plotId: order.job?.plotId ?? order.plotId ?? null,
+        jobId: order.jobId,
+        userId: session.user?.id || null,
+      },
+    });
 
-  return NextResponse.json(order, { status: 201 });
+    return NextResponse.json(order, { status: 201 });
+  } catch (err) {
+    return apiError(err, "Failed to create order");
+  }
 }

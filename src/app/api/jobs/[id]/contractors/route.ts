@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { apiError } from "@/lib/api-errors";
 
 export const dynamic = "force-dynamic";
 
@@ -66,42 +67,46 @@ export async function PUT(
     : [];
   const contractorNames = contacts.map((c) => c.company || c.name).join(", ");
 
-  // Replace all assignments in a transaction
-  const result = await prisma.$transaction(async (tx) => {
-    // Delete existing assignments
-    await tx.jobContractor.deleteMany({ where: { jobId: id } });
+  try {
+    // Replace all assignments in a transaction
+    const result = await prisma.$transaction(async (tx) => {
+      // Delete existing assignments
+      await tx.jobContractor.deleteMany({ where: { jobId: id } });
 
-    // Create new assignments
-    if (contactIds.length > 0) {
-      await tx.jobContractor.createMany({
-        data: contactIds.map((contactId) => ({
+      // Create new assignments
+      if (contactIds.length > 0) {
+        await tx.jobContractor.createMany({
+          data: contactIds.map((contactId) => ({
+            jobId: id,
+            contactId,
+          })),
+        });
+      }
+
+      // Log event with contractor names
+      const desc = contactIds.length === 0
+        ? `All contractors removed from "${job.name}"`
+        : `Contractor${contacts.length > 1 ? "s" : ""} assigned to "${job.name}": ${contractorNames}`;
+      await tx.eventLog.create({
+        data: {
+          type: "JOB_EDITED",
+          description: desc,
+          siteId: job.plot.siteId,
+          plotId: job.plotId,
           jobId: id,
-          contactId,
-        })),
+          userId: session.user.id,
+        },
       });
-    }
 
-    // Log event with contractor names
-    const desc = contactIds.length === 0
-      ? `All contractors removed from "${job.name}"`
-      : `Contractor${contacts.length > 1 ? "s" : ""} assigned to "${job.name}": ${contractorNames}`;
-    await tx.eventLog.create({
-      data: {
-        type: "JOB_EDITED",
-        description: desc,
-        siteId: job.plot.siteId,
-        plotId: job.plotId,
-        jobId: id,
-        userId: session.user.id,
-      },
+      return tx.jobContractor.findMany({
+        where: { jobId: id },
+        include: { contact: true },
+        orderBy: { createdAt: "asc" },
+      });
     });
 
-    return tx.jobContractor.findMany({
-      where: { jobId: id },
-      include: { contact: true },
-      orderBy: { createdAt: "asc" },
-    });
-  });
-
-  return NextResponse.json(result);
+    return NextResponse.json(result);
+  } catch (err) {
+    return apiError(err, "Failed to update contractor assignments");
+  }
 }

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canAccessSite } from "@/lib/site-access";
+import { apiError } from "@/lib/api-errors";
 
 export const dynamic = "force-dynamic";
 
@@ -55,20 +56,24 @@ export async function POST(
     return NextResponse.json({ error: "name and quantity (number) are required" }, { status: 400 });
   }
 
-  const material = await prisma.plotMaterial.create({
-    data: {
-      plotId,
-      sourceType: "MANUAL",
-      name: String(name).trim(),
-      quantity,
-      unit: (unit || "each").trim(),
-      unitCost: unitCost ?? null,
-      category: category?.trim() || null,
-      notes: notes?.trim() || null,
-      linkedStageCode: linkedStageCode?.trim() || null,
-      delivered: delivered ?? 0,
-      consumed: consumed ?? 0,
-    },
-  });
-  return NextResponse.json(material, { status: 201 });
+  try {
+    const material = await prisma.plotMaterial.create({
+      data: {
+        plotId,
+        sourceType: "MANUAL",
+        name: String(name).trim(),
+        quantity,
+        unit: (unit || "each").trim(),
+        unitCost: unitCost ?? null,
+        category: category?.trim() || null,
+        notes: notes?.trim() || null,
+        linkedStageCode: linkedStageCode?.trim() || null,
+        delivered: delivered ?? 0,
+        consumed: consumed ?? 0,
+      },
+    });
+    return NextResponse.json(material, { status: 201 });
+  } catch (err) {
+    return apiError(err, "Failed to create material");
+  }
 }

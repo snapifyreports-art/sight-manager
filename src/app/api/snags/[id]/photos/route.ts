@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getSupabase, PHOTOS_BUCKET } from "@/lib/supabase";
 import { canAccessSite } from "@/lib/site-access";
+import { apiError } from "@/lib/api-errors";
 
 export const dynamic = "force-dynamic";
 
@@ -97,30 +98,34 @@ export async function POST(
       data: { publicUrl },
     } = getSupabase().storage.from(PHOTOS_BUCKET).getPublicUrl(storagePath);
 
-    const photo = await prisma.snagPhoto.create({
-      data: {
-        snagId: id,
-        url: publicUrl,
-        fileName: srcName || "photo.jpg",
-        tag: tag || null,
-      },
-    });
-
-    // Also add photo to the linked job
-    if (snag.jobId) {
-      await prisma.jobPhoto.create({
+    try {
+      const photo = await prisma.snagPhoto.create({
         data: {
-          jobId: snag.jobId,
+          snagId: id,
           url: publicUrl,
           fileName: srcName || "photo.jpg",
-          caption: `Snag photo (${tag || "untagged"})`,
           tag: tag || null,
-          uploadedById: session.user.id,
         },
       });
-    }
 
-    return NextResponse.json([photo], { status: 201 });
+      // Also add photo to the linked job
+      if (snag.jobId) {
+        await prisma.jobPhoto.create({
+          data: {
+            jobId: snag.jobId,
+            url: publicUrl,
+            fileName: srcName || "photo.jpg",
+            caption: `Snag photo (${tag || "untagged"})`,
+            tag: tag || null,
+            uploadedById: session.user.id,
+          },
+        });
+      }
+
+      return NextResponse.json([photo], { status: 201 });
+    } catch (err) {
+      return apiError(err, "Failed to upload photo");
+    }
   }
 
   // FormData body: direct file upload
@@ -134,67 +139,71 @@ export async function POST(
 
   const createdPhotos = [];
 
-  for (const file of files) {
-    const ext = file.name.split(".").pop() || "jpg";
-    const fileName = `snags/${id}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+  try {
+    for (const file of files) {
+      const ext = file.name.split(".").pop() || "jpg";
+      const fileName = `snags/${id}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
 
-    const arrayBuffer = await file.arrayBuffer();
-    const { error: uploadError } = await getSupabase()
-      .storage.from(PHOTOS_BUCKET)
-      .upload(fileName, arrayBuffer, {
-        contentType: file.type,
-        upsert: false,
-      });
+      const arrayBuffer = await file.arrayBuffer();
+      const { error: uploadError } = await getSupabase()
+        .storage.from(PHOTOS_BUCKET)
+        .upload(fileName, arrayBuffer, {
+          contentType: file.type,
+          upsert: false,
+        });
 
-    if (uploadError) {
-      console.error("Upload error:", uploadError);
-      continue;
-    }
+      if (uploadError) {
+        console.error("Upload error:", uploadError);
+        continue;
+      }
 
-    const {
-      data: { publicUrl },
-    } = getSupabase().storage.from(PHOTOS_BUCKET).getPublicUrl(fileName);
+      const {
+        data: { publicUrl },
+      } = getSupabase().storage.from(PHOTOS_BUCKET).getPublicUrl(fileName);
 
-    const photo = await prisma.snagPhoto.create({
-      data: {
-        snagId: id,
-        url: publicUrl,
-        fileName: file.name,
-        tag: tag || null,
-      },
-    });
-
-    // Also add photo to the linked job so it shows in the job panel
-    if (snag.jobId) {
-      await prisma.jobPhoto.create({
+      const photo = await prisma.snagPhoto.create({
         data: {
-          jobId: snag.jobId,
+          snagId: id,
           url: publicUrl,
           fileName: file.name,
-          caption: `Snag photo (${tag || "untagged"})`,
           tag: tag || null,
-          uploadedById: session.user.id,
+        },
+      });
+
+      // Also add photo to the linked job so it shows in the job panel
+      if (snag.jobId) {
+        await prisma.jobPhoto.create({
+          data: {
+            jobId: snag.jobId,
+            url: publicUrl,
+            fileName: file.name,
+            caption: `Snag photo (${tag || "untagged"})`,
+            tag: tag || null,
+            uploadedById: session.user.id,
+          },
+        });
+      }
+
+      createdPhotos.push(photo);
+    }
+
+    // Log event for snag photo uploads
+    if (createdPhotos.length > 0 && snag.plot) {
+      const plotLabel = snag.plot.plotNumber ? `Plot ${snag.plot.plotNumber}` : snag.plot.name;
+      await prisma.eventLog.create({
+        data: {
+          type: "PHOTO_UPLOADED" as import("@prisma/client").EventType,
+          description: `${createdPhotos.length} snag photo${createdPhotos.length !== 1 ? "s" : ""} uploaded — ${plotLabel}: "${snag.description?.substring(0, 60) || "Snag"}"`,
+          siteId: snag.plot.siteId,
+          plotId: snag.plotId,
+          jobId: snag.jobId,
+          userId: session.user.id,
         },
       });
     }
 
-    createdPhotos.push(photo);
+    return NextResponse.json(createdPhotos, { status: 201 });
+  } catch (err) {
+    return apiError(err, "Failed to upload photo");
   }
-
-  // Log event for snag photo uploads
-  if (createdPhotos.length > 0 && snag.plot) {
-    const plotLabel = snag.plot.plotNumber ? `Plot ${snag.plot.plotNumber}` : snag.plot.name;
-    await prisma.eventLog.create({
-      data: {
-        type: "PHOTO_UPLOADED" as import("@prisma/client").EventType,
-        description: `${createdPhotos.length} snag photo${createdPhotos.length !== 1 ? "s" : ""} uploaded — ${plotLabel}: "${snag.description?.substring(0, 60) || "Snag"}"`,
-        siteId: snag.plot.siteId,
-        plotId: snag.plotId,
-        jobId: snag.jobId,
-        userId: session.user.id,
-      },
-    });
-  }
-
-  return NextResponse.json(createdPhotos, { status: 201 });
 }

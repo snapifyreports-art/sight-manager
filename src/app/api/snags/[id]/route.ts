@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { getSupabase, PHOTOS_BUCKET } from "@/lib/supabase";
 import { getServerCurrentDate } from "@/lib/dev-date";
 import { addDays, format } from "date-fns";
+import { apiError } from "@/lib/api-errors";
 
 export const dynamic = "force-dynamic";
 
@@ -66,6 +67,7 @@ export async function PATCH(
   const isResolving =
     status === "RESOLVED" && existing.status !== "RESOLVED";
 
+  try {
   const snag = await prisma.snag.update({
     where: { id },
     data: {
@@ -177,6 +179,9 @@ export async function PATCH(
   }
 
   return NextResponse.json(snag);
+  } catch (err) {
+    return apiError(err, "Failed to update snag");
+  }
 }
 
 // DELETE /api/snags/[id] — delete a snag and its photos
@@ -200,15 +205,19 @@ export async function DELETE(
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  // Delete photos from Supabase Storage
-  for (const photo of snag.photos) {
-    const urlParts = photo.url.split(`${PHOTOS_BUCKET}/`);
-    if (urlParts.length > 1) {
-      await getSupabase().storage.from(PHOTOS_BUCKET).remove([urlParts[1]]);
+  try {
+    // Delete photos from Supabase Storage
+    for (const photo of snag.photos) {
+      const urlParts = photo.url.split(`${PHOTOS_BUCKET}/`);
+      if (urlParts.length > 1) {
+        await getSupabase().storage.from(PHOTOS_BUCKET).remove([urlParts[1]]);
+      }
     }
+
+    await prisma.snag.delete({ where: { id } });
+
+    return NextResponse.json({ success: true });
+  } catch (err) {
+    return apiError(err, "Failed to delete snag");
   }
-
-  await prisma.snag.delete({ where: { id } });
-
-  return NextResponse.json({ success: true });
 }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { apiError } from "@/lib/api-errors";
 
 export const dynamic = "force-dynamic";
 
@@ -24,11 +25,15 @@ export async function PUT(
   if (body.linkedStageCode !== undefined)
     data.linkedStageCode = body.linkedStageCode ? String(body.linkedStageCode).trim() : null;
 
-  const updated = await prisma.templateMaterial.update({
-    where: { id: materialId },
-    data,
-  });
-  return NextResponse.json(updated);
+  try {
+    const updated = await prisma.templateMaterial.update({
+      where: { id: materialId },
+      data,
+    });
+    return NextResponse.json(updated);
+  } catch (err) {
+    return apiError(err, "Failed to update template material");
+  }
 }
 
 // DELETE /api/plot-templates/[id]/materials/[materialId]
@@ -40,6 +45,10 @@ export async function DELETE(
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { materialId } = await params;
-  await prisma.templateMaterial.delete({ where: { id: materialId } });
-  return NextResponse.json({ success: true });
+  try {
+    await prisma.templateMaterial.delete({ where: { id: materialId } });
+    return NextResponse.json({ success: true });
+  } catch (err) {
+    return apiError(err, "Failed to delete template material");
+  }
 }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { apiError } from "@/lib/api-errors";
 
 export const dynamic = "force-dynamic";
 
@@ -70,33 +71,37 @@ export async function POST(
   // Inherit assignedToId from site if not explicitly provided
   const resolvedAssignedToId = assignedToId || plot.site.assignedToId || null;
 
-  const job = await prisma.job.create({
-    data: {
-      name: name.trim(),
-      description: description?.trim() || null,
-      plotId,
-      assignedToId: resolvedAssignedToId,
-      startDate: startDate ? new Date(startDate) : null,
-      endDate: endDate ? new Date(endDate) : null,
-    },
-    include: {
-      assignedTo: {
-        select: { id: true, name: true },
+  try {
+    const job = await prisma.job.create({
+      data: {
+        name: name.trim(),
+        description: description?.trim() || null,
+        plotId,
+        assignedToId: resolvedAssignedToId,
+        startDate: startDate ? new Date(startDate) : null,
+        endDate: endDate ? new Date(endDate) : null,
       },
-    },
-  });
+      include: {
+        assignedTo: {
+          select: { id: true, name: true },
+        },
+      },
+    });
 
-  // Log the event
-  await prisma.eventLog.create({
-    data: {
-      type: "JOB_STARTED",
-      description: `Job "${job.name}" was created in plot "${plot.name}" on site "${plot.site.name}"`,
-      siteId: plot.site.id,
-      plotId: plot.id,
-      jobId: job.id,
-      userId: session.user.id,
-    },
-  });
+    // Log the event
+    await prisma.eventLog.create({
+      data: {
+        type: "JOB_STARTED",
+        description: `Job "${job.name}" was created in plot "${plot.name}" on site "${plot.site.name}"`,
+        siteId: plot.site.id,
+        plotId: plot.id,
+        jobId: job.id,
+        userId: session.user.id,
+      },
+    });
 
-  return NextResponse.json(job, { status: 201 });
+    return NextResponse.json(job, { status: 201 });
+  } catch (err) {
+    return apiError(err, "Failed to create job");
+  }
 }

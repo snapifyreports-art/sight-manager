@@ -5,6 +5,7 @@ import { getServerCurrentDate } from "@/lib/dev-date";
 import { addWeeks, differenceInCalendarDays } from "date-fns";
 import { addWorkingDays, snapToWorkingDay } from "@/lib/working-days";
 import { getNextMonday } from "@/lib/schedule";
+import { apiError } from "@/lib/api-errors";
 
 export const dynamic = "force-dynamic";
 
@@ -47,27 +48,31 @@ export async function POST(
 
   // "Leave for now" — mark plot as awaiting restart, no date changes
   if (decision === "leave_for_now") {
-    await prisma.plot.update({
-      where: { id: plotId },
-      data: {
-        awaitingRestart: true,
-        ...(awaitingContractor ? { awaitingContractorConfirmation: true } : {}),
-      },
-    });
+    try {
+      await prisma.plot.update({
+        where: { id: plotId },
+        data: {
+          awaitingRestart: true,
+          ...(awaitingContractor ? { awaitingContractorConfirmation: true } : {}),
+        },
+      });
 
-    await prisma.eventLog.create({
-      data: {
-        type: "USER_ACTION",
-        description: awaitingContractor
-          ? `Plot ${plot.plotNumber || plotId}: awaiting contractor confirmation`
-          : `Plot ${plot.plotNumber || plotId}: next job deferred — awaiting restart decision`,
-        siteId: plot.siteId,
-        plotId,
-        userId: session.user.id,
-      },
-    });
+      await prisma.eventLog.create({
+        data: {
+          type: "USER_ACTION",
+          description: awaitingContractor
+            ? `Plot ${plot.plotNumber || plotId}: awaiting contractor confirmation`
+            : `Plot ${plot.plotNumber || plotId}: next job deferred — awaiting restart decision`,
+          siteId: plot.siteId,
+          plotId,
+          userId: session.user.id,
+        },
+      });
 
-    return NextResponse.json({ success: true, decision });
+      return NextResponse.json({ success: true, decision });
+    } catch (err) {
+      return apiError(err, "Failed to apply restart decision");
+    }
   }
 
   if (!nextJobId) {
@@ -115,6 +120,7 @@ export async function POST(
     ? differenceInCalendarDays(targetStart, nextJob.startDate)
     : 0;
 
+  try {
   await prisma.$transaction(async (tx) => {
     // Preserve original dates before any shift
     if (!nextJob.originalStartDate && nextJob.startDate) {
@@ -206,4 +212,7 @@ export async function POST(
   });
 
   return NextResponse.json({ success: true, decision, delta, targetStart });
+  } catch (err) {
+    return apiError(err, "Failed to apply restart decision");
+  }
 }

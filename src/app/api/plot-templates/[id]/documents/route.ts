@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getSupabase, PHOTOS_BUCKET } from "@/lib/supabase";
+import { apiError } from "@/lib/api-errors";
 
 export const dynamic = "force-dynamic";
 
@@ -54,16 +55,20 @@ export async function POST(
 
   const { data: { publicUrl } } = getSupabase().storage.from(PHOTOS_BUCKET).getPublicUrl(storagePath);
 
-  const doc = await prisma.templateDocument.create({
-    data: {
-      templateId,
-      name,
-      url: publicUrl,
-      fileName: file.name,
-      fileSize: file.size,
-      mimeType: file.type,
-      category,
-    },
-  });
-  return NextResponse.json(doc, { status: 201 });
+  try {
+    const doc = await prisma.templateDocument.create({
+      data: {
+        templateId,
+        name,
+        url: publicUrl,
+        fileName: file.name,
+        fileSize: file.size,
+        mimeType: file.type,
+        category,
+      },
+    });
+    return NextResponse.json(doc, { status: 201 });
+  } catch (err) {
+    return apiError(err, "Failed to upload template document");
+  }
 }

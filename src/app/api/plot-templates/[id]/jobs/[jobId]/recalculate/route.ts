@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { templateJobsInclude } from "@/lib/template-includes";
+import { apiError } from "@/lib/api-errors";
 
 export const dynamic = "force-dynamic";
 
@@ -46,34 +47,38 @@ export async function POST(
   // Recalculate: sub-jobs are sequential starting from parent's startWeek
   let currentWeek = parent.startWeek;
 
-  await prisma.$transaction(async (tx) => {
-    for (const child of parent.children) {
-      const duration = child.durationWeeks ?? 1;
-      const startWeek = currentWeek;
-      const endWeek = startWeek + duration - 1;
-      currentWeek = endWeek + 1;
+  try {
+    await prisma.$transaction(async (tx) => {
+      for (const child of parent.children) {
+        const duration = child.durationWeeks ?? 1;
+        const startWeek = currentWeek;
+        const endWeek = startWeek + duration - 1;
+        currentWeek = endWeek + 1;
 
+        await tx.templateJob.update({
+          where: { id: child.id },
+          data: { startWeek, endWeek },
+        });
+      }
+
+      // Update parent's endWeek to span all children
+      const newParentEndWeek = currentWeek - 1;
       await tx.templateJob.update({
-        where: { id: child.id },
-        data: { startWeek, endWeek },
+        where: { id: jobId },
+        data: { endWeek: newParentEndWeek },
       });
-    }
-
-    // Update parent's endWeek to span all children
-    const newParentEndWeek = currentWeek - 1;
-    await tx.templateJob.update({
-      where: { id: jobId },
-      data: { endWeek: newParentEndWeek },
     });
-  });
 
-  // Return updated template
-  const template = await prisma.plotTemplate.findUnique({
-    where: { id },
-    include: {
-      jobs: templateJobsInclude,
-    },
-  });
+    // Return updated template
+    const template = await prisma.plotTemplate.findUnique({
+      where: { id },
+      include: {
+        jobs: templateJobsInclude,
+      },
+    });
 
-  return NextResponse.json(template);
+    return NextResponse.json(template);
+  } catch (err) {
+    return apiError(err, "Failed to recalculate job");
+  }
 }

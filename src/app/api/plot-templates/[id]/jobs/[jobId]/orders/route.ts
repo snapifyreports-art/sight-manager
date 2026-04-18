@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { apiError } from "@/lib/api-errors";
 
 export const dynamic = "force-dynamic";
 
@@ -41,46 +42,50 @@ export async function POST(
     );
   }
 
-  const order = await prisma.templateOrder.create({
-    data: {
-      templateJobId: jobId,
-      supplierId: supplierId || null,
-      itemsDescription: itemsDescription?.trim() || null,
-      orderWeekOffset: orderWeekOffset ?? -2,
-      deliveryWeekOffset: deliveryWeekOffset ?? 0,
-      anchorType: anchorType || null,
-      anchorAmount: anchorAmount ?? null,
-      anchorUnit: anchorUnit || null,
-      anchorDirection: anchorDirection || null,
-      anchorJobId: anchorJobId || null,
-      leadTimeAmount: leadTimeAmount ?? null,
-      leadTimeUnit: leadTimeUnit || null,
-      items: items?.length
-        ? {
-            create: items.map(
-              (item: {
-                name: string;
-                quantity?: number;
-                unit?: string;
-                unitCost?: number;
-              }) => ({
-                name: item.name,
-                quantity: item.quantity ?? 1,
-                unit: item.unit ?? "units",
-                unitCost: item.unitCost ?? 0,
-              })
-            ),
-          }
-        : undefined,
-    },
-    include: {
-      items: true,
-      supplier: true,
-      anchorJob: {
-        select: { id: true, name: true, startWeek: true, stageCode: true },
+  try {
+    const order = await prisma.templateOrder.create({
+      data: {
+        templateJobId: jobId,
+        supplierId: supplierId || null,
+        itemsDescription: itemsDescription?.trim() || null,
+        orderWeekOffset: orderWeekOffset ?? -2,
+        deliveryWeekOffset: deliveryWeekOffset ?? 0,
+        anchorType: anchorType || null,
+        anchorAmount: anchorAmount ?? null,
+        anchorUnit: anchorUnit || null,
+        anchorDirection: anchorDirection || null,
+        anchorJobId: anchorJobId || null,
+        leadTimeAmount: leadTimeAmount ?? null,
+        leadTimeUnit: leadTimeUnit || null,
+        items: items?.length
+          ? {
+              create: items.map(
+                (item: {
+                  name: string;
+                  quantity?: number;
+                  unit?: string;
+                  unitCost?: number;
+                }) => ({
+                  name: item.name,
+                  quantity: item.quantity ?? 1,
+                  unit: item.unit ?? "units",
+                  unitCost: item.unitCost ?? 0,
+                })
+              ),
+            }
+          : undefined,
       },
-    },
-  });
+      include: {
+        items: true,
+        supplier: true,
+        anchorJob: {
+          select: { id: true, name: true, startWeek: true, stageCode: true },
+        },
+      },
+    });
 
-  return NextResponse.json(order, { status: 201 });
+    return NextResponse.json(order, { status: 201 });
+  } catch (err) {
+    return apiError(err, "Failed to add template order");
+  }
 }

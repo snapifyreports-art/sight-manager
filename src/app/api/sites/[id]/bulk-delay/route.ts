@@ -5,6 +5,7 @@ import { calculateCascade } from "@/lib/cascade";
 import { getTodayWeatherSummary } from "@/lib/weather";
 import { addWorkingDays } from "@/lib/working-days";
 import { canAccessSite } from "@/lib/site-access";
+import { apiError } from "@/lib/api-errors";
 
 export const dynamic = "force-dynamic";
 
@@ -64,6 +65,7 @@ export async function POST(
   }> = [];
   const skipped: string[] = [];
 
+  try {
   // Process plots sequentially to respect connection pool limits
   for (const plotId of plotIds) {
     const currentJob = await prisma.job.findFirst({
@@ -223,4 +225,7 @@ export async function POST(
     skipped: skipped.length,
     details: results,
   });
+  } catch (err) {
+    return apiError(err, "Failed to apply bulk delay");
+  }
 }

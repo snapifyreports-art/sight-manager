@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getServerCurrentDate } from "@/lib/dev-date";
 import { canAccessSite } from "@/lib/site-access";
+import { apiError } from "@/lib/api-errors";
 
 async function guardPlotAccess(plotId: string, userId: string, role: string) {
   const plot = await prisma.plot.findUnique({ where: { id: plotId }, select: { siteId: true } });
@@ -64,21 +65,25 @@ export async function GET(
 
   // Auto-create standard items if none exist
   if (items.length === 0) {
-    await prisma.handoverChecklist.createMany({
-      data: STANDARD_DOC_TYPES.map((docType) => ({
-        plotId: id,
-        docType,
-        required: true,
-      })),
-    });
-    items = await prisma.handoverChecklist.findMany({
-      where: { plotId: id },
-      include: {
-        document: { select: { id: true, name: true, url: true, fileName: true } },
-        checkedBy: { select: { id: true, name: true } },
-      },
-      orderBy: { createdAt: "asc" },
-    });
+    try {
+      await prisma.handoverChecklist.createMany({
+        data: STANDARD_DOC_TYPES.map((docType) => ({
+          plotId: id,
+          docType,
+          required: true,
+        })),
+      });
+      items = await prisma.handoverChecklist.findMany({
+        where: { plotId: id },
+        include: {
+          document: { select: { id: true, name: true, url: true, fileName: true } },
+          checkedBy: { select: { id: true, name: true } },
+        },
+        orderBy: { createdAt: "asc" },
+      });
+    } catch (err) {
+      return apiError(err, "Failed to update handover");
+    }
   }
 
   const total = items.length;
@@ -146,12 +151,16 @@ export async function PATCH(
     updateData.checkedById = null;
   }
 
-  const updated = await prisma.handoverChecklist.update({
-    where: { id: itemId },
-    data: updateData,
-  });
+  try {
+    const updated = await prisma.handoverChecklist.update({
+      where: { id: itemId },
+      data: updateData,
+    });
 
-  return NextResponse.json(updated);
+    return NextResponse.json(updated);
+  } catch (err) {
+    return apiError(err, "Failed to update handover");
+  }
 }
 
 // POST /api/plots/[id]/handover — generate handover PDF

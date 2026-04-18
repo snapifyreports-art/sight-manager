@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { UK_HOUSEBUILDING_STAGES } from "@/lib/stage-library";
 import { templateJobsInclude } from "@/lib/template-includes";
+import { apiError } from "@/lib/api-errors";
 
 export const dynamic = "force-dynamic";
 
@@ -101,44 +102,48 @@ export async function POST(
 
   const parentEndWeek = subJobsWithWeeks[subJobsWithWeeks.length - 1].endWeek;
 
-  // Create parent + children in a transaction
-  const result = await prisma.$transaction(async (tx) => {
-    // Create parent stage
-    const parent = await tx.templateJob.create({
-      data: {
-        templateId: id,
-        name: stageName,
-        stageCode: stageCodeValue,
-        sortOrder: nextSortOrder,
-        startWeek: nextStartWeek,
-        endWeek: parentEndWeek,
-      },
-    });
-
-    // Create sub-jobs
-    for (const sj of subJobsWithWeeks) {
-      await tx.templateJob.create({
+  try {
+    // Create parent + children in a transaction
+    const result = await prisma.$transaction(async (tx) => {
+      // Create parent stage
+      const parent = await tx.templateJob.create({
         data: {
           templateId: id,
-          parentId: parent.id,
-          name: sj.name,
-          stageCode: sj.code,
-          sortOrder: sj.sortOrder,
-          startWeek: sj.startWeek,
-          endWeek: sj.endWeek,
-          durationWeeks: sj.duration,
+          name: stageName,
+          stageCode: stageCodeValue,
+          sortOrder: nextSortOrder,
+          startWeek: nextStartWeek,
+          endWeek: parentEndWeek,
         },
       });
-    }
 
-    // Return updated template
-    return tx.plotTemplate.findUnique({
-      where: { id },
-      include: {
-        jobs: templateJobsInclude,
-      },
+      // Create sub-jobs
+      for (const sj of subJobsWithWeeks) {
+        await tx.templateJob.create({
+          data: {
+            templateId: id,
+            parentId: parent.id,
+            name: sj.name,
+            stageCode: sj.code,
+            sortOrder: sj.sortOrder,
+            startWeek: sj.startWeek,
+            endWeek: sj.endWeek,
+            durationWeeks: sj.duration,
+          },
+        });
+      }
+
+      // Return updated template
+      return tx.plotTemplate.findUnique({
+        where: { id },
+        include: {
+          jobs: templateJobsInclude,
+        },
+      });
     });
-  });
 
-  return NextResponse.json(result, { status: 201 });
+    return NextResponse.json(result, { status: 201 });
+  } catch (err) {
+    return apiError(err, "Failed to update stages");
+  }
 }

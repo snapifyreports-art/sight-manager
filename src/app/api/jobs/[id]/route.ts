@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { sessionHasPermission } from "@/lib/permissions";
 import { recomputeParentOf } from "@/lib/parent-job";
 import { canAccessSite } from "@/lib/site-access";
+import { apiError } from "@/lib/api-errors";
 
 export const dynamic = "force-dynamic";
 
@@ -134,31 +135,35 @@ export async function PUT(
     );
   }
 
-  const job = await prisma.job.update({
-    where: { id },
-    data: updateData,
-    include: {
-      plot: { include: { site: true } },
-      assignedTo: true,
-      _count: { select: { orders: true } },
-    },
-  });
+  try {
+    const job = await prisma.job.update({
+      where: { id },
+      data: updateData,
+      include: {
+        plot: { include: { site: true } },
+        assignedTo: true,
+        _count: { select: { orders: true } },
+      },
+    });
 
-  // If this job has a parent, let the parent's dates/status follow
-  await recomputeParentOf(prisma, id);
+    // If this job has a parent, let the parent's dates/status follow
+    await recomputeParentOf(prisma, id);
 
-  await prisma.eventLog.create({
-    data: {
-      type: "JOB_EDITED",
-      description: `Job "${job.name}" was updated`,
-      siteId: job.plot.siteId,
-      plotId: job.plotId,
-      jobId: job.id,
-      userId: session.user.id,
-    },
-  });
+    await prisma.eventLog.create({
+      data: {
+        type: "JOB_EDITED",
+        description: `Job "${job.name}" was updated`,
+        siteId: job.plot.siteId,
+        plotId: job.plotId,
+        jobId: job.id,
+        userId: session.user.id,
+      },
+    });
 
-  return NextResponse.json(job);
+    return NextResponse.json(job);
+  } catch (err) {
+    return apiError(err, "Failed to update job");
+  }
 }
 
 export async function DELETE(
@@ -189,27 +194,31 @@ export async function DELETE(
     return NextResponse.json({ error: "You do not have access to this site" }, { status: 403 });
   }
 
-  // Write event log BEFORE deletion so siteId is captured; the event survives
-  // the job delete because of onDelete: SetNull on EventLog.jobId
-  await prisma.eventLog.create({
-    data: {
-      type: "USER_ACTION",
-      description: `Job "${existing.name}" was deleted from plot ${existing.plot.plotNumber || existing.plot.name}`,
-      siteId: existing.plot.siteId,
-      plotId: existing.plotId,
-      jobId: existing.id,
-      userId: session.user.id,
-    },
-  });
+  try {
+    // Write event log BEFORE deletion so siteId is captured; the event survives
+    // the job delete because of onDelete: SetNull on EventLog.jobId
+    await prisma.eventLog.create({
+      data: {
+        type: "USER_ACTION",
+        description: `Job "${existing.name}" was deleted from plot ${existing.plot.plotNumber || existing.plot.name}`,
+        siteId: existing.plot.siteId,
+        plotId: existing.plotId,
+        jobId: existing.id,
+        userId: session.user.id,
+      },
+    });
 
-  const parentIdToRecompute = existing.parentId;
-  await prisma.job.delete({ where: { id } });
+    const parentIdToRecompute = existing.parentId;
+    await prisma.job.delete({ where: { id } });
 
-  // If this was a sub-job, parent's dates/status may need updating based on remaining siblings
-  if (parentIdToRecompute) {
-    const { recomputeParentFromChildren } = await import("@/lib/parent-job");
-    await recomputeParentFromChildren(prisma, parentIdToRecompute);
+    // If this was a sub-job, parent's dates/status may need updating based on remaining siblings
+    if (parentIdToRecompute) {
+      const { recomputeParentFromChildren } = await import("@/lib/parent-job");
+      await recomputeParentFromChildren(prisma, parentIdToRecompute);
+    }
+
+    return NextResponse.json({ success: true });
+  } catch (err) {
+    return apiError(err, "Failed to delete job");
   }
-
-  return NextResponse.json({ success: true });
 }

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canAccessSite } from "@/lib/site-access";
+import { apiError } from "@/lib/api-errors";
 
 export const dynamic = "force-dynamic";
 
@@ -44,8 +45,12 @@ export async function PUT(
     return NextResponse.json({ error: "Material not found on this plot" }, { status: 404 });
   }
 
-  const updated = await prisma.plotMaterial.update({ where: { id: materialId }, data });
-  return NextResponse.json(updated);
+  try {
+    const updated = await prisma.plotMaterial.update({ where: { id: materialId }, data });
+    return NextResponse.json(updated);
+  } catch (err) {
+    return apiError(err, "Failed to update material");
+  }
 }
 
 // DELETE /api/plots/[id]/materials/[materialId]
@@ -65,6 +70,10 @@ export async function DELETE(
     return NextResponse.json({ error: "Material not found on this plot" }, { status: 404 });
   }
 
-  await prisma.plotMaterial.delete({ where: { id: materialId } });
-  return NextResponse.json({ success: true });
+  try {
+    await prisma.plotMaterial.delete({ where: { id: materialId } });
+    return NextResponse.json({ success: true });
+  } catch (err) {
+    return apiError(err, "Failed to delete material");
+  }
 }

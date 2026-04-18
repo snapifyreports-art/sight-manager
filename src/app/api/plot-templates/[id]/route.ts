@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { templateJobsInclude } from "@/lib/template-includes";
+import { apiError } from "@/lib/api-errors";
 
 export const dynamic = "force-dynamic";
 
@@ -56,23 +57,27 @@ export async function PUT(
     );
   }
 
-  const template = await prisma.plotTemplate.update({
-    where: { id },
-    data: {
-      ...(name !== undefined && { name: name.trim() }),
-      ...(description !== undefined && {
-        description: description?.trim() || null,
-      }),
-      ...(typeLabel !== undefined && {
-        typeLabel: typeLabel?.trim() || null,
-      }),
-    },
-    include: {
-      jobs: templateJobsInclude,
-    },
-  });
+  try {
+    const template = await prisma.plotTemplate.update({
+      where: { id },
+      data: {
+        ...(name !== undefined && { name: name.trim() }),
+        ...(description !== undefined && {
+          description: description?.trim() || null,
+        }),
+        ...(typeLabel !== undefined && {
+          typeLabel: typeLabel?.trim() || null,
+        }),
+      },
+      include: {
+        jobs: templateJobsInclude,
+      },
+    });
 
-  return NextResponse.json(template);
+    return NextResponse.json(template);
+  } catch (err) {
+    return apiError(err, "Failed to update template");
+  }
 }
 
 // DELETE /api/plot-templates/[id] — delete template (cascades)
@@ -95,7 +100,11 @@ export async function DELETE(
     );
   }
 
-  await prisma.plotTemplate.delete({ where: { id } });
+  try {
+    await prisma.plotTemplate.delete({ where: { id } });
 
-  return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true });
+  } catch (err) {
+    return apiError(err, "Failed to delete template");
+  }
 }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/lib/auth";
+import { apiError } from "@/lib/api-errors";
 
 export const dynamic = "force-dynamic";
 
@@ -65,16 +66,20 @@ export async function POST(
   const cost = unitCost ? parseFloat(unitCost) : 0;
   const totalCost = qty * cost;
 
-  const item = await prisma.orderItem.create({
-    data: {
-      orderId: id,
-      name,
-      quantity: qty,
-      unit: unit || "units",
-      unitCost: cost,
-      totalCost,
-    },
-  });
+  try {
+    const item = await prisma.orderItem.create({
+      data: {
+        orderId: id,
+        name,
+        quantity: qty,
+        unit: unit || "units",
+        unitCost: cost,
+        totalCost,
+      },
+    });
 
-  return NextResponse.json(item, { status: 201 });
+    return NextResponse.json(item, { status: 201 });
+  } catch (err) {
+    return apiError(err, "Failed to add order item");
+  }
 }

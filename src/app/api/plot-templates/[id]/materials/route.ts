@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { apiError } from "@/lib/api-errors";
 
 export const dynamic = "force-dynamic";
 
@@ -36,17 +37,21 @@ export async function POST(
     return NextResponse.json({ error: "name and quantity (number) are required" }, { status: 400 });
   }
 
-  const material = await prisma.templateMaterial.create({
-    data: {
-      templateId,
-      name: name.trim(),
-      quantity,
-      unit: (unit || "each").trim(),
-      unitCost: unitCost ?? null,
-      category: category?.trim() || null,
-      notes: notes?.trim() || null,
-      linkedStageCode: linkedStageCode?.trim() || null,
-    },
-  });
-  return NextResponse.json(material, { status: 201 });
+  try {
+    const material = await prisma.templateMaterial.create({
+      data: {
+        templateId,
+        name: name.trim(),
+        quantity,
+        unit: (unit || "each").trim(),
+        unitCost: unitCost ?? null,
+        category: category?.trim() || null,
+        notes: notes?.trim() || null,
+        linkedStageCode: linkedStageCode?.trim() || null,
+      },
+    });
+    return NextResponse.json(material, { status: 201 });
+  } catch (err) {
+    return apiError(err, "Failed to add template material");
+  }
 }

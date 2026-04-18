@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { sendPushToAll } from "@/lib/push";
 import { canAccessSite } from "@/lib/site-access";
+import { apiError } from "@/lib/api-errors";
 
 export const dynamic = "force-dynamic";
 
@@ -53,36 +54,40 @@ export async function POST(
     return NextResponse.json({ alreadyRequested: true });
   }
 
-  // Create the request action
-  await prisma.jobAction.create({
-    data: {
-      jobId: id,
-      userId: session.user.id,
-      action: "request_signoff",
-      notes: "Sign-off requested by site team",
-    },
-  });
+  try {
+    // Create the request action
+    await prisma.jobAction.create({
+      data: {
+        jobId: id,
+        userId: session.user.id,
+        action: "request_signoff",
+        notes: "Sign-off requested by site team",
+      },
+    });
 
-  // Log event
-  const plotLabel = job.plot.plotNumber ? `Plot ${job.plot.plotNumber}` : job.plot.name;
-  await prisma.eventLog.create({
-    data: {
-      type: "USER_ACTION",
-      description: `Sign-off requested for "${job.name}" on ${plotLabel}`,
-      siteId: job.plot.site.id,
-      plotId: job.plotId,
-      jobId: id,
-      userId: session.user.id,
-    },
-  });
+    // Log event
+    const plotLabel = job.plot.plotNumber ? `Plot ${job.plot.plotNumber}` : job.plot.name;
+    await prisma.eventLog.create({
+      data: {
+        type: "USER_ACTION",
+        description: `Sign-off requested for "${job.name}" on ${plotLabel}`,
+        siteId: job.plot.site.id,
+        plotId: job.plotId,
+        jobId: id,
+        userId: session.user.id,
+      },
+    });
 
-  // Send push notification
-  await sendPushToAll("JOBS_READY_FOR_SIGNOFF", {
-    title: `Sign-Off Requested — ${job.name}`,
-    body: `${plotLabel} on ${job.plot.site.name}: "${job.name}" is ready for sign-off`,
-    url: `/jobs/${id}`,
-    tag: `signoff-request-${id}`,
-  });
+    // Send push notification
+    await sendPushToAll("JOBS_READY_FOR_SIGNOFF", {
+      title: `Sign-Off Requested — ${job.name}`,
+      body: `${plotLabel} on ${job.plot.site.name}: "${job.name}" is ready for sign-off`,
+      url: `/jobs/${id}`,
+      tag: `signoff-request-${id}`,
+    });
 
-  return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true });
+  } catch (err) {
+    return apiError(err, "Failed to request sign-off");
+  }
 }

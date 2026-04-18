@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { apiError } from "@/lib/api-errors";
 
 export const dynamic = "force-dynamic";
 
@@ -28,36 +29,40 @@ export async function PUT(
     );
   }
 
-  const updated = await prisma.templateJob.update({
-    where: { id: jobId },
-    data: {
-      ...(name !== undefined && { name: name.trim() }),
-      ...(description !== undefined && {
-        description: description?.trim() || null,
-      }),
-      ...(stageCode !== undefined && {
-        stageCode: stageCode?.trim() || null,
-      }),
-      ...(sortOrder !== undefined && { sortOrder }),
-      ...(startWeek !== undefined && { startWeek }),
-      ...(endWeek !== undefined && { endWeek }),
-      ...(durationWeeks !== undefined && { durationWeeks }),
-      ...(weatherAffected !== undefined && { weatherAffected }),
-      ...(weatherAffectedType !== undefined && { weatherAffectedType: weatherAffectedType || null }),
-      ...(contactId !== undefined && { contactId: contactId || null }),
-      ...(parentId !== undefined && { parentId: parentId || null }),
-    },
-    include: {
-      orders: {
-        include: { items: true },
+  try {
+    const updated = await prisma.templateJob.update({
+      where: { id: jobId },
+      data: {
+        ...(name !== undefined && { name: name.trim() }),
+        ...(description !== undefined && {
+          description: description?.trim() || null,
+        }),
+        ...(stageCode !== undefined && {
+          stageCode: stageCode?.trim() || null,
+        }),
+        ...(sortOrder !== undefined && { sortOrder }),
+        ...(startWeek !== undefined && { startWeek }),
+        ...(endWeek !== undefined && { endWeek }),
+        ...(durationWeeks !== undefined && { durationWeeks }),
+        ...(weatherAffected !== undefined && { weatherAffected }),
+        ...(weatherAffectedType !== undefined && { weatherAffectedType: weatherAffectedType || null }),
+        ...(contactId !== undefined && { contactId: contactId || null }),
+        ...(parentId !== undefined && { parentId: parentId || null }),
       },
-      children: {
-        orderBy: { sortOrder: "asc" },
+      include: {
+        orders: {
+          include: { items: true },
+        },
+        children: {
+          orderBy: { sortOrder: "asc" },
+        },
       },
-    },
-  });
+    });
 
-  return NextResponse.json(updated);
+    return NextResponse.json(updated);
+  } catch (err) {
+    return apiError(err, "Failed to update template job");
+  }
 }
 
 // DELETE /api/plot-templates/[id]/jobs/[jobId] — delete a template job
@@ -91,13 +96,9 @@ export async function DELETE(
       });
     }
     await prisma.templateJob.delete({ where: { id: jobId } });
-  } catch (err) {
-    console.error("Failed to delete template job:", err);
-    return NextResponse.json(
-      { error: "Failed to delete template job" },
-      { status: 500 }
-    );
-  }
 
-  return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true });
+  } catch (err) {
+    return apiError(err, "Failed to delete template job");
+  }
 }

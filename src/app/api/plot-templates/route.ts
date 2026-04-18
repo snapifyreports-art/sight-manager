@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { templateJobsInclude } from "@/lib/template-includes";
+import { apiError } from "@/lib/api-errors";
 
 export const dynamic = "force-dynamic";
 
@@ -39,16 +40,20 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const template = await prisma.plotTemplate.create({
-    data: {
-      name: name.trim(),
-      description: description?.trim() || null,
-      typeLabel: typeLabel?.trim() || null,
-    },
-    include: {
-      jobs: templateJobsInclude,
-    },
-  });
+  try {
+    const template = await prisma.plotTemplate.create({
+      data: {
+        name: name.trim(),
+        description: description?.trim() || null,
+        typeLabel: typeLabel?.trim() || null,
+      },
+      include: {
+        jobs: templateJobsInclude,
+      },
+    });
 
-  return NextResponse.json(template, { status: 201 });
+    return NextResponse.json(template, { status: 201 });
+  } catch (err) {
+    return apiError(err, "Failed to create template");
+  }
 }

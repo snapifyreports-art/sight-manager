@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { apiError } from "@/lib/api-errors";
 
 export const dynamic = "force-dynamic";
 
@@ -102,19 +103,23 @@ export async function PUT(
     );
   }
 
-  const contact = await prisma.contact.update({
-    where: { id },
-    data: {
-      name: body.name ?? existing.name,
-      email: body.email !== undefined ? body.email || null : existing.email,
-      phone: body.phone !== undefined ? body.phone || null : existing.phone,
-      type: body.type ?? existing.type,
-      company: body.company !== undefined ? body.company || null : existing.company,
-      notes: body.notes !== undefined ? body.notes || null : existing.notes,
-    },
-  });
+  try {
+    const contact = await prisma.contact.update({
+      where: { id },
+      data: {
+        name: body.name ?? existing.name,
+        email: body.email !== undefined ? body.email || null : existing.email,
+        phone: body.phone !== undefined ? body.phone || null : existing.phone,
+        type: body.type ?? existing.type,
+        company: body.company !== undefined ? body.company || null : existing.company,
+        notes: body.notes !== undefined ? body.notes || null : existing.notes,
+      },
+    });
 
-  return NextResponse.json(contact);
+    return NextResponse.json(contact);
+  } catch (err) {
+    return apiError(err, "Failed to update contact");
+  }
 }
 
 export async function DELETE(
@@ -133,7 +138,11 @@ export async function DELETE(
     return NextResponse.json({ error: "Contact not found" }, { status: 404 });
   }
 
-  await prisma.contact.delete({ where: { id } });
+  try {
+    await prisma.contact.delete({ where: { id } });
 
-  return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true });
+  } catch (err) {
+    return apiError(err, "Failed to delete contact");
+  }
 }

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { templateJobsInclude } from "@/lib/template-includes";
+import { apiError } from "@/lib/api-errors";
 
 export const dynamic = "force-dynamic";
 
@@ -59,42 +60,46 @@ export async function POST(
 
   const parentEndWeek = subJobsWithWeeks[subJobsWithWeeks.length - 1].endWeek;
 
-  // Create children and update parent in a transaction
-  const result = await prisma.$transaction(async (tx) => {
-    // Update parent's endWeek to span all children
-    await tx.templateJob.update({
-      where: { id: jobId },
-      data: {
-        endWeek: parentEndWeek,
-        // Clear description since it's now a stage header
-        description: null,
-      },
-    });
-
-    // Create sub-jobs
-    for (const sj of subJobsWithWeeks) {
-      await tx.templateJob.create({
+  try {
+    // Create children and update parent in a transaction
+    const result = await prisma.$transaction(async (tx) => {
+      // Update parent's endWeek to span all children
+      await tx.templateJob.update({
+        where: { id: jobId },
         data: {
-          templateId: id,
-          parentId: jobId,
-          name: sj.name.trim(),
-          stageCode: sj.code.trim(),
-          sortOrder: sj.sortOrder,
-          startWeek: sj.startWeek,
-          endWeek: sj.endWeek,
-          durationWeeks: sj.duration,
+          endWeek: parentEndWeek,
+          // Clear description since it's now a stage header
+          description: null,
         },
       });
-    }
 
-    // Return updated template
-    return tx.plotTemplate.findUnique({
-      where: { id },
-      include: {
-        jobs: templateJobsInclude,
-      },
+      // Create sub-jobs
+      for (const sj of subJobsWithWeeks) {
+        await tx.templateJob.create({
+          data: {
+            templateId: id,
+            parentId: jobId,
+            name: sj.name.trim(),
+            stageCode: sj.code.trim(),
+            sortOrder: sj.sortOrder,
+            startWeek: sj.startWeek,
+            endWeek: sj.endWeek,
+            durationWeeks: sj.duration,
+          },
+        });
+      }
+
+      // Return updated template
+      return tx.plotTemplate.findUnique({
+        where: { id },
+        include: {
+          jobs: templateJobsInclude,
+        },
+      });
     });
-  });
 
-  return NextResponse.json(result);
+    return NextResponse.json(result);
+  } catch (err) {
+    return apiError(err, "Failed to split job");
+  }
 }

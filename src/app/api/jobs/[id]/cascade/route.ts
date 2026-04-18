@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { calculateCascade } from "@/lib/cascade";
 import { addWorkingDays, snapToWorkingDay } from "@/lib/working-days";
 import { canAccessSite } from "@/lib/site-access";
+import { apiError } from "@/lib/api-errors";
 
 export const dynamic = "force-dynamic";
 
@@ -150,6 +151,7 @@ export async function PUT(
     }))
   );
 
+  try {
   // Apply updates directly (no transaction — all updates are on the same plot, safe without wrapping)
   {
     // Update the changed job — shift both start and end dates, preserve originals
@@ -240,4 +242,7 @@ export async function PUT(
     jobsUpdated: result.jobUpdates.length,
     ordersUpdated: result.orderUpdates.length,
   });
+  } catch (err) {
+    return apiError(err, "Failed to apply cascade");
+  }
 }

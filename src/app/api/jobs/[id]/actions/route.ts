@@ -6,6 +6,7 @@ import { getServerCurrentDate } from "@/lib/dev-date";
 import { sessionHasPermission } from "@/lib/permissions";
 import { recomputeParentOf } from "@/lib/parent-job";
 import { canAccessSite } from "@/lib/site-access";
+import { apiError } from "@/lib/api-errors";
 import type { EventType, JobStatus } from "@prisma/client";
 
 export const dynamic = "force-dynamic";
@@ -94,6 +95,7 @@ export async function POST(
 
   const now = getServerCurrentDate(req);
 
+  try {
   // Create the job action record
   await prisma.jobAction.create({
     data: {
@@ -461,4 +463,7 @@ export async function POST(
   }
 
   return NextResponse.json(job);
+  } catch (err) {
+    return apiError(err, "Failed to update job");
+  }
 }

@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { sendPushToAll } from "@/lib/push";
 import { canAccessSite } from "@/lib/site-access";
+import { apiError } from "@/lib/api-errors";
 
 export const dynamic = "force-dynamic";
 
@@ -53,30 +54,34 @@ export async function POST(
     updateData.notes = `${existingNotes}${separator}[${timestamp}] Contractor notes: ${notes}`;
   }
 
-  await prisma.snag.update({
-    where: { id },
-    data: updateData,
-  });
+  try {
+    await prisma.snag.update({
+      where: { id },
+      data: updateData,
+    });
 
-  // Log the request
-  const plotLabel = snag.plot.plotNumber ? `Plot ${snag.plot.plotNumber}` : snag.plot.name;
-  await prisma.eventLog.create({
-    data: {
-      type: "USER_ACTION",
-      description: `Snag sign-off requested: "${snag.description}" on ${plotLabel}`,
-      siteId: snag.plot.site.id,
-      plotId: snag.plotId,
-      userId: session.user.id,
-    },
-  });
+    // Log the request
+    const plotLabel = snag.plot.plotNumber ? `Plot ${snag.plot.plotNumber}` : snag.plot.name;
+    await prisma.eventLog.create({
+      data: {
+        type: "USER_ACTION",
+        description: `Snag sign-off requested: "${snag.description}" on ${plotLabel}`,
+        siteId: snag.plot.site.id,
+        plotId: snag.plotId,
+        userId: session.user.id,
+      },
+    });
 
-  // Send push notification
-  await sendPushToAll("JOBS_READY_FOR_SIGNOFF", {
-    title: `Snag Sign-Off Requested`,
-    body: `${plotLabel} on ${snag.plot.site.name}: "${snag.description}" — contractor says this is resolved`,
-    url: `/sites/${snag.plot.site.id}?tab=snags&snagId=${id}`,
-    tag: `snag-signoff-${id}`,
-  });
+    // Send push notification
+    await sendPushToAll("JOBS_READY_FOR_SIGNOFF", {
+      title: `Snag Sign-Off Requested`,
+      body: `${plotLabel} on ${snag.plot.site.name}: "${snag.description}" — contractor says this is resolved`,
+      url: `/sites/${snag.plot.site.id}?tab=snags&snagId=${id}`,
+      tag: `snag-signoff-${id}`,
+    });
 
-  return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true });
+  } catch (err) {
+    return apiError(err, "Failed to request snag sign-off");
+  }
 }

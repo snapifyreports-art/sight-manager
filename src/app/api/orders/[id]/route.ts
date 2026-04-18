@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { auth } from "@/lib/auth";
 import { getServerCurrentDate } from "@/lib/dev-date";
 import { sessionHasPermission } from "@/lib/permissions";
+import { apiError } from "@/lib/api-errors";
 
 export const dynamic = "force-dynamic";
 
@@ -150,9 +151,11 @@ export async function PUT(
     ) {
       data.deliveredDate = getServerCurrentDate(req);
     }
+  }
 
+  try {
     // Create event log for status changes
-    if (body.status !== existing.status) {
+    if (body.status !== undefined && body.status !== existing.status) {
       const eventType =
         body.status === "DELIVERED"
           ? "DELIVERY_CONFIRMED"
@@ -172,24 +175,26 @@ export async function PUT(
         },
       });
     }
-  }
 
-  const order = await prisma.materialOrder.update({
-    where: { id },
-    data,
-    include: {
-      supplier: true,
-      contact: true,
-      orderItems: true,
-      job: {
-        include: {
-          plot: { include: { site: true } },
+    const order = await prisma.materialOrder.update({
+      where: { id },
+      data,
+      include: {
+        supplier: true,
+        contact: true,
+        orderItems: true,
+        job: {
+          include: {
+            plot: { include: { site: true } },
+          },
         },
       },
-    },
-  });
+    });
 
-  return NextResponse.json(order);
+    return NextResponse.json(order);
+  } catch (err) {
+    return apiError(err, "Failed to update order");
+  }
 }
 
 export async function DELETE(
@@ -219,20 +224,24 @@ export async function DELETE(
     return NextResponse.json({ error: "Order not found" }, { status: 404 });
   }
 
-  await prisma.eventLog.create({
-    data: {
-      type: "ORDER_CANCELLED",
-      description: `[${existing.supplier.name}] Order for ${existing.job?.name ?? "one-off order"} was deleted`,
-      siteId: existing.job?.plot.siteId ?? existing.siteId ?? null,
-      plotId: existing.job?.plotId ?? existing.plotId ?? null,
-      jobId: existing.jobId,
-      userId: session.user?.id || null,
-    },
-  });
+  try {
+    await prisma.eventLog.create({
+      data: {
+        type: "ORDER_CANCELLED",
+        description: `[${existing.supplier.name}] Order for ${existing.job?.name ?? "one-off order"} was deleted`,
+        siteId: existing.job?.plot.siteId ?? existing.siteId ?? null,
+        plotId: existing.job?.plotId ?? existing.plotId ?? null,
+        jobId: existing.jobId,
+        userId: session.user?.id || null,
+      },
+    });
 
-  await prisma.materialOrder.delete({
-    where: { id },
-  });
+    await prisma.materialOrder.delete({
+      where: { id },
+    });
 
-  return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true });
+  } catch (err) {
+    return apiError(err, "Failed to delete order");
+  }
 }

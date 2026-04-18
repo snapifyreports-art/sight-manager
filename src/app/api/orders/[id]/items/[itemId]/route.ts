@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/lib/auth";
+import { apiError } from "@/lib/api-errors";
 
 export const dynamic = "force-dynamic";
 
@@ -35,12 +36,16 @@ export async function PUT(
   const cost = (data.unitCost as number) ?? item.unitCost;
   data.totalCost = qty * cost;
 
-  const updated = await prisma.orderItem.update({
-    where: { id: itemId },
-    data,
-  });
+  try {
+    const updated = await prisma.orderItem.update({
+      where: { id: itemId },
+      data,
+    });
 
-  return NextResponse.json(updated);
+    return NextResponse.json(updated);
+  } catch (err) {
+    return apiError(err, "Failed to update order item");
+  }
 }
 
 export async function DELETE(
@@ -62,7 +67,11 @@ export async function DELETE(
     return NextResponse.json({ error: "Item not found" }, { status: 404 });
   }
 
-  await prisma.orderItem.delete({ where: { id: itemId } });
+  try {
+    await prisma.orderItem.delete({ where: { id: itemId } });
 
-  return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true });
+  } catch (err) {
+    return apiError(err, "Failed to delete order item");
+  }
 }

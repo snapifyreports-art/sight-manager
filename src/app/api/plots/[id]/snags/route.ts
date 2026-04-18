@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getServerCurrentDate } from "@/lib/dev-date";
+import { apiError } from "@/lib/api-errors";
 
 export const dynamic = "force-dynamic";
 
@@ -101,53 +102,57 @@ export async function POST(
     }
   }
 
-  const snag = await prisma.snag.create({
-    data: {
-      plotId: id,
-      jobId: jobId || null,
-      description: description.trim(),
-      location: location || null,
-      priority: priority || "MEDIUM",
-      assignedToId: resolvedAssignedToId,
-      contactId: resolvedContactId,
-      raisedById: session.user.id,
-      notes: notes || null,
-      createdAt: getServerCurrentDate(req),
-    },
-    include: {
-      assignedTo: { select: { id: true, name: true } },
-      contact: { select: { id: true, name: true, email: true, company: true } },
-      raisedBy: { select: { id: true, name: true } },
-      job: { select: { id: true, name: true, parent: { select: { name: true } } } },
-      photos: true,
-      _count: { select: { photos: true } },
-    },
-  });
+  try {
+    const snag = await prisma.snag.create({
+      data: {
+        plotId: id,
+        jobId: jobId || null,
+        description: description.trim(),
+        location: location || null,
+        priority: priority || "MEDIUM",
+        assignedToId: resolvedAssignedToId,
+        contactId: resolvedContactId,
+        raisedById: session.user.id,
+        notes: notes || null,
+        createdAt: getServerCurrentDate(req),
+      },
+      include: {
+        assignedTo: { select: { id: true, name: true } },
+        contact: { select: { id: true, name: true, email: true, company: true } },
+        raisedBy: { select: { id: true, name: true } },
+        job: { select: { id: true, name: true, parent: { select: { name: true } } } },
+        photos: true,
+        _count: { select: { photos: true } },
+      },
+    });
 
-  // Log event
-  const eventLogPromise = prisma.eventLog.create({
-    data: {
-      type: "SNAG_CREATED",
-      description: `Snag raised on Plot ${plot.plotNumber || plot.name}: "${description.trim().slice(0, 60)}"`,
-      siteId: plot.siteId,
-      plotId: id,
-      userId: session.user.id,
-    },
-  });
+    // Log event
+    const eventLogPromise = prisma.eventLog.create({
+      data: {
+        type: "SNAG_CREATED",
+        description: `Snag raised on Plot ${plot.plotNumber || plot.name}: "${description.trim().slice(0, 60)}"`,
+        siteId: plot.siteId,
+        plotId: id,
+        userId: session.user.id,
+      },
+    });
 
-  // Link snag to job's notes/actions if a job was specified
-  const jobActionPromise = jobId
-    ? prisma.jobAction.create({
-        data: {
-          jobId,
-          userId: session.user.id,
-          action: "note",
-          notes: `⚠️ Snag raised: "${description.trim().slice(0, 80)}"${location ? ` — ${location}` : ""}`,
-        },
-      })
-    : Promise.resolve(null);
+    // Link snag to job's notes/actions if a job was specified
+    const jobActionPromise = jobId
+      ? prisma.jobAction.create({
+          data: {
+            jobId,
+            userId: session.user.id,
+            action: "note",
+            notes: `⚠️ Snag raised: "${description.trim().slice(0, 80)}"${location ? ` — ${location}` : ""}`,
+          },
+        })
+      : Promise.resolve(null);
 
-  await Promise.all([eventLogPromise, jobActionPromise]);
+    await Promise.all([eventLogPromise, jobActionPromise]);
 
-  return NextResponse.json(snag, { status: 201 });
+    return NextResponse.json(snag, { status: 201 });
+  } catch (err) {
+    return apiError(err, "Failed to create snag");
+  }
 }

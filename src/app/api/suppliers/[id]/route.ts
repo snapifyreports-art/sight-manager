@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { apiError } from "@/lib/api-errors";
 
 export const dynamic = "force-dynamic";
 
@@ -47,18 +48,22 @@ export async function PUT(
     return NextResponse.json({ error: "Supplier not found" }, { status: 404 });
   }
 
-  const supplier = await prisma.supplier.update({
-    where: { id },
-    data: {
-      name: body.name ?? existing.name,
-      contactName: body.contactName !== undefined ? body.contactName : existing.contactName,
-      contactEmail: body.contactEmail !== undefined ? body.contactEmail : existing.contactEmail,
-      contactNumber: body.contactNumber !== undefined ? body.contactNumber : existing.contactNumber,
-      type: body.type !== undefined ? body.type : existing.type,
-      emailTemplate: body.emailTemplate !== undefined ? body.emailTemplate : existing.emailTemplate,
-      accountNumber: body.accountNumber !== undefined ? body.accountNumber : existing.accountNumber,
-    },
-  });
+  try {
+    const supplier = await prisma.supplier.update({
+      where: { id },
+      data: {
+        name: body.name ?? existing.name,
+        contactName: body.contactName !== undefined ? body.contactName : existing.contactName,
+        contactEmail: body.contactEmail !== undefined ? body.contactEmail : existing.contactEmail,
+        contactNumber: body.contactNumber !== undefined ? body.contactNumber : existing.contactNumber,
+        type: body.type !== undefined ? body.type : existing.type,
+        emailTemplate: body.emailTemplate !== undefined ? body.emailTemplate : existing.emailTemplate,
+        accountNumber: body.accountNumber !== undefined ? body.accountNumber : existing.accountNumber,
+      },
+    });
 
-  return NextResponse.json(supplier);
+    return NextResponse.json(supplier);
+  } catch (err) {
+    return apiError(err, "Failed to update supplier");
+  }
 }

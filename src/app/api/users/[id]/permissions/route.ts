@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { hasPermission, ALL_PERMISSIONS } from "@/lib/permissions";
+import { apiError } from "@/lib/api-errors";
 
 export const dynamic = "force-dynamic";
 
@@ -93,19 +94,23 @@ export async function PUT(
     );
   }
 
-  await prisma.$transaction(ops);
+  try {
+    await prisma.$transaction(ops);
 
-  const user = await prisma.user.findUnique({
-    where: { id },
-    select: { name: true },
-  });
-  await prisma.eventLog.create({
-    data: {
-      type: "USER_ACTION",
-      description: `Permissions updated for ${user?.name || "user"} (${permissions.length} permission${permissions.length !== 1 ? "s" : ""}${Array.isArray(siteIds) ? `, ${siteIds.length} site${siteIds.length !== 1 ? "s" : ""}` : ""})`,
-      userId: session.user.id,
-    },
-  });
+    const user = await prisma.user.findUnique({
+      where: { id },
+      select: { name: true },
+    });
+    await prisma.eventLog.create({
+      data: {
+        type: "USER_ACTION",
+        description: `Permissions updated for ${user?.name || "user"} (${permissions.length} permission${permissions.length !== 1 ? "s" : ""}${Array.isArray(siteIds) ? `, ${siteIds.length} site${siteIds.length !== 1 ? "s" : ""}` : ""})`,
+        userId: session.user.id,
+      },
+    });
 
-  return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true });
+  } catch (err) {
+    return apiError(err, "Failed to update permissions");
+  }
 }

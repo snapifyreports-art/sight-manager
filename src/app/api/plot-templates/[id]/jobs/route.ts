@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { apiError } from "@/lib/api-errors";
 
 export const dynamic = "force-dynamic";
 
@@ -40,28 +41,32 @@ export async function POST(
     );
   }
 
-  const job = await prisma.templateJob.create({
-    data: {
-      templateId: id,
-      name: name.trim(),
-      description: description?.trim() || null,
-      stageCode: stageCode?.trim() || null,
-      sortOrder: sortOrder ?? 0,
-      startWeek,
-      endWeek,
-      parentId: parentId || null,
-      durationWeeks: durationWeeks ?? null,
-      contactId: contactId || null,
-    },
-    include: {
-      orders: {
-        include: { items: true },
+  try {
+    const job = await prisma.templateJob.create({
+      data: {
+        templateId: id,
+        name: name.trim(),
+        description: description?.trim() || null,
+        stageCode: stageCode?.trim() || null,
+        sortOrder: sortOrder ?? 0,
+        startWeek,
+        endWeek,
+        parentId: parentId || null,
+        durationWeeks: durationWeeks ?? null,
+        contactId: contactId || null,
       },
-      children: {
-        orderBy: { sortOrder: "asc" },
+      include: {
+        orders: {
+          include: { items: true },
+        },
+        children: {
+          orderBy: { sortOrder: "asc" },
+        },
       },
-    },
-  });
+    });
 
-  return NextResponse.json(job, { status: 201 });
+    return NextResponse.json(job, { status: 201 });
+  } catch (err) {
+    return apiError(err, "Failed to add template job");
+  }
 }
