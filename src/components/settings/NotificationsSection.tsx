@@ -22,6 +22,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { usePush } from "@/lib/use-push";
+import { useToast } from "@/components/ui/toast";
 
 // Human-readable labels and descriptions for each notification type
 const NOTIFICATION_TYPE_META: Record<
@@ -77,6 +78,7 @@ interface Preference {
 
 export function NotificationsSection() {
   const { status, subscribe, unsubscribe } = usePush();
+  const toast = useToast();
   const [preferences, setPreferences] = useState<Preference[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -130,7 +132,11 @@ export function NotificationsSection() {
       .finally(() => setLoading(false));
   }, []);
 
-  // Toggle a preference and save immediately
+  // Toggle a preference and save immediately.
+  // Previously this only reverted state on thrown exceptions — if the server
+  // returned a non-ok response (e.g. 400/500) the UI would show the toggle
+  // as succeeded while the server state was actually wrong. Now we revert on
+  // ANY non-ok response AND surface the reason via a toast.
   async function handleToggle(type: string, checked: boolean) {
     const previous = [...preferences];
     const updated = preferences.map((p) =>
@@ -140,15 +146,22 @@ export function NotificationsSection() {
 
     setSaving(true);
     try {
-      await fetch("/api/notifications/preferences", {
+      const res = await fetch("/api/notifications/preferences", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ preferences: [{ type, enabled: checked }] }),
       });
+      if (!res.ok) {
+        // Server rejected — revert local state so UI stays in sync with server.
+        console.error("Preference save rejected:", res.status);
+        setPreferences(previous);
+        const data = await res.json().catch(() => null);
+        toast.error(data?.error ?? `Failed to save preference (HTTP ${res.status})`);
+      }
     } catch (err) {
       console.error("Failed to save preference:", err);
-      // Revert on error
       setPreferences(previous);
+      toast.error(err instanceof Error ? err.message : "Failed to save preference");
     } finally {
       setSaving(false);
     }

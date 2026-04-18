@@ -59,6 +59,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { PhotoUpload } from "./PhotoUpload";
 import { useJobAction } from "@/hooks/useJobAction";
+import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 
 // ---------- Types ----------
 
@@ -304,6 +305,7 @@ const SNAG_STATUS_COLOR: Record<string, string> = {
 
 export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
   const router = useRouter();
+  const toast = useToast();
   const [job, setJob] = useState(initialJob);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
@@ -329,11 +331,13 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "note", notes: noteText.trim() }),
       });
-      if (res.ok) {
-        const newAction = await res.json();
-        setJob((prev) => ({ ...prev, actions: [newAction, ...prev.actions] }));
-        setNoteText("");
+      if (!res.ok) {
+        toast.error(await fetchErrorMessage(res, "Failed to add note"));
+        return;
       }
+      const newAction = await res.json();
+      setJob((prev) => ({ ...prev, actions: [newAction, ...prev.actions] }));
+      setNoteText("");
     } finally {
       setSubmittingNote(false);
     }
@@ -391,21 +395,23 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
           contactIds: Array.from(selectedContractorIds),
         }),
       });
-      if (res.ok) {
-        const updated = await res.json();
-        setJob((prev) => ({
-          ...prev,
-          contractors: updated,
-        }));
-        setContractorDialogOpen(false);
-        router.refresh();
+      if (!res.ok) {
+        toast.error(await fetchErrorMessage(res, "Failed to save contractors"));
+        return;
       }
+      const updated = await res.json();
+      setJob((prev) => ({
+        ...prev,
+        contractors: updated,
+      }));
+      setContractorDialogOpen(false);
+      router.refresh();
     } catch (error) {
-      console.error("Failed to save contractors:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to save contractors");
     } finally {
       setSavingContractors(false);
     }
-  }, [job.id, selectedContractorIds, router]);
+  }, [job.id, selectedContractorIds, router, toast]);
 
   // Sign-off dialog state
   const [signOffDialogOpen, setSignOffDialogOpen] = useState(false);
@@ -466,11 +472,13 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action }),
       });
-      if (res.ok) {
-        const updated = await res.json();
-        setJob((prev) => ({ ...prev, status: updated.status }));
-        router.refresh();
+      if (!res.ok) {
+        toast.error(await fetchErrorMessage(res, `Failed to ${action} job`));
+        return;
       }
+      const updated = await res.json();
+      setJob((prev) => ({ ...prev, status: updated.status }));
+      router.refresh();
     } finally {
       setActionLoading(null);
     }
@@ -480,11 +488,15 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
     setSigningOff(true);
     try {
       // Complete first, then sign off separately
-      await fetch(`/api/jobs/${job.id}/actions`, {
+      const completeRes = await fetch(`/api/jobs/${job.id}/actions`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "complete" }),
       });
+      if (!completeRes.ok) {
+        toast.error(await fetchErrorMessage(completeRes, "Failed to complete job before sign-off"));
+        return;
+      }
       const res = await fetch(`/api/jobs/${job.id}/actions`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -493,38 +505,40 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
           signOffNotes: signOffNotes || undefined,
         }),
       });
-      if (res.ok) {
-        const updated = await res.json();
-        setJob((prev) => ({ ...prev, status: updated.status }));
-        setSignOffDialogOpen(false);
-        setSignOffNotes("");
+      if (!res.ok) {
+        toast.error(await fetchErrorMessage(res, "Failed to sign off job"));
+        return;
+      }
+      const updated = await res.json();
+      setJob((prev) => ({ ...prev, status: updated.status }));
+      setSignOffDialogOpen(false);
+      setSignOffNotes("");
 
-        // Fetch next-job data for post-signoff dialog
-        try {
-          const nextRes = await fetch(`/api/jobs/${job.id}/next`);
-          if (nextRes.ok) {
-            const nextData: NextJobResponse = await nextRes.json();
-            if (nextData.cascade.needed || nextData.nextJobs.length > 0) {
-              setPostSignOffData(nextData);
-              setPostSignOffStep(nextData.cascade.needed ? "cascade" : "notify");
-              // Pre-select all contractors with emails
-              const allIds = new Set<string>();
-              for (const nj of nextData.nextJobs) {
-                for (const c of nj.contractors) {
-                  if (c.email) allIds.add(c.contactId);
-                }
+      // Fetch next-job data for post-signoff dialog
+      try {
+        const nextRes = await fetch(`/api/jobs/${job.id}/next`);
+        if (nextRes.ok) {
+          const nextData: NextJobResponse = await nextRes.json();
+          if (nextData.cascade.needed || nextData.nextJobs.length > 0) {
+            setPostSignOffData(nextData);
+            setPostSignOffStep(nextData.cascade.needed ? "cascade" : "notify");
+            // Pre-select all contractors with emails
+            const allIds = new Set<string>();
+            for (const nj of nextData.nextJobs) {
+              for (const c of nj.contractors) {
+                if (c.email) allIds.add(c.contactId);
               }
-              setNotifyContractorIds(allIds);
-              setPostSignOffDialogOpen(true);
-            } else {
-              router.refresh();
             }
+            setNotifyContractorIds(allIds);
+            setPostSignOffDialogOpen(true);
           } else {
             router.refresh();
           }
-        } catch {
+        } else {
           router.refresh();
         }
+      } catch {
+        router.refresh();
       }
     } finally {
       setSigningOff(false);
@@ -543,31 +557,33 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
           deliveredDate: deliveryDate,
         }),
       });
-      if (res.ok) {
-        // Capture supplier name before state update
-        const confirmedOrder = job.orders.find((o) => o.id === deliveryOrderId);
-        setJob((prev) => ({
-          ...prev,
-          orders: prev.orders.map((o) =>
-            o.id === deliveryOrderId
-              ? { ...o, status: "DELIVERED", deliveredDate: deliveryDate }
-              : o
-          ),
-        }));
-        setDeliveryDialogOpen(false);
-        setDeliveryOrderId(null);
-        setDeliveryNotes("");
+      if (!res.ok) {
+        toast.error(await fetchErrorMessage(res, "Failed to confirm delivery"));
+        return;
+      }
+      // Capture supplier name before state update
+      const confirmedOrder = job.orders.find((o) => o.id === deliveryOrderId);
+      setJob((prev) => ({
+        ...prev,
+        orders: prev.orders.map((o) =>
+          o.id === deliveryOrderId
+            ? { ...o, status: "DELIVERED", deliveredDate: deliveryDate }
+            : o
+        ),
+      }));
+      setDeliveryDialogOpen(false);
+      setDeliveryOrderId(null);
+      setDeliveryNotes("");
 
-        // Open post-delivery notification dialog if contractors with emails exist
-        if (confirmedOrder && job.contractors.some((c) => c.contact.email)) {
-          setDeliveryNotifySupplier(confirmedOrder.supplier.name);
-          setDeliveryNotifyContractors(
-            new Set(job.contractors.filter((c) => c.contact.email).map((c) => c.contactId))
-          );
-          setPostDeliveryDialogOpen(true);
-        } else {
-          router.refresh();
-        }
+      // Open post-delivery notification dialog if contractors with emails exist
+      if (confirmedOrder && job.contractors.some((c) => c.contact.email)) {
+        setDeliveryNotifySupplier(confirmedOrder.supplier.name);
+        setDeliveryNotifyContractors(
+          new Set(job.contractors.filter((c) => c.contact.email).map((c) => c.contactId))
+        );
+        setPostDeliveryDialogOpen(true);
+      } else {
+        router.refresh();
       }
     } finally {
       setConfirmingDelivery(false);
@@ -580,7 +596,7 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
       const contractorsToNotify = job.contractors.filter(
         (c) => deliveryNotifyContractors.has(c.contactId) && c.contact.email
       );
-      await Promise.all(
+      const results = await Promise.all(
         contractorsToNotify.map((c) =>
           fetch("/api/email/send", {
             method: "POST",
@@ -599,8 +615,12 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
           })
         )
       );
+      const failed = results.find((r) => !r.ok);
+      if (failed) {
+        toast.error(await fetchErrorMessage(failed, "Failed to send delivery notification"));
+      }
     } catch (error) {
-      console.error("Failed to send delivery notification:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to send delivery notification");
     } finally {
       setSendingDeliveryEmail(false);
       setPostDeliveryDialogOpen(false);
@@ -612,7 +632,7 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
     if (!postSignOffData) return;
     setApplyingCascade(true);
     try {
-      await fetch(`/api/jobs/${job.id}/cascade`, {
+      const res = await fetch(`/api/jobs/${job.id}/cascade`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -620,9 +640,13 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
           confirm: true,
         }),
       });
+      if (!res.ok) {
+        toast.error(await fetchErrorMessage(res, "Failed to apply cascade"));
+        return;
+      }
       setPostSignOffStep("notify");
     } catch (error) {
-      console.error("Failed to apply cascade:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to apply cascade");
     } finally {
       setApplyingCascade(false);
     }
@@ -636,10 +660,12 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ startDate: editDateValue }),
       });
-      if (res.ok) {
-        setEditingStartDate(false);
-        router.refresh();
+      if (!res.ok) {
+        toast.error(await fetchErrorMessage(res, "Failed to update start date"));
+        return;
       }
+      setEditingStartDate(false);
+      router.refresh();
     } finally {
       setSavingDate(false);
     }
@@ -653,21 +679,27 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ newEndDate: editDateValue }),
       });
-      if (res.ok) {
-        const preview = await res.json();
-        if (preview.jobUpdates?.length > 0 || preview.orderUpdates?.length > 0) {
-          setDateCascadePreview(preview);
-          setPendingEndDate(editDateValue);
-        } else {
-          // No cascade needed, just save
-          await fetch(`/api/jobs/${job.id}`, {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ endDate: editDateValue }),
-          });
-          setEditingEndDate(false);
-          router.refresh();
+      if (!res.ok) {
+        toast.error(await fetchErrorMessage(res, "Failed to preview cascade"));
+        return;
+      }
+      const preview = await res.json();
+      if (preview.jobUpdates?.length > 0 || preview.orderUpdates?.length > 0) {
+        setDateCascadePreview(preview);
+        setPendingEndDate(editDateValue);
+      } else {
+        // No cascade needed, just save
+        const saveRes = await fetch(`/api/jobs/${job.id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ endDate: editDateValue }),
+        });
+        if (!saveRes.ok) {
+          toast.error(await fetchErrorMessage(saveRes, "Failed to update end date"));
+          return;
         }
+        setEditingEndDate(false);
+        router.refresh();
       }
     } finally {
       setSavingDate(false);
@@ -683,12 +715,14 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ newEndDate: pendingEndDate, confirm: true }),
       });
-      if (res.ok) {
-        setDateCascadePreview(null);
-        setPendingEndDate(null);
-        setEditingEndDate(false);
-        router.refresh();
+      if (!res.ok) {
+        toast.error(await fetchErrorMessage(res, "Failed to apply date cascade"));
+        return;
       }
+      setDateCascadePreview(null);
+      setPendingEndDate(null);
+      setEditingEndDate(false);
+      router.refresh();
     } finally {
       setSavingDate(false);
     }
@@ -698,11 +732,12 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
     if (!postSignOffData) return;
     setSendingNotifications(true);
     try {
+      let firstFailed: Response | null = null;
       for (const nj of postSignOffData.nextJobs) {
         const contractorsToNotify = nj.contractors.filter(
           (c) => notifyContractorIds.has(c.contactId) && c.email
         );
-        await Promise.all(
+        const results = await Promise.all(
           contractorsToNotify.map((c) =>
             fetch("/api/email/send", {
               method: "POST",
@@ -721,9 +756,15 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
             })
           )
         );
+        if (!firstFailed) {
+          firstFailed = results.find((r) => !r.ok) ?? null;
+        }
+      }
+      if (firstFailed) {
+        toast.error(await fetchErrorMessage(firstFailed, "Failed to send next-stage notification"));
       }
     } catch (error) {
-      console.error("Failed to send notifications:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to send notifications");
     } finally {
       setSendingNotifications(false);
       setPostSignOffDialogOpen(false);
@@ -1934,11 +1975,15 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
                 // Save end date without cascade
                 setSavingDate(true);
                 try {
-                  await fetch(`/api/jobs/${job.id}`, {
+                  const res = await fetch(`/api/jobs/${job.id}`, {
                     method: "PUT",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ endDate: pendingEndDate }),
                   });
+                  if (!res.ok) {
+                    toast.error(await fetchErrorMessage(res, "Failed to update end date"));
+                    return;
+                  }
                   setDateCascadePreview(null);
                   setPendingEndDate(null);
                   setEditingEndDate(false);

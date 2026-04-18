@@ -22,6 +22,7 @@ import {
   DialogClose,
 } from "@/components/ui/dialog";
 import { CreateSiteWizard } from "./CreateSiteWizard";
+import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 
 // ---------- Types ----------
 
@@ -89,6 +90,7 @@ export function SitesClient({
   sites: SiteItem[];
 }) {
   const router = useRouter();
+  const toast = useToast();
   const [sites, setSites] = useState(initialSites);
   const [dialogOpen, setDialogOpen] = useState(false);
 
@@ -123,8 +125,8 @@ export function SitesClient({
       });
 
       if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || "Failed to delete site");
+        toast.error(await fetchErrorMessage(res, "Failed to delete site"));
+        return;
       }
 
       setSites((prev) => prev.filter((s) => s.id !== siteToDelete.id));
@@ -132,7 +134,7 @@ export function SitesClient({
       setSiteToDelete(null);
       router.refresh();
     } catch (error) {
-      console.error("Failed to delete site:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to delete site");
     } finally {
       setDeleting(false);
     }

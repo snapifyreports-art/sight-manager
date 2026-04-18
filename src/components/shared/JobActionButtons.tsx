@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Play, CheckCircle2, Clock, CalendarClock, FileCheck, Loader2 } from "lucide-react";
 import { useJobAction } from "@/hooks/useJobAction";
+import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 
 /**
  * Shared job action buttons — consistent context-dependent actions per job status.
@@ -48,6 +49,7 @@ export function JobActionButtons({
   className = "",
 }: Props) {
   const [loading, setLoading] = useState<string | null>(null);
+  const toast = useToast();
 
   // Centralised start hook
   const { triggerAction: triggerStart, dialogs: startDialogs } = useJobAction(
@@ -75,7 +77,11 @@ export function JobActionButtons({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      if (res.ok) onRefresh?.();
+      if (!res.ok) {
+        toast.error(await fetchErrorMessage(res, `Failed to ${action} job`));
+        return;
+      }
+      onRefresh?.();
     } finally {
       setLoading(null);
     }

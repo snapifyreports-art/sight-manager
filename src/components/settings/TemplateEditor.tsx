@@ -54,6 +54,7 @@ import {
   CUSTOM_STAGE_KEY,
 } from "@/lib/stage-library";
 import type { StageDefinition } from "@/lib/stage-library";
+import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 
 interface MaterialSuggestion {
   name: string;
@@ -74,6 +75,7 @@ export function TemplateEditor({
   onBack,
   onUpdate,
 }: TemplateEditorProps) {
+  const toast = useToast();
   const [editingMeta, setEditingMeta] = useState(false);
   const [metaName, setMetaName] = useState(template.name);
   const [metaDescription, setMetaDescription] = useState(
@@ -279,12 +281,15 @@ export function TemplateEditor({
           }),
         }
       );
-      if (!res.ok) throw new Error("Failed to split job");
+      if (!res.ok) {
+        toast.error(await fetchErrorMessage(res, "Failed to split job"));
+        return;
+      }
       const updated = await res.json();
       onUpdate(updated);
       setSplitDialogOpen(false);
     } catch (error) {
-      console.error("Failed to split job:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to split job");
     } finally {
       setSavingSplit(false);
     }
@@ -378,12 +383,15 @@ export function TemplateEditor({
           typeLabel: metaTypeLabel || null,
         }),
       });
-      if (!res.ok) throw new Error("Failed to update template");
+      if (!res.ok) {
+        toast.error(await fetchErrorMessage(res, "Failed to update template"));
+        return;
+      }
       const updated = await res.json();
       onUpdate(updated);
       setEditingMeta(false);
     } catch (error) {
-      console.error("Failed to update template:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to update template");
     } finally {
       setSavingMeta(false);
     }
@@ -459,7 +467,10 @@ export function TemplateEditor({
             }),
           }
         );
-        if (!res.ok) throw new Error("Failed to create custom stage");
+        if (!res.ok) {
+          toast.error(await fetchErrorMessage(res, "Failed to create custom stage"));
+          return;
+        }
         const stageData = await res.json();
 
         // Create sub-jobs sequentially
@@ -467,7 +478,7 @@ export function TemplateEditor({
         for (let i = 0; i < customSubJobs.length; i++) {
           const sj = customSubJobs[i];
           const subEnd = subStart + sj.duration - 1;
-          await fetch(`/api/plot-templates/${template.id}/jobs`, {
+          const subRes = await fetch(`/api/plot-templates/${template.id}/jobs`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -480,6 +491,10 @@ export function TemplateEditor({
               sortOrder: i,
             }),
           });
+          if (!subRes.ok) {
+            toast.error(await fetchErrorMessage(subRes, `Failed to create sub-job "${sj.name}"`));
+            return;
+          }
           subStart = subEnd + 1;
         }
       } else {
@@ -493,7 +508,10 @@ export function TemplateEditor({
             body: JSON.stringify({ stageCodes: codes }),
           }
         );
-        if (!res.ok) throw new Error("Failed to add stages");
+        if (!res.ok) {
+          toast.error(await fetchErrorMessage(res, "Failed to add stages"));
+          return;
+        }
       }
 
       const tplRes = await fetch(`/api/plot-templates/${template.id}`, { cache: "no-store" });
@@ -501,7 +519,7 @@ export function TemplateEditor({
       onUpdate(updated);
       setStageDialogOpen(false);
     } catch (error) {
-      console.error("Failed to add stage:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to add stage");
     } finally {
       setSavingStage(false);
     }
@@ -549,7 +567,10 @@ export function TemplateEditor({
             }),
           }
         );
-        if (!res.ok) throw new Error("Failed to update job");
+        if (!res.ok) {
+          toast.error(await fetchErrorMessage(res, "Failed to update job"));
+          return;
+        }
 
         // If the edited job has children, recalculate their weeks
         if (editingJob.children && editingJob.children.length > 0) {
@@ -573,7 +594,7 @@ export function TemplateEditor({
       onUpdate(updated);
       setJobDialogOpen(false);
     } catch (error) {
-      console.error("Failed to save job:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to save job");
     } finally {
       setSavingJob(false);
     }
@@ -587,8 +608,8 @@ export function TemplateEditor({
         { method: "DELETE" }
       );
       if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.error || "Failed to delete job");
+        toast.error(await fetchErrorMessage(res, "Failed to delete job"));
+        return;
       }
 
       const tplRes = await fetch(`/api/plot-templates/${template.id}`, { cache: "no-store" });
@@ -597,7 +618,7 @@ export function TemplateEditor({
       setDeleteJobDialogOpen(false);
       setDeletingJobId(null);
     } catch (error) {
-      console.error("Failed to delete job:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to delete job");
     }
   }
 
@@ -636,7 +657,10 @@ export function TemplateEditor({
           sortOrder: subJobParentChildren,
         }),
       });
-      if (!res.ok) throw new Error("Failed to create sub-job");
+      if (!res.ok) {
+        toast.error(await fetchErrorMessage(res, "Failed to create sub-job"));
+        return;
+      }
 
       // Recalculate parent stage
       await fetch(
@@ -649,7 +673,7 @@ export function TemplateEditor({
       onUpdate(updated);
       setSubJobDialogOpen(false);
     } catch (error) {
-      console.error("Failed to create sub-job:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to create sub-job");
     } finally {
       setSavingSubJob(false);
     }
@@ -681,7 +705,10 @@ export function TemplateEditor({
           body: JSON.stringify({ durationWeeks: newVal }),
         }
       );
-      if (!res.ok) throw new Error("Failed to update duration");
+      if (!res.ok) {
+        toast.error(await fetchErrorMessage(res, "Failed to update duration"));
+        return;
+      }
 
       await fetch(
         `/api/plot-templates/${template.id}/jobs/${parentId}/recalculate`,
@@ -692,7 +719,7 @@ export function TemplateEditor({
       const updated = await tplRes.json();
       onUpdate(updated);
     } catch (error) {
-      console.error("Failed to update duration:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to update duration");
     } finally {
       setEditingDurations((prev) => {
         const next = { ...prev };
@@ -847,7 +874,12 @@ export function TemplateEditor({
             body: JSON.stringify(payload),
           }
         );
-        if (!res.ok) throw new Error("Failed to update order");
+        if (!res.ok) {
+          const msg = await fetchErrorMessage(res, "Failed to update order");
+          setOrderError(msg);
+          toast.error(msg);
+          return;
+        }
       } else {
         const res = await fetch(
           `/api/plot-templates/${template.id}/jobs/${orderJobId}/orders`,
@@ -857,7 +889,12 @@ export function TemplateEditor({
             body: JSON.stringify(payload),
           }
         );
-        if (!res.ok) throw new Error("Failed to create order");
+        if (!res.ok) {
+          const msg = await fetchErrorMessage(res, "Failed to create order");
+          setOrderError(msg);
+          toast.error(msg);
+          return;
+        }
       }
 
       const tplRes = await fetch(`/api/plot-templates/${template.id}`, { cache: "no-store" });
@@ -865,8 +902,9 @@ export function TemplateEditor({
       onUpdate(updated);
       setOrderDialogOpen(false);
     } catch (error) {
-      console.error("Failed to save order:", error);
-      setOrderError(error instanceof Error ? error.message : "Failed to save order. Please try again.");
+      const msg = error instanceof Error ? error.message : "Failed to save order. Please try again.";
+      setOrderError(msg);
+      toast.error(msg);
     } finally {
       setSavingOrder(false);
     }
@@ -879,7 +917,10 @@ export function TemplateEditor({
         `/api/plot-templates/${template.id}/jobs/${orderJobId}/orders/${deletingOrderId}`,
         { method: "DELETE" }
       );
-      if (!res.ok) throw new Error("Failed to delete order");
+      if (!res.ok) {
+        toast.error(await fetchErrorMessage(res, "Failed to delete order"));
+        return;
+      }
 
       const tplRes = await fetch(`/api/plot-templates/${template.id}`, { cache: "no-store" });
       const updated = await tplRes.json();
@@ -887,7 +928,7 @@ export function TemplateEditor({
       setDeleteOrderDialogOpen(false);
       setDeletingOrderId(null);
     } catch (error) {
-      console.error("Failed to delete order:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to delete order");
     }
   }
 

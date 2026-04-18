@@ -43,6 +43,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 
 // ---------- Types ----------
 
@@ -177,6 +178,7 @@ function WizardSteps({ step }: { step: number }) {
 // ---------- Main component ----------
 
 export function SiteOrders({ siteId }: SiteOrdersProps) {
+  const toast = useToast();
   const [orders, setOrders] = useState<SiteOrder[]>([]);
   const [siteInfo, setSiteInfo] = useState<{ name: string; address: string | null; postcode: string | null } | null>(null);
   const [loading, setLoading] = useState(true);
@@ -218,16 +220,36 @@ export function SiteOrders({ siteId }: SiteOrdersProps) {
   const handleGroupStatus = async (orderIds: string[], status: string) => {
     orderIds.forEach((id) => setPendingActions((prev) => new Set(prev).add(id)));
     try {
-      await Promise.all(
+      const results = await Promise.all(
         orderIds.map((id) =>
           fetch(`/api/orders/${id}`, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ status }),
           })
+            .then((r) => ({ id, ok: r.ok, res: r }))
+            .catch(() => ({ id, ok: false, res: null as Response | null }))
         )
       );
-      setOrders((prev) => prev.map((o) => (orderIds.includes(o.id) ? { ...o, status } : o)));
+      const succeededIds = results.filter((r) => r.ok).map((r) => r.id);
+      const failed = results.filter((r) => !r.ok);
+      // Only mark successful orders as updated (revert unchanged for failures)
+      if (succeededIds.length > 0) {
+        setOrders((prev) =>
+          prev.map((o) => (succeededIds.includes(o.id) ? { ...o, status } : o))
+        );
+      }
+      if (failed.length > 0) {
+        const first = failed[0];
+        const firstMsg = first.res
+          ? await fetchErrorMessage(first.res, "Failed to update")
+          : "Network error";
+        toast.error(
+          failed.length === 1
+            ? firstMsg
+            : `${failed.length} orders failed to update (${firstMsg})`
+        );
+      }
     } finally {
       setPendingActions((prev) => {
         const n = new Set(prev);
@@ -379,6 +401,7 @@ export function SiteOrders({ siteId }: SiteOrdersProps) {
     setCreating(true);
     setCreateError("");
     let failed = 0;
+    let firstError: string | null = null;
 
     const parsedItems = orderItems
       .filter((i) => i.name.trim())
@@ -401,12 +424,19 @@ export function SiteOrders({ siteId }: SiteOrdersProps) {
           items: parsedItems.length > 0 ? parsedItems : undefined,
         }),
       });
-      if (!res.ok) failed++;
+      if (!res.ok) {
+        failed++;
+        if (firstError === null) {
+          firstError = await fetchErrorMessage(res, "Failed to create order");
+        }
+      }
     }
 
     setCreating(false);
     if (failed > 0) {
-      setCreateError(`${failed} order(s) failed to create. Please try again.`);
+      const msg = `${failed} order(s) failed to create${firstError ? `: ${firstError}` : ". Please try again."}`;
+      setCreateError(msg);
+      toast.error(msg);
     } else {
       closeWizard();
       refreshOrders();

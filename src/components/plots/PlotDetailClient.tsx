@@ -38,6 +38,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Breadcrumbs } from "@/components/ui/breadcrumbs";
 import { useJobAction } from "@/hooks/useJobAction";
+import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 import { PostCompletionDialog } from "@/components/PostCompletionDialog";
 import {
   Card,
@@ -161,6 +162,7 @@ function AddJobDialog({
   plotId: string;
   onCreated: () => void;
 }) {
+  const toast = useToast();
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [name, setName] = useState("");
@@ -199,11 +201,13 @@ function AddJobDialog({
         }),
       });
 
-      if (res.ok) {
-        resetForm();
-        setOpen(false);
-        onCreated();
+      if (!res.ok) {
+        toast.error(await fetchErrorMessage(res, "Failed to create job"));
+        return;
       }
+      resetForm();
+      setOpen(false);
+      onCreated();
     } finally {
       setLoading(false);
     }

@@ -28,6 +28,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { fetchErrorMessage } from "@/components/ui/toast";
 
 // ---------- Types ----------
 
@@ -126,12 +127,16 @@ export function SupplierDetailClient({ supplier: initial }: { supplier: Supplier
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(supplierForm),
       });
-      if (res.ok) {
-        const updated = await res.json();
-        setSupplier((s) => ({ ...s, ...updated }));
-        setEditSupplierOpen(false);
-        showToast("Supplier updated");
+      if (!res.ok) {
+        showToast(await fetchErrorMessage(res, "Failed to update supplier"), "error");
+        return;
       }
+      const updated = await res.json();
+      setSupplier((s) => ({ ...s, ...updated }));
+      setEditSupplierOpen(false);
+      showToast("Supplier updated");
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Failed to update supplier", "error");
     } finally {
       setSaving(false);
     }
@@ -153,13 +158,17 @@ export function SupplierDetailClient({ supplier: initial }: { supplier: Supplier
           sku: addForm.sku || null,
         }),
       });
-      if (res.ok) {
-        const item = await res.json();
-        setItems((prev) => [...prev, item].sort((a, b) => a.name.localeCompare(b.name)));
-        setAddOpen(false);
-        setAddForm({ name: "", unit: "each", unitCost: "", category: "", sku: "" });
-        showToast("Item added");
+      if (!res.ok) {
+        showToast(await fetchErrorMessage(res, "Failed to add item"), "error");
+        return;
       }
+      const item = await res.json();
+      setItems((prev) => [...prev, item].sort((a, b) => a.name.localeCompare(b.name)));
+      setAddOpen(false);
+      setAddForm({ name: "", unit: "each", unitCost: "", category: "", sku: "" });
+      showToast("Item added");
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Failed to add item", "error");
     } finally {
       setSaving(false);
     }
@@ -192,15 +201,19 @@ export function SupplierDetailClient({ supplier: initial }: { supplier: Supplier
           sku: editForm.sku || null,
         }),
       });
-      if (res.ok) {
-        const updated = await res.json();
-        setItems((prev) =>
-          prev.map((i) => (i.id === editingId ? { ...i, ...updated } : i))
-            .sort((a, b) => a.name.localeCompare(b.name))
-        );
-        setEditingId(null);
-        showToast("Item updated");
+      if (!res.ok) {
+        showToast(await fetchErrorMessage(res, "Failed to update item"), "error");
+        return;
       }
+      const updated = await res.json();
+      setItems((prev) =>
+        prev.map((i) => (i.id === editingId ? { ...i, ...updated } : i))
+          .sort((a, b) => a.name.localeCompare(b.name))
+      );
+      setEditingId(null);
+      showToast("Item updated");
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Failed to update item", "error");
     } finally {
       setSaving(false);
     }
@@ -212,11 +225,13 @@ export function SupplierDetailClient({ supplier: initial }: { supplier: Supplier
       const res = await fetch(`/api/suppliers/${supplier.id}/pricelist/${id}`, {
         method: "DELETE",
       });
-      if (res.ok) {
-        setItems((prev) => prev.filter((i) => i.id !== id));
-        setDeleteConfirm(null);
-        showToast("Item deleted");
+      if (!res.ok) {
+        showToast(await fetchErrorMessage(res, "Failed to delete item"), "error");
+        return;
       }
+      setItems((prev) => prev.filter((i) => i.id !== id));
+      setDeleteConfirm(null);
+      showToast("Item deleted");
     } catch {
       showToast("Failed to delete", "error");
     }

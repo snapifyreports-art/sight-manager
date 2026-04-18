@@ -12,6 +12,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
+import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 
 /**
  * Compact Materials + Drawings sections for a PlotTemplate.
@@ -60,6 +61,8 @@ export function TemplateExtras({ templateId, templateName }: { templateId: strin
   const [dSubmitting, setDSubmitting] = useState(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
 
+  const toast = useToast();
+
   const load = useCallback(async () => {
     setLoading(true);
     const [mRes, dRes] = await Promise.all([
@@ -88,26 +91,36 @@ export function TemplateExtras({ templateId, templateName }: { templateId: strin
           category: mCategory || null,
         }),
       });
-      if (res.ok) {
-        setMOpen(false);
-        setMName(""); setMQuantity(""); setMUnitCost(""); setMCategory("");
-        load();
+      if (!res.ok) {
+        toast.error(await fetchErrorMessage(res, "Failed to add material"));
+        return;
       }
+      setMOpen(false);
+      setMName(""); setMQuantity(""); setMUnitCost(""); setMCategory("");
+      load();
     } finally { setMSubmitting(false); }
   }
 
   async function deleteMaterial(id: string) {
     if (!confirm("Delete this material from the template?")) return;
-    await fetch(`/api/plot-templates/${templateId}/materials/${id}`, { method: "DELETE" });
+    const res = await fetch(`/api/plot-templates/${templateId}/materials/${id}`, { method: "DELETE" });
+    if (!res.ok) {
+      toast.error(await fetchErrorMessage(res, "Failed to delete material"));
+      return;
+    }
     load();
   }
 
   async function updateMaterialField(m: TemplateMaterial, patch: Partial<Pick<TemplateMaterial, "quantity" | "unitCost" | "unit">>) {
-    await fetch(`/api/plot-templates/${templateId}/materials/${m.id}`, {
+    const res = await fetch(`/api/plot-templates/${templateId}/materials/${m.id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(patch),
     });
+    if (!res.ok) {
+      toast.error(await fetchErrorMessage(res, "Failed to update material"));
+      return;
+    }
     load();
   }
 
@@ -121,18 +134,24 @@ export function TemplateExtras({ templateId, templateName }: { templateId: strin
       fd.append("name", dName || f.name);
       fd.append("category", "DRAWING");
       const res = await fetch(`/api/plot-templates/${templateId}/documents`, { method: "POST", body: fd });
-      if (res.ok) {
-        setDOpen(false);
-        setDName("");
-        if (fileRef.current) fileRef.current.value = "";
-        load();
+      if (!res.ok) {
+        toast.error(await fetchErrorMessage(res, "Failed to upload drawing"));
+        return;
       }
+      setDOpen(false);
+      setDName("");
+      if (fileRef.current) fileRef.current.value = "";
+      load();
     } finally { setDSubmitting(false); }
   }
 
   async function deleteDoc(id: string) {
     if (!confirm("Delete this drawing from the template?")) return;
-    await fetch(`/api/plot-templates/${templateId}/documents/${id}`, { method: "DELETE" });
+    const res = await fetch(`/api/plot-templates/${templateId}/documents/${id}`, { method: "DELETE" });
+    if (!res.ok) {
+      toast.error(await fetchErrorMessage(res, "Failed to delete drawing"));
+      return;
+    }
     load();
   }
 

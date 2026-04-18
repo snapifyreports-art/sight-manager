@@ -34,6 +34,7 @@ import {
 import { TemplateEditor } from "./TemplateEditor";
 import { TemplateExtras } from "./TemplateExtras";
 import type { TemplateData } from "./types";
+import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 
 export function PlotTemplatesSection({
   initialTemplates,
@@ -41,6 +42,7 @@ export function PlotTemplatesSection({
   initialTemplates: TemplateData[];
 }) {
   const router = useRouter();
+  const toast = useToast();
   const [templates, setTemplates] = useState(initialTemplates);
   const [editingTemplate, setEditingTemplate] = useState<TemplateData | null>(
     null
@@ -69,7 +71,10 @@ export function PlotTemplatesSection({
           typeLabel: newTypeLabel || null,
         }),
       });
-      if (!res.ok) throw new Error("Failed to create template");
+      if (!res.ok) {
+        toast.error(await fetchErrorMessage(res, "Failed to create template"));
+        return;
+      }
       const created = await res.json();
       setTemplates((prev) => [created, ...prev]);
       setNewName("");
@@ -79,7 +84,7 @@ export function PlotTemplatesSection({
       // Open the editor for the new template
       setEditingTemplate(created);
     } catch (error) {
-      console.error("Failed to create template:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to create template");
     } finally {
       setCreating(false);
     }
@@ -92,12 +97,15 @@ export function PlotTemplatesSection({
       const res = await fetch(`/api/plot-templates/${deletingId}`, {
         method: "DELETE",
       });
-      if (!res.ok) throw new Error("Failed to delete template");
+      if (!res.ok) {
+        toast.error(await fetchErrorMessage(res, "Failed to delete template"));
+        return;
+      }
       setTemplates((prev) => prev.filter((t) => t.id !== deletingId));
       setDeleteDialogOpen(false);
       setDeletingId(null);
     } catch (error) {
-      console.error("Failed to delete template:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to delete template");
     } finally {
       setDeleting(false);
     }

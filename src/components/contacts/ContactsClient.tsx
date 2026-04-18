@@ -32,6 +32,7 @@ import {
   DialogClose,
 } from "@/components/ui/dialog";
 import { ContractorDetailSheet } from "@/components/contacts/ContractorDetailSheet";
+import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 
 // ---------- Types ----------
 
@@ -79,6 +80,7 @@ export function ContactsClient({
   contacts: Contact[];
 }) {
   const router = useRouter();
+  const toast = useToast();
   const [contacts, setContacts] = useState(initialContacts);
   const [search, setSearch] = useState("");
 
@@ -168,8 +170,8 @@ export function ContactsClient({
         });
 
         if (!res.ok) {
-          const err = await res.json();
-          throw new Error(err.error || "Failed to update contractor");
+          toast.error(await fetchErrorMessage(res, "Failed to update contractor"));
+          return;
         }
 
         const updated = await res.json();
@@ -190,8 +192,8 @@ export function ContactsClient({
         });
 
         if (!res.ok) {
-          const err = await res.json();
-          throw new Error(err.error || "Failed to create contractor");
+          toast.error(await fetchErrorMessage(res, "Failed to create contractor"));
+          return;
         }
 
         const created = await res.json();
@@ -210,7 +212,7 @@ export function ContactsClient({
       setForm(EMPTY_FORM);
       router.refresh();
     } catch (error) {
-      console.error("Failed to save contractor:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to save contractor");
     } finally {
       setSaving(false);
     }
@@ -227,8 +229,8 @@ export function ContactsClient({
       });
 
       if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || "Failed to delete contractor");
+        toast.error(await fetchErrorMessage(res, "Failed to delete contractor"));
+        return;
       }
 
       setContacts((prev) => prev.filter((c) => c.id !== deletingContact.id));
@@ -236,7 +238,7 @@ export function ContactsClient({
       setDeletingContact(null);
       router.refresh();
     } catch (error) {
-      console.error("Failed to delete contractor:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to delete contractor");
     } finally {
       setDeleting(false);
     }

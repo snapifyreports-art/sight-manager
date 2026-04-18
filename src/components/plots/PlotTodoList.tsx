@@ -4,6 +4,7 @@ import { useState, useMemo } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useJobAction } from "@/hooks/useJobAction";
+import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 import { PostCompletionDialog } from "@/components/PostCompletionDialog";
 import { differenceInCalendarDays, isSameDay, format } from "date-fns";
 import { getCurrentDate } from "@/lib/dev-date";
@@ -75,19 +76,19 @@ interface PlotTodoListProps {
 
 // ---------- Helpers ----------
 
-async function updateOrderStatus(orderId: string, status: string) {
-  const res = await fetch(`/api/orders/${orderId}`, {
+async function updateOrderStatus(orderId: string, status: string): Promise<Response> {
+  return fetch(`/api/orders/${orderId}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ status }),
   });
-  if (!res.ok) throw new Error("Failed to update order");
 }
 
 // ---------- Component ----------
 
 export function PlotTodoList({ jobs, snagSummary, siteId, plotId }: PlotTodoListProps) {
   const router = useRouter();
+  const toast = useToast();
   const now = getCurrentDate();
 
   const [openSections, setOpenSections] = useState<Set<string>>(
@@ -134,13 +135,15 @@ export function PlotTodoList({ jobs, snagSummary, siteId, plotId }: PlotTodoList
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action }),
       });
-      if (res.ok) {
-        const result = await res.json();
-        router.refresh();
-        if (result._completionContext) {
-          const jobName = jobs.find((j) => j.id === jobId)?.name || "";
-          setCompletionContext({ completedJobName: jobName, ...result._completionContext });
-        }
+      if (!res.ok) {
+        toast.error(await fetchErrorMessage(res, `Failed to ${action} job`));
+        return;
+      }
+      const result = await res.json();
+      router.refresh();
+      if (result._completionContext) {
+        const jobName = jobs.find((j) => j.id === jobId)?.name || "";
+        setCompletionContext({ completedJobName: jobName, ...result._completionContext });
       }
     } finally {
       setPendingJobActions((prev) => { const n = new Set(prev); n.delete(jobId); return n; });
@@ -155,7 +158,11 @@ export function PlotTodoList({ jobs, snagSummary, siteId, plotId }: PlotTodoList
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "signoff" }),
       });
-      if (res.ok) router.refresh();
+      if (!res.ok) {
+        toast.error(await fetchErrorMessage(res, "Failed to sign off job"));
+        return;
+      }
+      router.refresh();
     } finally {
       setPendingJobActions((prev) => { const n = new Set(prev); n.delete(jobId); return n; });
     }
@@ -164,7 +171,11 @@ export function PlotTodoList({ jobs, snagSummary, siteId, plotId }: PlotTodoList
   async function handleOrderStatus(orderId: string, status: string) {
     setPendingOrderActions((prev) => new Set(prev).add(orderId));
     try {
-      await updateOrderStatus(orderId, status);
+      const res = await updateOrderStatus(orderId, status);
+      if (!res.ok) {
+        toast.error(await fetchErrorMessage(res, "Failed to update order"));
+        return;
+      }
       router.refresh();
     } finally {
       setPendingOrderActions((prev) => { const n = new Set(prev); n.delete(orderId); return n; });

@@ -37,6 +37,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { PERMISSION_META, ALL_PERMISSIONS } from "@/lib/permissions";
+import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 
 // ---------- Types ----------
 
@@ -112,6 +113,7 @@ function PermissionsDialog({
   user: UserData | null;
   sites: SiteData[];
 }) {
+  const toast = useToast();
   const [permissions, setPermissions] = useState<string[]>([]);
   const [assignedSiteIds, setAssignedSiteIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
@@ -161,11 +163,13 @@ function PermissionsDialog({
           siteIds: isAdmin ? undefined : assignedSiteIds,
         }),
       });
-      if (res.ok) {
-        onOpenChange(false);
+      if (!res.ok) {
+        toast.error(await fetchErrorMessage(res, "Failed to save permissions"));
+        return;
       }
+      onOpenChange(false);
     } catch (err) {
-      console.error("Failed to save permissions:", err);
+      toast.error(err instanceof Error ? err.message : "Failed to save permissions");
     } finally {
       setSaving(false);
     }
@@ -332,6 +336,7 @@ export function UsersClient({
   sites: SiteData[];
 }) {
   const router = useRouter();
+  const toast = useToast();
   const [users, setUsers] = useState(initialUsers);
   const [search, setSearch] = useState("");
 
@@ -420,8 +425,8 @@ export function UsersClient({
         });
 
         if (!res.ok) {
-          const err = await res.json();
-          throw new Error(err.error || "Failed to update user");
+          toast.error(await fetchErrorMessage(res, "Failed to update user"));
+          return;
         }
 
         const updated = await res.json();
@@ -436,8 +441,8 @@ export function UsersClient({
         });
 
         if (!res.ok) {
-          const err = await res.json();
-          throw new Error(err.error || "Failed to create user");
+          toast.error(await fetchErrorMessage(res, "Failed to create user"));
+          return;
         }
 
         const created = await res.json();
@@ -451,7 +456,7 @@ export function UsersClient({
       setForm(EMPTY_FORM);
       router.refresh();
     } catch (error) {
-      console.error("Failed to save user:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to save user");
     } finally {
       setSaving(false);
     }
@@ -468,8 +473,8 @@ export function UsersClient({
       });
 
       if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || "Failed to delete user");
+        toast.error(await fetchErrorMessage(res, "Failed to delete user"));
+        return;
       }
 
       setUsers((prev) => prev.filter((u) => u.id !== deletingUser.id));
@@ -477,7 +482,7 @@ export function UsersClient({
       setDeletingUser(null);
       router.refresh();
     } catch (error) {
-      console.error("Failed to delete user:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to delete user");
     } finally {
       setDeleting(false);
     }

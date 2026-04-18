@@ -24,6 +24,7 @@ import {
   Dialog,
   DialogContent,
 } from "@/components/ui/dialog";
+import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 
 interface JobPhoto {
   id: string;
@@ -66,6 +67,7 @@ export function PhotoUpload({
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
+  const toast = useToast();
 
   const filteredPhotos =
     filterTag === "all"
@@ -89,19 +91,19 @@ export function PhotoUpload({
           body: formData,
         });
 
-        if (res.ok) {
-          const newPhotos = await res.json();
-          onPhotosChange?.([...newPhotos, ...photos]);
+        if (!res.ok) {
+          toast.error(await fetchErrorMessage(res, "Failed to upload photos"));
+          return;
         }
-      } catch (error) {
-        console.error("Upload failed:", error);
+        const newPhotos = await res.json();
+        onPhotosChange?.([...newPhotos, ...photos]);
       } finally {
         setUploading(false);
         if (fileInputRef.current) fileInputRef.current.value = "";
         if (cameraInputRef.current) cameraInputRef.current.value = "";
       }
     },
-    [jobId, photos, onPhotosChange, selectedTag]
+    [jobId, photos, onPhotosChange, selectedTag, toast]
   );
 
   const handleDelete = useCallback(
@@ -112,39 +114,37 @@ export function PhotoUpload({
           `/api/jobs/${jobId}/photos?photoId=${photoId}`,
           { method: "DELETE" }
         );
-        if (res.ok) {
-          onPhotosChange?.(photos.filter((p) => p.id !== photoId));
-          if (lightboxIndex !== null) setLightboxIndex(null);
+        if (!res.ok) {
+          toast.error(await fetchErrorMessage(res, "Failed to delete photo"));
+          return;
         }
-      } catch (error) {
-        console.error("Delete failed:", error);
+        onPhotosChange?.(photos.filter((p) => p.id !== photoId));
+        if (lightboxIndex !== null) setLightboxIndex(null);
       } finally {
         setDeletingId(null);
       }
     },
-    [jobId, photos, onPhotosChange, lightboxIndex]
+    [jobId, photos, onPhotosChange, lightboxIndex, toast]
   );
 
   const handleUpdateTag = useCallback(
     async (photoId: string, newTag: string) => {
-      try {
-        const res = await fetch(`/api/jobs/${jobId}/photos`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ photoId, tag: newTag || null }),
-        });
-        if (res.ok) {
-          onPhotosChange?.(
-            photos.map((p) =>
-              p.id === photoId ? { ...p, tag: newTag || null } : p
-            )
-          );
-        }
-      } catch (error) {
-        console.error("Update failed:", error);
+      const res = await fetch(`/api/jobs/${jobId}/photos`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ photoId, tag: newTag || null }),
+      });
+      if (!res.ok) {
+        toast.error(await fetchErrorMessage(res, "Failed to update photo tag"));
+        return;
       }
+      onPhotosChange?.(
+        photos.map((p) =>
+          p.id === photoId ? { ...p, tag: newTag || null } : p
+        )
+      );
     },
-    [jobId, photos, onPhotosChange]
+    [jobId, photos, onPhotosChange, toast]
   );
 
   // Keyboard nav for lightbox

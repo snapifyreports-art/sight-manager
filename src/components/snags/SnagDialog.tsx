@@ -25,6 +25,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 
 interface SnagUser {
   id: string;
@@ -104,6 +105,7 @@ export function SnagDialog({
   initialJobId,
   initialContactId,
 }: SnagDialogProps) {
+  const toast = useToast();
   const isEditing = !!snag;
   const [viewMode, setViewMode] = useState(isEditing);
 
@@ -266,7 +268,7 @@ export function SnagDialog({
       let snagId = snag?.id;
 
       if (isEditing) {
-        await fetch(`/api/snags/${snag!.id}`, {
+        const res = await fetch(`/api/snags/${snag!.id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -280,6 +282,10 @@ export function SnagDialog({
             status: form.status,
           }),
         });
+        if (!res.ok) {
+          toast.error(await fetchErrorMessage(res, "Failed to update snag"));
+          return;
+        }
       } else {
         const res = await fetch(`/api/plots/${plotId}/snags`, {
           method: "POST",
@@ -294,15 +300,18 @@ export function SnagDialog({
             notes: form.notes || null,
           }),
         });
-        if (res.ok) {
-          const created = await res.json();
-          snagId = created.id;
+        if (!res.ok) {
+          toast.error(await fetchErrorMessage(res, "Failed to raise snag"));
+          return;
         }
+        const created = await res.json();
+        snagId = created.id;
       }
 
       // Upload pre-attached photos (from job panel) to the snag
+      let photoUploadFailed = false;
       if (snagId && photoAttachments.length > 0) {
-        await Promise.all(
+        const results = await Promise.all(
           photoAttachments.map((photo) =>
             fetch(`/api/snags/${snagId}/photos`, {
               method: "POST",
@@ -312,9 +321,10 @@ export function SnagDialog({
                 fileName: photo.fileName,
                 tag: photoTag || null,
               }),
-            }).catch(console.error)
+            }).then((r) => r.ok).catch(() => false)
           )
         );
+        if (results.some((ok) => !ok)) photoUploadFailed = true;
       }
 
       // Upload pending files (selected during creation) to the snag
@@ -322,10 +332,15 @@ export function SnagDialog({
         const formData = new FormData();
         pendingFiles.forEach((f) => formData.append("photos", f));
         if (photoTag) formData.append("tag", photoTag);
-        await fetch(`/api/snags/${snagId}/photos`, {
+        const pendingRes = await fetch(`/api/snags/${snagId}/photos`, {
           method: "POST",
           body: formData,
-        }).catch(console.error);
+        }).catch(() => null);
+        if (!pendingRes || !pendingRes.ok) photoUploadFailed = true;
+      }
+
+      if (photoUploadFailed) {
+        toast.error("Snag saved but one or more photos failed to upload.");
       }
 
       onSaved();
@@ -382,10 +397,12 @@ export function SnagDialog({
   const handleDelete = async () => {
     if (!snag || !confirm("Delete this snag?")) return;
     const res = await fetch(`/api/snags/${snag.id}`, { method: "DELETE" });
-    if (res.ok) {
-      onSaved();
-      onOpenChange(false);
+    if (!res.ok) {
+      toast.error(await fetchErrorMessage(res, "Failed to delete snag"));
+      return;
     }
+    onSaved();
+    onOpenChange(false);
   };
 
   const handleCloseSnag = async () => {
@@ -393,14 +410,16 @@ export function SnagDialog({
     setClosingInProgress(true);
     try {
       // Upload "after" photo if provided
+      let photoUploadFailed = false;
       if (pendingCloseFile) {
         const formData = new FormData();
         formData.append("photos", pendingCloseFile);
         formData.append("tag", "after");
-        await fetch(`/api/snags/${snag.id}/photos`, {
+        const photoRes = await fetch(`/api/snags/${snag.id}/photos`, {
           method: "POST",
           body: formData,
-        });
+        }).catch(() => null);
+        if (!photoRes || !photoRes.ok) photoUploadFailed = true;
       }
 
       // Build updated notes
@@ -411,7 +430,7 @@ export function SnagDialog({
         : undefined;
 
       // PATCH snag to CLOSED
-      await fetch(`/api/snags/${snag.id}`, {
+      const res = await fetch(`/api/snags/${snag.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -419,6 +438,14 @@ export function SnagDialog({
           ...(closingNote !== undefined && { notes: closingNote }),
         }),
       });
+      if (!res.ok) {
+        toast.error(await fetchErrorMessage(res, "Failed to close snag"));
+        return;
+      }
+
+      if (photoUploadFailed) {
+        toast.error("Snag closed but after-photo failed to upload.");
+      }
 
       // Clean up and refresh
       setShowCloseForm(false);
@@ -445,7 +472,7 @@ export function SnagDialog({
         ...photoAttachments.map((p) => p.url),
       ];
 
-      await fetch("/api/email/send", {
+      const res = await fetch("/api/email/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -462,10 +489,16 @@ export function SnagDialog({
           },
         }),
       });
+      if (!res.ok) {
+        toast.error(await fetchErrorMessage(res, "Failed to send email"));
+        return;
+      }
       setEmailSent(true);
       setTimeout(() => setEmailSent(false), 3000);
     } catch (error) {
-      console.error("Failed to send email:", error);
+      toast.error(
+        error instanceof Error ? error.message : "Failed to send email"
+      );
     } finally {
       setSendingEmail(false);
     }

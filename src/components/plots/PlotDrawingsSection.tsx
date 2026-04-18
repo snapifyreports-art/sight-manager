@@ -12,6 +12,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
+import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 
 interface Drawing {
   id: string;
@@ -35,6 +36,7 @@ export function PlotDrawingsSection({ plotId, siteId }: { plotId: string; siteId
   const [uploadName, setUploadName] = useState("");
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [linkCopied, setLinkCopied] = useState<string | null>(null);
+  const toast = useToast();
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -87,7 +89,11 @@ export function PlotDrawingsSection({ plotId, siteId }: { plotId: string; siteId
 
   async function deleteDrawing(d: Drawing) {
     if (!confirm(`Delete "${d.name}"?`)) return;
-    await fetch(`/api/documents/${d.id}`, { method: "DELETE" });
+    const res = await fetch(`/api/documents/${d.id}`, { method: "DELETE" });
+    if (!res.ok) {
+      toast.error(await fetchErrorMessage(res, "Failed to delete drawing"));
+      return;
+    }
     refresh();
   }
 

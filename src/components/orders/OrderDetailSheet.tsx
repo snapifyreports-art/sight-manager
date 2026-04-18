@@ -29,6 +29,7 @@ import {
   SheetTitle,
   SheetDescription,
 } from "@/components/ui/sheet";
+import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 
 // ---------- Types (mirrors OrdersClient) ----------
 
@@ -150,6 +151,7 @@ export function OrderDetailSheet({
   onDeleted,
   onEditClick,
 }: OrderDetailSheetProps) {
+  const toast = useToast();
   const [statusLoading, setStatusLoading] = useState<string | null>(null);
   const [items, setItems] = useState<OrderItem[]>([]);
   const [addingItem, setAddingItem] = useState(false);
@@ -177,10 +179,12 @@ export function OrderDetailSheet({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: newStatus }),
       });
-      if (res.ok) {
-        const updated = await res.json();
-        onUpdated(updated);
+      if (!res.ok) {
+        toast.error(await fetchErrorMessage(res, "Failed to update order status"));
+        return;
       }
+      const updated = await res.json();
+      onUpdated(updated);
     } finally {
       setStatusLoading(null);
     }
@@ -189,10 +193,12 @@ export function OrderDetailSheet({
   async function handleDelete() {
     if (!order || !confirm("Delete this order?")) return;
     const res = await fetch(`/api/orders/${order.id}`, { method: "DELETE" });
-    if (res.ok) {
-      onDeleted(order.id);
-      onOpenChange(false);
+    if (!res.ok) {
+      toast.error(await fetchErrorMessage(res, "Failed to delete order"));
+      return;
     }
+    onDeleted(order.id);
+    onOpenChange(false);
   }
 
   async function handleAddItem() {
@@ -207,19 +213,23 @@ export function OrderDetailSheet({
         unitCost: newItemCost || "0",
       }),
     });
-    if (res.ok) {
-      // Refetch the full order to get updated items
-      const orderRes = await fetch(`/api/orders/${order.id}`);
-      if (orderRes.ok) {
-        const updated = await orderRes.json();
-        onUpdated(updated);
-      }
-      setNewItemName("");
-      setNewItemQty("1");
-      setNewItemUnit("units");
-      setNewItemCost("");
-      setAddingItem(false);
+    if (!res.ok) {
+      toast.error(await fetchErrorMessage(res, "Failed to add item"));
+      return;
     }
+    // Refetch the full order to get updated items
+    const orderRes = await fetch(`/api/orders/${order.id}`);
+    if (!orderRes.ok) {
+      toast.error(await fetchErrorMessage(orderRes, "Item added but failed to refresh order"));
+      return;
+    }
+    const updated = await orderRes.json();
+    onUpdated(updated);
+    setNewItemName("");
+    setNewItemQty("1");
+    setNewItemUnit("units");
+    setNewItemCost("");
+    setAddingItem(false);
   }
 
   async function handleDeleteItem(itemId: string) {
@@ -227,13 +237,17 @@ export function OrderDetailSheet({
     const res = await fetch(`/api/orders/${order.id}/items/${itemId}`, {
       method: "DELETE",
     });
-    if (res.ok) {
-      const orderRes = await fetch(`/api/orders/${order.id}`);
-      if (orderRes.ok) {
-        const updated = await orderRes.json();
-        onUpdated(updated);
-      }
+    if (!res.ok) {
+      toast.error(await fetchErrorMessage(res, "Failed to delete item"));
+      return;
     }
+    const orderRes = await fetch(`/api/orders/${order.id}`);
+    if (!orderRes.ok) {
+      toast.error(await fetchErrorMessage(orderRes, "Item deleted but failed to refresh order"));
+      return;
+    }
+    const updated = await orderRes.json();
+    onUpdated(updated);
   }
 
   if (!order) return null;

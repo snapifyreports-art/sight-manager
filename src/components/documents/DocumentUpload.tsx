@@ -2,6 +2,7 @@
 
 import { useState, useRef, useCallback } from "react";
 import { Upload, Loader2 } from "lucide-react";
+import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 
 interface DocumentUploadProps {
   siteId: string;
@@ -21,16 +22,19 @@ export function DocumentUpload({
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const toast = useToast();
 
   const handleFiles = useCallback(
     async (files: FileList | null) => {
       if (!files || files.length === 0) return;
 
       setUploading(true);
+      const failures: string[] = [];
+      let successes = 0;
       try {
         for (const file of Array.from(files)) {
           if (file.size > 10 * 1024 * 1024) {
-            alert(`${file.name} exceeds 10MB limit`);
+            failures.push(`${file.name}: exceeds 10MB limit`);
             continue;
           }
 
@@ -40,20 +44,37 @@ export function DocumentUpload({
           if (plotId) formData.append("plotId", plotId);
           if (jobId) formData.append("jobId", jobId);
 
-          await fetch(`/api/sites/${siteId}/documents`, {
-            method: "POST",
-            body: formData,
-          });
+          try {
+            const res = await fetch(`/api/sites/${siteId}/documents`, {
+              method: "POST",
+              body: formData,
+            });
+            if (!res.ok) {
+              const msg = await fetchErrorMessage(res, "Upload failed");
+              failures.push(`${file.name}: ${msg}`);
+            } else {
+              successes++;
+            }
+          } catch (error) {
+            failures.push(
+              `${file.name}: ${error instanceof Error ? error.message : "Network error"}`
+            );
+          }
         }
-        onUploaded();
-      } catch (error) {
-        console.error("Upload failed:", error);
+        if (failures.length > 0) {
+          const summary =
+            failures.length === 1
+              ? failures[0]
+              : `${failures.length} files failed to upload: ${failures.join("; ")}`;
+          toast.error(summary);
+        }
+        if (successes > 0) onUploaded();
       } finally {
         setUploading(false);
         if (fileInputRef.current) fileInputRef.current.value = "";
       }
     },
-    [siteId, plotId, jobId, onUploaded]
+    [siteId, plotId, jobId, onUploaded, toast]
   );
 
   return (

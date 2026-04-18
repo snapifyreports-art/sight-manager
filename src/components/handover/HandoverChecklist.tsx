@@ -17,6 +17,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 
 interface HandoverDoc {
   id: string;
@@ -58,6 +59,7 @@ export function HandoverChecklist({ plotId }: { plotId: string }) {
   const [generating, setGenerating] = useState(false);
   const [docs, setDocs] = useState<AvailableDoc[]>([]);
   const [linkingId, setLinkingId] = useState<string | null>(null);
+  const toast = useToast();
 
   const fetchData = useCallback(() => {
     fetch(`/api/plots/${plotId}/handover`)
@@ -90,7 +92,11 @@ export function HandoverChecklist({ plotId }: { plotId: string }) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ itemId, checked }),
     });
-    if (res.ok) fetchData();
+    if (!res.ok) {
+      toast.error(await fetchErrorMessage(res, "Failed to update checklist item"));
+      return;
+    }
+    fetchData();
   };
 
   const handleLinkDoc = async (itemId: string, documentId: string) => {
@@ -99,10 +105,12 @@ export function HandoverChecklist({ plotId }: { plotId: string }) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ itemId, documentId }),
     });
-    if (res.ok) {
-      setLinkingId(null);
-      fetchData();
+    if (!res.ok) {
+      toast.error(await fetchErrorMessage(res, "Failed to link document"));
+      return;
     }
+    setLinkingId(null);
+    fetchData();
   };
 
   const handleGeneratePDF = async () => {
@@ -111,7 +119,10 @@ export function HandoverChecklist({ plotId }: { plotId: string }) {
       const res = await fetch(`/api/plots/${plotId}/handover`, {
         method: "POST",
       });
-      if (!res.ok) throw new Error("Failed");
+      if (!res.ok) {
+        toast.error(await fetchErrorMessage(res, "Failed to generate handover pack"));
+        return;
+      }
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");

@@ -43,6 +43,7 @@ import {
 import { getStageCode, getStageColor } from "@/lib/stage-codes";
 import { SnagDialog } from "@/components/snags/SnagDialog";
 import { OrderDetailSheet } from "@/components/orders/OrderDetailSheet";
+import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 
 // ---------- Types ----------
 
@@ -254,6 +255,7 @@ function NotesSection({
 // ---------- Component ----------
 
 export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJobUpdated }: JobWeekPanelProps) {
+  const toast = useToast();
   const [photos, setPhotos] = useState<JobPhoto[]>([]);
   const [actions, setActions] = useState<JobAction[]>([]);
   const [orders, setOrders] = useState<PanelOrder[]>([]);
@@ -536,24 +538,26 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ contactIds: Array.from(selectedContractorIds) }),
       });
-      if (res.ok) {
-        const updated = await res.json();
-        const contacts = updated.map((jc: { contact: { id: string; name: string; company: string | null } | null }) => jc.contact).filter(Boolean);
-        if (contractorPickerTargetJobId) {
-          // Update per-child contractor map
-          const contractor = contacts[0] ?? null;
-          setChildJobContractors((prev) => new Map(prev).set(contractorPickerTargetJobId, contractor));
-        } else {
-          setPanelContractors(contacts);
-          setJobContractorContactId(contacts[0]?.id || null);
-        }
+      if (!res.ok) {
+        toast.error(await fetchErrorMessage(res, "Failed to save contractors"));
+        return;
+      }
+      const updated = await res.json();
+      const contacts = updated.map((jc: { contact: { id: string; name: string; company: string | null } | null }) => jc.contact).filter(Boolean);
+      if (contractorPickerTargetJobId) {
+        // Update per-child contractor map
+        const contractor = contacts[0] ?? null;
+        setChildJobContractors((prev) => new Map(prev).set(contractorPickerTargetJobId, contractor));
+      } else {
+        setPanelContractors(contacts);
+        setJobContractorContactId(contacts[0]?.id || null);
       }
     } finally {
       setSavingContractors(false);
       setContractorPickerOpen(false);
       setContractorPickerTargetJobId(null);
     }
-  }, [context, isSynthetic, contractorPickerTargetJobId, selectedContractorIds]);
+  }, [context, isSynthetic, contractorPickerTargetJobId, selectedContractorIds, toast]);
 
   const handleAddNote = useCallback(async () => {
     if (!context || !noteText.trim()) return;
@@ -566,19 +570,21 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
         body: JSON.stringify({ action: "note", notes: noteText.trim() }),
       });
 
-      if (res.ok) {
-        const jobData = await fetch(`/api/jobs/${context.job.id}`, { cache: "no-store" }).then((r) =>
-          r.json()
-        );
-        setActions(Array.isArray(jobData.actions) ? jobData.actions : []);
-        setNoteText("");
+      if (!res.ok) {
+        toast.error(await fetchErrorMessage(res, "Failed to add note"));
+        return;
       }
+      const jobData = await fetch(`/api/jobs/${context.job.id}`, { cache: "no-store" }).then((r) =>
+        r.json()
+      );
+      setActions(Array.isArray(jobData.actions) ? jobData.actions : []);
+      setNoteText("");
     } catch (error) {
-      console.error("Failed to add note:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to add note");
     } finally {
       setSubmittingNote(false);
     }
-  }, [context, noteText]);
+  }, [context, noteText, toast]);
 
   // Fire the actual start/stop/complete API call (shared by direct and post-dialog paths)
   const fireJobAction = useCallback(async (jobId: string, action: "start" | "stop" | "complete", notes?: string) => {
@@ -597,11 +603,15 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
         if (diffWD !== 0) {
           // Pull forward (early) or push back (late) — cascade the programme
           const newEnd = addWorkingDays(new Date(jobEnd), -diffWD).toISOString().split("T")[0];
-          await fetch(`/api/jobs/${jobId}/cascade`, {
+          const cascadeRes = await fetch(`/api/jobs/${jobId}/cascade`, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ newEndDate: newEnd, confirm: true }),
           });
+          if (!cascadeRes.ok) {
+            toast.error(await fetchErrorMessage(cascadeRes, "Failed to cascade programme"));
+            return false;
+          }
         }
       }
     }
@@ -611,26 +621,28 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action, ...(notes ? { signOffNotes: notes } : {}) }),
     });
-    if (res.ok) {
-      const responseData = await res.json();
-      const jobData = await fetch(`/api/jobs/${jobId}`, { cache: "no-store" }).then((r) => r.json());
-      setActions(Array.isArray(jobData.actions) ? jobData.actions : []);
-      onJobUpdated?.();
-      // After completing, offer programme adjustment if job deviated from schedule
-      if (action === "complete" && responseData._completionContext) {
-        const ctx = responseData._completionContext;
-        if (ctx.daysDeviation !== 0) {
-          setCompletionShiftDialog({
-            jobId,
-            daysDeviation: ctx.daysDeviation,
-            nextJob: ctx.nextJob ?? null,
-            plotId: ctx.plotId,
-          });
-        }
+    if (!res.ok) {
+      toast.error(await fetchErrorMessage(res, `Failed to ${action} job`));
+      return false;
+    }
+    const responseData = await res.json();
+    const jobData = await fetch(`/api/jobs/${jobId}`, { cache: "no-store" }).then((r) => r.json());
+    setActions(Array.isArray(jobData.actions) ? jobData.actions : []);
+    onJobUpdated?.();
+    // After completing, offer programme adjustment if job deviated from schedule
+    if (action === "complete" && responseData._completionContext) {
+      const ctx = responseData._completionContext;
+      if (ctx.daysDeviation !== 0) {
+        setCompletionShiftDialog({
+          jobId,
+          daysDeviation: ctx.daysDeviation,
+          nextJob: ctx.nextJob ?? null,
+          plotId: ctx.plotId,
+        });
       }
     }
-    return res.ok;
-  }, [onJobUpdated, context?.job]);
+    return true;
+  }, [onJobUpdated, context?.job, toast]);
 
   // Job status actions (start / stop / sign off)
   const handleJobAction = useCallback(async (action: "start" | "stop" | "complete", notes?: string) => {
@@ -656,11 +668,11 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
         setSignOffNotesInput("");
       }
     } catch (e) {
-      console.error("Job action failed:", e);
+      toast.error(e instanceof Error ? e.message : "Job action failed");
     } finally {
       setJobActionLoading(false);
     }
-  }, [context, isSynthetic, fireJobAction, triggerCentralStart]);
+  }, [context, isSynthetic, fireJobAction, triggerCentralStart, toast]);
 
   // Action on an individual child job inside a synthetic parent panel
   const handleChildJobAction = useCallback(async (childId: string, action: "start" | "stop" | "complete", notes?: string) => {
@@ -692,11 +704,11 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
         }
       }
     } catch (e) {
-      console.error("Child job action failed:", e);
+      toast.error(e instanceof Error ? e.message : "Child job action failed");
     } finally {
       setChildJobActionLoading((prev) => { const s = new Set(prev); s.delete(childId); return s; });
     }
-  }, [childJobs, fireJobAction, triggerCentralStart]);
+  }, [childJobs, fireJobAction, triggerCentralStart, toast]);
 
   // Handle "Pull Forward" — cascade all subsequent jobs earlier, then start.
   // `daysEarly` is in WORKING days (matches cascade engine).
@@ -705,11 +717,15 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
     try {
       if (endDate) {
         const newEnd = addWorkingDays(new Date(endDate), -daysEarly).toISOString().split("T")[0];
-        await fetch(`/api/jobs/${jobId}/cascade`, {
+        const cascadeRes = await fetch(`/api/jobs/${jobId}/cascade`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ newEndDate: newEnd, confirm: true }),
         });
+        if (!cascadeRes.ok) {
+          toast.error(await fetchErrorMessage(cascadeRes, "Failed to pull programme forward"));
+          return;
+        }
       }
       await fireJobAction(jobId, "start");
       setEarlyStartDialog(null);
@@ -719,11 +735,11 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
         setLocalStatus("IN_PROGRESS");
       }
     } catch (e) {
-      console.error("Pull forward failed:", e);
+      toast.error(e instanceof Error ? e.message : "Pull forward failed");
     } finally {
       setCascadeLoading(false);
     }
-  }, [fireJobAction]);
+  }, [fireJobAction, toast]);
 
   const handlePullForward = useCallback(async () => {
     if (!earlyStartDialog) return;
@@ -791,11 +807,11 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
         setLocalStatus("IN_PROGRESS");
       }
     } catch (e) {
-      console.error("Expand job failed:", e);
+      toast.error(e instanceof Error ? e.message : "Expand job failed");
     } finally {
       setCascadeLoading(false);
     }
-  }, [earlyStartDialog, fireJobAction]);
+  }, [earlyStartDialog, fireJobAction, toast]);
 
   // Pre-start: resolve dependency/delivery warnings then proceed
   const handlePreStartConfirm = useCallback(async () => {
@@ -805,15 +821,19 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
     setPreStartLoading(true);
     try {
       if (signOffPrev && prevJob) {
-        await fetch(`/api/jobs/${prevJob.id}/actions`, {
+        const completeRes = await fetch(`/api/jobs/${prevJob.id}/actions`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action: "complete" }),
         });
+        if (!completeRes.ok) {
+          toast.error(await fetchErrorMessage(completeRes, "Failed to sign off previous job"));
+          return;
+        }
         onJobUpdated?.();
       }
       if (markDelivered && undeliveredOrders.length > 0) {
-        await Promise.all(
+        const results = await Promise.all(
           undeliveredOrders.map((o) =>
             fetch(`/api/orders/${o.id}`, {
               method: "PUT",
@@ -822,6 +842,11 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
             })
           )
         );
+        const failed = results.find((r) => !r.ok);
+        if (failed) {
+          toast.error(await fetchErrorMessage(failed, "Failed to mark orders delivered"));
+          return;
+        }
         setOrders((prev) =>
           prev.map((o) => (undeliveredOrders.find((u) => u.id === o.id) ? { ...o, status: "DELIVERED" } : o))
         );
@@ -851,11 +876,11 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
         setChildJobActionLoading((prev) => { const s = new Set(prev); s.delete(jobId); return s; });
       }
     } catch (e) {
-      console.error("Pre-start confirm failed:", e);
+      toast.error(e instanceof Error ? e.message : "Pre-start confirm failed");
     } finally {
       setPreStartLoading(false);
     }
-  }, [preStartChecks, context, childJobs, fireJobAction, onJobUpdated]);
+  }, [preStartChecks, context, childJobs, fireJobAction, onJobUpdated, toast]);
 
   // Post-completion: shift entire programme from the actual end date
   const handleShiftProgramme = useCallback(async () => {
@@ -865,20 +890,24 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
       const jobData = await fetch(`/api/jobs/${completionShiftDialog.jobId}`, { cache: "no-store" }).then((r) => r.json());
       const actualEnd: string | null = jobData.actualEndDate ?? null;
       if (actualEnd) {
-        await fetch(`/api/jobs/${completionShiftDialog.jobId}/cascade`, {
+        const res = await fetch(`/api/jobs/${completionShiftDialog.jobId}/cascade`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ newEndDate: actualEnd.slice(0, 10), confirm: true }),
         });
+        if (!res.ok) {
+          toast.error(await fetchErrorMessage(res, "Failed to shift programme"));
+          return;
+        }
         onJobUpdated?.();
       }
     } catch (e) {
-      console.error("Shift programme failed:", e);
+      toast.error(e instanceof Error ? e.message : "Shift programme failed");
     } finally {
       setCascadeLoading(false);
       setCompletionShiftDialog(null);
     }
-  }, [completionShiftDialog, onJobUpdated]);
+  }, [completionShiftDialog, onJobUpdated, toast]);
 
   // Post-completion: adjust next job only (shift its start + end by same delta)
   const handleAdjustNextJob = useCallback(async () => {
@@ -895,20 +924,24 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
       if (nextJobData.endDate) updates.endDate = addWorkingDays(new Date(nextJobData.endDate), deltaWD).toISOString().slice(0, 10);
       if (nextJobData.startDate) updates.startDate = addWorkingDays(new Date(nextJobData.startDate), deltaWD).toISOString().slice(0, 10);
       if (Object.keys(updates).length > 0) {
-        await fetch(`/api/jobs/${nextJob.id}`, {
+        const res = await fetch(`/api/jobs/${nextJob.id}`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(updates),
         });
+        if (!res.ok) {
+          toast.error(await fetchErrorMessage(res, "Failed to adjust next job"));
+          return;
+        }
         onJobUpdated?.();
       }
     } catch (e) {
-      console.error("Adjust next job failed:", e);
+      toast.error(e instanceof Error ? e.message : "Adjust next job failed");
     } finally {
       setCascadeLoading(false);
       setCompletionShiftDialog(null);
     }
-  }, [completionShiftDialog, onJobUpdated]);
+  }, [completionShiftDialog, onJobUpdated, toast]);
 
   // Open delay form — fetch weather suggestion at the same time
   const openDelayForm = useCallback(async () => {
@@ -940,15 +973,18 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
           reason: delayReasonText.trim() || undefined,
         }),
       });
-      if (!res.ok) throw new Error("Failed");
+      if (!res.ok) {
+        toast.error(await fetchErrorMessage(res, "Failed to delay job"));
+        return;
+      }
       setShowDelayForm(false);
       onJobUpdated?.();
     } catch (e) {
-      console.error("Delay failed:", e);
+      toast.error(e instanceof Error ? e.message : "Delay failed");
     } finally {
       setDelayLoading(false);
     }
-  }, [context, isSynthetic, delayDays, delayReasonType, delayReasonText, onJobUpdated]);
+  }, [context, isSynthetic, delayDays, delayReasonType, delayReasonText, onJobUpdated, toast]);
 
   // Stage files for upload (shows caption input)
   const handleFileSelect = useCallback((files: FileList | null) => {
@@ -974,22 +1010,24 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
         body: formData,
       });
 
-      if (res.ok) {
-        const newPhotos: JobPhoto[] = await res.json();
-        setPhotos((prev) => [...newPhotos, ...prev]);
-        // Refetch actions to pick up the auto-generated "photo uploaded" note
-        try {
-          const jobData = await fetch(`/api/jobs/${context.job.id}`, { cache: "no-store" }).then((r) => r.json());
-          if (Array.isArray(jobData.actions)) setActions(jobData.actions);
-        } catch { /* ignore */ }
+      if (!res.ok) {
+        toast.error(await fetchErrorMessage(res, "Photo upload failed"));
+        return;
+      }
+      const newPhotos: JobPhoto[] = await res.json();
+      setPhotos((prev) => [...newPhotos, ...prev]);
+      // Refetch actions to pick up the auto-generated "photo uploaded" note
+      try {
+        const jobData = await fetch(`/api/jobs/${context.job.id}`, { cache: "no-store" }).then((r) => r.json());
+        if (Array.isArray(jobData.actions)) setActions(jobData.actions);
+      } catch { /* ignore */ }
 
-        // Show "Raise as snag?" prompt
-        if (newPhotos.length > 0) {
-          setSnagPromptPhotos(newPhotos);
-        }
+      // Show "Raise as snag?" prompt
+      if (newPhotos.length > 0) {
+        setSnagPromptPhotos(newPhotos);
       }
     } catch (error) {
-      console.error("Upload failed:", error);
+      toast.error(error instanceof Error ? error.message : "Photo upload failed");
     } finally {
       setUploading(false);
       setPendingFiles(null);
@@ -997,7 +1035,7 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
       if (fileInputRef.current) fileInputRef.current.value = "";
       if (cameraInputRef.current) cameraInputRef.current.value = "";
     }
-  }, [context, pendingFiles, photoCaption]);
+  }, [context, pendingFiles, photoCaption, toast]);
 
   // Open snag dialog (called from SnagDialog's onSaved)
   const handleSnagSaved = useCallback(() => {
@@ -1028,14 +1066,16 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ status: newStatus }),
         });
-        if (res.ok) {
-          setOrders((prev) =>
-            prev.map((o) => (o.id === orderId ? { ...o, status: newStatus } : o))
-          );
-          onOrderUpdated?.();
+        if (!res.ok) {
+          toast.error(await fetchErrorMessage(res, "Failed to update order"));
+          return;
         }
+        setOrders((prev) =>
+          prev.map((o) => (o.id === orderId ? { ...o, status: newStatus } : o))
+        );
+        onOrderUpdated?.();
       } catch (err) {
-        console.error("Failed to update order:", err);
+        toast.error(err instanceof Error ? err.message : "Failed to update order");
       } finally {
         setActioningIds((prev) => {
           const next = new Set(prev);
@@ -1044,7 +1084,7 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
         });
       }
     },
-    [onOrderUpdated]
+    [onOrderUpdated, toast]
   );
 
   // Delete photo
@@ -1057,20 +1097,22 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
           `/api/jobs/${context.job.id}/photos?photoId=${photoId}`,
           { method: "DELETE" }
         );
-        if (res.ok) {
-          setPhotos((prev) => prev.filter((p) => p.id !== photoId));
-          // Close lightbox if we deleted the current photo
-          if (lightboxIndex !== null) {
-            setLightboxIndex(null);
-          }
+        if (!res.ok) {
+          toast.error(await fetchErrorMessage(res, "Failed to delete photo"));
+          return;
+        }
+        setPhotos((prev) => prev.filter((p) => p.id !== photoId));
+        // Close lightbox if we deleted the current photo
+        if (lightboxIndex !== null) {
+          setLightboxIndex(null);
         }
       } catch (error) {
-        console.error("Delete failed:", error);
+        toast.error(error instanceof Error ? error.message : "Failed to delete photo");
       } finally {
         setDeletingId(null);
       }
     },
-    [context, lightboxIndex]
+    [context, lightboxIndex, toast]
   );
 
   // Update photo caption
@@ -1084,21 +1126,23 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ photoId, caption: newCaption || null }),
         });
-        if (res.ok) {
-          setPhotos((prev) =>
-            prev.map((p) =>
-              p.id === photoId ? { ...p, caption: newCaption || null } : p
-            )
-          );
-          setEditingCaption(false);
+        if (!res.ok) {
+          toast.error(await fetchErrorMessage(res, "Failed to update caption"));
+          return;
         }
+        setPhotos((prev) =>
+          prev.map((p) =>
+            p.id === photoId ? { ...p, caption: newCaption || null } : p
+          )
+        );
+        setEditingCaption(false);
       } catch (error) {
-        console.error("Caption update failed:", error);
+        toast.error(error instanceof Error ? error.message : "Caption update failed");
       } finally {
         setSavingCaption(false);
       }
     },
-    [context]
+    [context, toast]
   );
 
   // Raise snag from lightbox photo

@@ -11,6 +11,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 
 interface Document {
   id: string;
@@ -53,13 +54,18 @@ function formatSize(bytes: number | null) {
 
 export function DocumentList({ documents, onDelete, level = "site" }: DocumentListProps) {
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const toast = useToast();
 
   const handleDelete = async (id: string) => {
     if (!confirm("Delete this document?")) return;
     setDeletingId(id);
     try {
       const res = await fetch(`/api/documents/${id}`, { method: "DELETE" });
-      if (res.ok) onDelete(id);
+      if (!res.ok) {
+        toast.error(await fetchErrorMessage(res, "Failed to delete document"));
+        return;
+      }
+      onDelete(id);
     } finally {
       setDeletingId(null);
     }

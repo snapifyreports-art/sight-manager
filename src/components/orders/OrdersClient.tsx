@@ -58,6 +58,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 
 // ---------- Types ----------
 
@@ -483,6 +484,7 @@ function InlineOrderEditor({
   onSaved: (updated: Order) => void;
   onCancel: () => void;
 }) {
+  const toast = useToast();
   const [supplierId, setSupplierId] = useState(order.supplierId);
   const [expectedDeliveryDate, setExpectedDeliveryDate] = useState(
     order.expectedDeliveryDate ? order.expectedDeliveryDate.split("T")[0] : ""
@@ -549,18 +551,26 @@ function InlineOrderEditor({
           expectedDeliveryDate: expectedDeliveryDate || null,
         }),
       });
-      if (!orderRes.ok) return;
+      if (!orderRes.ok) {
+        toast.error(await fetchErrorMessage(orderRes, "Failed to update order"));
+        return;
+      }
 
       // 2. Process item changes
+      let itemFailures = 0;
       for (const item of items) {
         if (item._deleted && item.id) {
           // Delete existing item
-          await fetch(`/api/orders/${order.id}/items/${item.id}`, {
+          const res = await fetch(`/api/orders/${order.id}/items/${item.id}`, {
             method: "DELETE",
           });
+          if (!res.ok) {
+            toast.error(await fetchErrorMessage(res, `Failed to delete item "${item.name}"`));
+            itemFailures++;
+          }
         } else if (!item._deleted && item.id) {
           // Update existing item
-          await fetch(`/api/orders/${order.id}/items/${item.id}`, {
+          const res = await fetch(`/api/orders/${order.id}/items/${item.id}`, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -570,9 +580,13 @@ function InlineOrderEditor({
               unitCost: item.unitCost,
             }),
           });
+          if (!res.ok) {
+            toast.error(await fetchErrorMessage(res, `Failed to update item "${item.name}"`));
+            itemFailures++;
+          }
         } else if (!item._deleted && !item.id && item.name.trim()) {
           // Create new item
-          await fetch(`/api/orders/${order.id}/items`, {
+          const res = await fetch(`/api/orders/${order.id}/items`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -582,14 +596,23 @@ function InlineOrderEditor({
               unitCost: item.unitCost,
             }),
           });
+          if (!res.ok) {
+            toast.error(await fetchErrorMessage(res, `Failed to add item "${item.name}"`));
+            itemFailures++;
+          }
         }
       }
 
       // 3. Refetch the full order
       const freshRes = await fetch(`/api/orders/${order.id}`);
-      if (freshRes.ok) {
-        const freshOrder = await freshRes.json();
-        onSaved(freshOrder);
+      if (!freshRes.ok) {
+        toast.error(await fetchErrorMessage(freshRes, "Order saved but failed to refresh"));
+        return;
+      }
+      const freshOrder = await freshRes.json();
+      onSaved(freshOrder);
+      if (itemFailures === 0) {
+        // Success — caller closes editor; nothing more to do
       }
     } finally {
       setSaving(false);
@@ -758,6 +781,7 @@ export function OrdersClient({
 }: OrdersClientProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const toast = useToast();
   const [orders, setOrders] = useState<Order[]>(initialOrders);
 
   // Auto-refresh when user navigates back or tab regains focus
@@ -861,10 +885,12 @@ export function OrdersClient({
       body: JSON.stringify({ status: newStatus }),
     });
 
-    if (res.ok) {
-      const updated = await res.json();
-      handleUpdated(updated);
+    if (!res.ok) {
+      toast.error(await fetchErrorMessage(res, "Failed to update order status"));
+      return;
     }
+    const updated = await res.json();
+    handleUpdated(updated);
   }
 
   async function handleDelete(orderId: string) {
@@ -872,9 +898,11 @@ export function OrdersClient({
       method: "DELETE",
     });
 
-    if (res.ok) {
-      setOrders((prev) => prev.filter((o) => o.id !== orderId));
+    if (!res.ok) {
+      toast.error(await fetchErrorMessage(res, "Failed to delete order"));
+      return;
     }
+    setOrders((prev) => prev.filter((o) => o.id !== orderId));
   }
 
   return (
