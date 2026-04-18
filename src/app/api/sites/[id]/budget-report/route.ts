@@ -22,7 +22,7 @@ export async function GET(
     return NextResponse.json({ error: "You do not have access to this site" }, { status: 403 });
   }
 
-  // Get all plots with their jobs, orders, and order items
+  // Get all plots with their jobs, orders, order items + manual materials
   const plots = await prisma.plot.findMany({
     where: { siteId: id },
     select: {
@@ -30,6 +30,18 @@ export async function GET(
       plotNumber: true,
       name: true,
       houseType: true,
+      materials: {
+        select: {
+          id: true,
+          name: true,
+          quantity: true,
+          unit: true,
+          unitCost: true,
+          delivered: true,
+          consumed: true,
+          sourceType: true,
+        },
+      },
       jobs: {
         select: {
           id: true,
@@ -135,6 +147,41 @@ export async function GET(
     let plotCommitted = 0;
     let plotPending = 0;
 
+    // Manual quants roll-up per plot (Q5=Yes — they count in budget).
+    // - quantity * unitCost = expected value (adds to budget)
+    // - delivered * unitCost = "committed" (locked in)
+    // - Remaining undelivered (quantity - delivered) = "pending"
+    const manualMaterials = plot.materials ?? [];
+    let manualBudget = 0;
+    let manualCommitted = 0;
+    let manualPending = 0;
+    const manualBreakdown = manualMaterials
+      .filter((m) => m.unitCost != null && m.unitCost > 0)
+      .map((m) => {
+        const expected = m.quantity * (m.unitCost ?? 0);
+        const delivered = m.delivered * (m.unitCost ?? 0);
+        const pending = Math.max(0, (m.quantity - m.delivered)) * (m.unitCost ?? 0);
+        manualBudget += expected;
+        manualCommitted += delivered;
+        manualPending += pending;
+        return {
+          materialId: m.id,
+          name: m.name,
+          sourceType: m.sourceType,
+          quantity: m.quantity,
+          unit: m.unit,
+          unitCost: m.unitCost,
+          budgeted: Math.round(expected * 100) / 100,
+          delivered: Math.round(delivered * 100) / 100,
+          pending: Math.round(pending * 100) / 100,
+        };
+      });
+    // Manual costs are separate from order-based so they add to plot totals.
+    plotBudget += manualBudget;
+    plotDelivered += manualCommitted;
+    plotCommitted += manualCommitted;
+    plotPending += manualPending;
+
     const jobBreakdown = plot.jobs.map((job) => {
       const budgeted = template?.jobs[job.name] ?? 0;
 
@@ -205,6 +252,7 @@ export async function GET(
             ? 100
             : 0,
       jobs: jobBreakdown,
+      manualMaterials: manualBreakdown,
     };
   });
 

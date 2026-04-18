@@ -171,13 +171,30 @@ export async function GET(
   const totalOrderedOpen = orderValues
     .filter((o) => o.status === "ORDERED")
     .reduce((s, o) => s + o.total, 0);
-  const totalForecast = orderValues
+  const totalForecastOrders = orderValues
     .filter((o) => o.status === "PENDING")
     .reduce((s, o) => s + o.total, 0);
-  const totalActual = orderValues
+  const totalActualOrders = orderValues
     .filter((o) => o.status === "DELIVERED")
     .reduce((s, o) => s + o.total, 0);
-  const totalCommitted = totalOrderedOpen + totalActual;
+
+  // Manual Quants roll-up (Q5=Yes — count in Cash Flow).
+  // Manual materials don't have order dates, so they're totals-only, not time-series.
+  const manualMaterials = await prisma.plotMaterial.findMany({
+    where: { plot: { siteId: id }, unitCost: { not: null } },
+    select: { quantity: true, unitCost: true, delivered: true },
+  });
+  let manualCommitted = 0;
+  let manualForecast = 0;
+  for (const m of manualMaterials) {
+    const uc = m.unitCost ?? 0;
+    manualCommitted += m.delivered * uc;
+    manualForecast += Math.max(0, m.quantity - m.delivered) * uc;
+  }
+
+  const totalForecast = totalForecastOrders + manualForecast;
+  const totalActual = totalActualOrders + manualCommitted;
+  const totalCommitted = totalOrderedOpen + totalActualOrders + manualCommitted;
 
   return NextResponse.json({
     months,
@@ -186,6 +203,8 @@ export async function GET(
       orderedOpen: Math.round(totalOrderedOpen * 100) / 100,
       forecast: Math.round(totalForecast * 100) / 100,
       actual: Math.round(totalActual * 100) / 100,
+      manualCommitted: Math.round(manualCommitted * 100) / 100,
+      manualForecast: Math.round(manualForecast * 100) / 100,
     },
   });
 }

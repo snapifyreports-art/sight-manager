@@ -163,6 +163,29 @@ export async function GET(
     : [];
   const requestedJobIds = new Set(signOffRequests.map((r) => r.jobId));
 
+  // Drawings visible to each contractor: site-wide documents + drawings on plots they work on
+  const allPlotIds = Array.from(new Set(
+    Array.from(contactMap.values()).flatMap((c) => c.allJobs.map((j) => j.plot.id))
+  ));
+  const siteWideDrawings = await prisma.siteDocument.findMany({
+    where: { siteId, plotId: null, category: "DRAWING" },
+    select: { id: true, name: true, url: true, fileName: true, mimeType: true, fileSize: true, createdAt: true },
+    orderBy: { createdAt: "desc" },
+  });
+  const plotDrawings = allPlotIds.length > 0
+    ? await prisma.siteDocument.findMany({
+        where: { siteId, plotId: { in: allPlotIds }, category: "DRAWING" },
+        select: { id: true, name: true, url: true, fileName: true, mimeType: true, fileSize: true, createdAt: true, plotId: true },
+        orderBy: { createdAt: "desc" },
+      })
+    : [];
+  const drawingsByPlot = new Map<string, typeof plotDrawings>();
+  for (const d of plotDrawings) {
+    const existing = drawingsByPlot.get(d.plotId!) ?? [];
+    existing.push(d);
+    drawingsByPlot.set(d.plotId!, existing);
+  }
+
   // Attach orders to each contractor entry
   for (const entry of contactMap.values()) {
     (entry as Record<string, unknown>).orders = entry.allJobs.flatMap((j) => ordersByJob.get(j.id) ?? []);
@@ -217,6 +240,20 @@ export async function GET(
         supplier: o.supplier,
         items: o.orderItems,
       })),
+      // Drawings this contractor can see: site-wide + drawings on plots they have jobs on
+      drawings: [
+        ...siteWideDrawings.map((d) => ({
+          id: d.id, name: d.name, url: d.url, fileName: d.fileName, mimeType: d.mimeType,
+          fileSize: d.fileSize, createdAt: d.createdAt.toISOString(), plot: null,
+        })),
+        ...Array.from(c.plotIds).flatMap((pid) =>
+          (drawingsByPlot.get(pid) ?? []).map((d) => ({
+            id: d.id, name: d.name, url: d.url, fileName: d.fileName, mimeType: d.mimeType,
+            fileSize: d.fileSize, createdAt: d.createdAt.toISOString(),
+            plot: c.allJobs.find((j) => j.plot.id === pid)?.plot ?? null,
+          }))
+        ),
+      ],
     }));
 
   return NextResponse.json({ site, contractors });

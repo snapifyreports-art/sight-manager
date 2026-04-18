@@ -24,6 +24,7 @@ export async function GET(
   const { searchParams } = new URL(req.url);
   const plotId = searchParams.get("plotId");
   const jobId = searchParams.get("jobId");
+  const category = searchParams.get("category"); // e.g. "DRAWING"
 
   // Build where clause based on filters
   let where: Record<string, unknown> = { siteId: id };
@@ -41,6 +42,10 @@ export async function GET(
       siteId: id,
       OR: [{ plotId }, ...(jobIds.length > 0 ? [{ jobId: { in: jobIds } }] : [])],
     };
+  }
+
+  if (category) {
+    where = { ...where, category };
   }
 
   const documents = await prisma.siteDocument.findMany({
@@ -72,7 +77,8 @@ export async function POST(
   const file = formData.get("file") as File;
   const name = (formData.get("name") as string) || file?.name;
   const plotId = formData.get("plotId") as string | null;
-  let jobId = formData.get("jobId") as string | null;
+  const jobId = formData.get("jobId") as string | null;
+  const category = (formData.get("category") as string | null) || null;
 
   if (!file) {
     return NextResponse.json({ error: "No file provided" }, { status: 400 });
@@ -120,6 +126,7 @@ export async function POST(
       fileName: file.name,
       fileSize: file.size,
       mimeType: file.type,
+      category: category,
       siteId: id,
       plotId: resolvedPlotId || null,
       jobId: jobId || null,

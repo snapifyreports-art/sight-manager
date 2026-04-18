@@ -38,11 +38,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Site not found" }, { status: 404 });
   }
 
-  // Fetch template with all nested data including children
+  // Fetch template with all nested data including children + materials + documents
   const template = await prisma.plotTemplate.findUnique({
     where: { id: templateId },
     include: {
       jobs: templateJobsInclude,
+      materials: true,
+      documents: true,
     },
   });
 
@@ -79,6 +81,40 @@ export async function POST(request: NextRequest) {
       supplierMappings || null,
       site.assignedToId
     );
+
+    // 2b. Copy TemplateMaterial rows → PlotMaterial (sourceType=TEMPLATE, snapshot)
+    if (template.materials.length > 0) {
+      await tx.plotMaterial.createMany({
+        data: template.materials.map((m) => ({
+          plotId: plot.id,
+          sourceType: "TEMPLATE",
+          name: m.name,
+          quantity: m.quantity,
+          unit: m.unit,
+          unitCost: m.unitCost,
+          category: m.category,
+          notes: m.notes,
+          linkedStageCode: m.linkedStageCode,
+        })),
+      });
+    }
+
+    // 2c. Copy TemplateDocument rows → SiteDocument (plot-scoped snapshot)
+    if (template.documents.length > 0) {
+      await tx.siteDocument.createMany({
+        data: template.documents.map((d) => ({
+          name: d.name,
+          url: d.url,
+          fileName: d.fileName,
+          fileSize: d.fileSize,
+          mimeType: d.mimeType,
+          category: d.category || "DRAWING",
+          siteId,
+          plotId: plot.id,
+          uploadedById: session.user.id,
+        })),
+      });
+    }
 
     // 3. Log event
     await tx.eventLog.create({
