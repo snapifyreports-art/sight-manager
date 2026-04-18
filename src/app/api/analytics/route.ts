@@ -21,7 +21,8 @@ export async function GET(req: NextRequest) {
     ? { plot: { siteId } }
     : {};
 
-  // Run queries in small batches to avoid exhausting Supabase connection pool
+  // Run queries in small batches to avoid exhausting Supabase connection pool.
+  // All job-level analytics use LEAF jobs only (parents are derived rollups).
   const [sites, plots, jobs] = await Promise.all([
     prisma.site.findMany({
       where: siteId ? { id: siteId } : {},
@@ -34,6 +35,7 @@ export async function GET(req: NextRequest) {
             id: true,
             buildCompletePercent: true,
             jobs: {
+              where: { children: { none: {} } },
               select: {
                 id: true,
                 status: true,
@@ -51,7 +53,7 @@ export async function GET(req: NextRequest) {
     }),
     prisma.plot.count({ where: siteFilter }),
     prisma.job.findMany({
-      where: plotFilter,
+      where: { ...plotFilter, children: { none: {} } },
       select: {
         id: true,
         name: true,

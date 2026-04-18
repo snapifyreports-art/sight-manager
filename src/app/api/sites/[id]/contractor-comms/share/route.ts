@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { signContractorToken } from "@/lib/share-token";
+import { canAccessSite } from "@/lib/site-access";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +17,10 @@ export async function POST(
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { id: siteId } = await params;
+
+  if (!(await canAccessSite(session.user.id, (session.user as { role: string }).role, siteId))) {
+    return NextResponse.json({ error: "You do not have access to this site" }, { status: 403 });
+  }
   const body = await req.json();
   const { contactId } = body;
 

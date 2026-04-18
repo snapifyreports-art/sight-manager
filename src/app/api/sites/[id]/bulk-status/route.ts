@@ -5,6 +5,7 @@ import { sendPushToUser } from "@/lib/push";
 import { getServerCurrentDate } from "@/lib/dev-date";
 import { sessionHasPermission } from "@/lib/permissions";
 import type { JobStatus } from "@prisma/client";
+import { canAccessSite } from "@/lib/site-access";
 
 export const dynamic = "force-dynamic";
 
@@ -24,6 +25,10 @@ export async function POST(
   }
 
   const { id: siteId } = await params;
+
+  if (!(await canAccessSite(session.user.id, (session.user as { role: string }).role, siteId))) {
+    return NextResponse.json({ error: "You do not have access to this site" }, { status: 403 });
+  }
   const { jobIds, action } = await req.json();
 
   if (!Array.isArray(jobIds) || jobIds.length === 0) {

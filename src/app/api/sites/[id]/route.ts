@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { sessionHasPermission } from "@/lib/permissions";
+import { canAccessSite } from "@/lib/site-access";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +17,10 @@ export async function GET(
   }
 
   const { id } = await params;
+
+  if (!(await canAccessSite(session.user.id, (session.user as { role: string }).role, id))) {
+    return NextResponse.json({ error: "You do not have access to this site" }, { status: 403 });
+  }
 
   const site = await prisma.site.findUnique({
     where: { id },
@@ -38,7 +43,8 @@ export async function GET(
             },
           },
           _count: {
-            select: { jobs: true },
+            // Count leaf jobs only — parents are derived rollups
+            select: { jobs: { where: { children: { none: {} } } } },
           },
         },
       },

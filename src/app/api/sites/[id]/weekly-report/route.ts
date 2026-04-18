@@ -9,6 +9,7 @@ import {
   format,
 } from "date-fns";
 import { getServerCurrentDate } from "@/lib/dev-date";
+import { canAccessSite } from "@/lib/site-access";
 
 export const dynamic = "force-dynamic";
 
@@ -24,6 +25,10 @@ export async function GET(
   }
 
   const { id } = await params;
+
+  if (!(await canAccessSite(session.user.id, (session.user as { role: string }).role, id))) {
+    return NextResponse.json({ error: "You do not have access to this site" }, { status: 403 });
+  }
   const weekParam = req.nextUrl.searchParams.get("weekOf");
   const targetDate = weekParam ? new Date(weekParam) : getServerCurrentDate(req);
 
@@ -42,7 +47,7 @@ export async function GET(
     }),
     prisma.plot.count({ where: { siteId: id } }),
     prisma.job.findMany({
-      where: { plot: { siteId: id } },
+      where: { plot: { siteId: id }, children: { none: {} } },
       select: { status: true, endDate: true },
     }),
   ]);
@@ -53,6 +58,7 @@ export async function GET(
         plot: { siteId: id },
         status: "COMPLETED",
         actualEndDate: { gte: weekStart, lte: weekEnd },
+        children: { none: {} },
       },
     }),
     prisma.job.count({
@@ -60,12 +66,14 @@ export async function GET(
         plot: { siteId: id },
         status: "COMPLETED",
         actualEndDate: { gte: prevWeekStart, lte: prevWeekEnd },
+        children: { none: {} },
       },
     }),
     prisma.job.count({
       where: {
         plot: { siteId: id },
         actualStartDate: { gte: weekStart, lte: weekEnd },
+        children: { none: {} },
       },
     }),
   ]);
@@ -176,6 +184,7 @@ export async function GET(
     where: {
       plot: { siteId: id },
       startDate: { gte: nextWeekStart, lte: nextWeekEnd },
+      children: { none: {} },
     },
     select: {
       id: true,

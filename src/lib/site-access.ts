@@ -37,3 +37,17 @@ export async function siteAccessFilter(
   if (siteIds === null) return {}; // admin — no filter
   return { [siteIdField]: { in: siteIds } };
 }
+
+/**
+ * Returns true if the user can access the given site.
+ * CEO and DIRECTOR always can.
+ */
+export async function canAccessSite(
+  userId: string,
+  role: string,
+  siteId: string
+): Promise<boolean> {
+  const ids = await getUserSiteIds(userId, role);
+  if (ids === null) return true;
+  return ids.includes(siteId);
+}

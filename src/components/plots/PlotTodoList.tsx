@@ -57,6 +57,8 @@ interface JobData {
   endDate: string | null;
   status: string;
   signedOffAt: string | null;
+  parentId: string | null;
+  parentStage: string | null;
   assignedTo: { id: string; name: string } | null;
   contractors: Array<{
     contact: { id: string; name: string; company: string | null } | null;
@@ -172,21 +174,25 @@ export function PlotTodoList({ jobs, snagSummary, siteId, plotId }: PlotTodoList
   // ---------- Derive sections ----------
 
   const sections = useMemo(() => {
+    // Filter to LEAF jobs only for action lists — parent-stage jobs are derived rollups
+    const parentIds = new Set(jobs.filter((j) => j.parentId).map((j) => j.parentId!));
+    const leafJobs = jobs.filter((j) => !parentIds.has(j.id));
+
     // Jobs: Starting today (NOT_STARTED with startDate <= today)
-    const starting = jobs.filter((j) => {
+    const starting = leafJobs.filter((j) => {
       if (j.status !== "NOT_STARTED" || !j.startDate) return false;
       return new Date(j.startDate) <= now;
     });
 
     // Jobs: In Progress
-    const inProgress = jobs.filter((j) => j.status === "IN_PROGRESS");
+    const inProgress = leafJobs.filter((j) => j.status === "IN_PROGRESS");
 
     // Jobs: Awaiting Sign Off (COMPLETED but not signed off)
-    const awaitingSignOff = jobs.filter(
+    const awaitingSignOff = leafJobs.filter(
       (j) => j.status === "COMPLETED" && !j.signedOffAt
     );
 
-    // Materials: Deliveries today
+    // Materials: Deliveries today (orders on ALL jobs — including parent-stage orders)
     const allOrders = jobs.flatMap((j) =>
       j.orders.map((o) => ({ ...o, jobId: j.id, jobName: j.name }))
     );

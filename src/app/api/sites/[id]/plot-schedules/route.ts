@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getPlotScheduleStatus } from "@/lib/schedule";
+import { canAccessSite } from "@/lib/site-access";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +20,10 @@ export async function GET(
   }
 
   const { id } = await params;
+
+  if (!(await canAccessSite(session.user.id, (session.user as { role: string }).role, id))) {
+    return NextResponse.json({ error: "You do not have access to this site" }, { status: 403 });
+  }
 
   const plots = await prisma.plot.findMany({
     where: { siteId: id },

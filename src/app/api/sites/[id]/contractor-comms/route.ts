@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { canAccessSite } from "@/lib/site-access";
 
 export const dynamic = "force-dynamic";
 
@@ -15,15 +16,20 @@ export async function GET(
 
   const { id: siteId } = await params;
 
+  if (!(await canAccessSite(session.user.id, (session.user as { role: string }).role, siteId))) {
+    return NextResponse.json({ error: "You do not have access to this site" }, { status: 403 });
+  }
+
   const site = await prisma.site.findUnique({
     where: { id: siteId },
     select: { id: true, name: true },
   });
   if (!site) return NextResponse.json({ error: "Site not found" }, { status: 404 });
 
-  // Get all job-contractor links for this site, grouped by contact
+  // Get all job-contractor links for LEAF jobs on this site (parents are rollups).
+  // A contractor attached to a parent stage should be re-attached at the child level.
   const jobContractors = await prisma.jobContractor.findMany({
-    where: { job: { plot: { siteId } } },
+    where: { job: { plot: { siteId }, children: { none: {} } } },
     select: {
       contactId: true,
       contact: {

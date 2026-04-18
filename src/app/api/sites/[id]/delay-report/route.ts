@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { differenceInDays } from "date-fns";
 import { getServerCurrentDate } from "@/lib/dev-date";
+import { canAccessSite } from "@/lib/site-access";
 
 export const dynamic = "force-dynamic";
 
@@ -18,17 +19,22 @@ export async function GET(
   }
 
   const { id } = await params;
+
+  if (!(await canAccessSite(session.user.id, (session.user as { role: string }).role, id))) {
+    return NextResponse.json({ error: "You do not have access to this site" }, { status: 403 });
+  }
   const today = getServerCurrentDate(req);
   today.setHours(0, 0, 0, 0);
 
   const [overdueJobs, weatherImpactDays, overdueDeliveries, completedLateJobs] =
     await Promise.all([
-      // Currently overdue jobs
+      // Currently overdue jobs — leaf jobs only (parents are derived rollups)
       prisma.job.findMany({
         where: {
           plot: { siteId: id },
           endDate: { lt: today },
           status: { not: "COMPLETED" },
+          children: { none: {} },
         },
         select: {
           id: true,
@@ -110,13 +116,14 @@ export async function GET(
         orderBy: { expectedDeliveryDate: "asc" },
       }),
 
-      // Jobs completed late (for trend)
+      // Jobs completed late (for trend) — leaves only, parents don't have actualEndDate anyway
       prisma.job.findMany({
         where: {
           plot: { siteId: id },
           status: "COMPLETED",
           endDate: { not: null },
           actualEndDate: { not: null },
+          children: { none: {} },
         },
         select: {
           id: true,

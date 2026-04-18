@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { canAccessSite } from "@/lib/site-access";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +17,10 @@ export async function GET(
   }
 
   const { id } = await params;
+
+  if (!(await canAccessSite(session.user.id, (session.user as { role: string }).role, id))) {
+    return NextResponse.json({ error: "You do not have access to this site" }, { status: 403 });
+  }
 
   // Get all plots with their jobs, orders, and order items
   const plots = await prisma.plot.findMany({
@@ -105,11 +110,9 @@ export async function GET(
           jobBudget += item.quantity * item.unitCost;
         }
       }
-      // Parent-level orders get moved to the first child during template application.
-      // Attribute the budget to the first child's name to match where the actual orders land.
-      const firstChild = (tj.children as { name: string; sortOrder: number }[])?.[0];
-      const budgetKey = (firstChild && !tj.parentId && jobBudget > 0) ? firstChild.name : tj.name;
-      jobBudgets[budgetKey] = (jobBudgets[budgetKey] || 0) + jobBudget;
+      // Parent-stage orders attach to the real parent Job on apply (H3 hierarchy),
+      // so the budget is keyed by the template job's own name — whether parent or child.
+      jobBudgets[tj.name] = (jobBudgets[tj.name] || 0) + jobBudget;
       templateTotal += jobBudget;
     }
 

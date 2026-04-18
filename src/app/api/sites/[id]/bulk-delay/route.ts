@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { calculateCascade } from "@/lib/cascade";
 import { getTodayWeatherSummary } from "@/lib/weather";
 import { addWorkingDays } from "@/lib/working-days";
+import { canAccessSite } from "@/lib/site-access";
 
 export const dynamic = "force-dynamic";
 
@@ -20,6 +21,10 @@ export async function POST(
   }
 
   const { id: siteId } = await params;
+
+  if (!(await canAccessSite(session.user.id, (session.user as { role: string }).role, siteId))) {
+    return NextResponse.json({ error: "You do not have access to this site" }, { status: 403 });
+  }
   const body = await req.json();
   const { plotIds, days, reason, delayReasonType = "OTHER" } = body as {
     plotIds: string[];

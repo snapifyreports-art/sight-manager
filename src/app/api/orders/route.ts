@@ -80,6 +80,22 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // Guard: caller must have access to the job's site
+  const jobForCheck = await prisma.job.findUnique({
+    where: { id: jobId },
+    select: { plot: { select: { siteId: true } } },
+  });
+  if (!jobForCheck) {
+    return NextResponse.json({ error: "Job not found" }, { status: 404 });
+  }
+  const accessibleSites = await getUserSiteIds(session.user.id, session.user.role);
+  if (accessibleSites !== null && !accessibleSites.includes(jobForCheck.plot.siteId)) {
+    return NextResponse.json(
+      { error: "You do not have access to this site" },
+      { status: 403 }
+    );
+  }
+
   const order = await prisma.materialOrder.create({
     data: {
       supplierId,

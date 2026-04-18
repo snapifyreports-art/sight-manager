@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { format } from "date-fns";
+import { canAccessSite } from "@/lib/site-access";
 
 export const dynamic = "force-dynamic";
 
@@ -18,6 +19,10 @@ export async function GET(
   }
 
   const { id } = await params;
+
+  if (!(await canAccessSite(session.user.id, (session.user as { role: string }).role, id))) {
+    return NextResponse.json({ error: "You do not have access to this site" }, { status: 403 });
+  }
 
   const days = await prisma.rainedOffDay.findMany({
     where: { siteId: id },
@@ -39,6 +44,10 @@ export async function POST(
   }
 
   const { id: siteId } = await params;
+
+  if (!(await canAccessSite(session.user.id, (session.user as { role: string }).role, siteId))) {
+    return NextResponse.json({ error: "You do not have access to this site" }, { status: 403 });
+  }
   const body = await req.json();
   const { date, note, type = "RAIN" } = body as {
     date: string;

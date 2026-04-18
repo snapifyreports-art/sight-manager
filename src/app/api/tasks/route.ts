@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { addDays } from "date-fns";
 import { getServerCurrentDate } from "@/lib/dev-date";
+import { getUserSiteIds } from "@/lib/site-access";
 
 export const dynamic = "force-dynamic";
 
@@ -12,6 +13,12 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  // Site-access filter — non-admins only see tasks on sites they've been granted access to
+  const accessibleSiteIds = await getUserSiteIds(session.user.id, (session.user as { role: string }).role);
+  const siteAccess = accessibleSiteIds === null ? {} : { plot: { siteId: { in: accessibleSiteIds } } };
+  const siteAccessForOrder = accessibleSiteIds === null ? {} : { job: { plot: { siteId: { in: accessibleSiteIds } } } };
+  const leafOnly = { children: { none: {} } };
+
   const now = getServerCurrentDate(req);
   const in7Days = addDays(now, 7);
   const in3Days = addDays(now, 3);
@@ -19,6 +26,7 @@ export async function GET(req: NextRequest) {
   // 1. Confirm Delivery — orders ORDERED with delivery within 7 days (not overdue)
   const confirmDelivery = await prisma.materialOrder.findMany({
     where: {
+      ...siteAccessForOrder,
       status: "ORDERED",
       expectedDeliveryDate: { gte: now, lte: in7Days },
     },
@@ -42,6 +50,7 @@ export async function GET(req: NextRequest) {
   const sendOrderCutoff = addDays(now, 14);
   const sendOrder = await prisma.materialOrder.findMany({
     where: {
+      ...siteAccessForOrder,
       status: "PENDING",
       dateOfOrder: { lte: sendOrderCutoff },
     },
@@ -61,9 +70,11 @@ export async function GET(req: NextRequest) {
     orderBy: { dateOfOrder: "asc" },
   });
 
-  // 3. Sign Off Jobs — IN_PROGRESS jobs with endDate within 3 days (not overdue)
+  // 3. Sign Off Jobs — IN_PROGRESS leaf jobs with endDate within 3 days (not overdue)
   const signOffJobs = await prisma.job.findMany({
     where: {
+      ...siteAccess,
+      ...leafOnly,
       status: "IN_PROGRESS",
       endDate: { gte: now, lte: in3Days },
     },
@@ -78,9 +89,11 @@ export async function GET(req: NextRequest) {
     orderBy: { endDate: "asc" },
   });
 
-  // 4. Overdue Jobs — IN_PROGRESS jobs past their end date
+  // 4. Overdue Jobs — IN_PROGRESS leaf jobs past their end date
   const overdueJobs = await prisma.job.findMany({
     where: {
+      ...siteAccess,
+      ...leafOnly,
       status: "IN_PROGRESS",
       endDate: { lt: now },
     },
@@ -95,9 +108,11 @@ export async function GET(req: NextRequest) {
     orderBy: { endDate: "asc" },
   });
 
-  // 4b. Late Start — NOT_STARTED jobs whose start date has passed
+  // 4b. Late Start — NOT_STARTED leaf jobs whose start date has passed
   const lateStartJobs = await prisma.job.findMany({
     where: {
+      ...siteAccess,
+      ...leafOnly,
       status: "NOT_STARTED",
       startDate: { lt: now },
     },
@@ -115,6 +130,7 @@ export async function GET(req: NextRequest) {
   // 5. Overdue Materials — ORDERED orders past expected delivery date
   const overdueOrders = await prisma.materialOrder.findMany({
     where: {
+      ...siteAccessForOrder,
       status: "ORDERED",
       expectedDeliveryDate: { lt: now },
     },
@@ -137,6 +153,7 @@ export async function GET(req: NextRequest) {
   // 5b. Waiting on Delivery — ORDERED orders with delivery date in the future (beyond 7-day confirm window)
   const awaitingDelivery = await prisma.materialOrder.findMany({
     where: {
+      ...siteAccessForOrder,
       status: "ORDERED",
       expectedDeliveryDate: { gt: in7Days },
     },
@@ -156,9 +173,11 @@ export async function GET(req: NextRequest) {
     orderBy: { expectedDeliveryDate: "asc" },
   });
 
-  // 6. Upcoming — next 7 days of job starts + deliveries
+  // 6. Upcoming — next 7 days of leaf job starts + deliveries
   const upcomingJobs = await prisma.job.findMany({
     where: {
+      ...siteAccess,
+      ...leafOnly,
       status: { in: ["NOT_STARTED", "IN_PROGRESS"] },
       startDate: { gte: now, lte: in7Days },
     },
@@ -175,6 +194,7 @@ export async function GET(req: NextRequest) {
 
   const upcomingDeliveries = await prisma.materialOrder.findMany({
     where: {
+      ...siteAccessForOrder,
       status: "ORDERED",
       expectedDeliveryDate: { gte: now, lte: in7Days },
     },

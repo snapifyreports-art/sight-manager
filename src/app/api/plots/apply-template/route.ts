@@ -55,7 +55,8 @@ export async function POST(request: NextRequest) {
 
   const plotStartDate = new Date(startDate);
 
-  // Create everything in a transaction
+  // Create everything in a transaction — complex templates can have 20+ jobs + many orders,
+  // so extend the default 5s timeout to 60s to match apply-template-batch
   const result = await prisma.$transaction(async (tx) => {
     // 1. Create Plot
     const plot = await tx.plot.create({
@@ -109,7 +110,7 @@ export async function POST(request: NextRequest) {
       },
     });
     return { plot: created, warnings };
-  });
+  }, { timeout: 60_000 }); // complex templates can have 20+ jobs + 10+ orders each
 
   return NextResponse.json({ ...result.plot, _warnings: result.warnings }, { status: 201 });
 }

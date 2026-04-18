@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { startOfDay, endOfDay, subDays, addDays } from "date-fns";
 import { getServerCurrentDate } from "@/lib/dev-date";
 import { fetchWeatherForPostcode } from "@/lib/weather";
+import { canAccessSite } from "@/lib/site-access";
 
 export const dynamic = "force-dynamic";
 
@@ -18,6 +19,10 @@ export async function GET(
   }
 
   const { id } = await params;
+
+  if (!(await canAccessSite(session.user.id, (session.user as { role: string }).role, id))) {
+    return NextResponse.json({ error: "You do not have access to this site" }, { status: 403 });
+  }
   const dateParam = req.nextUrl.searchParams.get("date");
   const targetDate = dateParam ? new Date(dateParam) : getServerCurrentDate(req);
   const dayStart = startOfDay(targetDate);

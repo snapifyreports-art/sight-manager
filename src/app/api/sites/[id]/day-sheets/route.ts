@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { startOfDay, endOfDay } from "date-fns";
 import { getServerCurrentDate } from "@/lib/dev-date";
+import { canAccessSite } from "@/lib/site-access";
 
 export const dynamic = "force-dynamic";
 
@@ -18,15 +19,20 @@ export async function GET(
   }
 
   const { id } = await params;
+
+  if (!(await canAccessSite(session.user.id, (session.user as { role: string }).role, id))) {
+    return NextResponse.json({ error: "You do not have access to this site" }, { status: 403 });
+  }
   const dateParam = req.nextUrl.searchParams.get("date");
   const targetDate = dateParam ? new Date(dateParam) : getServerCurrentDate(req);
   const dayStart = startOfDay(targetDate);
   const dayEnd = endOfDay(targetDate);
 
-  // Get all jobs active on the target date (started before/on date, not ended before date)
+  // Get all LEAF jobs active on the target date (parents are derived rollups)
   const jobs = await prisma.job.findMany({
     where: {
       plot: { siteId: id },
+      children: { none: {} },
       OR: [
         // Jobs explicitly active on this date
         {

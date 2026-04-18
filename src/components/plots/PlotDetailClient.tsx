@@ -427,7 +427,12 @@ function PlotOverview({
       string,
       { name: string; jobs: typeof plot.jobs }
     > = {};
+    // Skip real parent Jobs (they're derived rollups) — identify them as jobs
+    // that appear as parentId on other jobs. We group by parentStage for children
+    // and by name for flat top-level jobs (no parent AND no children).
+    const parentJobIds = new Set(plot.jobs.filter((j) => j.parentId).map((j) => j.parentId!));
     for (const job of plot.jobs) {
+      if (parentJobIds.has(job.id)) continue; // skip real parent Jobs
       const stage = job.parentStage || "Ungrouped";
       if (!groups[stage]) {
         groups[stage] = { name: stage, jobs: [] };

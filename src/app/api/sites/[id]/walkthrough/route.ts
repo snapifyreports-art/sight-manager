@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getServerCurrentDate } from "@/lib/dev-date";
 import { differenceInCalendarDays } from "date-fns";
+import { canAccessSite } from "@/lib/site-access";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +17,10 @@ export async function GET(
   }
 
   const { id } = await params;
+
+  if (!(await canAccessSite(session.user.id, (session.user as { role: string }).role, id))) {
+    return NextResponse.json({ error: "You do not have access to this site" }, { status: 403 });
+  }
   const today = getServerCurrentDate(req);
 
   const site = await prisma.site.findUnique({
@@ -56,6 +61,7 @@ export async function GET(
           orders: {
             select: { id: true, status: true, expectedDeliveryDate: true, supplier: { select: { name: true } } },
           },
+          parentId: true,
           parentStage: true,
           stageCode: true,
         },
@@ -79,24 +85,19 @@ export async function GET(
   });
 
   const walkthroughPlots = plots.map((plot) => {
-    const totalJobs = plot.jobs.length;
-    const completedJobs = plot.jobs.filter((j) => j.status === "COMPLETED").length;
-    const inProgressJobs = plot.jobs.filter((j) => j.status === "IN_PROGRESS").length;
+    // Use real parentId relation when available; fall back to parentStage string for legacy jobs
+    const jobsWithChildrenIds = new Set(
+      plot.jobs.filter((j) => j.parentId).map((j) => j.parentId!)
+    );
+    // Actionable jobs are LEAVES: they have no children themselves
+    const actionableJobs = plot.jobs.filter((j) => !jobsWithChildrenIds.has(j.id));
+
+    // Counts on LEAVES only (parents are derived rollups)
+    const totalJobs = actionableJobs.length;
+    const completedJobs = actionableJobs.filter((j) => j.status === "COMPLETED").length;
+    const inProgressJobs = actionableJobs.filter((j) => j.status === "IN_PROGRESS").length;
     const progressPercent =
       totalJobs > 0 ? Math.round((completedJobs / totalJobs) * 100) : 0;
-
-    // Sub-jobs only (exclude parent stage jobs that have children)
-    const parentIds = new Set(plot.jobs.filter((j) => !j.parentStage).map((j) => j.id));
-    const hasChildren = new Set<string>();
-    for (const j of plot.jobs) {
-      if (j.parentStage) {
-        // Find parent by stageCode matching parentStage
-        const parent = plot.jobs.find((p) => !p.parentStage && (p.stageCode === j.parentStage || p.name === j.parentStage));
-        if (parent) hasChildren.add(parent.id);
-      }
-    }
-    // Actionable jobs: sub-jobs (have parentStage) + flat jobs (no children)
-    const actionableJobs = plot.jobs.filter((j) => j.parentStage || !hasChildren.has(j.id));
     // Sort by start date for chronological order
     const sortedActionable = [...actionableJobs].sort((a, b) => {
       if (!a.startDate) return 1;
@@ -110,9 +111,9 @@ export async function GET(
       sortedActionable.find((j) => j.status === "NOT_STARTED") ||
       null;
 
-    // Parent stage context (for display)
-    const parentStageJob = currentJob?.parentStage
-      ? plot.jobs.find((p) => !p.parentStage && (p.stageCode === currentJob.parentStage || p.name === currentJob.parentStage))
+    // Parent stage context (for display) — use real parentId relation
+    const parentStageJob = currentJob?.parentId
+      ? plot.jobs.find((p) => p.id === currentJob.parentId) ?? null
       : null;
 
     // Next job: first NOT_STARTED sub-job after current by start date
