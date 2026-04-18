@@ -17,7 +17,7 @@ import {
   getMonth,
   getYear,
 } from "date-fns";
-import { getCurrentDate } from "@/lib/dev-date";
+import { getCurrentDate, getCurrentDateAtMidnight } from "@/lib/dev-date";
 import { useDevDate } from "@/lib/dev-date-context";
 import { Loader2, Columns3, ChevronRight, Download, FileText, Search, X, Camera, StickyNote, CalendarDays, Calendar, Layers, List, CheckSquare, Clock, ZoomIn, ZoomOut, Maximize2, Minimize2, Play } from "lucide-react";
 import Link from "next/link";
@@ -734,7 +734,8 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
 
     if (!minDate || !maxDate) return { columns: [] as TimelineColumn[], todayIndex: -1, monthSpans: [] as MonthSpan[] };
 
-    const now = getCurrentDate();
+    // Midnight-snapped so SSR and hydration agree on "today".
+    const now = getCurrentDateAtMidnight();
 
     // Ensure today is always within the visible range
     if (now < minDate) minDate = now;

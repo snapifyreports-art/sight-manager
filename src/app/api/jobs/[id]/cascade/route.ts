@@ -148,11 +148,14 @@ export async function PUT(
 
   try {
     // Build a lookup so we can preserve originalStart/End on first move (I9).
+    // `allPlotJobs` was already fetched with parentId in scope — use it
+    // instead of issuing one findUnique per updated job (previously N+1).
     const jobMap = new Map(allPlotJobs.map((j) => [j.id, j]));
 
-    // Apply every job update uniformly — trigger + downstream.
-    await Promise.all(
-      result.jobUpdates.map((update) => {
+    // Run job + order updates concurrently (both resolve against the same
+    // plot, so there's no cross-write hazard worth a transaction).
+    await Promise.all([
+      ...result.jobUpdates.map((update) => {
         const current = jobMap.get(update.jobId);
         return prisma.job.update({
           where: { id: update.jobId },
@@ -167,12 +170,8 @@ export async function PUT(
               : {}),
           },
         });
-      })
-    );
-
-    // Apply order updates.
-    await Promise.all(
-      result.orderUpdates.map((update) =>
+      }),
+      ...result.orderUpdates.map((update) =>
         prisma.materialOrder.update({
           where: { id: update.orderId },
           data: {
@@ -180,22 +179,22 @@ export async function PUT(
             expectedDeliveryDate: update.newDeliveryDate,
           },
         })
-      )
-    );
+      ),
+    ]);
 
     // I6: parent-stage rollup — recompute any parent whose children moved.
+    // Pull parentIds from the already-loaded jobMap (no extra queries).
     const { recomputeParentFromChildren } = await import("@/lib/parent-job");
     const parentIds = new Set<string>();
     for (const update of result.jobUpdates) {
-      const shiftedJob = await prisma.job.findUnique({
-        where: { id: update.jobId },
-        select: { parentId: true },
-      });
-      if (shiftedJob?.parentId) parentIds.add(shiftedJob.parentId);
+      const j = jobMap.get(update.jobId);
+      if (j?.parentId) parentIds.add(j.parentId);
     }
-    for (const parentId of parentIds) {
-      await recomputeParentFromChildren(prisma, parentId);
-    }
+    // Recompute parents concurrently — each call reads its own children, but
+    // different parents don't overlap.
+    await Promise.all(
+      Array.from(parentIds).map((pid) => recomputeParentFromChildren(prisma, pid))
+    );
 
     await prisma.eventLog.create({
       data: {

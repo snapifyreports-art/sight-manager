@@ -7,7 +7,7 @@ import { useJobAction } from "@/hooks/useJobAction";
 import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 import { PostCompletionDialog } from "@/components/PostCompletionDialog";
 import { differenceInCalendarDays, isSameDay, format } from "date-fns";
-import { getCurrentDate } from "@/lib/dev-date";
+import { getCurrentDateAtMidnight } from "@/lib/dev-date";
 import { cn } from "@/lib/utils";
 import {
   Package,
@@ -89,7 +89,9 @@ async function updateOrderStatus(orderId: string, status: string): Promise<Respo
 export function PlotTodoList({ jobs, snagSummary, siteId, plotId }: PlotTodoListProps) {
   const router = useRouter();
   const toast = useToast();
-  const now = getCurrentDate();
+  // Snap to midnight so SSR and initial client render produce the same
+  // date-comparisons (avoids React hydration mismatch #418).
+  const now = getCurrentDateAtMidnight();
 
   const [openSections, setOpenSections] = useState<Set<string>>(
     new Set(["jobs", "materials", "snags"])

@@ -5,7 +5,7 @@ import { useRefreshOnFocus } from "@/hooks/useRefreshOnFocus";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { format, differenceInCalendarDays } from "date-fns";
-import { getCurrentDate } from "@/lib/dev-date";
+import { getCurrentDateAtMidnight } from "@/lib/dev-date";
 import { useDevDate } from "@/lib/dev-date-context";
 import {
   ArrowLeft,
@@ -301,7 +301,8 @@ function PlotOverview({
   plot: PlotData;
   snagSummary: Record<string, number>;
 }) {
-  const today = getCurrentDate();
+  // Midnight-snap so SSR + hydration agree on today's date (prevents React #418).
+  const today = getCurrentDateAtMidnight();
   const router = useRouter();
   const [pendingOrderActions, setPendingOrderActions] = useState<Set<string>>(new Set());
   const [pendingJobActions, setPendingJobActions] = useState<Set<string>>(new Set());

@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { format, isBefore, isSameDay, differenceInDays } from "date-fns";
-import { getCurrentDate } from "@/lib/dev-date";
+import { getCurrentDate, getCurrentDateAtMidnight } from "@/lib/dev-date";
 import { useDevDate } from "@/lib/dev-date-context";
 import {
   ClipboardList,
@@ -120,7 +120,8 @@ interface SupplierGroup {
 function getUrgency(dateStr: string | null): "overdue" | "today" | "upcoming" {
   if (!dateStr) return "upcoming";
   const d = new Date(dateStr);
-  const now = getCurrentDate();
+  // Midnight-snap so SSR and hydration agree on categorisation.
+  const now = getCurrentDateAtMidnight();
   if (isBefore(d, now) && !isSameDay(d, now)) return "overdue";
   if (isSameDay(d, now)) return "today";
   return "upcoming";

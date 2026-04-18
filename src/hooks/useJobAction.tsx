@@ -4,6 +4,7 @@ import { useState, useCallback } from "react";
 import { differenceInCalendarDays, addDays, format } from "date-fns";
 import { AlertTriangle, Loader2 } from "lucide-react";
 import { addWorkingDays, differenceInWorkingDays, isWorkingDay, snapToWorkingDay } from "@/lib/working-days";
+import { useToast } from "@/components/ui/toast";
 import {
   Dialog,
   DialogContent,
@@ -41,6 +42,7 @@ export interface JobForAction {
 export function useJobAction(
   onSuccess?: (action: string, jobId: string, data?: unknown) => void
 ) {
+  const toast = useToast();
   const [isLoading, setIsLoading] = useState(false);
 
   // The job currently being processed (kept in state so dialogs can reference it)
@@ -50,7 +52,7 @@ export function useJobAction(
   const [preStartChecks, setPreStartChecks] = useState<{
     prevJob: { id: string; name: string } | null;
     undeliveredOrders: Array<{ id: string; supplier: string; status: string; expectedDeliveryDate?: string | null; dateOfOrder?: string | null }>;
-    nearestEvent: { date: string; supplierName: string; label: string } | null;
+    nearestEvent: { date: string; supplierName: string; label: string; alreadyTimed?: boolean } | null;
     signOffPrev: boolean;
     markDelivered: boolean;
   } | null>(null);
@@ -108,14 +110,24 @@ export function useJobAction(
         });
         if (res.ok) {
           const data = await res.json();
+          // User-visible confirmation for the main lifecycle actions.
+          if (action === "start") toast.success("Job started");
+          else if (action === "complete") toast.success("Job marked complete");
+          else if (action === "signoff") toast.success("Job signed off");
+          else if (action === "stop") toast.success("Job put on hold");
           onSuccess?.(action, jobId, data);
+        } else {
+          const err = await res.json().catch(() => null);
+          toast.error(err?.error ?? `Failed to ${action} job (HTTP ${res.status})`);
         }
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : `Failed to ${action} job`);
       } finally {
         setIsLoading(false);
         setActiveJob(null);
       }
     },
-    [onSuccess]
+    [onSuccess, toast]
   );
 
   // ---- Pull forward then start ----
@@ -412,8 +424,8 @@ export function useJobAction(
         // Monday). Uses working-day arithmetic throughout to match the cascade
         // engine — prevents "place today" → working-day-delta producing an
         // order date in the past.
-        let nearestEvent: { date: string; supplierName: string; label: string } | null = null;
-        const eventDates: Array<{ date: Date; supplierName: string; label: string }> = [];
+        let nearestEvent: { date: string; supplierName: string; label: string; alreadyTimed?: boolean } | null = null;
+        const eventDates: Array<{ date: Date; supplierName: string; label: string; alreadyTimed: boolean }> = [];
         const todayForward = isWorkingDay(today) ? today : snapToWorkingDay(today, "forward");
         for (const o of undelivered) {
           if (o.status === "PENDING" && o.dateOfOrder) {
@@ -423,7 +435,13 @@ export function useJobAction(
               // Preserve the order→job gap in WORKING days (matches cascade).
               const gapWD = differenceInWorkingDays(jobStart, orderDate);
               const newJobStart = addWorkingDays(todayForward, gapWD);
+              // If the existing dateOfOrder is already on or before today's
+              // snapped working day, pulling forward would be a no-op / would
+              // move order into the past. Mark as alreadyTimed so the UI can
+              // show a grey "already perfectly timed" chip instead of hiding.
+              const alreadyTimed = orderDate.getTime() <= todayForward.getTime();
               eventDates.push({
+                alreadyTimed,
                 date: newJobStart,
                 supplierName: o.supplier.name,
                 label: `${o.supplier.name} order — place today, start ${format(newJobStart, "dd MMM")}`,
@@ -431,12 +449,13 @@ export function useJobAction(
             }
           } else if (o.status === "ORDERED" && o.expectedDeliveryDate) {
             const d = new Date(o.expectedDeliveryDate);
-            if (d > today) eventDates.push({ date: d, supplierName: o.supplier.name, label: `${o.supplier.name} delivery on ${format(d, "dd MMM")}` });
+            if (d > today) eventDates.push({ alreadyTimed: false, date: d, supplierName: o.supplier.name, label: `${o.supplier.name} delivery on ${format(d, "dd MMM")}` });
           }
         }
         if (eventDates.length > 0) {
           eventDates.sort((a, b) => a.date.getTime() - b.date.getTime());
-          nearestEvent = { date: eventDates[0].date.toISOString(), supplierName: eventDates[0].supplierName, label: eventDates[0].label };
+          const first = eventDates[0];
+          nearestEvent = { date: first.date.toISOString(), supplierName: first.supplierName, label: first.label, alreadyTimed: first.alreadyTimed };
         }
 
         setPreStartChecks({
@@ -611,7 +630,18 @@ export function useJobAction(
                       {o.status === "PENDING" && (
                         <div className="flex gap-1">
                           <button onClick={async () => {
-                            await fetch(`/api/orders/${o.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: "ORDERED" }) });
+                            // Mark Sent records the actual placement date (today)
+                            // so Daily Brief / Budget / Cash-flow downstream views
+                            // see when the order was actually placed vs the template
+                            // default date.
+                            await fetch(`/api/orders/${o.id}`, {
+                              method: "PUT",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({
+                                status: "ORDERED",
+                                dateOfOrder: new Date().toISOString(),
+                              }),
+                            });
                             o.status = "ORDERED";
                             setPreStartChecks({ ...preStartChecks });
                           }} className="rounded border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-700 hover:bg-blue-100">
@@ -665,20 +695,29 @@ export function useJobAction(
                                 const newEnd = addWorkingDays(new Date(activeJob.endDate), deltaWD).toISOString().split("T")[0];
                                 setPreStartChecks(null);
                                 setCascadeLoading(true);
+                                toast.info("Shifting programme…");
                                 fetch(`/api/jobs/${activeJob.id}/cascade`, {
                                   method: "PUT",
                                   headers: { "Content-Type": "application/json" },
                                   body: JSON.stringify({ newEndDate: newEnd, confirm: true }),
                                 }).then(async (res) => {
                                   if (res.ok) {
+                                    const data = await res.json().catch(() => ({ jobsUpdated: 0, deltaDays: deltaWD }));
+                                    toast.success(`Programme shifted to start ${format(pickedFwd, "dd MMM")} — ${data.jobsUpdated} job${data.jobsUpdated !== 1 ? "s" : ""} updated`);
                                     await executeAction(activeJob.id, "start");
                                   } else if (res.status === 409) {
                                     const data = await res.json().catch(() => null);
-                                    alert(data?.conflicts?.length ? `Cannot shift to that date: ${data.conflicts[0].kind === "job_in_past" ? "would put a job in the past" : "would require placing an order in the past"}.` : "Cannot shift to that date.");
+                                    toast.error(data?.conflicts?.length ? `Cannot shift to that date: ${data.conflicts[0].kind === "job_in_past" ? "would put a job in the past" : "would require placing an order in the past"}.` : "Cannot shift to that date.");
+                                  } else {
+                                    const err = await res.json().catch(() => null);
+                                    toast.error(err?.error ?? `Cascade failed (HTTP ${res.status})`);
                                   }
                                   setCascadeLoading(false);
                                   setActiveJob(null);
-                                }).catch(() => setCascadeLoading(false));
+                                }).catch((e) => {
+                                  setCascadeLoading(false);
+                                  toast.error(e instanceof Error ? e.message : "Cascade failed");
+                                });
                               } else {
                                 setPreStartChecks(null);
                                 executeAction(activeJob.id, "start").then(() => setActiveJob(null));
@@ -691,8 +730,25 @@ export function useJobAction(
                   </div>
                 </div>
 
-                {/* Option 3: Pull forward to next event (order date or delivery date) */}
-                {preStartChecks.nearestEvent && activeJob && (
+                {/* Option 3: Pull forward to next event (order date or delivery date).
+                    When the order is already scheduled on or before today's next
+                    working day, pulling forward would be a no-op (or require
+                    ordering in the past). Show a disabled "already perfectly
+                    timed" chip instead of hiding so users understand the state. */}
+                {preStartChecks.nearestEvent && activeJob && preStartChecks.nearestEvent.alreadyTimed && (
+                  <div className="flex w-full items-start gap-3 rounded-xl border-2 border-slate-200 bg-slate-50 px-4 py-3 text-left opacity-70">
+                    <span className="mt-0.5 text-lg">✅</span>
+                    <div>
+                      <p className="text-sm font-semibold text-slate-700">
+                        Already perfectly timed
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        This order is already scheduled to be placed today (or earlier) — no pull-forward available. Use &ldquo;Start today&rdquo; above to send the order and begin.
+                      </p>
+                    </div>
+                  </div>
+                )}
+                {preStartChecks.nearestEvent && activeJob && !preStartChecks.nearestEvent.alreadyTimed && (
                   <button
                     onClick={() => {
                       if (!activeJob || !preStartChecks.nearestEvent) return;
@@ -706,24 +762,32 @@ export function useJobAction(
                           const newEnd = addWorkingDays(new Date(activeJob.endDate), deltaWD).toISOString().split("T")[0];
                           setPreStartChecks(null);
                           setCascadeLoading(true);
+                          toast.info("Shifting programme…");
                           fetch(`/api/jobs/${activeJob.id}/cascade`, {
                             method: "PUT",
                             headers: { "Content-Type": "application/json" },
                             body: JSON.stringify({ newEndDate: newEnd, confirm: true }),
                           }).then(async (res) => {
                             if (res.ok) {
+                              const data = await res.json().catch(() => ({ jobsUpdated: 0, deltaDays: deltaWD }));
+                              toast.success(`Programme shifted ${Math.abs(data.deltaDays)} working day${Math.abs(data.deltaDays) !== 1 ? "s" : ""} earlier — ${data.jobsUpdated} job${data.jobsUpdated !== 1 ? "s" : ""} updated`);
                               await executeAction(activeJob.id, "start");
                             } else if (res.status === 409) {
-                              // Engine returned conflicts — surface them to the user.
                               const data = await res.json().catch(() => null);
                               const msg = data?.conflicts?.length
                                 ? `Cannot pull forward: ${data.conflicts[0].kind === "job_in_past" ? "a downstream job would start in the past" : "an order would need placing in the past"}. Try a later start date.`
                                 : "Cannot pull forward — programme conflict.";
-                              alert(msg);
+                              toast.error(msg);
+                            } else {
+                              const err = await res.json().catch(() => null);
+                              toast.error(err?.error ?? `Cascade failed (HTTP ${res.status})`);
                             }
                             setCascadeLoading(false);
                             setActiveJob(null);
-                          }).catch(() => setCascadeLoading(false));
+                          }).catch((e) => {
+                            setCascadeLoading(false);
+                            toast.error(e instanceof Error ? e.message : "Cascade failed");
+                          });
                         }
                       }
                     }}
@@ -826,7 +890,14 @@ export function useJobAction(
                           {isPending && (
                             <button
                               onClick={async () => {
-                                await fetch(`/api/orders/${order.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: "ORDERED" }) });
+                                await fetch(`/api/orders/${order.id}`, {
+                                  method: "PUT",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({
+                                    status: "ORDERED",
+                                    dateOfOrder: new Date().toISOString(),
+                                  }),
+                                });
                                 setOrderResolution((prev) => prev ? { ...prev, resolved: new Set(prev.resolved).add(order.id) } : prev);
                               }}
                               className="rounded bg-blue-600 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-blue-700"
@@ -861,8 +932,15 @@ export function useJobAction(
                                     window.open(mailto, "_blank");
                                   }
                                 }
-                                // Mark as ORDERED and resolved
-                                await fetch(`/api/orders/${order.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: "ORDERED" }) });
+                                // Mark as ORDERED with actual placement date
+                                await fetch(`/api/orders/${order.id}`, {
+                                  method: "PUT",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({
+                                    status: "ORDERED",
+                                    dateOfOrder: new Date().toISOString(),
+                                  }),
+                                });
                                 setOrderResolution((prev) => prev ? { ...prev, resolved: new Set(prev.resolved).add(order.id) } : prev);
                               }}
                               className="rounded bg-amber-500 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-amber-600"

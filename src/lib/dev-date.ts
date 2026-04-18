@@ -37,6 +37,22 @@ export function getCurrentDate(): Date {
 }
 
 /**
+ * "Today" snapped to midnight local time. Safe to use in render — avoids
+ * hydration mismatches that would otherwise happen because the SSR render's
+ * `new Date()` and the first client render's `new Date()` differ by a few
+ * milliseconds. As long as SSR and hydration happen on the same calendar day
+ * they produce identical values.
+ *
+ * Use this anywhere you write `const now = getCurrentDate()` at the top of a
+ * client component that renders date-comparison logic.
+ */
+export function getCurrentDateAtMidnight(): Date {
+  const d = getCurrentDate();
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+/**
  * Server-side: get current date from a NextRequest's cookies.
  * Use in API route handlers: getServerCurrentDate(req)
  */

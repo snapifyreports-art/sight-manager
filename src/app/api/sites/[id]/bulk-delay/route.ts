@@ -114,14 +114,16 @@ export async function POST(
       }))
     );
 
+    // allPlotJobs already has every field we need for the originalStart/End
+    // preservation check. Build a map once and read from it inside the tx to
+    // avoid N+1 findUnique calls.
+    const bulkJobMap = new Map(allPlotJobs.map((j) => [j.id, j]));
+
     await prisma.$transaction(async (tx) => {
       // The cascade library returns the trigger + downstream uniformly.
       // Apply them all the same way; set originalStart/End on first shift.
       for (const update of cascade.jobUpdates) {
-        const current = await tx.job.findUnique({
-          where: { id: update.jobId },
-          select: { startDate: true, endDate: true, originalStartDate: true, originalEndDate: true },
-        });
+        const current = bulkJobMap.get(update.jobId);
         const data: Record<string, unknown> = {
           startDate: update.newStart,
           endDate: update.newEnd,
@@ -177,20 +179,17 @@ export async function POST(
         },
       });
 
-      // Recompute parents of any shifted child jobs on this plot
-      // (cascade.jobUpdates already includes the trigger)
+      // Recompute parents of any shifted child jobs on this plot.
+      // bulkJobMap has parentId already — no extra queries.
       const { recomputeParentFromChildren } = await import("@/lib/parent-job");
       const parentIds = new Set<string>();
       for (const update of cascade.jobUpdates) {
-        const shiftedJob = await tx.job.findUnique({
-          where: { id: update.jobId },
-          select: { parentId: true },
-        });
-        if (shiftedJob?.parentId) parentIds.add(shiftedJob.parentId);
+        const j = bulkJobMap.get(update.jobId);
+        if (j?.parentId) parentIds.add(j.parentId);
       }
-      for (const parentId of parentIds) {
-        await recomputeParentFromChildren(tx, parentId);
-      }
+      await Promise.all(
+        Array.from(parentIds).map((pid) => recomputeParentFromChildren(tx, pid))
+      );
     });
 
     results.push({

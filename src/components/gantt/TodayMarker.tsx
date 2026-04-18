@@ -1,7 +1,7 @@
 "use client";
 
 import { getPositionForDate, DAY_WIDTH, HEADER_HEIGHT } from "./GanttHelpers";
-import { getCurrentDate } from "@/lib/dev-date";
+import { getCurrentDateAtMidnight } from "@/lib/dev-date";
 
 interface TodayMarkerProps {
   timelineStart: Date;
@@ -9,7 +9,8 @@ interface TodayMarkerProps {
 }
 
 export function TodayMarker({ timelineStart, totalHeight }: TodayMarkerProps) {
-  const today = getCurrentDate();
+  // Midnight-snap so SSR and hydration agree on position.
+  const today = getCurrentDateAtMidnight();
   const left = getPositionForDate(today, timelineStart, DAY_WIDTH);
 
   // Don't render if today is off the visible timeline

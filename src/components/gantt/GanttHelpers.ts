@@ -7,7 +7,7 @@ import {
   isAfter,
   addDays,
 } from "date-fns";
-import { getCurrentDate } from "@/lib/dev-date";
+import { getCurrentDateAtMidnight } from "@/lib/dev-date";
 
 /** Pixels per calendar day */
 export const DAY_WIDTH = 20;
@@ -88,7 +88,8 @@ export function getTimelineRange(
   }>,
   includeOriginalDates: boolean = false
 ): { timelineStart: Date; timelineEnd: Date } {
-  const today = getCurrentDate();
+  // Midnight snap so SSR + hydration agree on timeline bounds.
+  const today = getCurrentDateAtMidnight();
   let earliest: Date | null = null;
   let latest: Date | null = null;
 

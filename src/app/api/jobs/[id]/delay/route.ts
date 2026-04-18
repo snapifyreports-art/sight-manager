@@ -216,21 +216,18 @@ export async function POST(
     });
   });
 
-  // Recompute every affected parent job's dates/status from its shifted children
-  // (cascade.jobUpdates already includes the trigger, no need to add `id` separately)
+  // Recompute every affected parent job's dates/status from its shifted children.
+  // jobMap already has parentId for every job on this plot — no extra queries.
   {
     const { recomputeParentFromChildren } = await import("@/lib/parent-job");
     const parentIds = new Set<string>();
     for (const update of cascade.jobUpdates) {
-      const shiftedJob = await prisma.job.findUnique({
-        where: { id: update.jobId },
-        select: { parentId: true },
-      });
-      if (shiftedJob?.parentId) parentIds.add(shiftedJob.parentId);
+      const j = jobMap.get(update.jobId);
+      if (j?.parentId) parentIds.add(j.parentId);
     }
-    for (const parentId of parentIds) {
-      await recomputeParentFromChildren(prisma, parentId);
-    }
+    await Promise.all(
+      Array.from(parentIds).map((pid) => recomputeParentFromChildren(prisma, pid))
+    );
   }
 
   // Notify assigned user about the delay

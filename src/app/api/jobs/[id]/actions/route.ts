@@ -206,67 +206,57 @@ export async function POST(
     },
   });
 
-  // Auto-reorder: when a job starts, create draft orders from template orders
+  // Auto-reorder: when a job starts, create draft orders from template orders.
+  // Previously this loop issued 1 findFirst per template order (N+1) and 1
+  // sequential create per new order. Now we fetch existing orders once, skip
+  // the ones we already have, and create the rest in parallel.
   if (action === "start" && existing.stageCode) {
     try {
-      // Find template jobs matching this job's stageCode or name
-      const templateJobs = await prisma.templateJob.findMany({
-        where: {
-          OR: [
-            { stageCode: existing.stageCode },
-            { name: existing.name },
-          ],
-        },
-        include: {
-          orders: {
-            include: {
-              supplier: true,
-              items: true,
-            },
+      const [templateJobs, existingAutomatedOrders] = await Promise.all([
+        prisma.templateJob.findMany({
+          where: {
+            OR: [
+              { stageCode: existing.stageCode },
+              { name: existing.name },
+            ],
           },
-        },
-      });
+          include: {
+            orders: { include: { supplier: true, items: true } },
+          },
+        }),
+        prisma.materialOrder.findMany({
+          where: { jobId: id, automated: true },
+          select: { supplierId: true },
+        }),
+      ]);
 
-      for (const tj of templateJobs) {
-        for (const to of tj.orders) {
-          if (!to.supplierId || to.items.length === 0) continue;
+      const existingSupplierIds = new Set(existingAutomatedOrders.map((o) => o.supplierId));
 
-          // Check if an automated order already exists for this job+supplier
-          const existingOrder = await prisma.materialOrder.findFirst({
-            where: {
-              jobId: id,
-              supplierId: to.supplierId,
-              automated: true,
-            },
-          });
+      const ordersToCreate = templateJobs.flatMap((tj) =>
+        tj.orders.filter(
+          (to) => to.supplierId && to.items.length > 0 && !existingSupplierIds.has(to.supplierId)
+        )
+      );
 
-          if (existingOrder) continue;
-
-          // Calculate expected delivery date from lead time
+      await Promise.all(
+        ordersToCreate.map((to) => {
           let expectedDelivery: Date | null = null;
+          let leadTimeDays: number | null = null;
           if (to.leadTimeAmount && to.leadTimeUnit) {
+            const days = to.leadTimeUnit === "weeks" ? to.leadTimeAmount * 7 : to.leadTimeAmount;
             expectedDelivery = new Date(now.getTime());
-            const days =
-              to.leadTimeUnit === "weeks"
-                ? to.leadTimeAmount * 7
-                : to.leadTimeAmount;
             expectedDelivery.setDate(expectedDelivery.getDate() + days);
+            leadTimeDays = days;
           }
-
-          // Create draft PENDING order
-          await prisma.materialOrder.create({
+          return prisma.materialOrder.create({
             data: {
-              supplierId: to.supplierId,
+              supplierId: to.supplierId!,
               jobId: id,
               automated: true,
               status: "PENDING",
               itemsDescription: to.itemsDescription,
               expectedDeliveryDate: expectedDelivery,
-              leadTimeDays: to.leadTimeAmount
-                ? to.leadTimeUnit === "weeks"
-                  ? to.leadTimeAmount * 7
-                  : to.leadTimeAmount
-                : null,
+              leadTimeDays,
               orderItems: {
                 create: to.items.map((item) => ({
                   name: item.name,
@@ -278,8 +268,8 @@ export async function POST(
               },
             },
           });
-        }
-      }
+        })
+      );
     } catch (e) {
       // Don't fail the action if auto-reorder fails
       console.error("Auto-reorder error:", e);
