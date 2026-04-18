@@ -212,6 +212,23 @@ export async function POST(
     });
   });
 
+  // Recompute every affected parent job's dates/status from its shifted children
+  {
+    const { recomputeParentFromChildren } = await import("@/lib/parent-job");
+    const shiftedIds = [id, ...cascade.jobUpdates.map((u) => u.jobId)];
+    const parentIds = new Set<string>();
+    for (const shiftedId of shiftedIds) {
+      const shiftedJob = await prisma.job.findUnique({
+        where: { id: shiftedId },
+        select: { parentId: true },
+      });
+      if (shiftedJob?.parentId) parentIds.add(shiftedJob.parentId);
+    }
+    for (const parentId of parentIds) {
+      await recomputeParentFromChildren(prisma, parentId);
+    }
+  }
+
   // Notify assigned user about the delay
   if (job.assignedToId) {
     const { sendPushToUser } = await import("@/lib/push");

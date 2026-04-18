@@ -589,6 +589,141 @@ async function testDailyBriefStartingTomorrowFilter(siteId: string) {
   );
 }
 
+async function testHierarchyApplyAndAutoStretch(siteId: string) {
+  // H3: Parent Jobs exist as real rows, parent stretches with children, status follows.
+  // Build a synthetic "parent with 2 children" scenario directly via Prisma.
+  const existing = await prisma.plot.findFirst({ where: { siteId, plotNumber: "H3" } });
+  if (existing) {
+    const jobs = await prisma.job.findMany({ where: { plotId: existing.id }, select: { id: true } });
+    await prisma.materialOrder.deleteMany({ where: { jobId: { in: jobs.map((j) => j.id) } } });
+    await prisma.jobAction.deleteMany({ where: { jobId: { in: jobs.map((j) => j.id) } } });
+    await prisma.job.deleteMany({ where: { plotId: existing.id } });
+    await prisma.plot.delete({ where: { id: existing.id } });
+  }
+  const plot = await prisma.plot.create({
+    data: { siteId, plotNumber: "H3", name: "Test Plot H3" },
+  });
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const day = 24 * 60 * 60 * 1000;
+
+  const parent = await prisma.job.create({
+    data: {
+      name: "First Fix",
+      plotId: plot.id,
+      sortOrder: 100,
+      status: "NOT_STARTED",
+      startDate: new Date(today.getTime() + 1 * day),
+      endDate: new Date(today.getTime() + 10 * day),
+    },
+  });
+  const childA = await prisma.job.create({
+    data: {
+      name: "First Fix Electrics",
+      plotId: plot.id,
+      parentId: parent.id,
+      parentStage: "First Fix",
+      sortOrder: 101,
+      status: "NOT_STARTED",
+      startDate: new Date(today.getTime() + 1 * day),
+      endDate: new Date(today.getTime() + 5 * day),
+    },
+  });
+  const childB = await prisma.job.create({
+    data: {
+      name: "First Fix Plumbing",
+      plotId: plot.id,
+      parentId: parent.id,
+      parentStage: "First Fix",
+      sortOrder: 102,
+      status: "NOT_STARTED",
+      startDate: new Date(today.getTime() + 3 * day),
+      endDate: new Date(today.getTime() + 8 * day),
+    },
+  });
+
+  // H3-a: start childA → parent status becomes IN_PROGRESS
+  await req(`/api/jobs/${childA.id}/actions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "start" }),
+  });
+  const parentAfterStart = await prisma.job.findUnique({ where: { id: parent.id } });
+  record(
+    "H3-a: Starting a sub-job auto-moves parent to IN_PROGRESS",
+    parentAfterStart?.status === "IN_PROGRESS",
+    `parent.status=${parentAfterStart?.status}`
+  );
+
+  // H3-b: extend childB's endDate via cascade → parent endDate stretches
+  const newEnd = new Date(today.getTime() + 15 * day);
+  await req(`/api/jobs/${childB.id}/cascade`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ newEndDate: newEnd.toISOString(), confirm: true }),
+  });
+  const parentAfterStretch = await prisma.job.findUnique({ where: { id: parent.id } });
+  record(
+    "H3-b: Parent endDate stretches to latest child endDate after cascade",
+    !!parentAfterStretch?.endDate && parentAfterStretch.endDate.getTime() >= newEnd.getTime() - 2 * day, // tolerate working-day snap
+    `parent.endDate=${parentAfterStretch?.endDate?.toISOString()} expected >= ${newEnd.toISOString()}`
+  );
+
+  // H3-c: complete both children → parent becomes COMPLETED
+  await prisma.job.update({ where: { id: childA.id }, data: { status: "IN_PROGRESS", actualStartDate: today } });
+  await req(`/api/jobs/${childA.id}/actions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "complete" }),
+  });
+  await prisma.job.update({ where: { id: childB.id }, data: { status: "IN_PROGRESS", actualStartDate: today } });
+  await req(`/api/jobs/${childB.id}/actions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "complete" }),
+  });
+  const parentAfterComplete = await prisma.job.findUnique({ where: { id: parent.id } });
+  record(
+    "H3-c: Parent becomes COMPLETED when all children are COMPLETED",
+    parentAfterComplete?.status === "COMPLETED",
+    `parent.status=${parentAfterComplete?.status}`
+  );
+
+  // H3-d: Daily Brief excludes parents from action lists
+  // Set childA to start today, set parent too — verify only childA shows in jobsStartingToday
+  await prisma.job.update({ where: { id: childA.id }, data: { status: "NOT_STARTED", startDate: today, endDate: new Date(today.getTime() + 3 * day), actualStartDate: null, actualEndDate: null, signedOffAt: null, signedOffById: null } });
+  await prisma.job.update({ where: { id: childB.id }, data: { status: "NOT_STARTED", startDate: today, endDate: new Date(today.getTime() + 5 * day), actualStartDate: null, actualEndDate: null, signedOffAt: null, signedOffById: null } });
+  await prisma.job.update({ where: { id: parent.id }, data: { status: "NOT_STARTED", startDate: today, endDate: new Date(today.getTime() + 5 * day) } });
+  const briefRes = await req(`/api/sites/${siteId}/daily-brief`);
+  const brief = await briefRes.json();
+  const startingIds = new Set((brief.jobsStartingToday || []).map((j: { id: string }) => j.id));
+  record(
+    "H3-d: Daily Brief 'jobsStartingToday' excludes parent jobs",
+    startingIds.has(childA.id) && startingIds.has(childB.id) && !startingIds.has(parent.id),
+    `children shown=${startingIds.has(childA.id) && startingIds.has(childB.id)}, parent hidden=${!startingIds.has(parent.id)}`
+  );
+
+  // H3-e: plot.buildCompletePercent counts leaves only, not the parent
+  // With 2 children pending and 0 completed, pct should reflect 0% (ignoring parent).
+  // Complete childA → pct should be 50% not 33%.
+  await req(`/api/jobs/${childA.id}/actions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "start" }),
+  });
+  await req(`/api/jobs/${childA.id}/actions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "complete" }),
+  });
+  const plotAfter = await prisma.plot.findUnique({ where: { id: plot.id } });
+  record(
+    "H3-e: Plot buildCompletePercent counts leaf jobs only (1 of 2 = 50%)",
+    plotAfter?.buildCompletePercent === 50,
+    `pct=${plotAfter?.buildCompletePercent}`
+  );
+}
+
 /* ---------------- Runner ---------------- */
 
 async function main() {
@@ -619,6 +754,8 @@ async function main() {
     await testJobDeleteEventLog(userId, site.id);
     await testDailyBriefDedup(userId, site.id);
     await testSiteCreateGrantsUserSite(userId);
+    // H3 hierarchy
+    await testHierarchyApplyAndAutoStretch(site.id);
   } finally {
     console.log("\nCleaning up test data…");
     await cleanupTestSite();

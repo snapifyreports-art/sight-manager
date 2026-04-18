@@ -75,17 +75,59 @@ export async function createJobsFromTemplate(
   const warnings: TemplateApplyWarning[] = [];
   for (const templateJob of templateJobs) {
     if (templateJob.children && templateJob.children.length > 0) {
-      // HIERARCHICAL: create individual Job records for each sub-job
-      for (const child of templateJob.children) {
-        // Snap to working days — weekends cause downstream cascade/report issues
-        const jobStartDate = snapToWorkingDay(
-          addWeeks(plotStartDate, child.startWeek - 1),
-          "forward"
+      // HIERARCHICAL: create a REAL parent Job row, then children with parentId set.
+      // Parent's dates span from the earliest child start to the latest child end.
+      const childWindows = templateJob.children.map((c) => ({
+        start: snapToWorkingDay(addWeeks(plotStartDate, c.startWeek - 1), "forward"),
+        end: snapToWorkingDay(addDays(addWeeks(plotStartDate, c.endWeek - 1), 6), "forward"),
+      }));
+      const parentStart = new Date(Math.min(...childWindows.map((w) => w.start.getTime())));
+      const parentEnd = new Date(Math.max(...childWindows.map((w) => w.end.getTime())));
+
+      const parentJob = await tx.job.create({
+        data: {
+          name: templateJob.name,
+          description: templateJob.description,
+          plotId,
+          startDate: parentStart,
+          endDate: parentEnd,
+          originalStartDate: parentStart,
+          originalEndDate: parentEnd,
+          status: "NOT_STARTED",
+          stageCode: templateJob.stageCode || null,
+          weatherAffected: templateJob.weatherAffected ?? false,
+          weatherAffectedType: templateJob.weatherAffectedType ?? null,
+          // parentId is null — this IS the parent
+          parentStage: null,
+          sortOrder: templateJob.sortOrder * 100,
+          ...(assignedToId ? { assignedToId } : {}),
+        },
+      });
+
+      // Parent-stage contractor assignment (if template specified one on the parent)
+      if (templateJob.contactId) {
+        await tx.jobContractor.create({
+          data: { jobId: parentJob.id, contactId: templateJob.contactId },
+        });
+      }
+
+      // Parent-stage orders attach to the parent Job directly (clean, no hacky first-child routing)
+      if (templateJob.orders.length > 0) {
+        await createOrdersFromTemplate(
+          tx,
+          parentJob.id,
+          parentStart,
+          templateJob.orders,
+          supplierMappings,
+          templateJob.name,
+          warnings
         );
-        const jobEndDate = snapToWorkingDay(
-          addDays(addWeeks(plotStartDate, child.endWeek - 1), 6),
-          "forward"
-        );
+      }
+
+      // Create child Jobs with parentId pointing at the real parent
+      for (let i = 0; i < templateJob.children.length; i++) {
+        const child = templateJob.children[i];
+        const { start: jobStartDate, end: jobEndDate } = childWindows[i];
 
         const job = await tx.job.create({
           data: {
@@ -100,8 +142,9 @@ export async function createJobsFromTemplate(
             stageCode: child.stageCode || null,
             weatherAffected: child.weatherAffected ?? false,
             weatherAffectedType: child.weatherAffectedType ?? null,
+            parentId: parentJob.id,
             parentStage: templateJob.name,
-            sortOrder: templateJob.sortOrder * 100 + child.sortOrder,
+            sortOrder: templateJob.sortOrder * 100 + child.sortOrder + 1,
             ...(assignedToId ? { assignedToId } : {}),
           },
         });
@@ -123,35 +166,6 @@ export async function createJobsFromTemplate(
           `${templateJob.name} / ${child.name}`,
           warnings
         );
-      }
-
-      // Also create orders from the PARENT stage's template orders
-      // Attach them to the first child job
-      if (templateJob.orders.length > 0) {
-        // Find the first child job we just created
-        const firstChildJob = await tx.job.findFirst({
-          where: {
-            plotId,
-            parentStage: templateJob.name,
-          },
-          orderBy: { sortOrder: "asc" },
-        });
-
-        if (firstChildJob) {
-          const firstChildStartDate = addWeeks(
-            plotStartDate,
-            templateJob.children[0].startWeek - 1
-          );
-          await createOrdersFromTemplate(
-            tx,
-            firstChildJob.id,
-            firstChildStartDate,
-            templateJob.orders,
-            supplierMappings,
-            templateJob.name,
-            warnings
-          );
-        }
       }
     } else {
       // FLAT (legacy): create Job directly from template job

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { sessionHasPermission } from "@/lib/permissions";
+import { recomputeParentOf } from "@/lib/parent-job";
 
 export const dynamic = "force-dynamic";
 
@@ -132,6 +133,9 @@ export async function PUT(
     },
   });
 
+  // If this job has a parent, let the parent's dates/status follow
+  await recomputeParentOf(prisma, id);
+
   await prisma.eventLog.create({
     data: {
       type: "JOB_EDITED",
@@ -182,7 +186,14 @@ export async function DELETE(
     },
   });
 
+  const parentIdToRecompute = existing.parentId;
   await prisma.job.delete({ where: { id } });
+
+  // If this was a sub-job, parent's dates/status may need updating based on remaining siblings
+  if (parentIdToRecompute) {
+    const { recomputeParentFromChildren } = await import("@/lib/parent-job");
+    await recomputeParentFromChildren(prisma, parentIdToRecompute);
+  }
 
   return NextResponse.json({ success: true });
 }

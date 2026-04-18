@@ -34,6 +34,7 @@ export async function GET(
         plot: { siteId: id },
         startDate: { gte: dayStart, lte: dayEnd },
         status: { in: ["NOT_STARTED", "IN_PROGRESS"] },
+        children: { none: {} }, // leaf-only — parent stages are derived roll-ups
       },
       select: {
         id: true, name: true, status: true, sortOrder: true, plotId: true,
@@ -56,6 +57,7 @@ export async function GET(
         plot: { siteId: id },
         endDate: { gte: dayStart, lte: dayEnd },
         status: { not: "COMPLETED" },
+        children: { none: {} },
       },
       select: {
         id: true, name: true, status: true, plotId: true,
@@ -90,6 +92,7 @@ export async function GET(
         plot: { siteId: id },
         endDate: { lt: dayStart },
         status: { not: "COMPLETED" },
+        children: { none: {} },
       },
       select: {
         id: true, name: true, status: true, endDate: true, plotId: true,
@@ -104,6 +107,7 @@ export async function GET(
         plot: { siteId: id },
         status: "NOT_STARTED",
         startDate: { lt: dayStart },
+        children: { none: {} },
       },
       select: {
         id: true, name: true, startDate: true, endDate: true, sortOrder: true,
@@ -121,6 +125,7 @@ export async function GET(
         status: "NOT_STARTED",
         originalStartDate: { lt: dayStart },
         startDate: { gt: dayEnd },
+        children: { none: {} },
       },
       select: {
         id: true, name: true, startDate: true, endDate: true, originalStartDate: true, plotId: true,
@@ -136,7 +141,7 @@ export async function GET(
       take: 20,
     }),
     prisma.job.findMany({
-      where: { plot: { siteId: id }, status: "IN_PROGRESS" },
+      where: { plot: { siteId: id }, status: "IN_PROGRESS", children: { none: {} } },
       select: {
         id: true, name: true, endDate: true, plotId: true,
         plot: { select: { plotNumber: true, name: true } },
@@ -316,6 +321,7 @@ export async function GET(
         plot: { siteId: id },
         startDate: { gte: tomorrowStart, lte: tomorrowEnd },
         status: { in: ["NOT_STARTED", "IN_PROGRESS"] },
+        children: { none: {} },
       },
       select: {
         id: true, name: true, status: true,
@@ -330,6 +336,7 @@ export async function GET(
         plot: { siteId: id },
         status: "IN_PROGRESS",
         contractors: { none: {} },
+        children: { none: {} },
       },
       select: {
         id: true, name: true, plotId: true,
@@ -344,6 +351,7 @@ export async function GET(
         plot: { siteId: id },
         status: "IN_PROGRESS",
         assignedToId: null,
+        children: { none: {} },
       },
       select: {
         id: true, name: true, plotId: true,
@@ -360,6 +368,7 @@ export async function GET(
           { signOffNotes: null },
           { signOffNotes: "" },
         ],
+        children: { none: {} },
       },
       select: {
         id: true, name: true, plotId: true, signOffNotes: true,
@@ -374,6 +383,7 @@ export async function GET(
         plot: { siteId: id },
         status: "COMPLETED",
         signedOffAt: null,
+        children: { none: {} },
       },
       select: {
         id: true, name: true, status: true, actualEndDate: true, plotId: true,
@@ -497,7 +507,8 @@ export async function GET(
       take: 20,
     }),
     prisma.plot.count({ where: { siteId: id } }),
-    prisma.job.count({ where: { plot: { siteId: id } } }),
+    // Only count leaf jobs — parent stages are derived roll-ups, counting them would double-count progress
+    prisma.job.count({ where: { plot: { siteId: id }, children: { none: {} } } }),
     // IN_PROGRESS jobs where a later job on the same plot has already been started
     prisma.job.findMany({
       where: { plot: { siteId: id }, status: "IN_PROGRESS" },
@@ -627,7 +638,7 @@ export async function GET(
 
   const [completedJobs, weatherForecast] = await Promise.all([
     prisma.job.count({
-      where: { plot: { siteId: id }, status: "COMPLETED" },
+      where: { plot: { siteId: id }, status: "COMPLETED", children: { none: {} } },
     }),
     weatherPromise,
   ]);

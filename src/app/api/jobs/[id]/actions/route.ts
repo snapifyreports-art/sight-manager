@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { sendPushToUser } from "@/lib/push";
 import { getServerCurrentDate } from "@/lib/dev-date";
 import { sessionHasPermission } from "@/lib/permissions";
+import { recomputeParentOf } from "@/lib/parent-job";
 import type { EventType, JobStatus } from "@prisma/client";
 
 export const dynamic = "force-dynamic";
@@ -277,10 +278,16 @@ export async function POST(
     }
   }
 
-  // Auto-update plot buildCompletePercent when job status changes
+  // If this job has a parent (is a sub-job), recompute parent's dates/status
+  // so the parent stretches with its children and its status follows theirs
+  await recomputeParentOf(prisma, id);
+
+  // Auto-update plot buildCompletePercent when job status changes.
+  // Only count LEAF jobs (jobs with no children) — parent jobs are derived
+  // roll-ups, counting them would double-count the plot's true progress.
   if (action === "complete" || action === "start") {
     const plotJobs = await prisma.job.findMany({
-      where: { plotId: existing.plotId },
+      where: { plotId: existing.plotId, children: { none: {} } },
       select: { status: true },
     });
     const total = plotJobs.length;

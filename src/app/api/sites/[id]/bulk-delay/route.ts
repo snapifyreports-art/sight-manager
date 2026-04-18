@@ -186,6 +186,21 @@ export async function POST(
           delayReasonType,
         },
       });
+
+      // Recompute parents of any shifted child jobs on this plot
+      const { recomputeParentFromChildren } = await import("@/lib/parent-job");
+      const shiftedIds = [currentJob.id, ...cascade.jobUpdates.map((u) => u.jobId)];
+      const parentIds = new Set<string>();
+      for (const shiftedId of shiftedIds) {
+        const shiftedJob = await tx.job.findUnique({
+          where: { id: shiftedId },
+          select: { parentId: true },
+        });
+        if (shiftedJob?.parentId) parentIds.add(shiftedJob.parentId);
+      }
+      for (const parentId of parentIds) {
+        await recomputeParentFromChildren(tx, parentId);
+      }
     });
 
     results.push({

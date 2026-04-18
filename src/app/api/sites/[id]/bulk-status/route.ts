@@ -117,9 +117,16 @@ export async function POST(
         },
       });
 
+      // If this job has a parent, let the parent's dates/status follow
+      {
+        const { recomputeParentOf } = await import("@/lib/parent-job");
+        await recomputeParentOf(prisma, jobId);
+      }
+
       // Recalculate plot buildCompletePercent — mirrors /api/jobs/[id]/actions
+      // Only count LEAF jobs (children: none) — parents are derived, would double-count
       const plotJobs = await prisma.job.findMany({
-        where: { plotId: job.plotId },
+        where: { plotId: job.plotId, children: { none: {} } },
         select: { status: true },
       });
       const total = plotJobs.length;
