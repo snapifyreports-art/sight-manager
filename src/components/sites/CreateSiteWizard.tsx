@@ -34,6 +34,7 @@ import {
   DialogFooter,
   DialogClose,
 } from "@/components/ui/dialog";
+import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 
 // ---------- Types ----------
 
@@ -122,10 +123,23 @@ export function CreateSiteWizard({
   const [sitePostcode, setSitePostcode] = useState("");
   const [siteManagerId, setSiteManagerId] = useState("");
   const [users, setUsers] = useState<{ id: string; name: string }[]>([]);
+  const toast = useToast();
 
   useEffect(() => {
-    fetch("/api/users").then((r) => r.json()).then((data: { id: string; name: string }[]) => setUsers(data.map((u) => ({ id: u.id, name: u.name })))).catch(() => {});
-  }, []);
+    (async () => {
+      try {
+        const res = await fetch("/api/users");
+        if (!res.ok) {
+          toast.error(await fetchErrorMessage(res, "Failed to load users"));
+          return;
+        }
+        const data: { id: string; name: string }[] = await res.json();
+        setUsers(data.map((u) => ({ id: u.id, name: u.name })));
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "Failed to load users");
+      }
+    })();
+  }, [toast]);
 
   // Step 2: Plot batches
   const [plotBatches, setPlotBatches] = useState<PlotBatch[]>([]);
@@ -176,17 +190,25 @@ export function CreateSiteWizard({
     if (step === "plot-batches" && templates.length === 0) {
       setLoadingTemplates(true);
       Promise.all([
-        fetch("/api/plot-templates").then((r) => r.json()),
-        fetch("/api/suppliers").then((r) => r.json()),
+        fetch("/api/plot-templates").then(async (r) => {
+          if (!r.ok) throw new Error(await fetchErrorMessage(r, "Failed to load plot templates"));
+          return r.json();
+        }),
+        fetch("/api/suppliers").then(async (r) => {
+          if (!r.ok) throw new Error(await fetchErrorMessage(r, "Failed to load suppliers"));
+          return r.json();
+        }),
       ])
         .then(([tpls, sups]) => {
           setTemplates(tpls);
           setSuppliers(sups);
         })
-        .catch(console.error)
+        .catch((e: unknown) => {
+          toast.error(e instanceof Error ? e.message : "Failed to load templates and suppliers");
+        })
         .finally(() => setLoadingTemplates(false));
     }
-  }, [step, templates.length]);
+  }, [step, templates.length, toast]);
 
   function resetBatchForm() {
     setBatchMode("template");

@@ -32,6 +32,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import { fetchErrorMessage } from "@/components/ui/toast";
 
 interface Job {
   id: string;
@@ -737,9 +738,10 @@ function ContractorCard({
 }
 
 export function ContractorComms({ siteId }: { siteId: string }) {
-  const [loaded, setLoaded] = useState<{ siteId: string; data: CommsData | null } | null>(null);
+  const [loaded, setLoaded] = useState<{ siteId: string; data: CommsData | null; error: string | null } | null>(null);
   const data = loaded?.siteId === siteId ? loaded.data : null;
   const loading = loaded?.siteId !== siteId;
+  const error = loaded?.siteId === siteId ? loaded.error : null;
   const [filter, setFilter] = useState<string | null>(null); // contactId or null = all
 
   // Tick used to force a refetch from useRefreshOnFocus (incremented on focus)
@@ -748,13 +750,18 @@ export function ContractorComms({ siteId }: { siteId: string }) {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const res = await fetch(`/api/sites/${siteId}/contractor-comms`);
-      if (cancelled) return;
-      if (res.ok) {
+      try {
+        const res = await fetch(`/api/sites/${siteId}/contractor-comms`);
+        if (cancelled) return;
+        if (!res.ok) {
+          const msg = await fetchErrorMessage(res, "Failed to load contractor comms");
+          setLoaded({ siteId, data: null, error: msg });
+          return;
+        }
         const json = await res.json();
-        if (!cancelled) setLoaded({ siteId, data: json });
-      } else {
-        setLoaded({ siteId, data: null });
+        if (!cancelled) setLoaded({ siteId, data: json, error: null });
+      } catch (e) {
+        if (!cancelled) setLoaded({ siteId, data: null, error: e instanceof Error ? e.message : "Network error" });
       }
     })();
     return () => { cancelled = true; };
@@ -767,6 +774,16 @@ export function ContractorComms({ siteId }: { siteId: string }) {
     return (
       <div className="flex items-center justify-center py-16">
         <Loader2 className="size-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+        <p className="font-medium">Failed to load contractor comms</p>
+        <p className="text-xs">{error}</p>
+        <button onClick={() => setLoaded(null)} className="mt-2 text-xs underline">Retry</button>
       </div>
     );
   }

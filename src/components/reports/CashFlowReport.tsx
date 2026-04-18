@@ -26,6 +26,7 @@ import {
   Legend,
   ResponsiveContainer,
 } from "recharts";
+import { fetchErrorMessage } from "@/components/ui/toast";
 
 interface MonthData {
   month: string;
@@ -68,19 +69,28 @@ export function CashFlowReport({ siteId }: { siteId: string }) {
   const [dateMode, setDateMode] = useState<DateMode>("current");
   // Tag fetched data with the request key so loading is derivable.
   const requestKey = `${siteId}|${dateMode}`;
-  const [loaded, setLoaded] = useState<{ key: string; data: CashFlowData | null } | null>(null);
+  const [loaded, setLoaded] = useState<{ key: string; data: CashFlowData | null; error: string | null } | null>(null);
   const data = loaded?.key === requestKey ? loaded.data : null;
   const loading = loaded?.key !== requestKey;
+  const error = loaded?.key === requestKey ? loaded.error : null;
 
   useEffect(() => {
     let cancelled = false;
-    fetch(`/api/sites/${siteId}/cash-flow?dateMode=${dateMode}`)
-      .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json();
-      })
-      .then((d) => { if (!cancelled) setLoaded({ key: requestKey, data: d }); })
-      .catch(() => { if (!cancelled) setLoaded({ key: requestKey, data: null }); });
+    (async () => {
+      try {
+        const res = await fetch(`/api/sites/${siteId}/cash-flow?dateMode=${dateMode}`);
+        if (cancelled) return;
+        if (!res.ok) {
+          const msg = await fetchErrorMessage(res, "Failed to load cash flow");
+          setLoaded({ key: requestKey, data: null, error: msg });
+          return;
+        }
+        const d = await res.json();
+        if (!cancelled) setLoaded({ key: requestKey, data: d, error: null });
+      } catch (e) {
+        if (!cancelled) setLoaded({ key: requestKey, data: null, error: e instanceof Error ? e.message : "Network error" });
+      }
+    })();
     return () => { cancelled = true; };
   }, [siteId, dateMode, requestKey]);
 
@@ -88,6 +98,16 @@ export function CashFlowReport({ siteId }: { siteId: string }) {
     return (
       <div className="flex items-center justify-center py-12">
         <Loader2 className="size-5 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+        <p className="font-medium">Failed to load cash flow</p>
+        <p className="text-xs">{error}</p>
+        <button onClick={() => setLoaded(null)} className="mt-2 text-xs underline">Retry</button>
       </div>
     );
   }

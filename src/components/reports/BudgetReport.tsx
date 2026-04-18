@@ -19,6 +19,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { fetchErrorMessage } from "@/components/ui/toast";
 
 interface BudgetReportProps {
   siteId: string;
@@ -108,17 +109,29 @@ function VarianceIndicator({ variance, percent }: { variance: number; percent: n
 export function BudgetReport({ siteId }: BudgetReportProps) {
   // Store fetched data with the siteId it belongs to so `loading` can be
   // derived without calling setState inside an effect.
-  const [loaded, setLoaded] = useState<{ siteId: string; data: BudgetData | null } | null>(null);
+  const [loaded, setLoaded] = useState<{ siteId: string; data: BudgetData | null; error: string | null } | null>(null);
   const data = loaded?.siteId === siteId ? loaded.data : null;
   const loading = loaded?.siteId !== siteId;
+  const error = loaded?.siteId === siteId ? loaded.error : null;
   const [expandedPlots, setExpandedPlots] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     let cancelled = false;
-    fetch(`/api/sites/${siteId}/budget-report`)
-      .then((r) => r.json())
-      .then((d) => { if (!cancelled) setLoaded({ siteId, data: d }); })
-      .catch(() => { if (!cancelled) setLoaded({ siteId, data: null }); });
+    (async () => {
+      try {
+        const res = await fetch(`/api/sites/${siteId}/budget-report`);
+        if (cancelled) return;
+        if (!res.ok) {
+          const msg = await fetchErrorMessage(res, "Failed to load budget report");
+          setLoaded({ siteId, data: null, error: msg });
+          return;
+        }
+        const d = await res.json();
+        if (!cancelled) setLoaded({ siteId, data: d, error: null });
+      } catch (e) {
+        if (!cancelled) setLoaded({ siteId, data: null, error: e instanceof Error ? e.message : "Network error" });
+      }
+    })();
     return () => { cancelled = true; };
   }, [siteId]);
 
@@ -135,6 +148,16 @@ export function BudgetReport({ siteId }: BudgetReportProps) {
     return (
       <div className="flex items-center justify-center py-12">
         <Loader2 className="size-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+        <p className="font-medium">Failed to load budget report</p>
+        <p className="text-xs">{error}</p>
+        <button onClick={() => setLoaded(null)} className="mt-2 text-xs underline">Retry</button>
       </div>
     );
   }

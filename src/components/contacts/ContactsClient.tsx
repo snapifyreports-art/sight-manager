@@ -145,15 +145,17 @@ export function ContactsClient({
   const handleOpenDetail = useCallback(async (contactId: string) => {
     try {
       const res = await fetch(`/api/contacts/${contactId}`, { cache: "no-store" });
-      if (res.ok) {
-        const data = await res.json();
-        setSelectedContractor(data);
-        setSheetOpen(true);
+      if (!res.ok) {
+        toast.error(await fetchErrorMessage(res, "Failed to load contractor details"));
+        return;
       }
+      const data = await res.json();
+      setSelectedContractor(data);
+      setSheetOpen(true);
     } catch (err) {
-      console.error("Failed to fetch contractor detail:", err);
+      toast.error(err instanceof Error ? err.message : "Failed to load contractor details");
     }
-  }, []);
+  }, [toast]);
 
   // Save (create or update)
   async function handleSave() {

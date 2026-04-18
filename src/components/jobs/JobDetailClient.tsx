@@ -349,15 +349,25 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
   // Snags linked to this job
   const [jobSnags, setJobSnags] = useState<JobSnag[]>([]);
   useEffect(() => {
-    fetch(`/api/plots/${initialJob.plotId}/snags`)
-      .then((r) => r.json())
-      .then((data: Array<JobSnag & { jobId?: string | null }>) => {
-        if (Array.isArray(data)) {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/plots/${initialJob.plotId}/snags`);
+        if (cancelled) return;
+        if (!res.ok) {
+          toast.error(await fetchErrorMessage(res, "Failed to load snags"));
+          return;
+        }
+        const data: Array<JobSnag & { jobId?: string | null }> = await res.json();
+        if (!cancelled && Array.isArray(data)) {
           setJobSnags(data.filter((s) => s.jobId === initialJob.id));
         }
-      })
-      .catch(console.error);
-  }, [initialJob.plotId, initialJob.id]);
+      } catch (e) {
+        if (!cancelled) toast.error(e instanceof Error ? e.message : "Failed to load snags");
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [initialJob.plotId, initialJob.id, toast]);
 
   // Contractor dialog state
   const [contractorDialogOpen, setContractorDialogOpen] = useState(false);
@@ -370,20 +380,28 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
   useEffect(() => {
     if (contractorDialogOpen && allContractors.length === 0) {
       setLoadingContractors(true);
-      fetch("/api/contacts?type=CONTRACTOR")
-        .then((r) => r.json())
-        .then((data) => {
+      (async () => {
+        try {
+          const res = await fetch("/api/contacts?type=CONTRACTOR");
+          if (!res.ok) {
+            toast.error(await fetchErrorMessage(res, "Failed to load contractors"));
+            return;
+          }
+          const data = await res.json();
           setAllContractors(data);
-        })
-        .catch(console.error)
-        .finally(() => setLoadingContractors(false));
+        } catch (e) {
+          toast.error(e instanceof Error ? e.message : "Failed to load contractors");
+        } finally {
+          setLoadingContractors(false);
+        }
+      })();
     }
     if (contractorDialogOpen) {
       setSelectedContractorIds(
         new Set(job.contractors.map((c) => c.contactId))
       );
     }
-  }, [contractorDialogOpen, allContractors.length, job.contractors]);
+  }, [contractorDialogOpen, allContractors.length, job.contractors, toast]);
 
   const handleSaveContractors = useCallback(async () => {
     setSavingContractors(true);

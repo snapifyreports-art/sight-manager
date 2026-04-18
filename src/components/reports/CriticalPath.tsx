@@ -27,6 +27,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { fetchErrorMessage } from "@/components/ui/toast";
 
 interface CriticalPathProps {
   siteId: string;
@@ -77,24 +78,34 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 export function CriticalPath({ siteId }: CriticalPathProps) {
-  const [loaded, setLoaded] = useState<{ siteId: string; data: PathData | null } | null>(null);
+  const [loaded, setLoaded] = useState<{ siteId: string; data: PathData | null; error: string | null } | null>(null);
   const data = loaded?.siteId === siteId ? loaded.data : null;
   const loading = loaded?.siteId !== siteId;
+  const error = loaded?.siteId === siteId ? loaded.error : null;
   const [selectedPlotId, setSelectedPlotId] = useState<string>("all");
   const [expandedPlots, setExpandedPlots] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     let cancelled = false;
-    fetch(`/api/sites/${siteId}/critical-path`)
-      .then((r) => r.json())
-      .then((d) => {
+    (async () => {
+      try {
+        const res = await fetch(`/api/sites/${siteId}/critical-path`);
         if (cancelled) return;
-        setLoaded({ siteId, data: d });
+        if (!res.ok) {
+          const msg = await fetchErrorMessage(res, "Failed to load critical path");
+          setLoaded({ siteId, data: null, error: msg });
+          return;
+        }
+        const d = await res.json();
+        if (cancelled) return;
+        setLoaded({ siteId, data: d, error: null });
         if (d.siteCriticalPlotId) {
           setExpandedPlots(new Set([d.siteCriticalPlotId]));
         }
-      })
-      .catch(() => { if (!cancelled) setLoaded({ siteId, data: null }); });
+      } catch (e) {
+        if (!cancelled) setLoaded({ siteId, data: null, error: e instanceof Error ? e.message : "Network error" });
+      }
+    })();
     return () => { cancelled = true; };
   }, [siteId]);
 
@@ -111,6 +122,16 @@ export function CriticalPath({ siteId }: CriticalPathProps) {
     return (
       <div className="flex items-center justify-center py-12">
         <Loader2 className="size-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+        <p className="font-medium">Failed to load critical path</p>
+        <p className="text-xs">{error}</p>
+        <button onClick={() => setLoaded(null)} className="mt-2 text-xs underline">Retry</button>
       </div>
     );
   }

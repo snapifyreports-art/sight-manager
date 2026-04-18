@@ -260,26 +260,54 @@ export function SiteOrders({ siteId }: SiteOrdersProps) {
   };
 
   const refreshOrders = () => {
-    fetch(`/api/sites/${siteId}/orders`)
-      .then((r) => r.json())
-      .then((data) => { setOrders(data.orders || data); if (data.site) setSiteInfo(data.site); })
-      .catch(console.error);
+    (async () => {
+      try {
+        const res = await fetch(`/api/sites/${siteId}/orders`);
+        if (!res.ok) {
+          toast.error(await fetchErrorMessage(res, "Failed to refresh orders"));
+          return;
+        }
+        const data = await res.json();
+        setOrders(data.orders || data);
+        if (data.site) setSiteInfo(data.site);
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "Failed to refresh orders");
+      }
+    })();
   };
 
   useEffect(() => {
-    fetch(`/api/sites/${siteId}/orders`)
-      .then((r) => r.json())
-      .then((data) => { setOrders(data.orders || data); if (data.site) setSiteInfo(data.site); })
-      .finally(() => setLoading(false));
-  }, [siteId]);
+    (async () => {
+      try {
+        const res = await fetch(`/api/sites/${siteId}/orders`);
+        if (!res.ok) {
+          toast.error(await fetchErrorMessage(res, "Failed to load orders"));
+          return;
+        }
+        const data = await res.json();
+        setOrders(data.orders || data);
+        if (data.site) setSiteInfo(data.site);
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "Failed to load orders");
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [siteId, toast]);
 
   // Load wizard data when dialog opens
   useEffect(() => {
     if (!wizardOpen) return;
     setWizardLoading(true);
     Promise.all([
-      fetch(`/api/sites/${siteId}/programme`).then((r) => r.json()),
-      fetch("/api/suppliers").then((r) => r.json()),
+      fetch(`/api/sites/${siteId}/programme`).then(async (r) => {
+        if (!r.ok) throw new Error(await fetchErrorMessage(r, "Failed to load programme"));
+        return r.json();
+      }),
+      fetch("/api/suppliers").then(async (r) => {
+        if (!r.ok) throw new Error(await fetchErrorMessage(r, "Failed to load suppliers"));
+        return r.json();
+      }),
     ])
       .then(([programme, suppliers]) => {
         const plots: WizardPlot[] = (programme.plots ?? []).map((p: WizardPlot) => ({
@@ -299,9 +327,11 @@ export function SiteOrders({ siteId }: SiteOrdersProps) {
         setWizardSuppliers(Array.isArray(suppliers) ? suppliers : []);
         setSelectedPlotIds(new Set(plots.map((p) => p.id)));
       })
-      .catch(console.error)
+      .catch((e: unknown) => {
+        toast.error(e instanceof Error ? e.message : "Failed to load wizard data");
+      })
       .finally(() => setWizardLoading(false));
-  }, [wizardOpen, siteId]);
+  }, [wizardOpen, siteId, toast]);
 
   // Reset wizard when closed
   const openWizard = () => {
@@ -322,11 +352,22 @@ export function SiteOrders({ siteId }: SiteOrdersProps) {
   // Fetch supplier materials when a supplier is selected
   useEffect(() => {
     if (!supplierId) { setSupplierMaterials([]); setCatalogueOpen(false); return; }
-    fetch(`/api/suppliers/${supplierId}/materials`)
-      .then((r) => r.json())
-      .then((data) => setSupplierMaterials(Array.isArray(data) ? data : []))
-      .catch(() => setSupplierMaterials([]));
-  }, [supplierId]);
+    (async () => {
+      try {
+        const res = await fetch(`/api/suppliers/${supplierId}/materials`);
+        if (!res.ok) {
+          toast.error(await fetchErrorMessage(res, "Failed to load supplier materials"));
+          setSupplierMaterials([]);
+          return;
+        }
+        const data = await res.json();
+        setSupplierMaterials(Array.isArray(data) ? data : []);
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "Failed to load supplier materials");
+        setSupplierMaterials([]);
+      }
+    })();
+  }, [supplierId, toast]);
 
   // Unique job names across selected plots, grouped by parentStage
   const availableJobGroups = useMemo(() => {

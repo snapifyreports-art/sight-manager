@@ -19,6 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 
 interface ManualByMaterial {
   name: string;
@@ -83,10 +84,23 @@ export function SiteQuantsClient({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const toast = useToast();
 
   useEffect(() => {
-    fetch("/api/suppliers").then((r) => r.json()).then((ss) => setSuppliers(ss.map((s: Supplier) => ({ id: s.id, name: s.name })))).catch(() => {});
-  }, []);
+    (async () => {
+      try {
+        const res = await fetch("/api/suppliers");
+        if (!res.ok) {
+          toast.error(await fetchErrorMessage(res, "Failed to load suppliers"));
+          return;
+        }
+        const ss = await res.json();
+        setSuppliers(ss.map((s: Supplier) => ({ id: s.id, name: s.name })));
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "Failed to load suppliers");
+      }
+    })();
+  }, [toast]);
 
   // Add-manual dialog
   const [manualOpen, setManualOpen] = useState(false);

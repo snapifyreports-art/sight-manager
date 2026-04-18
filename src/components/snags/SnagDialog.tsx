@@ -139,6 +139,7 @@ export function SnagDialog({
   const [contacts, setContacts] = useState<SnagContact[]>([]);
   const [jobs, setJobs] = useState<JobItem[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   // Close snag state (view mode)
   const [showCloseForm, setShowCloseForm] = useState(false);
@@ -165,21 +166,36 @@ export function SnagDialog({
 
     if ((!usersProp || usersProp.length === 0) && users.length === 0) {
       setLoadingUsers(true);
-      fetch("/api/users", { cache: "no-store" })
-        .then((r) => r.json())
-        .then((data) => {
+      (async () => {
+        try {
+          const res = await fetch("/api/users", { cache: "no-store" });
+          if (!res.ok) {
+            const msg = await fetchErrorMessage(res, "Failed to load users");
+            setLoadError((prev) => prev ?? msg);
+            return;
+          }
+          const data = await res.json();
           if (Array.isArray(data)) {
             setUsers(data.map((u: SnagUser) => ({ id: u.id, name: u.name })));
           }
-        })
-        .catch(console.error)
-        .finally(() => setLoadingUsers(false));
+        } catch (e) {
+          setLoadError((prev) => prev ?? (e instanceof Error ? e.message : "Failed to load users"));
+        } finally {
+          setLoadingUsers(false);
+        }
+      })();
     }
 
     if (contacts.length === 0) {
-      fetch("/api/contacts?type=CONTRACTOR", { cache: "no-store" })
-        .then((r) => r.json())
-        .then((data) => {
+      (async () => {
+        try {
+          const res = await fetch("/api/contacts?type=CONTRACTOR", { cache: "no-store" });
+          if (!res.ok) {
+            const msg = await fetchErrorMessage(res, "Failed to load contractors");
+            setLoadError((prev) => prev ?? msg);
+            return;
+          }
+          const data = await res.json();
           if (Array.isArray(data)) {
             setContacts(
               data.map((c: SnagContact & { company?: string }) => ({
@@ -190,8 +206,10 @@ export function SnagDialog({
               }))
             );
           }
-        })
-        .catch(console.error);
+        } catch (e) {
+          setLoadError((prev) => prev ?? (e instanceof Error ? e.message : "Failed to load contractors"));
+        }
+      })();
     }
   }, [open, usersProp, users.length, contacts.length]);
 
@@ -199,15 +217,23 @@ export function SnagDialog({
   useEffect(() => {
     if (!open || !plotId) return;
 
-    fetch(`/api/plots/${plotId}`, { cache: "no-store" })
-      .then((r) => r.json())
-      .then((data) => {
+    (async () => {
+      try {
+        const res = await fetch(`/api/plots/${plotId}`, { cache: "no-store" });
+        if (!res.ok) {
+          const msg = await fetchErrorMessage(res, "Failed to load jobs");
+          setLoadError((prev) => prev ?? msg);
+          return;
+        }
+        const data = await res.json();
         // The plot endpoint should include jobs — if not, fetch separately
         if (data.jobs && Array.isArray(data.jobs)) {
           setJobs(data.jobs);
         }
-      })
-      .catch(console.error);
+      } catch (e) {
+        setLoadError((prev) => prev ?? (e instanceof Error ? e.message : "Failed to load jobs"));
+      }
+    })();
   }, [open, plotId]);
 
   // Fetch photos for existing snags
@@ -218,14 +244,28 @@ export function SnagDialog({
     }
 
     setLoadingPhotos(true);
-    fetch(`/api/snags/${snag.id}/photos`, { cache: "no-store" })
-      .then((r) => r.json())
-      .then((data) => {
+    (async () => {
+      try {
+        const res = await fetch(`/api/snags/${snag.id}/photos`, { cache: "no-store" });
+        if (!res.ok) {
+          const msg = await fetchErrorMessage(res, "Failed to load photos");
+          setLoadError((prev) => prev ?? msg);
+          return;
+        }
+        const data = await res.json();
         if (Array.isArray(data)) setSnagPhotos(data);
-      })
-      .catch(console.error)
-      .finally(() => setLoadingPhotos(false));
+      } catch (e) {
+        setLoadError((prev) => prev ?? (e instanceof Error ? e.message : "Failed to load photos"));
+      } finally {
+        setLoadingPhotos(false);
+      }
+    })();
   }, [open, snag]);
+
+  // Clear load error when dialog closes
+  useEffect(() => {
+    if (!open) setLoadError(null);
+  }, [open]);
 
   // Sync initialPhotos when they change
   useEffect(() => {
@@ -566,6 +606,19 @@ export function SnagDialog({
               {!isEditing ? "Raise Snag" : viewMode ? "Snag Details" : "Edit Snag"}
             </DialogTitle>
           </DialogHeader>
+
+          {loadError && (
+            <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+              <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+              <div className="flex-1">
+                <p className="font-medium">Some data failed to load — dropdowns may be incomplete.</p>
+                <p>{loadError}</p>
+              </div>
+              <button onClick={() => setLoadError(null)} className="text-red-600 hover:text-red-800" aria-label="Dismiss">
+                <X className="size-3.5" />
+              </button>
+            </div>
+          )}
 
           {/* ── View Mode ── */}
           {isEditing && viewMode && snag && (

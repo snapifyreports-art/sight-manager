@@ -31,6 +31,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { fetchErrorMessage } from "@/components/ui/toast";
 
 interface WeeklySiteReportProps {
   siteId: string;
@@ -109,26 +110,46 @@ export function WeeklySiteReport({ siteId }: WeeklySiteReportProps) {
     startOfWeek(getCurrentDate(), { weekStartsOn: 1 })
   );
   const reqKey = `${siteId}|${format(weekDate, "yyyy-MM-dd")}|${devDate ?? ""}`;
-  const [loaded, setLoaded] = useState<{ key: string; data: ReportData | null } | null>(null);
+  const [loaded, setLoaded] = useState<{ key: string; data: ReportData | null; error: string | null } | null>(null);
   const data = loaded?.key === reqKey ? loaded.data : null;
   const loading = loaded?.key !== reqKey;
+  const error = loaded?.key === reqKey ? loaded.error : null;
   const [scheduleStatuses, setScheduleStatuses] = useState<Array<{ plotId: string; plotNumber: string | null; status: string; daysDeviation: number; awaitingRestart: boolean }>>([]);
 
   useEffect(() => {
     let cancelled = false;
     const dateStr = format(weekDate, "yyyy-MM-dd");
-    fetch(`/api/sites/${siteId}/weekly-report?weekOf=${dateStr}`)
-      .then((r) => r.json())
-      .then((d) => { if (!cancelled) setLoaded({ key: reqKey, data: d }); })
-      .catch(() => { if (!cancelled) setLoaded({ key: reqKey, data: null }); });
+    (async () => {
+      try {
+        const res = await fetch(`/api/sites/${siteId}/weekly-report?weekOf=${dateStr}`);
+        if (cancelled) return;
+        if (!res.ok) {
+          const msg = await fetchErrorMessage(res, "Failed to load weekly report");
+          setLoaded({ key: reqKey, data: null, error: msg });
+          return;
+        }
+        const d = await res.json();
+        if (!cancelled) setLoaded({ key: reqKey, data: d, error: null });
+      } catch (e) {
+        if (!cancelled) setLoaded({ key: reqKey, data: null, error: e instanceof Error ? e.message : "Network error" });
+      }
+    })();
     return () => { cancelled = true; };
   }, [siteId, weekDate, devDate, reqKey]);
 
   useEffect(() => {
-    fetch(`/api/sites/${siteId}/plot-schedules`)
-      .then((r) => r.json())
-      .then(setScheduleStatuses)
-      .catch(() => {});
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/sites/${siteId}/plot-schedules`);
+        if (cancelled || !res.ok) return;
+        const d = await res.json();
+        if (!cancelled) setScheduleStatuses(d);
+      } catch {
+        // Non-critical supplementary data — fail silently
+      }
+    })();
+    return () => { cancelled = true; };
   }, [siteId]);
 
   const prevWeek = () => setWeekDate((d) => subWeeks(d, 1));
@@ -140,6 +161,16 @@ export function WeeklySiteReport({ siteId }: WeeklySiteReportProps) {
     return (
       <div className="flex items-center justify-center py-12">
         <Loader2 className="size-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+        <p className="font-medium">Failed to load weekly report</p>
+        <p className="text-xs">{error}</p>
+        <button onClick={() => setLoaded(null)} className="mt-2 text-xs underline">Retry</button>
       </div>
     );
   }

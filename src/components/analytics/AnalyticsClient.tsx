@@ -36,6 +36,7 @@ import {
   BarChart3,
   CloudRain,
 } from "lucide-react";
+import { fetchErrorMessage } from "@/components/ui/toast";
 
 // ---------- Types ----------
 
@@ -230,19 +231,31 @@ export function AnalyticsClient() {
   const searchParams = useSearchParams();
   const siteFilter = searchParams.get("site") ?? "";
   const reqKey = `${siteFilter}|${devDate ?? ""}`;
-  const [loaded, setLoaded] = useState<{ key: string; data: AnalyticsData | null } | null>(null);
+  const [loaded, setLoaded] = useState<{ key: string; data: AnalyticsData | null; error: string | null } | null>(null);
   const data = loaded?.key === reqKey ? loaded.data : null;
   const loading = loaded?.key !== reqKey;
+  const error = loaded?.key === reqKey ? loaded.error : null;
 
   useEffect(() => {
     let cancelled = false;
     const url = siteFilter
       ? `/api/analytics?siteId=${siteFilter}`
       : "/api/analytics";
-    fetch(url)
-      .then((r) => r.json())
-      .then((d) => { if (!cancelled) setLoaded({ key: reqKey, data: d }); })
-      .catch(() => { if (!cancelled) setLoaded({ key: reqKey, data: null }); });
+    (async () => {
+      try {
+        const res = await fetch(url);
+        if (cancelled) return;
+        if (!res.ok) {
+          const msg = await fetchErrorMessage(res, "Failed to load analytics");
+          setLoaded({ key: reqKey, data: null, error: msg });
+          return;
+        }
+        const d = await res.json();
+        if (!cancelled) setLoaded({ key: reqKey, data: d, error: null });
+      } catch (e) {
+        if (!cancelled) setLoaded({ key: reqKey, data: null, error: e instanceof Error ? e.message : "Network error" });
+      }
+    })();
     return () => { cancelled = true; };
   }, [siteFilter, devDate, reqKey]);
 
@@ -250,6 +263,16 @@ export function AnalyticsClient() {
     return (
       <div className="flex items-center justify-center py-24">
         <Loader2 className="size-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+        <p className="font-medium">Failed to load analytics</p>
+        <p className="text-xs">{error}</p>
+        <button onClick={() => setLoaded(null)} className="mt-2 text-xs underline">Retry</button>
       </div>
     );
   }

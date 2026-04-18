@@ -56,34 +56,49 @@ interface AvailableDoc {
 export function HandoverChecklist({ plotId }: { plotId: string }) {
   const [data, setData] = useState<HandoverData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
   const [docs, setDocs] = useState<AvailableDoc[]>([]);
   const [linkingId, setLinkingId] = useState<string | null>(null);
   const toast = useToast();
 
   const fetchData = useCallback(() => {
-    fetch(`/api/plots/${plotId}/handover`)
-      .then((r) => r.json())
-      .then(setData)
-      .finally(() => setLoading(false));
+    setLoadError(null);
+    (async () => {
+      try {
+        const res = await fetch(`/api/plots/${plotId}/handover`);
+        if (!res.ok) {
+          setLoadError(await fetchErrorMessage(res, "Failed to load handover checklist"));
+          return;
+        }
+        const d = await res.json();
+        setData(d);
+      } catch (e) {
+        setLoadError(e instanceof Error ? e.message : "Network error loading handover checklist");
+      } finally {
+        setLoading(false);
+      }
+    })();
   }, [plotId]);
 
   useEffect(() => {
     fetchData();
-    // Fetch available documents for linking
-    fetch(`/api/plots/${plotId}`)
-      .then((r) => r.json())
-      .then((plot) => {
+    // Fetch available documents for linking — supplementary, fails silently
+    (async () => {
+      try {
+        const plotRes = await fetch(`/api/plots/${plotId}`);
+        if (!plotRes.ok) return;
+        const plot = await plotRes.json();
         if (plot.siteId) {
-          fetch(`/api/sites/${plot.siteId}/documents`)
-            .then((r) => r.json())
-            .then((d) => {
-              if (Array.isArray(d)) setDocs(d);
-            })
-            .catch(() => {});
+          const docRes = await fetch(`/api/sites/${plot.siteId}/documents`);
+          if (!docRes.ok) return;
+          const d = await docRes.json();
+          if (Array.isArray(d)) setDocs(d);
         }
-      })
-      .catch(() => {});
+      } catch {
+        // Supplementary — main error UX covered by handover fetch
+      }
+    })();
   }, [plotId, fetchData]);
 
   const handleCheck = async (itemId: string, checked: boolean) => {
@@ -141,6 +156,24 @@ export function HandoverChecklist({ plotId }: { plotId: string }) {
     return (
       <div className="flex items-center justify-center py-12">
         <Loader2 className="size-5 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+        <p className="font-medium">Failed to load handover checklist</p>
+        <p className="text-xs">{loadError}</p>
+        <button
+          onClick={() => {
+            setLoading(true);
+            fetchData();
+          }}
+          className="mt-2 text-xs underline"
+        >
+          Retry
+        </button>
       </div>
     );
   }

@@ -33,6 +33,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { fetchErrorMessage } from "@/components/ui/toast";
 
 // ---------- Types ----------
 
@@ -288,6 +289,7 @@ export function EventsClient({
   const [events, setEvents] = useState(initialEvents);
   const [pagination, setPagination] = useState(initialPagination);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   // Filters
   const [typeFilter, setTypeFilter] = useState<string>("all");
@@ -301,6 +303,7 @@ export function EventsClient({
   const fetchEvents = useCallback(
     async (page: number, type: string, siteId: string) => {
       setLoading(true);
+      setLoadError(null);
       try {
         const params = new URLSearchParams();
         params.set("page", String(page));
@@ -309,7 +312,10 @@ export function EventsClient({
         if (siteId !== "all") params.set("siteId", siteId);
 
         const res = await fetch(`/api/events?${params.toString()}`);
-        if (!res.ok) throw new Error("Failed to fetch events");
+        if (!res.ok) {
+          setLoadError(await fetchErrorMessage(res, "Failed to load events"));
+          return;
+        }
 
         const data = await res.json();
         setEvents(data.events);
@@ -319,7 +325,7 @@ export function EventsClient({
           totalPages: data.totalPages,
         });
       } catch (error) {
-        console.error("Error fetching events:", error);
+        setLoadError(error instanceof Error ? error.message : "Network error loading events");
       } finally {
         setLoading(false);
       }
@@ -457,7 +463,18 @@ export function EventsClient({
       </Card>
 
       {/* Timeline */}
-      {loading ? (
+      {loadError ? (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+          <p className="font-medium">Failed to load events</p>
+          <p className="text-xs">{loadError}</p>
+          <button
+            onClick={() => fetchEvents(currentPage, typeFilter, siteFilter)}
+            className="mt-2 text-xs underline"
+          >
+            Retry
+          </button>
+        </div>
+      ) : loading ? (
         <Card>
           <CardContent className="flex items-center justify-center py-16">
             <div className="text-sm text-muted-foreground">

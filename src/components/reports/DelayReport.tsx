@@ -22,6 +22,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { fetchErrorMessage } from "@/components/ui/toast";
 
 interface DelayReportProps {
   siteId: string;
@@ -164,9 +165,10 @@ function JobDelayCard({ job }: { job: DelayedJob }) {
 export function DelayReport({ siteId }: DelayReportProps) {
   const { devDate } = useDevDate();
   const reqKey = `${siteId}|${devDate ?? ""}`;
-  const [loaded, setLoaded] = useState<{ key: string; data: DelayData | null } | null>(null);
+  const [loaded, setLoaded] = useState<{ key: string; data: DelayData | null; error: string | null } | null>(null);
   const data = loaded?.key === reqKey ? loaded.data : null;
   const loading = loaded?.key !== reqKey;
+  const error = loaded?.key === reqKey ? loaded.error : null;
   const [showImpactDays, setShowImpactDays] = useState(false);
   const [showTrend, setShowTrend] = useState(false);
   const [expandedSuppliers, setExpandedSuppliers] = useState<Set<string>>(new Set());
@@ -175,22 +177,37 @@ export function DelayReport({ siteId }: DelayReportProps) {
 
   useEffect(() => {
     let cancelled = false;
-    fetch(`/api/sites/${siteId}`)
-      .then((r) => r.json())
-      .then((site) => {
+    (async () => {
+      try {
+        const res = await fetch(`/api/sites/${siteId}`);
+        if (cancelled || !res.ok) return;
+        const site = await res.json();
         if (cancelled) return;
         if (site.plots) setPlots(site.plots.map((p: { id: string; plotNumber: string | null; name: string }) => ({ id: p.id, plotNumber: p.plotNumber, name: p.name })));
-      })
-      .catch(() => {});
+      } catch {
+        // Plot filter list is supplementary — fail silently; main report covers the error UX
+      }
+    })();
     return () => { cancelled = true; };
   }, [siteId]);
 
   useEffect(() => {
     let cancelled = false;
-    fetch(`/api/sites/${siteId}/delay-report`)
-      .then((r) => r.json())
-      .then((d) => { if (!cancelled) setLoaded({ key: reqKey, data: d }); })
-      .catch(() => { if (!cancelled) setLoaded({ key: reqKey, data: null }); });
+    (async () => {
+      try {
+        const res = await fetch(`/api/sites/${siteId}/delay-report`);
+        if (cancelled) return;
+        if (!res.ok) {
+          const msg = await fetchErrorMessage(res, "Failed to load delay report");
+          setLoaded({ key: reqKey, data: null, error: msg });
+          return;
+        }
+        const d = await res.json();
+        if (!cancelled) setLoaded({ key: reqKey, data: d, error: null });
+      } catch (e) {
+        if (!cancelled) setLoaded({ key: reqKey, data: null, error: e instanceof Error ? e.message : "Network error" });
+      }
+    })();
     return () => { cancelled = true; };
   }, [siteId, devDate, reqKey]);
 
@@ -198,6 +215,16 @@ export function DelayReport({ siteId }: DelayReportProps) {
     return (
       <div className="flex items-center justify-center py-12">
         <Loader2 className="size-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+        <p className="font-medium">Failed to load delay report</p>
+        <p className="text-xs">{error}</p>
+        <button onClick={() => setLoaded(null)} className="mt-2 text-xs underline">Retry</button>
       </div>
     );
   }

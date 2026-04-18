@@ -406,8 +406,14 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
       Promise.all(
         childIds.map((cid) =>
           Promise.all([
-            fetch(`/api/jobs/${cid}/photos`, { cache: "no-store" }).then((r) => r.json()),
-            fetch(`/api/jobs/${cid}`, { cache: "no-store" }).then((r) => r.json()),
+            fetch(`/api/jobs/${cid}/photos`, { cache: "no-store" }).then((r) => {
+              if (!r.ok) throw new Error(`Failed to load photos (HTTP ${r.status})`);
+              return r.json();
+            }),
+            fetch(`/api/jobs/${cid}`, { cache: "no-store" }).then((r) => {
+              if (!r.ok) throw new Error(`Failed to load job (HTTP ${r.status})`);
+              return r.json();
+            }),
           ])
         )
       )
@@ -462,15 +468,23 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
           summaries.forEach((s) => childContractorMap.set(s.id, s.contractor));
           setChildJobContractors(childContractorMap);
         })
-        .catch(console.error)
+        .catch((e: unknown) => {
+          toast.error(e instanceof Error ? e.message : "Failed to load job data");
+        })
         .finally(() => setLoading(false));
       return;
     }
 
     setLoading(true);
     Promise.all([
-      fetch(`/api/jobs/${context.job.id}/photos`, { cache: "no-store" }).then((r) => r.json()),
-      fetch(`/api/jobs/${context.job.id}`, { cache: "no-store" }).then((r) => r.json()),
+      fetch(`/api/jobs/${context.job.id}/photos`, { cache: "no-store" }).then((r) => {
+        if (!r.ok) throw new Error(`Failed to load photos (HTTP ${r.status})`);
+        return r.json();
+      }),
+      fetch(`/api/jobs/${context.job.id}`, { cache: "no-store" }).then((r) => {
+        if (!r.ok) throw new Error(`Failed to load job (HTTP ${r.status})`);
+        return r.json();
+      }),
     ])
       .then(([photosData, jobData]) => {
         setPhotos(Array.isArray(photosData) ? photosData : []);
@@ -487,9 +501,11 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
           setPanelContractors([]);
         }
       })
-      .catch(console.error)
+      .catch((e: unknown) => {
+        toast.error(e instanceof Error ? e.message : "Failed to load job data");
+      })
       .finally(() => setLoading(false));
-  }, [open, context]);
+  }, [open, context, toast]);
 
   // Keyboard nav for lightbox
   useEffect(() => {
