@@ -420,10 +420,12 @@ export async function POST(
       select: { originalEndDate: true, actualEndDate: true },
     });
 
+    // Working-day deviation — matches the cascade engine's delta so any
+    // downstream "shift programme" action applies a consistent amount.
     let daysDeviation = 0;
     if (completedJobWithOriginal?.originalEndDate && completedJobWithOriginal?.actualEndDate) {
-      const { differenceInCalendarDays } = await import("date-fns");
-      daysDeviation = differenceInCalendarDays(
+      const { differenceInWorkingDays } = await import("@/lib/working-days");
+      daysDeviation = differenceInWorkingDays(
         completedJobWithOriginal.originalEndDate,
         completedJobWithOriginal.actualEndDate
       );

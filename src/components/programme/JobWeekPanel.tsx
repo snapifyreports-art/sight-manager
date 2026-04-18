@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { format, differenceInCalendarDays, addDays } from "date-fns";
+import { addWorkingDays, differenceInWorkingDays, isWorkingDay, snapToWorkingDay } from "@/lib/working-days";
 import { useJobAction } from "@/hooks/useJobAction";
 import Link from "next/link";
 import {
@@ -588,12 +589,14 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
       if (jobStart && jobEnd) {
         const today = new Date();
         today.setHours(0, 0, 0, 0);
+        const todayFwd = isWorkingDay(today) ? today : snapToWorkingDay(today, "forward");
         const planned = new Date(jobStart);
         planned.setHours(0, 0, 0, 0);
-        const diff = Math.round((planned.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-        if (diff !== 0) {
+        // Working-day delta matches the cascade engine.
+        const diffWD = differenceInWorkingDays(planned, todayFwd);
+        if (diffWD !== 0) {
           // Pull forward (early) or push back (late) — cascade the programme
-          const newEnd = new Date(new Date(jobEnd).getTime() - diff * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+          const newEnd = addWorkingDays(new Date(jobEnd), -diffWD).toISOString().split("T")[0];
           await fetch(`/api/jobs/${jobId}/cascade`, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
@@ -695,12 +698,13 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
     }
   }, [childJobs, fireJobAction, triggerCentralStart]);
 
-  // Handle "Pull Forward" — cascade all subsequent jobs earlier, then start
+  // Handle "Pull Forward" — cascade all subsequent jobs earlier, then start.
+  // `daysEarly` is in WORKING days (matches cascade engine).
   const executePullForward = useCallback(async (jobId: string, daysEarly: number, endDate: string | null, isChild: boolean) => {
     setCascadeLoading(true);
     try {
       if (endDate) {
-        const newEnd = addDays(new Date(endDate), -daysEarly).toISOString().split("T")[0];
+        const newEnd = addWorkingDays(new Date(endDate), -daysEarly).toISOString().split("T")[0];
         await fetch(`/api/jobs/${jobId}/cascade`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
@@ -727,7 +731,7 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
 
     // Preview the cascade to check if any order dates would go into the past
     if (endDate) {
-      const newEnd = addDays(new Date(endDate), -daysEarly).toISOString().split("T")[0];
+      const newEnd = addWorkingDays(new Date(endDate), -daysEarly).toISOString().split("T")[0];
       try {
         const res = await fetch(`/api/jobs/${jobId}/cascade`, {
           method: "POST",
@@ -822,12 +826,13 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
           prev.map((o) => (undeliveredOrders.find((u) => u.id === o.id) ? { ...o, status: "DELIVERED" } : o))
         );
       }
-      // Check for early start
+      // Check for early start (working days — matches cascade engine)
       const today = new Date(); today.setHours(0, 0, 0, 0);
+      const todayFwd = isWorkingDay(today) ? today : snapToWorkingDay(today, "forward");
       const jobRef = isChild ? childJobs.find((c) => c.id === jobId) : context?.job;
       if (jobRef?.startDate) {
         const planned = new Date(jobRef.startDate); planned.setHours(0, 0, 0, 0);
-        const daysEarly = differenceInCalendarDays(planned, today);
+        const daysEarly = differenceInWorkingDays(planned, todayFwd);
         if (daysEarly > 0) {
           setEarlyStartDialog({ jobId, jobName, daysEarly, endDate: jobRef.endDate ?? null, isChild });
           return;
@@ -881,13 +886,14 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
     setCascadeLoading(true);
     try {
       const { daysDeviation, nextJob } = completionShiftDialog;
-      // daysDeviation positive = early (actual before plan) → pull next job forward
-      // daysDeviation negative = late (actual after plan) → push next job back
-      const delta = -daysDeviation;
+      // daysDeviation is in working days (matches cascade engine).
+      // Positive = finished early (pull next job forward — subtract).
+      // Negative = finished late (push next job back — add).
+      const deltaWD = -daysDeviation;
       const nextJobData = await fetch(`/api/jobs/${nextJob.id}`, { cache: "no-store" }).then((r) => r.json());
       const updates: Record<string, string> = {};
-      if (nextJobData.endDate) updates.endDate = addDays(new Date(nextJobData.endDate), delta).toISOString().slice(0, 10);
-      if (nextJobData.startDate) updates.startDate = addDays(new Date(nextJobData.startDate), delta).toISOString().slice(0, 10);
+      if (nextJobData.endDate) updates.endDate = addWorkingDays(new Date(nextJobData.endDate), deltaWD).toISOString().slice(0, 10);
+      if (nextJobData.startDate) updates.startDate = addWorkingDays(new Date(nextJobData.startDate), deltaWD).toISOString().slice(0, 10);
       if (Object.keys(updates).length > 0) {
         await fetch(`/api/jobs/${nextJob.id}`, {
           method: "PUT",

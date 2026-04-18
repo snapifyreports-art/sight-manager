@@ -3,6 +3,7 @@
 import { useState, useCallback } from "react";
 import { differenceInCalendarDays, addDays, format } from "date-fns";
 import { AlertTriangle, Loader2 } from "lucide-react";
+import { addWorkingDays, differenceInWorkingDays, isWorkingDay, snapToWorkingDay } from "@/lib/working-days";
 import {
   Dialog,
   DialogContent,
@@ -118,13 +119,15 @@ export function useJobAction(
   );
 
   // ---- Pull forward then start ----
+  // `daysEarly` is in WORKING days — matches the cascade engine (see
+  // docs/cascade-spec.md). Caller computes this via differenceInWorkingDays.
   const executePullForward = useCallback(
     async (job: JobForAction, daysEarly: number, endDate: string | null) => {
       console.log("[CASCADE] executePullForward called:", { jobId: job.id, daysEarly, endDate });
       setCascadeLoading(true);
       try {
         if (endDate) {
-          const newEnd = addDays(new Date(endDate), -daysEarly)
+          const newEnd = addWorkingDays(new Date(endDate), -daysEarly)
             .toISOString()
             .split("T")[0];
           console.log("[CASCADE] Calling cascade PUT:", { jobId: job.id, newEnd });
@@ -134,9 +137,18 @@ export function useJobAction(
             body: JSON.stringify({ newEndDate: newEnd, confirm: true }),
           });
           if (!cascadeRes.ok) {
-            const errText = await cascadeRes.text();
-            console.error("[CASCADE] FAILED:", cascadeRes.status, errText);
-            alert("Cascade failed: " + errText);
+            // Surface conflicts (409) and real errors distinctly.
+            if (cascadeRes.status === 409) {
+              const data = await cascadeRes.json().catch(() => null);
+              const msg = data?.conflicts?.length
+                ? `Cannot pull forward: ${data.conflicts[0].kind === "job_in_past" ? "a downstream job would start in the past" : "an order would need placing in the past"}. Try a later start date.`
+                : "Cannot pull forward — programme conflict.";
+              alert(msg);
+            } else {
+              const errText = await cascadeRes.text();
+              console.error("[CASCADE] FAILED:", cascadeRes.status, errText);
+              alert("Cascade failed: " + errText);
+            }
             return;
           }
           const cascadeResult = await cascadeRes.json();
@@ -213,10 +225,13 @@ export function useJobAction(
       // Re-check early/late start after pre-start issues resolved
       const today = new Date();
       today.setHours(0, 0, 0, 0);
+      const todayForward = isWorkingDay(today) ? today : snapToWorkingDay(today, "forward");
       if (activeJob.startDate) {
         const planned = new Date(activeJob.startDate);
         planned.setHours(0, 0, 0, 0);
-        const daysEarly = differenceInCalendarDays(planned, today);
+        // daysEarly / daysLate are in WORKING days so they line up 1:1 with
+        // the cascade engine's working-day delta.
+        const daysEarly = differenceInWorkingDays(planned, todayForward);
         if (daysEarly > 0) {
           setEarlyStartDialog({ daysEarly, endDate: activeJob.endDate ?? null });
           return;
@@ -224,13 +239,13 @@ export function useJobAction(
         if (daysEarly < 0) {
           const daysLate = Math.abs(daysEarly);
           const originalDuration = activeJob.endDate
-            ? differenceInCalendarDays(new Date(activeJob.endDate), new Date(activeJob.startDate))
+            ? differenceInWorkingDays(new Date(activeJob.endDate), new Date(activeJob.startDate))
             : 0;
           const compressedDuration = Math.max(0, originalDuration - daysLate);
           let cascadePreview: { jobCount: number; deltaDays: number } | null = null;
           if (activeJob.endDate) {
             try {
-              const newEnd = addDays(new Date(activeJob.endDate), daysLate).toISOString().split("T")[0];
+              const newEnd = addWorkingDays(new Date(activeJob.endDate), daysLate).toISOString().split("T")[0];
               const prev = await fetch(`/api/jobs/${activeJob.id}/cascade`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -261,7 +276,8 @@ export function useJobAction(
     setCascadeLoading(true);
     try {
       if (activeJob.endDate) {
-        const newEnd = addDays(new Date(activeJob.endDate), lateStartDialog.daysLate)
+        // daysLate is in working days — shift end forward by that many WDs.
+        const newEnd = addWorkingDays(new Date(activeJob.endDate), lateStartDialog.daysLate)
           .toISOString().split("T")[0];
         const cascadeRes = await fetch(`/api/jobs/${activeJob.id}/cascade`, {
           method: "PUT",
@@ -269,7 +285,12 @@ export function useJobAction(
           body: JSON.stringify({ newEndDate: newEnd, confirm: true }),
         });
         if (!cascadeRes.ok) {
-          console.error("Late start cascade failed:", await cascadeRes.text());
+          if (cascadeRes.status === 409) {
+            const data = await cascadeRes.json().catch(() => null);
+            alert(data?.conflicts?.length ? `Cannot push programme: ${data.conflicts[0].kind}` : "Programme shift conflict.");
+          } else {
+            console.error("Late start cascade failed:", await cascadeRes.text());
+          }
           return;
         }
       }
@@ -386,19 +407,22 @@ export function useJobAction(
       console.log("[FLOW] Pre-start:", { prevJob: prevJob?.name, undelivered: undelivered.length });
       if (prevJob || undelivered.length > 0) {
         console.log("[FLOW] Showing pre-start dialog");
-        // Find the pull-forward option: shift programme so dateOfOrder lands on today
-        // This means: order gets placed today, delivery arrives on time, job starts when materials are on site
+        // Find the pull-forward option: shift programme so dateOfOrder lands on
+        // the next working day (today if today is a working day, else the next
+        // Monday). Uses working-day arithmetic throughout to match the cascade
+        // engine — prevents "place today" → working-day-delta producing an
+        // order date in the past.
         let nearestEvent: { date: string; supplierName: string; label: string } | null = null;
         const eventDates: Array<{ date: Date; supplierName: string; label: string }> = [];
+        const todayForward = isWorkingDay(today) ? today : snapToWorkingDay(today, "forward");
         for (const o of undelivered) {
           if (o.status === "PENDING" && o.dateOfOrder) {
             const orderDate = new Date(o.dateOfOrder);
-            // Calculate what the job start date would be if we shift dateOfOrder to today
-            // The delta is: today - orderDate (negative = pulling forward)
             if (jobWithOrders.startDate) {
               const jobStart = new Date(jobWithOrders.startDate);
-              const gapDays = Math.round((jobStart.getTime() - orderDate.getTime()) / (1000 * 60 * 60 * 24));
-              const newJobStart = addDays(today, gapDays);
+              // Preserve the order→job gap in WORKING days (matches cascade).
+              const gapWD = differenceInWorkingDays(jobStart, orderDate);
+              const newJobStart = addWorkingDays(todayForward, gapWD);
               eventDates.push({
                 date: newJobStart,
                 supplierName: o.supplier.name,
@@ -431,11 +455,12 @@ export function useJobAction(
         return;
       }
 
-      // 3. Early-start or late-start check
+      // 3. Early-start or late-start check (working days — matches cascade)
+      const todayFwd = isWorkingDay(today) ? today : snapToWorkingDay(today, "forward");
       if (jobWithOrders.startDate) {
         const planned = new Date(jobWithOrders.startDate);
         planned.setHours(0, 0, 0, 0);
-        const daysEarly = differenceInCalendarDays(planned, today);
+        const daysEarly = differenceInWorkingDays(planned, todayFwd);
         console.log("[FLOW] Early/late check:", { daysEarly, startDate: jobWithOrders.startDate, endDate: jobWithOrders.endDate });
         if (daysEarly > 0) {
           console.log("[FLOW] Showing early start dialog:", daysEarly, "days early");
@@ -475,7 +500,7 @@ export function useJobAction(
                 nearestEvent = {
                   date: nearest.date.toISOString(),
                   label: nearest.label,
-                  daysToEvent: differenceInCalendarDays(planned, nearest.date),
+                  daysToEvent: differenceInWorkingDays(planned, nearest.date),
                 };
               }
             }
@@ -486,7 +511,7 @@ export function useJobAction(
         if (daysEarly < 0) {
           const daysLate = Math.abs(daysEarly);
           const originalDuration = jobWithOrders.endDate
-            ? differenceInCalendarDays(new Date(jobWithOrders.endDate), new Date(jobWithOrders.startDate))
+            ? differenceInWorkingDays(new Date(jobWithOrders.endDate), new Date(jobWithOrders.startDate))
             : 0;
           const compressedDuration = Math.max(0, originalDuration - daysLate);
 
@@ -494,7 +519,7 @@ export function useJobAction(
           let cascadePreview: { jobCount: number; deltaDays: number } | null = null;
           if (jobWithOrders.endDate) {
             try {
-              const newEnd = addDays(new Date(jobWithOrders.endDate), daysLate).toISOString().split("T")[0];
+              const newEnd = addWorkingDays(new Date(jobWithOrders.endDate), daysLate).toISOString().split("T")[0];
               const prev = await fetch(`/api/jobs/${jobWithOrders.id}/cascade`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -633,9 +658,11 @@ export function useJobAction(
                             const picked = new Date(e.target.value);
                             const planned = activeJob.startDate ? new Date(activeJob.startDate) : null;
                             if (planned) {
-                              const delta = Math.round((picked.getTime() - planned.getTime()) / (1000 * 60 * 60 * 24));
-                              if (delta !== 0 && activeJob.endDate) {
-                                const newEnd = addDays(new Date(activeJob.endDate), delta).toISOString().split("T")[0];
+                              // Working-day delta — matches cascade engine.
+                              const pickedFwd = isWorkingDay(picked) ? picked : snapToWorkingDay(picked, "forward");
+                              const deltaWD = differenceInWorkingDays(pickedFwd, planned);
+                              if (deltaWD !== 0 && activeJob.endDate) {
+                                const newEnd = addWorkingDays(new Date(activeJob.endDate), deltaWD).toISOString().split("T")[0];
                                 setPreStartChecks(null);
                                 setCascadeLoading(true);
                                 fetch(`/api/jobs/${activeJob.id}/cascade`, {
@@ -645,6 +672,9 @@ export function useJobAction(
                                 }).then(async (res) => {
                                   if (res.ok) {
                                     await executeAction(activeJob.id, "start");
+                                  } else if (res.status === 409) {
+                                    const data = await res.json().catch(() => null);
+                                    alert(data?.conflicts?.length ? `Cannot shift to that date: ${data.conflicts[0].kind === "job_in_past" ? "would put a job in the past" : "would require placing an order in the past"}.` : "Cannot shift to that date.");
                                   }
                                   setCascadeLoading(false);
                                   setActiveJob(null);
@@ -669,9 +699,11 @@ export function useJobAction(
                       const targetDate = new Date(preStartChecks.nearestEvent.date);
                       const planned = activeJob.startDate ? new Date(activeJob.startDate) : null;
                       if (planned && activeJob.endDate) {
-                        const delta = Math.round((targetDate.getTime() - planned.getTime()) / (1000 * 60 * 60 * 24));
-                        if (delta !== 0) {
-                          const newEnd = addDays(new Date(activeJob.endDate), delta).toISOString().split("T")[0];
+                        // Working-day delta matches the cascade engine. The target
+                        // date above was computed in working days too.
+                        const deltaWD = differenceInWorkingDays(targetDate, planned);
+                        if (deltaWD !== 0) {
+                          const newEnd = addWorkingDays(new Date(activeJob.endDate), deltaWD).toISOString().split("T")[0];
                           setPreStartChecks(null);
                           setCascadeLoading(true);
                           fetch(`/api/jobs/${activeJob.id}/cascade`, {
@@ -681,6 +713,13 @@ export function useJobAction(
                           }).then(async (res) => {
                             if (res.ok) {
                               await executeAction(activeJob.id, "start");
+                            } else if (res.status === 409) {
+                              // Engine returned conflicts — surface them to the user.
+                              const data = await res.json().catch(() => null);
+                              const msg = data?.conflicts?.length
+                                ? `Cannot pull forward: ${data.conflicts[0].kind === "job_in_past" ? "a downstream job would start in the past" : "an order would need placing in the past"}. Try a later start date.`
+                                : "Cannot pull forward — programme conflict.";
+                              alert(msg);
                             }
                             setCascadeLoading(false);
                             setActiveJob(null);
@@ -881,18 +920,19 @@ export function useJobAction(
 
                     setOrderResolution(null);
                     if (!activeJob) return;
-                    // Go directly to early/late start check
+                    // Go directly to early/late start check (working days)
                     const today = new Date();
                     today.setHours(0, 0, 0, 0);
+                    const todayFwd2 = isWorkingDay(today) ? today : snapToWorkingDay(today, "forward");
                     if (activeJob.startDate) {
                       const planned = new Date(activeJob.startDate);
                       planned.setHours(0, 0, 0, 0);
-                      const daysEarly = differenceInCalendarDays(planned, today);
+                      const daysEarly = differenceInWorkingDays(planned, todayFwd2);
                       if (daysEarly > 0) {
                         if (targetDate) {
                           // Pull to delivery date instead of today
                           const deliveryDate = new Date(targetDate);
-                          const daysToDelivery = differenceInCalendarDays(planned, deliveryDate);
+                          const daysToDelivery = differenceInWorkingDays(planned, deliveryDate);
                           setEarlyStartDialog({
                             daysEarly,
                             endDate: activeJob.endDate ?? null,
@@ -907,7 +947,7 @@ export function useJobAction(
                       if (daysEarly < 0) {
                         const daysLate = Math.abs(daysEarly);
                         const originalDuration = activeJob.endDate
-                          ? differenceInCalendarDays(new Date(activeJob.endDate), new Date(activeJob.startDate))
+                          ? differenceInWorkingDays(new Date(activeJob.endDate), new Date(activeJob.startDate))
                           : 0;
                         setLateStartDialog({ daysLate, startDate: activeJob.startDate, endDate: activeJob.endDate ?? null, originalDuration, compressedDuration: Math.max(0, originalDuration - daysLate), cascadePreview: null });
                         return;
