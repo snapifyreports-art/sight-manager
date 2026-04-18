@@ -1041,7 +1041,12 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
         const fd = new FormData();
         signOffPhotos.forEach((f) => fd.append("photos", f));
         fd.append("tag", "after");
-        await fetch(`/api/jobs/${signOffTarget.id}/photos`, { method: "POST", body: fd });
+        const photoRes = await fetch(`/api/jobs/${signOffTarget.id}/photos`, { method: "POST", body: fd });
+        if (!photoRes.ok) {
+          showToast("Photos failed to upload — sign-off cancelled", "error");
+          setSignOffSubmitting(false);
+          return;
+        }
       }
       // If job is already COMPLETED, just sign off. Otherwise complete + signoff.
       const isAlreadyCompleted = signOffTarget.status === "COMPLETED";

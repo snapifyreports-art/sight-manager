@@ -44,7 +44,10 @@ export default async function SiteDetailPage({
       plots: {
         orderBy: [{ plotNumber: "asc" }, { createdAt: "asc" }],
         include: {
+          // Only LEAF jobs — parent-stage jobs are derived rollups that would
+          // double-count in jobStatusSummary and total counts
           jobs: {
+            where: { children: { none: {} } },
             orderBy: { createdAt: "asc" },
             include: {
               assignedTo: {
@@ -53,7 +56,7 @@ export default async function SiteDetailPage({
             },
           },
           _count: {
-            select: { jobs: true },
+            select: { jobs: { where: { children: { none: {} } } } },
           },
         },
       },

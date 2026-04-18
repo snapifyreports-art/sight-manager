@@ -118,6 +118,7 @@ export async function PUT(
         orderBy: { createdAt: "asc" },
         include: {
           jobs: {
+            where: { children: { none: {} } },
             orderBy: { createdAt: "asc" },
             include: {
               assignedTo: {
@@ -126,7 +127,7 @@ export async function PUT(
             },
           },
           _count: {
-            select: { jobs: true },
+            select: { jobs: { where: { children: { none: {} } } } },
           },
         },
       },

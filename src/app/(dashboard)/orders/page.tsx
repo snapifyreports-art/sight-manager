@@ -1,4 +1,7 @@
 import { prisma } from "@/lib/prisma";
+import { auth } from "@/lib/auth";
+import { getUserSiteIds } from "@/lib/site-access";
+import { redirect } from "next/navigation";
 import { OrdersClient } from "@/components/orders/OrdersClient";
 
 export const dynamic = "force-dynamic";
@@ -8,8 +11,17 @@ export const metadata = {
 };
 
 export default async function OrdersPage() {
+  const session = await auth();
+  if (!session) redirect("/login");
+
+  // Scope orders + jobs to sites the user can access
+  const siteIds = await getUserSiteIds(session.user.id, session.user.role);
+  const orderWhere = siteIds !== null ? { job: { plot: { siteId: { in: siteIds } } } } : {};
+  const jobWhere = siteIds !== null ? { plot: { siteId: { in: siteIds } } } : {};
+
   const [orders, suppliers, jobs] = await Promise.all([
     prisma.materialOrder.findMany({
+      where: orderWhere,
       include: {
         supplier: true,
         contact: true,
@@ -26,6 +38,7 @@ export default async function OrdersPage() {
       orderBy: { name: "asc" },
     }),
     prisma.job.findMany({
+      where: { ...jobWhere, children: { none: {} } },
       include: {
         plot: { include: { site: true } },
       },

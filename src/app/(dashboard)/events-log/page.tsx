@@ -1,4 +1,7 @@
 import { prisma } from "@/lib/prisma";
+import { auth } from "@/lib/auth";
+import { getUserSiteIds } from "@/lib/site-access";
+import { redirect } from "next/navigation";
 import { EventsClient } from "@/components/events/EventsClient";
 
 export const dynamic = "force-dynamic";
@@ -8,8 +11,17 @@ export const metadata = {
 };
 
 export default async function EventsLogPage() {
+  const session = await auth();
+  if (!session) redirect("/login");
+
+  // Scope event log + site filter dropdown to sites the user can access
+  const siteIds = await getUserSiteIds(session.user.id, session.user.role);
+  const eventWhere = siteIds !== null ? { siteId: { in: siteIds } } : {};
+  const siteWhere = siteIds !== null ? { id: { in: siteIds } } : {};
+
   const [events, total, sites] = await Promise.all([
     prisma.eventLog.findMany({
+      where: eventWhere,
       include: {
         user: { select: { id: true, name: true, email: true } },
         site: { select: { id: true, name: true } },
@@ -19,8 +31,9 @@ export default async function EventsLogPage() {
       orderBy: { createdAt: "desc" },
       take: 50,
     }),
-    prisma.eventLog.count(),
+    prisma.eventLog.count({ where: eventWhere }),
     prisma.site.findMany({
+      where: siteWhere,
       select: { id: true, name: true },
       orderBy: { name: "asc" },
     }),

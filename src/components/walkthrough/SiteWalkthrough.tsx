@@ -371,10 +371,15 @@ export default function SiteWalkthrough({
       if (signOffPhotos.length > 0) {
         const fd = new FormData();
         signOffPhotos.forEach((f) => fd.append("photos", f));
-        await fetch(`/api/jobs/${plot.currentJob.id}/photos`, {
+        const photoRes = await fetch(`/api/jobs/${plot.currentJob.id}/photos`, {
           method: "POST",
           body: fd,
         });
+        if (!photoRes.ok) {
+          showToast("Photos failed to upload — sign-off cancelled", "error");
+          setActionLoading(false);
+          return;
+        }
       }
       const res = await fetch(`/api/jobs/${plot.currentJob.id}/actions`, {
         method: "POST",

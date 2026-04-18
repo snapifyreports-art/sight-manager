@@ -1,5 +1,8 @@
 import { prisma } from "@/lib/prisma";
+import { auth } from "@/lib/auth";
+import { getUserSiteIds } from "@/lib/site-access";
 import { SitesClient } from "@/components/sites/SitesClient";
+import { redirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
 
@@ -8,12 +11,23 @@ export const metadata = {
 };
 
 export default async function SitesPage() {
+  const session = await auth();
+  if (!session) redirect("/login");
+
+  // Scope to sites the user can access — CEOs/DIRECTORs see all, others filtered
+  const siteIds = await getUserSiteIds(session.user.id, session.user.role);
+  const siteWhere = siteIds !== null ? { id: { in: siteIds } } : {};
+
   const sites = await prisma.site.findMany({
+    where: siteWhere,
     orderBy: { createdAt: "desc" },
     include: {
       plots: {
         include: {
-          jobs: true,
+          // Leaf jobs only — parents are derived rollups
+          jobs: {
+            where: { children: { none: {} } },
+          },
         },
       },
       createdBy: {

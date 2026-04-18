@@ -1,5 +1,7 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
+import { auth } from "@/lib/auth";
+import { canAccessSite } from "@/lib/site-access";
 import { PlotDetailClient } from "@/components/plots/PlotDetailClient";
 
 export const dynamic = "force-dynamic";
@@ -25,6 +27,12 @@ export default async function PlotDetailPage({
   params: Promise<{ siteId: string; plotId: string }>;
 }) {
   const { siteId, plotId } = await params;
+
+  const session = await auth();
+  if (!session) redirect("/login");
+  if (!(await canAccessSite(session.user.id, session.user.role, siteId))) {
+    notFound();
+  }
 
   const [plot, snagSummary] = await Promise.all([
     prisma.plot.findUnique({

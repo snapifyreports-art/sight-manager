@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { sessionHasPermission } from "@/lib/permissions";
+import { canAccessSite } from "@/lib/site-access";
 
 export const dynamic = "force-dynamic";
 
@@ -23,6 +24,8 @@ export async function GET(
       site: {
         select: { id: true, name: true, status: true },
       },
+      // Keep all jobs (parents + children) so Gantt/Programme can render hierarchy,
+      // but _count reports LEAF jobs only so "X jobs" displays the actionable count.
       jobs: {
         orderBy: { createdAt: "asc" },
         include: {
@@ -40,13 +43,18 @@ export async function GET(
         },
       },
       _count: {
-        select: { jobs: true },
+        select: { jobs: { where: { children: { none: {} } } } },
       },
     },
   });
 
   if (!plot) {
     return NextResponse.json({ error: "Plot not found" }, { status: 404 });
+  }
+
+  // Site-access check
+  if (!(await canAccessSite(session.user.id, (session.user as { role: string }).role, plot.site.id))) {
+    return NextResponse.json({ error: "You do not have access to this site" }, { status: 403 });
   }
 
   return NextResponse.json(plot);
@@ -72,6 +80,11 @@ export async function PUT(
   });
   if (!existing) {
     return NextResponse.json({ error: "Plot not found" }, { status: 404 });
+  }
+
+  // Site-access check
+  if (!(await canAccessSite(session.user.id, (session.user as { role: string }).role, existing.site.id))) {
+    return NextResponse.json({ error: "You do not have access to this site" }, { status: 403 });
   }
 
   const plot = await prisma.plot.update({
@@ -103,7 +116,7 @@ export async function PUT(
         },
       },
       _count: {
-        select: { jobs: true },
+        select: { jobs: { where: { children: { none: {} } } } },
       },
     },
   });
@@ -137,10 +150,29 @@ export async function DELETE(
 
   const { id } = await params;
 
-  const existing = await prisma.plot.findUnique({ where: { id } });
+  const existing = await prisma.plot.findUnique({
+    where: { id },
+    include: { site: { select: { id: true, name: true } } },
+  });
   if (!existing) {
     return NextResponse.json({ error: "Plot not found" }, { status: 404 });
   }
+
+  // Site-access check
+  if (!(await canAccessSite(session.user.id, (session.user as { role: string }).role, existing.site.id))) {
+    return NextResponse.json({ error: "You do not have access to this site" }, { status: 403 });
+  }
+
+  // Audit event BEFORE delete so siteId is captured (EventLog.plotId SetNull survives)
+  await prisma.eventLog.create({
+    data: {
+      type: "USER_ACTION",
+      description: `Plot "${existing.plotNumber || existing.name}" was deleted from site "${existing.site.name}"`,
+      siteId: existing.site.id,
+      plotId: existing.id,
+      userId: session.user.id,
+    },
+  });
 
   await prisma.plot.delete({ where: { id } });
 

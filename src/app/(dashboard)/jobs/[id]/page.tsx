@@ -1,5 +1,7 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
+import { auth } from "@/lib/auth";
+import { canAccessSite } from "@/lib/site-access";
 import { JobDetailClient } from "@/components/jobs/JobDetailClient";
 
 export const dynamic = "force-dynamic";
@@ -64,6 +66,13 @@ export default async function JobDetailPage({
   });
 
   if (!job) {
+    notFound();
+  }
+
+  // Site-access check
+  const session = await auth();
+  if (!session) redirect("/login");
+  if (!(await canAccessSite(session.user.id, session.user.role, job.plot.site.id))) {
     notFound();
   }
 

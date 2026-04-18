@@ -43,10 +43,10 @@ export default async function DashboardPage() {
       _count: { status: true },
     }),
 
-    // Jobs grouped by status (filtered)
+    // Jobs grouped by status (filtered, leaf-only — parents are derived rollups)
     prisma.job.groupBy({
       by: ["status"],
-      where: jobSiteWhere,
+      where: { ...jobSiteWhere, children: { none: {} } },
       _count: { status: true },
     }),
 
@@ -62,13 +62,14 @@ export default async function DashboardPage() {
       },
     }),
 
-    // Jobs for traffic light display (filtered)
+    // Jobs for traffic light display (filtered, leaf-only)
     prisma.job.findMany({
       take: 12,
       orderBy: { updatedAt: "desc" },
       where: {
         status: { in: ["IN_PROGRESS", "ON_HOLD", "NOT_STARTED"] },
         ...jobSiteWhere,
+        children: { none: {} },
       },
       select: {
         id: true,

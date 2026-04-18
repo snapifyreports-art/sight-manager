@@ -64,7 +64,7 @@ export async function POST(
     },
     include: {
       _count: {
-        select: { jobs: true },
+        select: { jobs: { where: { children: { none: {} } } } },
       },
     },
   });
