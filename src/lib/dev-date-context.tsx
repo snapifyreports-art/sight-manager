@@ -4,8 +4,7 @@ import {
   createContext,
   useCallback,
   useContext,
-  useEffect,
-  useState,
+  useSyncExternalStore,
   type ReactNode,
 } from "react";
 import { useRouter } from "next/navigation";
@@ -35,14 +34,25 @@ function readCookie(): string | null {
   return match?.[1] ? decodeURIComponent(match[1]) : null;
 }
 
+// Notify subscribers when the dev-date cookie is updated programmatically.
+// The browser doesn't fire an event when document.cookie changes, so we
+// dispatch a custom event ourselves and let useSyncExternalStore pick it up.
+const DEV_DATE_EVENT = "dev-date-changed";
+
+function subscribeToDevDate(callback: () => void) {
+  window.addEventListener(DEV_DATE_EVENT, callback);
+  return () => window.removeEventListener(DEV_DATE_EVENT, callback);
+}
+
+function getDevDateServerSnapshot(): string | null {
+  return null;
+}
+
 export function DevDateProvider({ children }: { children: ReactNode }) {
   const router = useRouter();
-  const [devDate, setDevDateState] = useState<string | null>(null);
-
-  // On mount, read existing cookie
-  useEffect(() => {
-    setDevDateState(readCookie());
-  }, []);
+  // Reading the cookie is deterministic per the snapshot callback — React 19
+  // will cache snapshots within a render so useSyncExternalStore is safe here.
+  const devDate = useSyncExternalStore(subscribeToDevDate, readCookie, getDevDateServerSnapshot);
 
   const setDevDate = useCallback(
     (date: string | null) => {
@@ -51,7 +61,8 @@ export function DevDateProvider({ children }: { children: ReactNode }) {
       } else {
         document.cookie = `${DEV_DATE_COOKIE}=; path=/; max-age=0`;
       }
-      setDevDateState(date);
+      // Notify listeners (including our own useSyncExternalStore)
+      window.dispatchEvent(new Event(DEV_DATE_EVENT));
       // Refresh server components + API data
       router.refresh();
     },

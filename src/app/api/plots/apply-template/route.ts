@@ -59,7 +59,9 @@ export async function POST(request: NextRequest) {
 
   // Create everything in a transaction — complex templates can have 20+ jobs + many orders,
   // so extend the default 5s timeout to 60s to match apply-template-batch
-  const result = await prisma.$transaction(async (tx) => {
+  let result;
+  try {
+    result = await prisma.$transaction(async (tx) => {
     // 1. Create Plot
     const plot = await tx.plot.create({
       data: {
@@ -145,8 +147,20 @@ export async function POST(request: NextRequest) {
         },
       },
     });
-    return { plot: created, warnings };
-  }, { timeout: 60_000 }); // complex templates can have 20+ jobs + 10+ orders each
+      return { plot: created, warnings };
+    }, { timeout: 60_000 }); // complex templates can have 20+ jobs + 10+ orders each
+  } catch (err) {
+    // Surface the actual Prisma / transaction error so the UI can show something
+    // useful instead of a generic 500. Includes the error code for Prisma errors.
+    console.error("apply-template failed:", err);
+    const message = err instanceof Error ? err.message : String(err);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const code = (err as any)?.code;
+    return NextResponse.json(
+      { error: `Failed to create plot: ${message}${code ? ` (${code})` : ""}` },
+      { status: 500 }
+    );
+  }
 
   return NextResponse.json({ ...result.plot, _warnings: result.warnings }, { status: 201 });
 }

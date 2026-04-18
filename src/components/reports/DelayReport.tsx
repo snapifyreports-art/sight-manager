@@ -163,8 +163,10 @@ function JobDelayCard({ job }: { job: DelayedJob }) {
 
 export function DelayReport({ siteId }: DelayReportProps) {
   const { devDate } = useDevDate();
-  const [data, setData] = useState<DelayData | null>(null);
-  const [loading, setLoading] = useState(true);
+  const reqKey = `${siteId}|${devDate ?? ""}`;
+  const [loaded, setLoaded] = useState<{ key: string; data: DelayData | null } | null>(null);
+  const data = loaded?.key === reqKey ? loaded.data : null;
+  const loading = loaded?.key !== reqKey;
   const [showImpactDays, setShowImpactDays] = useState(false);
   const [showTrend, setShowTrend] = useState(false);
   const [expandedSuppliers, setExpandedSuppliers] = useState<Set<string>>(new Set());
@@ -172,21 +174,25 @@ export function DelayReport({ siteId }: DelayReportProps) {
   const [selectedPlots, setSelectedPlots] = useState<Set<string>>(new Set());
 
   useEffect(() => {
+    let cancelled = false;
     fetch(`/api/sites/${siteId}`)
       .then((r) => r.json())
       .then((site) => {
+        if (cancelled) return;
         if (site.plots) setPlots(site.plots.map((p: { id: string; plotNumber: string | null; name: string }) => ({ id: p.id, plotNumber: p.plotNumber, name: p.name })));
       })
       .catch(() => {});
+    return () => { cancelled = true; };
   }, [siteId]);
 
   useEffect(() => {
-    setLoading(true);
+    let cancelled = false;
     fetch(`/api/sites/${siteId}/delay-report`)
       .then((r) => r.json())
-      .then(setData)
-      .finally(() => setLoading(false));
-  }, [siteId, devDate]);
+      .then((d) => { if (!cancelled) setLoaded({ key: reqKey, data: d }); })
+      .catch(() => { if (!cancelled) setLoaded({ key: reqKey, data: null }); });
+    return () => { cancelled = true; };
+  }, [siteId, devDate, reqKey]);
 
   if (loading) {
     return (
@@ -237,7 +243,7 @@ export function DelayReport({ siteId }: DelayReportProps) {
                 key={p.id}
                 onClick={() => setSelectedPlots((prev) => {
                   const next = new Set(prev);
-                  next.has(key) ? next.delete(key) : next.add(key);
+                  if (next.has(key)) next.delete(key); else next.add(key);
                   return next;
                 })}
                 className={`rounded-full px-2.5 py-1 text-[10px] font-medium transition-colors ${selectedPlots.has(key) ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}
@@ -393,7 +399,7 @@ export function DelayReport({ siteId }: DelayReportProps) {
                         onClick={() =>
                           setExpandedSuppliers((prev) => {
                             const next = new Set(prev);
-                            next.has(supplier) ? next.delete(supplier) : next.add(supplier);
+                            if (next.has(supplier)) next.delete(supplier); else next.add(supplier);
                             return next;
                           })
                         }

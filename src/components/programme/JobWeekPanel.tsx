@@ -627,7 +627,7 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
       }
     }
     return res.ok;
-  }, [onJobUpdated]);
+  }, [onJobUpdated, context?.job]);
 
   // Job status actions (start / stop / sign off)
   const handleJobAction = useCallback(async (action: "start" | "stop" | "complete", notes?: string) => {
@@ -693,7 +693,7 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
     } finally {
       setChildJobActionLoading((prev) => { const s = new Set(prev); s.delete(childId); return s; });
     }
-  }, [childJobs, fireJobAction]);
+  }, [childJobs, fireJobAction, triggerCentralStart]);
 
   // Handle "Pull Forward" — cascade all subsequent jobs earlier, then start
   const executePullForward = useCallback(async (jobId: string, daysEarly: number, endDate: string | null, isChild: boolean) => {
@@ -2029,7 +2029,7 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
                       key={c.id}
                       onClick={() => setSelectedContractorIds((prev) => {
                         const next = new Set(prev);
-                        selected ? next.delete(c.id) : next.add(c.id);
+                        if (selected) next.delete(c.id); else next.add(c.id);
                         return next;
                       })}
                       className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left hover:bg-slate-50"

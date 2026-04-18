@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   CheckCircle2,
   Circle,
@@ -59,12 +59,12 @@ export function HandoverChecklist({ plotId }: { plotId: string }) {
   const [docs, setDocs] = useState<AvailableDoc[]>([]);
   const [linkingId, setLinkingId] = useState<string | null>(null);
 
-  const fetchData = () => {
+  const fetchData = useCallback(() => {
     fetch(`/api/plots/${plotId}/handover`)
       .then((r) => r.json())
       .then(setData)
       .finally(() => setLoading(false));
-  };
+  }, [plotId]);
 
   useEffect(() => {
     fetchData();
@@ -82,7 +82,7 @@ export function HandoverChecklist({ plotId }: { plotId: string }) {
         }
       })
       .catch(() => {});
-  }, [plotId]);
+  }, [plotId, fetchData]);
 
   const handleCheck = async (itemId: string, checked: boolean) => {
     const res = await fetch(`/api/plots/${plotId}/handover`, {

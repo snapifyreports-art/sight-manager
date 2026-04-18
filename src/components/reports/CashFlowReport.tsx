@@ -65,21 +65,24 @@ function formatMonth(m: string) {
 type DateMode = "current" | "original";
 
 export function CashFlowReport({ siteId }: { siteId: string }) {
-  const [data, setData] = useState<CashFlowData | null>(null);
-  const [loading, setLoading] = useState(true);
   const [dateMode, setDateMode] = useState<DateMode>("current");
+  // Tag fetched data with the request key so loading is derivable.
+  const requestKey = `${siteId}|${dateMode}`;
+  const [loaded, setLoaded] = useState<{ key: string; data: CashFlowData | null } | null>(null);
+  const data = loaded?.key === requestKey ? loaded.data : null;
+  const loading = loaded?.key !== requestKey;
 
   useEffect(() => {
-    setLoading(true);
+    let cancelled = false;
     fetch(`/api/sites/${siteId}/cash-flow?dateMode=${dateMode}`)
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json();
       })
-      .then(setData)
-      .catch(() => setData(null))
-      .finally(() => setLoading(false));
-  }, [siteId, dateMode]);
+      .then((d) => { if (!cancelled) setLoaded({ key: requestKey, data: d }); })
+      .catch(() => { if (!cancelled) setLoaded({ key: requestKey, data: null }); });
+    return () => { cancelled = true; };
+  }, [siteId, dateMode, requestKey]);
 
   if (loading) {
     return (

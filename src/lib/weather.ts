@@ -59,7 +59,7 @@ export async function fetchWeatherForPostcode(
     // Step 1: Convert UK postcode → lat/lng
     const geoRes = await fetch(
       `https://api.postcodes.io/postcodes/${encodeURIComponent(postcode.trim())}`,
-      { next: { revalidate: 86400 } } as any
+      { next: { revalidate: 86400 } } as RequestInit & { next?: { revalidate?: number } }
     );
     if (!geoRes.ok) return null;
 
@@ -69,7 +69,7 @@ export async function fetchWeatherForPostcode(
     // Step 2: Fetch 7-day forecast from Open-Meteo
     const weatherRes = await fetch(
       `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&daily=weather_code,temperature_2m_max,temperature_2m_min&timezone=Europe%2FLondon&forecast_days=7`,
-      { next: { revalidate: 3600 } } as any
+      { next: { revalidate: 3600 } } as RequestInit & { next?: { revalidate?: number } }
     );
     if (!weatherRes.ok) return null;
 

@@ -57,8 +57,6 @@ interface DragState {
 }
 
 export function TemplateTimeline({ jobs, onJobUpdate, expandedJobIds, onToggleExpand, onBarClick }: TemplateTimelineProps) {
-  if (jobs.length === 0) return null;
-
   // Use external expand state if provided, otherwise fallback to internal
   const [internalExpanded, setInternalExpanded] = useState<Set<string>>(new Set());
   const effectiveExpanded = expandedJobIds ?? internalExpanded;
@@ -273,6 +271,8 @@ export function TemplateTimeline({ jobs, onJobUpdate, expandedJobIds, onToggleEx
     setDragState(null);
     setDragPreview(null);
   }, [dragState, dragPreview, onJobUpdate]);
+
+  if (jobs.length === 0) return null;
 
   return (
     <div className="rounded-lg border bg-white">

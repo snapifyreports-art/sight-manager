@@ -316,7 +316,7 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
     } finally {
       setDelayLoading(false);
     }
-  }, [site, siteId, selectedPlots, delayDays, delayReason, delayReasonType]);
+  }, [site, siteId, selectedPlots, delayDays, delayReason, delayReasonType, showToast]);
 
   // Job week panel state
   const [panelOpen, setPanelOpen] = useState(false);
@@ -798,6 +798,9 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
 
       return { columns: cols, todayIndex: todayIdx, monthSpans: spans };
     }
+    // devDate is intentionally a dep: getCurrentDate() reads it from cookies,
+    // so the memo must re-run when the user changes Dev Mode.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [site, viewMode, devDate]);
 
   // Track data version to re-trigger scroll after refreshes
@@ -982,6 +985,10 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
       alternateRowStyles: {
         fillColor: [248, 250, 252], // slate-50 for alternating rows
       },
+      // jspdf-autotable's CellHookData has tight styling types; we only read a
+      // few fields, so we cast styles through to set colours without fighting
+      // the declared union. eslint disabled locally for this single cast.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       didParseCell: (data: any) => {
         if (data.section === "body") {
           const key = `${data.row.index}-${data.column.index}`;
@@ -1011,7 +1018,7 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
     });
 
     // Legend at the bottom
-    const finalY = (doc as any).lastAutoTable?.finalY || 200;
+    const finalY = (doc as unknown as { lastAutoTable?: { finalY?: number } }).lastAutoTable?.finalY || 200;
     const legendY = finalY + 5;
     const legendItems = [
       { label: "Not Started", color: "#e2e8f0" },

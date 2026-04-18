@@ -122,7 +122,13 @@ function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: boolean; on
   // Only navigate to /sites/[id] if already on a site page; everywhere else update ?site= in-place
   const isOnSitePage = !!siteIdFromPath;
 
-  const [selectedSiteId, setSelectedSiteId] = useState(siteIdFromPath || "");
+  // Track a user-selected fallback for when the URL has no site (used for the
+  // picker itself to have a controlled value). Seed it from localStorage at
+  // mount via a lazy init so we never call setState inside an effect.
+  const [fallbackSiteId, setFallbackSiteId] = useState<string>(() => {
+    if (typeof window === "undefined") return "";
+    try { return localStorage.getItem("sight-manager-last-site") ?? ""; } catch { return ""; }
+  });
   const [sites, setSites] = useState<{ id: string; name: string; status: string }[]>([]);
 
   // Which group label is open — auto-open the one containing the active tab
@@ -135,7 +141,7 @@ function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: boolean; on
   const toggleGroup = (label: string) =>
     setOpenGroups((prev) => {
       const next = new Set(prev);
-      next.has(label) ? next.delete(label) : next.add(label);
+      if (next.has(label)) next.delete(label); else next.add(label);
       return next;
     });
 
@@ -155,29 +161,21 @@ function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: boolean; on
       .catch(() => {});
   }, []);
 
-  // Auto-select site from URL — either from /sites/[id] path or ?site= param or localStorage
-  useEffect(() => {
-    if (siteIdFromPath) {
-      setSelectedSiteId(siteIdFromPath);
-      // Persist to localStorage so navigation to global pages remembers the site
-      try { localStorage.setItem("sight-manager-last-site", siteIdFromPath); } catch {}
-    } else {
-      const fromParam = searchParams.get("site");
-      if (fromParam) {
-        setSelectedSiteId(fromParam);
-        try { localStorage.setItem("sight-manager-last-site", fromParam); } catch {}
-      } else {
-        // Fallback to localStorage
-        try {
-          const stored = localStorage.getItem("sight-manager-last-site");
-          if (stored) setSelectedSiteId(stored);
-        } catch {}
-      }
-    }
-  }, [siteIdFromPath, searchParams]);
+  // Derive the effective site directly (no effect needed) — prefer URL path,
+  // then ?site= query param, then the localStorage-seeded fallback.
+  const siteFromQuery = searchParams.get("site");
+  const effectiveSiteId = siteIdFromPath || siteFromQuery || fallbackSiteId;
+  const selectedSiteId = effectiveSiteId;
 
-  // Get the effective site ID (from URL or localStorage)
-  const effectiveSiteId = siteIdFromPath || selectedSiteId;
+  // Persist any new siteId to localStorage so global pages remember it when
+  // the user navigates away. This is a pure side-effect (localStorage write,
+  // no setState) so the rule is satisfied. The fallbackSiteId doesn't need
+  // updating here because `effectiveSiteId` already prefers URL/query.
+  useEffect(() => {
+    const toStore = siteIdFromPath || siteFromQuery;
+    if (!toStore) return;
+    try { localStorage.setItem("sight-manager-last-site", toStore); } catch {}
+  }, [siteIdFromPath, siteFromQuery]);
 
   // Context-aware nav href — always pass site context to global pages
   const getNavHref = (href: string) => {
@@ -215,7 +213,7 @@ function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: boolean; on
             value={selectedSiteId}
             onChange={(e) => {
               const id = e.target.value;
-              setSelectedSiteId(id);
+              setFallbackSiteId(id);
               if (isOnSitePage) {
                 // On a site page, navigate to the same tab on the new site
                 if (id) {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useSyncExternalStore } from "react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { useSession, signOut } from "next-auth/react";
@@ -57,19 +57,27 @@ function getInitials(name: string | null | undefined) {
     .slice(0, 2);
 }
 
-function useSiteId(pathname: string): string | null {
-  const [storedSiteId, setStoredSiteId] = useState<string | null>(null);
+// Read last-visited siteId from localStorage. Returns null on the server.
+function readStoredSiteId(): string | null {
+  if (typeof window === "undefined") return null;
+  try { return localStorage.getItem("sight-manager-last-site"); } catch { return null; }
+}
 
+function subscribeStoredSiteId(callback: () => void) {
+  window.addEventListener("storage", callback);
+  return () => window.removeEventListener("storage", callback);
+}
+
+function useSiteId(pathname: string): string | null {
   // Extract from URL: /sites/[siteId]/...
   const match = pathname.match(/^\/sites\/([^/]+)/);
   const urlSiteId = match ? match[1] : null;
 
-  useEffect(() => {
-    try {
-      const stored = localStorage.getItem("sight-manager-last-site");
-      if (stored) setStoredSiteId(stored);
-    } catch {}
-  }, []);
+  const storedSiteId = useSyncExternalStore(
+    subscribeStoredSiteId,
+    readStoredSiteId,
+    () => null // server snapshot
+  );
 
   return urlSiteId || storedSiteId;
 }

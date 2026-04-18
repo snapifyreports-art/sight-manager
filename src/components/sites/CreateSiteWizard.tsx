@@ -503,6 +503,7 @@ export function CreateSiteWizard({
     sitePostcode,
     plotBatches,
     supplierMappings,
+    siteManagerId,
     onCreated,
     onOpenChange,
   ]);

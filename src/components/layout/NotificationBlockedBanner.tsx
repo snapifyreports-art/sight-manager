@@ -1,22 +1,37 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { BellOff, X } from "lucide-react";
 
+// Notification.permission is read-only and changes via user action outside the
+// page — treat it as an external store. The browser fires "permissionchange"
+// on Notification.requestPermission results; some browsers don't, so we poll
+// on focus.
+function subscribeNotificationPermission(callback: () => void) {
+  if (typeof window === "undefined") return () => {};
+  window.addEventListener("focus", callback);
+  return () => {
+    window.removeEventListener("focus", callback);
+  };
+}
+function getPermissionSnapshot(): NotificationPermission | "unavailable" {
+  if (typeof Notification === "undefined") return "unavailable";
+  return Notification.permission;
+}
+function getServerPermissionSnapshot(): NotificationPermission | "unavailable" {
+  return "unavailable";
+}
+
 export function NotificationBlockedBanner() {
-  const [blocked, setBlocked] = useState(false);
   const [dismissed, setDismissed] = useState(false);
+  const permission = useSyncExternalStore(
+    subscribeNotificationPermission,
+    getPermissionSnapshot,
+    getServerPermissionSnapshot
+  );
 
-  useEffect(() => {
-    // Only check if the Notification API is available and permission has been explicitly denied
-    if (typeof Notification === "undefined") return;
-    if (Notification.permission === "denied") {
-      setBlocked(true);
-    }
-  }, []);
-
-  if (!blocked || dismissed) return null;
+  if (permission !== "denied" || dismissed) return null;
 
   return (
     <div className="flex items-center gap-3 bg-red-600 px-4 py-2 text-sm text-white">

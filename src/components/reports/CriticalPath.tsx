@@ -77,22 +77,25 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 export function CriticalPath({ siteId }: CriticalPathProps) {
-  const [data, setData] = useState<PathData | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loaded, setLoaded] = useState<{ siteId: string; data: PathData | null } | null>(null);
+  const data = loaded?.siteId === siteId ? loaded.data : null;
+  const loading = loaded?.siteId !== siteId;
   const [selectedPlotId, setSelectedPlotId] = useState<string>("all");
   const [expandedPlots, setExpandedPlots] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    setLoading(true);
+    let cancelled = false;
     fetch(`/api/sites/${siteId}/critical-path`)
       .then((r) => r.json())
       .then((d) => {
-        setData(d);
+        if (cancelled) return;
+        setLoaded({ siteId, data: d });
         if (d.siteCriticalPlotId) {
           setExpandedPlots(new Set([d.siteCriticalPlotId]));
         }
       })
-      .finally(() => setLoading(false));
+      .catch(() => { if (!cancelled) setLoaded({ siteId, data: null }); });
+    return () => { cancelled = true; };
   }, [siteId]);
 
   const togglePlot = (plotId: string) => {

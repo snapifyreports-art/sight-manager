@@ -27,18 +27,25 @@ const STATUS_DOT: Record<string, string> = {
 
 export function JobSiblingNav({ jobId }: JobSiblingNavProps) {
   const router = useRouter();
-  const [siblings, setSiblings] = useState<Sibling[]>([]);
-  const [loading, setLoading] = useState(true);
+  // Store the jobId alongside the siblings so we can derive `loading` from
+  // whether the fetched data matches the current jobId (no setState-in-effect).
+  const [loaded, setLoaded] = useState<{ jobId: string; siblings: Sibling[] } | null>(null);
+  const loading = loaded?.jobId !== jobId;
+  const siblings = loaded?.jobId === jobId ? loaded.siblings : [];
 
   useEffect(() => {
-    setLoading(true);
+    let cancelled = false;
     fetch(`/api/jobs/${jobId}/siblings`)
       .then((r) => r.json())
       .then((data) => {
-        setSiblings(data.siblings || []);
+        if (cancelled) return;
+        setLoaded({ jobId, siblings: data.siblings || [] });
       })
-      .catch(() => setSiblings([]))
-      .finally(() => setLoading(false));
+      .catch(() => {
+        if (cancelled) return;
+        setLoaded({ jobId, siblings: [] });
+      });
+    return () => { cancelled = true; };
   }, [jobId]);
 
   const currentIndex = siblings.findIndex((s) => s.id === jobId);

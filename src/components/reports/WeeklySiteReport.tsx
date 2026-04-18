@@ -105,21 +105,24 @@ function TrendIcon({ trend }: { trend: "up" | "down" | "flat" }) {
 
 export function WeeklySiteReport({ siteId }: WeeklySiteReportProps) {
   const { devDate } = useDevDate();
-  const [data, setData] = useState<ReportData | null>(null);
-  const [loading, setLoading] = useState(true);
   const [weekDate, setWeekDate] = useState(
     startOfWeek(getCurrentDate(), { weekStartsOn: 1 })
   );
+  const reqKey = `${siteId}|${format(weekDate, "yyyy-MM-dd")}|${devDate ?? ""}`;
+  const [loaded, setLoaded] = useState<{ key: string; data: ReportData | null } | null>(null);
+  const data = loaded?.key === reqKey ? loaded.data : null;
+  const loading = loaded?.key !== reqKey;
   const [scheduleStatuses, setScheduleStatuses] = useState<Array<{ plotId: string; plotNumber: string | null; status: string; daysDeviation: number; awaitingRestart: boolean }>>([]);
 
   useEffect(() => {
-    setLoading(true);
+    let cancelled = false;
     const dateStr = format(weekDate, "yyyy-MM-dd");
     fetch(`/api/sites/${siteId}/weekly-report?weekOf=${dateStr}`)
       .then((r) => r.json())
-      .then(setData)
-      .finally(() => setLoading(false));
-  }, [siteId, weekDate, devDate]);
+      .then((d) => { if (!cancelled) setLoaded({ key: reqKey, data: d }); })
+      .catch(() => { if (!cancelled) setLoaded({ key: reqKey, data: null }); });
+    return () => { cancelled = true; };
+  }, [siteId, weekDate, devDate, reqKey]);
 
   useEffect(() => {
     fetch(`/api/sites/${siteId}/plot-schedules`)

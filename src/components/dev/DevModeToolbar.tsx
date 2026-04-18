@@ -8,19 +8,21 @@ import { format } from "date-fns";
 
 export function DevModeToolbar() {
   const { devDate, isDevMode, setDevDate } = useDevDate();
-  const [showPicker, setShowPicker] = useState(false);
   const pathname = usePathname();
 
-  // Close dropdown on route change
-  useEffect(() => {
-    setShowPicker(false);
-  }, [pathname]);
+  // Track which pathname the picker was opened on. The picker auto-closes when
+  // the pathname changes because `showPicker` is derived — no setState inside
+  // an effect is needed.
+  const [openedOnPath, setOpenedOnPath] = useState<string | null>(null);
+  const showPicker = openedOnPath === pathname;
+  const setShowPicker = (open: boolean) =>
+    setOpenedOnPath(open ? pathname : null);
 
   // Close dropdown on Escape key
   useEffect(() => {
     if (!showPicker) return;
     const handleKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setShowPicker(false);
+      if (e.key === "Escape") setOpenedOnPath(null);
     };
     document.addEventListener("keydown", handleKey);
     return () => document.removeEventListener("keydown", handleKey);

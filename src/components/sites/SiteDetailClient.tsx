@@ -202,8 +202,12 @@ function getSiteStatusConfig(status: string) {
 // ---------- Site Snags Sub-Component ----------
 
 function SiteSnags({ siteId, plots, initialSnagId }: { siteId: string; plots: Array<{ id: string; name: string; plotNumber: string | null }>; initialSnagId?: string }) {
+  // Snags come from /api/sites/[id]/snags with a full shape defined by the
+  // downstream SnagList/SnagDialog components. We pass them through as-is.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [snags, setSnags] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [selectedSnag, setSelectedSnag] = useState<any>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [users, setUsers] = useState<{ id: string; name: string }[]>([]);
@@ -212,21 +216,21 @@ function SiteSnags({ siteId, plots, initialSnagId }: { siteId: string; plots: Ar
   const [selectedPlotId, setSelectedPlotId] = useState("");
   const [showAgeingReport, setShowAgeingReport] = useState(false);
 
-  const loadSnags = () => {
+  const loadSnags = useCallback(() => {
     fetch(`/api/sites/${siteId}/snags`)
       .then((r) => r.json())
       .then(setSnags)
       .finally(() => setLoading(false));
-  };
+  }, [siteId]);
 
   useEffect(() => {
     loadSnags();
     fetch("/api/users")
       .then((r) => r.json())
-      .then((data: any[]) =>
-        setUsers(data.map((u: any) => ({ id: u.id, name: u.name })))
+      .then((data: Array<{ id: string; name: string }>) =>
+        setUsers(data.map((u) => ({ id: u.id, name: u.name })))
       );
-  }, [siteId]);
+  }, [siteId, loadSnags]);
 
   if (loading) {
     return (
@@ -334,19 +338,22 @@ function SiteSnags({ siteId, plots, initialSnagId }: { siteId: string; plots: Ar
 // ---------- Site Documents Sub-Component ----------
 
 function SiteDocuments({ siteId }: { siteId: string }) {
+  // Documents come from /api/sites/[id]/documents and are passed straight
+  // through to DocumentList, which owns the concrete type.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [docs, setDocs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const loadDocs = () => {
+  const loadDocs = useCallback(() => {
     fetch(`/api/sites/${siteId}/documents`)
       .then((r) => r.json())
       .then(setDocs)
       .finally(() => setLoading(false));
-  };
+  }, [siteId]);
 
   useEffect(() => {
     loadDocs();
-  }, [siteId]);
+  }, [siteId, loadDocs]);
 
   if (loading) {
     return (
@@ -455,6 +462,7 @@ export function SiteDetailClient({
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
   const [startDate, setStartDate] = useState("");
+  const [plotCreateError, setPlotCreateError] = useState<string | null>(null);
   const [supplierMappings, setSupplierMappings] = useState<
     Record<string, string>
   >({});
@@ -730,15 +738,18 @@ export function SiteDetailClient({
       });
 
       if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || "Failed to create plot from template");
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `Failed to create plot from template (HTTP ${res.status})`);
       }
 
       resetAddPlotDialog();
       setAddPlotDialogOpen(false);
+      setPlotCreateError(null);
       router.refresh();
     } catch (error) {
+      const msg = error instanceof Error ? error.message : "Unknown error";
       console.error("Failed to create plot from template:", error);
+      setPlotCreateError(msg);
     } finally {
       setCreatingPlot(false);
     }
@@ -779,16 +790,30 @@ export function SiteDetailClient({
       });
 
       if (!res.ok) {
-        let errorMsg = "Failed to create plots";
-        try { const err = await res.json(); errorMsg = err.error || errorMsg; } catch {}
+        let errorMsg = `Failed to create plots (HTTP ${res.status})`;
+        try {
+          const err = await res.json();
+          errorMsg = err.error || errorMsg;
+          // Surface per-plot errors if the server included them
+          if (Array.isArray(err.errors) && err.errors.length > 0) {
+            const details = err.errors
+              .slice(0, 3)
+              .map((e: { plotNumber: string; error: string }) => `Plot ${e.plotNumber}: ${e.error}`)
+              .join("; ");
+            errorMsg += ` — ${details}${err.errors.length > 3 ? ` (and ${err.errors.length - 3} more)` : ""}`;
+          }
+        } catch {}
         throw new Error(errorMsg);
       }
 
       resetAddPlotDialog();
       setAddPlotDialogOpen(false);
+      setPlotCreateError(null);
       router.refresh();
     } catch (error) {
+      const msg = error instanceof Error ? error.message : "Unknown error";
       console.error("Failed to bulk create plots:", error);
+      setPlotCreateError(msg);
     } finally {
       setCreatingPlot(false);
     }
@@ -914,6 +939,24 @@ export function SiteDetailClient({
                             : "Assign suppliers to each material order."}
                   </DialogDescription>
                 </DialogHeader>
+
+                {/* Error banner — shows the actual server-reported failure */}
+                {plotCreateError && (
+                  <div className="mt-2 flex items-start gap-2 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-700">
+                    <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+                    <div className="flex-1">
+                      <p className="font-semibold">Plot creation failed</p>
+                      <p className="mt-0.5 break-words">{plotCreateError}</p>
+                    </div>
+                    <button
+                      onClick={() => setPlotCreateError(null)}
+                      className="rounded p-0.5 hover:bg-red-100"
+                      aria-label="Dismiss"
+                    >
+                      <X className="size-3.5" />
+                    </button>
+                  </div>
+                )}
 
                 {/* Step: Choose mode */}
                 {plotMode === "choose" && (

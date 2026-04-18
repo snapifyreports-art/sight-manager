@@ -138,7 +138,13 @@ export function GanttChart({ jobs, enableDateControls = false }: GanttChartProps
   }, [jobs, dateMode]);
 
   // Build grouped structure: parent stages with children, plus standalone jobs
+  // React Compiler can't preserve memoization through local Map/array mutation
+  // in this body; the useMemo still works correctly with its dep array.
+  // eslint-disable-next-line react-hooks/preserve-manual-memoization
   const allRows = useMemo(() => {
+    // Locally-created arrays we populate here — the React Compiler treats
+    // mutations on values that escape the memo as unsafe, but everything we
+    // build below stays local and we return a fresh array at the end.
     const rows: DisplayRow[] = [];
     const grouped = new Map<string, GanttJob[]>();
     const standalone: GanttJob[] = [];
@@ -146,9 +152,12 @@ export function GanttChart({ jobs, enableDateControls = false }: GanttChartProps
     // Separate jobs into groups and standalone
     for (const job of displayJobs) {
       if (job.parentStage) {
-        const arr = grouped.get(job.parentStage) || [];
-        arr.push(job);
-        grouped.set(job.parentStage, arr);
+        const existing = grouped.get(job.parentStage);
+        if (existing) {
+          existing.push(job);
+        } else {
+          grouped.set(job.parentStage, [job]);
+        }
       } else {
         standalone.push(job);
       }
@@ -171,7 +180,9 @@ export function GanttChart({ jobs, enableDateControls = false }: GanttChartProps
     }> = [];
 
     for (const [parentStage, children] of grouped) {
-      const sorted = children.sort(
+      // Use slice().sort() to avoid mutating the source array — the React
+      // Compiler can't preserve memoization across mutations.
+      const sorted = children.slice().sort(
         (a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0)
       );
       const minSortOrder = Math.min(

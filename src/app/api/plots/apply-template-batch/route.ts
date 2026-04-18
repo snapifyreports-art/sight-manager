@@ -174,8 +174,14 @@ export async function POST(request: NextRequest) {
   }
 
   if (createdPlots.length === 0 && errors.length > 0) {
+    // Include the first error's message in the top-level `error` so the UI
+    // can show something useful without having to parse the errors[] array.
+    const firstError = errors[0]?.error ?? "unknown error";
     return NextResponse.json(
-      { error: "All plots failed to create", errors },
+      {
+        error: `All ${plots.length} plot${plots.length === 1 ? "" : "s"} failed to create — first error: ${firstError}`,
+        errors,
+      },
       { status: 500 }
     );
   }

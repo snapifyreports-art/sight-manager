@@ -14,11 +14,16 @@ export function useRefreshOnFocus(
   refreshFn: () => void,
   minInterval = 5000 // 5 seconds minimum between refreshes
 ) {
-  const lastRefresh = useRef(Date.now());
-  const mountTime = useRef(Date.now());
+  // Initialise to 0; useEffect sets them to Date.now() after mount.
+  // We can't call Date.now() during render — it's impure and triggers
+  // react-hooks/purity warnings under React 19.
+  const lastRefresh = useRef(0);
+  const mountTime = useRef(0);
 
   useEffect(() => {
-    mountTime.current = Date.now();
+    const mountedAt = Date.now();
+    mountTime.current = mountedAt;
+    lastRefresh.current = mountedAt;
 
     const handleRefresh = () => {
       const now = Date.now();

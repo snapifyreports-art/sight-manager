@@ -30,28 +30,36 @@ function arrayBufferToBase64(buffer: ArrayBuffer) {
   return window.btoa(binary);
 }
 
+// Decide the initial status synchronously from feature detection so we don't
+// have to call setState inside an effect for the "unsupported" branch.
+function detectInitialStatus(): PushStatus {
+  if (typeof window === "undefined") return "loading";
+  if (!("serviceWorker" in navigator) || !("PushManager" in window)) return "unsupported";
+  return "loading";
+}
+
 export function usePush() {
-  const [status, setStatus] = useState<PushStatus>("loading");
+  const [status, setStatus] = useState<PushStatus>(detectInitialStatus);
   const [subscription, setSubscription] = useState<PushSubscription | null>(
     null
   );
 
   useEffect(() => {
-    if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
-      setStatus("unsupported");
-      return;
-    }
+    if (status === "unsupported") return;
+
+    let cancelled = false;
 
     async function checkStatus() {
       const permission = Notification.permission;
       if (permission === "denied") {
-        setStatus("denied");
+        if (!cancelled) setStatus("denied");
         return;
       }
 
       try {
         const reg = await navigator.serviceWorker.ready;
         const sub = await reg.pushManager.getSubscription();
+        if (cancelled) return;
         if (sub) {
           setSubscription(sub);
           setStatus("subscribed");
@@ -59,12 +67,13 @@ export function usePush() {
           setStatus(permission === "granted" ? "unsubscribed" : "prompt");
         }
       } catch {
-        setStatus("prompt");
+        if (!cancelled) setStatus("prompt");
       }
     }
 
     checkStatus();
-  }, []);
+    return () => { cancelled = true; };
+  }, [status]);
 
   const subscribe = useCallback(async () => {
     try {

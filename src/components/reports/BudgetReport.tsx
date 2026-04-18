@@ -106,16 +106,20 @@ function VarianceIndicator({ variance, percent }: { variance: number; percent: n
 }
 
 export function BudgetReport({ siteId }: BudgetReportProps) {
-  const [data, setData] = useState<BudgetData | null>(null);
-  const [loading, setLoading] = useState(true);
+  // Store fetched data with the siteId it belongs to so `loading` can be
+  // derived without calling setState inside an effect.
+  const [loaded, setLoaded] = useState<{ siteId: string; data: BudgetData | null } | null>(null);
+  const data = loaded?.siteId === siteId ? loaded.data : null;
+  const loading = loaded?.siteId !== siteId;
   const [expandedPlots, setExpandedPlots] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    setLoading(true);
+    let cancelled = false;
     fetch(`/api/sites/${siteId}/budget-report`)
       .then((r) => r.json())
-      .then(setData)
-      .finally(() => setLoading(false));
+      .then((d) => { if (!cancelled) setLoaded({ siteId, data: d }); })
+      .catch(() => { if (!cancelled) setLoaded({ siteId, data: null }); });
+    return () => { cancelled = true; };
   }, [siteId]);
 
   const togglePlot = (plotId: string) => {

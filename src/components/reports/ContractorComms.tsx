@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useRefreshOnFocus } from "@/hooks/useRefreshOnFocus";
 import { format, parseISO } from "date-fns";
 import {
@@ -125,6 +125,14 @@ function ShareDialog({
   const [copied, setCopied] = useState(false);
   const [emailBody, setEmailBody] = useState("");
 
+  // Keep the latest onLinkGenerated in a ref so the effect doesn't re-fire if
+  // the parent re-creates the callback on every render (which would cause us
+  // to generate a new share link each time).
+  const onLinkGeneratedRef = useRef(onLinkGenerated);
+  useEffect(() => {
+    onLinkGeneratedRef.current = onLinkGenerated;
+  }, [onLinkGenerated]);
+
   // Auto-generate permanent link on open
   useEffect(() => {
     fetch(`/api/sites/${siteId}/contractor-comms/share`, {
@@ -135,7 +143,7 @@ function ShareDialog({
       .then((r) => r.json())
       .then((data) => {
         setUrl(data.url);
-        onLinkGenerated?.();
+        onLinkGeneratedRef.current?.();
         const name = contractor.company || contractor.name;
         setEmailBody(
           `Hi ${contractor.name},\n\nHere is your permanent link to view your live jobs, upcoming work, orders and any open snags for ${name}:\n\n${data.url}\n\nThis link stays up to date automatically — no need to request a new one. Please do not hesitate to get in touch if you have any queries.\n\nKind regards`
@@ -729,18 +737,31 @@ function ContractorCard({
 }
 
 export function ContractorComms({ siteId }: { siteId: string }) {
-  const [data, setData] = useState<CommsData | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loaded, setLoaded] = useState<{ siteId: string; data: CommsData | null } | null>(null);
+  const data = loaded?.siteId === siteId ? loaded.data : null;
+  const loading = loaded?.siteId !== siteId;
   const [filter, setFilter] = useState<string | null>(null); // contactId or null = all
 
-  const fetchData = useCallback(async () => {
-    const res = await fetch(`/api/sites/${siteId}/contractor-comms`);
-    if (res.ok) setData(await res.json());
-    setLoading(false);
-  }, [siteId]);
+  // Tick used to force a refetch from useRefreshOnFocus (incremented on focus)
+  const [refreshTick, setRefreshTick] = useState(0);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
-  useRefreshOnFocus(fetchData);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const res = await fetch(`/api/sites/${siteId}/contractor-comms`);
+      if (cancelled) return;
+      if (res.ok) {
+        const json = await res.json();
+        if (!cancelled) setLoaded({ siteId, data: json });
+      } else {
+        setLoaded({ siteId, data: null });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [siteId, refreshTick]);
+
+  const bumpTick = useCallback(() => setRefreshTick((n) => n + 1), []);
+  useRefreshOnFocus(bumpTick);
 
   if (loading) {
     return (

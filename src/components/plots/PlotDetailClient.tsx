@@ -424,16 +424,17 @@ function PlotOverview({
   }, [plot.jobs, snagSummary, today]);
 
   // Group jobs by parent stage
+  const jobs = plot.jobs;
   const stageGroups = useMemo(() => {
     const groups: Record<
       string,
-      { name: string; jobs: typeof plot.jobs }
+      { name: string; jobs: typeof jobs }
     > = {};
     // Skip real parent Jobs (they're derived rollups) — identify them as jobs
     // that appear as parentId on other jobs. We group by parentStage for children
     // and by name for flat top-level jobs (no parent AND no children).
-    const parentJobIds = new Set(plot.jobs.filter((j) => j.parentId).map((j) => j.parentId!));
-    for (const job of plot.jobs) {
+    const parentJobIds = new Set(jobs.filter((j) => j.parentId).map((j) => j.parentId!));
+    for (const job of jobs) {
       if (parentJobIds.has(job.id)) continue; // skip real parent Jobs
       const stage = job.parentStage || "Ungrouped";
       if (!groups[stage]) {
@@ -442,7 +443,7 @@ function PlotOverview({
       groups[stage].jobs.push(job);
     }
     return Object.values(groups);
-  }, [plot.jobs]);
+  }, [jobs]);
 
   const activeJobs = useMemo(
     () => plot.jobs.filter((j) => j.status === "IN_PROGRESS"),

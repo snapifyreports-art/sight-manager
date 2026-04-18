@@ -229,20 +229,22 @@ export function AnalyticsClient() {
   const { devDate } = useDevDate();
   const searchParams = useSearchParams();
   const siteFilter = searchParams.get("site") ?? "";
-  const [data, setData] = useState<AnalyticsData | null>(null);
-  const [loading, setLoading] = useState(true);
+  const reqKey = `${siteFilter}|${devDate ?? ""}`;
+  const [loaded, setLoaded] = useState<{ key: string; data: AnalyticsData | null } | null>(null);
+  const data = loaded?.key === reqKey ? loaded.data : null;
+  const loading = loaded?.key !== reqKey;
 
   useEffect(() => {
+    let cancelled = false;
     const url = siteFilter
       ? `/api/analytics?siteId=${siteFilter}`
       : "/api/analytics";
-    setLoading(true);
     fetch(url)
       .then((r) => r.json())
-      .then(setData)
-      .catch(console.error)
-      .finally(() => setLoading(false));
-  }, [siteFilter, devDate]);
+      .then((d) => { if (!cancelled) setLoaded({ key: reqKey, data: d }); })
+      .catch(() => { if (!cancelled) setLoaded({ key: reqKey, data: null }); });
+    return () => { cancelled = true; };
+  }, [siteFilter, devDate, reqKey]);
 
   if (loading) {
     return (
@@ -474,7 +476,7 @@ export function AnalyticsClient() {
               </Pie>
               <Tooltip
                 contentStyle={{ fontSize: 12 }}
-                formatter={(value: any) => [value, "Jobs"]}
+                formatter={(value) => [String(value ?? ""), "Jobs"]}
               />
             </PieChart>
           </ResponsiveContainer>
@@ -527,8 +529,8 @@ export function AnalyticsClient() {
               />
               <Tooltip
                 contentStyle={{ fontSize: 12 }}
-                formatter={(value: any, name: any) => [
-                  `${value} days`,
+                formatter={(value, name) => [
+                  `${value ?? 0} days`,
                   name === "avgPlannedDays" ? "Planned" : "Actual",
                 ]}
               />
@@ -626,7 +628,7 @@ export function AnalyticsClient() {
                   </Pie>
                   <Tooltip
                     contentStyle={{ fontSize: 12 }}
-                    formatter={(value: any) => [value, "Orders"]}
+                    formatter={(value) => [String(value ?? ""), "Orders"]}
                   />
                 </PieChart>
               </ResponsiveContainer>
@@ -704,8 +706,8 @@ export function AnalyticsClient() {
                 />
                 <Tooltip
                   contentStyle={{ fontSize: 12 }}
-                  formatter={(value: any) => [
-                    formatCurrency(value),
+                  formatter={(value) => [
+                    formatCurrency(Number(value ?? 0)),
                     "Spend",
                   ]}
                 />
@@ -741,8 +743,8 @@ export function AnalyticsClient() {
                 <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
                 <Tooltip
                   contentStyle={{ fontSize: 12 }}
-                  labelFormatter={(label: any) => formatShortDate(String(label))}
-                  formatter={(value: any) => [value, "Events"]}
+                  labelFormatter={(label) => formatShortDate(String(label ?? ""))}
+                  formatter={(value) => [String(value ?? ""), "Events"]}
                 />
                 <defs>
                   <linearGradient id="activityGrad" x1="0" y1="0" x2="0" y2="1">
