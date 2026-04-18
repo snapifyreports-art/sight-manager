@@ -55,10 +55,16 @@ export function TemplateExtras({ templateId, templateName }: { templateId: strin
   const [mCategory, setMCategory] = useState("");
   const [mSubmitting, setMSubmitting] = useState(false);
 
-  // Doc upload dialog
+  // Doc upload dialog — multi-file with per-file labels
   const [dOpen, setDOpen] = useState(false);
-  const [dName, setDName] = useState("");
   const [dSubmitting, setDSubmitting] = useState(false);
+  const [pendingDocs, setPendingDocs] = useState<Array<{
+    tempId: string;
+    file: File;
+    name: string;
+    status: "pending" | "uploading" | "done" | "error";
+    errorMsg?: string;
+  }>>([]);
   const fileRef = useRef<HTMLInputElement | null>(null);
 
   const toast = useToast();
@@ -124,25 +130,69 @@ export function TemplateExtras({ templateId, templateName }: { templateId: strin
     load();
   }
 
-  async function uploadDoc() {
-    const f = fileRef.current?.files?.[0];
-    if (!f) return;
+  function handleFilesPicked(files: FileList | null) {
+    if (!files || files.length === 0) return;
+    const now = Date.now();
+    const queued = Array.from(files).map((file, i) => ({
+      tempId: `${now}-${i}`,
+      file,
+      name: file.name.replace(/\.[^.]+$/, ""),
+      status: "pending" as const,
+    }));
+    setPendingDocs((prev) => [...prev, ...queued]);
+    if (fileRef.current) fileRef.current.value = "";
+  }
+
+  function updatePending(tempId: string, patch: Partial<(typeof pendingDocs)[number]>) {
+    setPendingDocs((prev) => prev.map((p) => (p.tempId === tempId ? { ...p, ...patch } : p)));
+  }
+
+  function removePending(tempId: string) {
+    setPendingDocs((prev) => prev.filter((p) => p.tempId !== tempId));
+  }
+
+  // Upload all queued files in parallel. Per-file status tracked so partial
+  // failures (e.g. one oversize file) don't block the rest.
+  async function uploadDocs() {
+    if (pendingDocs.length === 0 || dSubmitting) return;
     setDSubmitting(true);
     try {
-      const fd = new FormData();
-      fd.append("file", f);
-      fd.append("name", dName || f.name);
-      fd.append("category", "DRAWING");
-      const res = await fetch(`/api/plot-templates/${templateId}/documents`, { method: "POST", body: fd });
-      if (!res.ok) {
-        toast.error(await fetchErrorMessage(res, "Failed to upload drawing"));
-        return;
+      let successCount = 0;
+      let errorCount = 0;
+      await Promise.all(
+        pendingDocs.map(async (p) => {
+          if (p.status === "done") return;
+          updatePending(p.tempId, { status: "uploading", errorMsg: undefined });
+          try {
+            const fd = new FormData();
+            fd.append("file", p.file);
+            fd.append("name", p.name || p.file.name);
+            fd.append("category", "DRAWING");
+            const res = await fetch(`/api/plot-templates/${templateId}/documents`, { method: "POST", body: fd });
+            if (res.ok) {
+              updatePending(p.tempId, { status: "done" });
+              successCount++;
+            } else {
+              const data = await res.json().catch(() => ({}));
+              updatePending(p.tempId, { status: "error", errorMsg: data.error ?? `HTTP ${res.status}` });
+              errorCount++;
+            }
+          } catch (e) {
+            updatePending(p.tempId, { status: "error", errorMsg: e instanceof Error ? e.message : "Network error" });
+            errorCount++;
+          }
+        })
+      );
+      if (successCount > 0) load();
+      if (errorCount === 0) {
+        setDOpen(false);
+        setPendingDocs([]);
+      } else if (successCount > 0) {
+        setPendingDocs((prev) => prev.filter((p) => p.status !== "done"));
       }
-      setDOpen(false);
-      setDName("");
-      if (fileRef.current) fileRef.current.value = "";
-      load();
-    } finally { setDSubmitting(false); }
+    } finally {
+      setDSubmitting(false);
+    }
   }
 
   async function deleteDoc(id: string) {
@@ -303,25 +353,60 @@ export function TemplateExtras({ templateId, templateName }: { templateId: strin
         </DialogContent>
       </Dialog>
 
-      {/* Upload doc dialog */}
-      <Dialog open={dOpen} onOpenChange={setDOpen}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>Upload drawing to template</DialogTitle></DialogHeader>
+      {/* Upload doc dialog — multi-file with per-file labels */}
+      <Dialog open={dOpen} onOpenChange={(o) => { setDOpen(o); if (!o) setPendingDocs([]); }}>
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader><DialogTitle>Upload drawings to template</DialogTitle></DialogHeader>
           <div className="space-y-3 py-2">
             <div>
-              <Label>File</Label>
-              <Input type="file" ref={fileRef} accept=".pdf,image/*,.dwg" />
+              <Label className="text-xs">Add files</Label>
+              <Input
+                type="file"
+                ref={fileRef}
+                accept=".pdf,image/*,.dwg"
+                multiple
+                onChange={(e) => handleFilesPicked(e.target.files)}
+              />
+              <p className="mt-1 text-[11px] text-muted-foreground">PDF, images, or DWG · 50MB per file max · select multiple with Ctrl/Cmd-click</p>
             </div>
-            <div>
-              <Label>Name (optional)</Label>
-              <Input value={dName} onChange={(e) => setDName(e.target.value)} placeholder="Uses filename if blank" />
-            </div>
+            {pendingDocs.length > 0 && (
+              <div className="space-y-1.5 rounded-lg border bg-slate-50/40 p-2">
+                <p className="text-[11px] font-medium text-muted-foreground">{pendingDocs.length} file{pendingDocs.length !== 1 ? "s" : ""} queued</p>
+                {pendingDocs.map((p) => (
+                  <div key={p.tempId} className="flex items-center gap-2 rounded bg-white px-2 py-1.5">
+                    <div className="min-w-0 flex-1">
+                      <Input
+                        value={p.name}
+                        onChange={(e) => updatePending(p.tempId, { name: e.target.value })}
+                        placeholder={p.file.name}
+                        className="h-7 text-xs"
+                        disabled={p.status === "uploading" || p.status === "done"}
+                      />
+                      <p className="mt-0.5 truncate text-[10px] text-muted-foreground">
+                        {p.file.name} · {Math.round(p.file.size / 1024)} KB
+                        {p.status === "error" && p.errorMsg && <span className="ml-1 text-red-600">— {p.errorMsg}</span>}
+                        {p.status === "done" && <span className="ml-1 text-green-600">— uploaded</span>}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => removePending(p.tempId)}
+                      className="rounded p-1 text-muted-foreground hover:bg-slate-100 hover:text-destructive disabled:opacity-50"
+                      disabled={p.status === "uploading"}
+                      aria-label="Remove"
+                    >
+                      <Trash2 className="size-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDOpen(false)}>Cancel</Button>
-            <Button onClick={uploadDoc} disabled={dSubmitting}>
+            <Button variant="outline" onClick={() => setDOpen(false)} disabled={dSubmitting}>Cancel</Button>
+            <Button onClick={uploadDocs} disabled={dSubmitting || pendingDocs.length === 0}>
               {dSubmitting && <Loader2 className="size-4 animate-spin" />}
-              Upload
+              Upload {pendingDocs.length > 0 ? `${pendingDocs.length} file${pendingDocs.length !== 1 ? "s" : ""}` : ""}
             </Button>
           </DialogFooter>
         </DialogContent>

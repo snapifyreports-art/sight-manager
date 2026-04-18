@@ -33,6 +33,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useRefreshOnFocus } from "@/hooks/useRefreshOnFocus";
 import { format, parseISO } from "date-fns";
+import { differenceInWorkingDays, addWorkingDays } from "@/lib/working-days";
 import { PostCompletionDialog } from "@/components/PostCompletionDialog";
 import { useJobAction } from "@/hooks/useJobAction";
 import { Breadcrumbs } from "@/components/ui/breadcrumbs";
@@ -211,6 +212,10 @@ export default function SiteWalkthrough({
   const [newEndDate, setNewEndDate] = useState("");
   const [cascadePreview, setCascadePreview] = useState<{ deltaDays: number; jobUpdates: unknown[] } | null>(null);
   const [cascadeLoading, setCascadeLoading] = useState(false);
+  // Delay reason — mirrors Daily Brief so delays from the walkthrough show
+  // up categorised on the Delay Report the same way. Enum matches the API.
+  const [delayReasonType, setDelayReasonType] = useState<"WEATHER_RAIN" | "WEATHER_TEMPERATURE" | "OTHER">("OTHER");
+  const [delayReasonNote, setDelayReasonNote] = useState("");
   const [completionContext, setCompletionContext] = useState<{
     completedJobName: string;
     daysDeviation: number;
@@ -295,6 +300,8 @@ export default function SiteWalkthrough({
     setPhotoFiles([]);
     setNewEndDate("");
     setCascadePreview(null);
+    setDelayReasonType("OTHER");
+    setDelayReasonNote("");
   };
 
   const refresh = async () => {
@@ -529,21 +536,51 @@ export default function SiteWalkthrough({
     }
   };
 
+  // Apply a delay via the proper /api/jobs/[id]/delay endpoint — matches
+  // Daily Brief's Delay Job flow. That endpoint:
+  //   - converts our working-day `days` into a cascade of start + end shifts
+  //   - records a JobAction + EventLog with the reason (so Delay Report can
+  //     categorise it as Rain / Temperature / Other)
+  //   - pushes the assigned user if they have notifications enabled
   const handleApplyDelay = async () => {
     if (!plot?.currentJob || !newEndDate) return;
+    const job = plot.currentJob;
+    if (!job.endDate) {
+      showToast("Job has no end date — cannot delay", "error");
+      return;
+    }
+    // Convert the picked new-end-date to a working-day count.
+    const newEnd = new Date(newEndDate);
+    const currentEnd = new Date(job.endDate);
+    const days = differenceInWorkingDays(newEnd, currentEnd);
+    if (days <= 0) {
+      showToast("New end date must be after the current end date", "error");
+      return;
+    }
     setActionLoading(true);
     try {
-      const res = await fetch(`/api/jobs/${plot.currentJob.id}/cascade`, {
-        method: "PUT",
+      const res = await fetch(`/api/jobs/${job.id}/delay`, {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ newEndDate, confirm: true }),
+        body: JSON.stringify({
+          days,
+          delayReasonType,
+          reason: delayReasonNote.trim() || undefined,
+        }),
       });
       if (res.ok) {
+        const data = await res.json().catch(() => ({ jobsShifted: 0 }));
         closeModal();
-        showToast("Delay applied & schedule updated", "success");
+        setDelayReasonType("OTHER");
+        setDelayReasonNote("");
+        showToast(
+          `Delayed ${days} working day${days !== 1 ? "s" : ""} — ${data.jobsShifted} downstream job${data.jobsShifted !== 1 ? "s" : ""} shifted`,
+          "success"
+        );
         await refresh();
       } else {
-        showToast("Failed to apply delay", "error");
+        const err = await res.json().catch(() => null);
+        showToast(err?.error ?? "Failed to apply delay", "error");
       }
     } finally {
       setActionLoading(false);
@@ -1408,12 +1445,67 @@ export default function SiteWalkthrough({
                 min={job.endDate ? job.endDate.slice(0, 10) : undefined}
                 className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
+              {newEndDate && job.endDate && (() => {
+                const wd = differenceInWorkingDays(new Date(newEndDate), new Date(job.endDate));
+                if (wd <= 0) return null;
+                return (
+                  <p className="mt-1 text-[11px] text-muted-foreground">
+                    {wd} working day{wd !== 1 ? "s" : ""} later than current plan
+                  </p>
+                );
+              })()}
             </div>
+
+            {/* Reason — matches Daily Brief's Delay dialog so delays show up
+                categorised on the Delay Report regardless of where they were
+                triggered. */}
+            <div>
+              <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+                Reason
+              </label>
+              <div className="grid grid-cols-3 gap-1.5">
+                {[
+                  { v: "WEATHER_RAIN" as const, label: "Rain", emoji: "☔" },
+                  { v: "WEATHER_TEMPERATURE" as const, label: "Temperature", emoji: "🌡️" },
+                  { v: "OTHER" as const, label: "Other", emoji: "⏳" },
+                ].map((r) => (
+                  <button
+                    key={r.v}
+                    type="button"
+                    onClick={() => setDelayReasonType(r.v)}
+                    className={cn(
+                      "rounded-lg border px-2 py-1.5 text-xs font-medium transition-colors",
+                      delayReasonType === r.v
+                        ? "border-amber-400 bg-amber-50 text-amber-900"
+                        : "border-border bg-white text-muted-foreground hover:bg-accent"
+                    )}
+                  >
+                    <span className="mr-1">{r.emoji}</span>{r.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {delayReasonType === "OTHER" && (
+              <div>
+                <label className="mb-1 block text-xs font-medium text-muted-foreground">
+                  Notes <span className="opacity-60">(optional — shows on delay report)</span>
+                </label>
+                <input
+                  type="text"
+                  value={delayReasonNote}
+                  onChange={(e) => setDelayReasonNote(e.target.value)}
+                  placeholder="e.g. Contractor no-show, material not on site yet"
+                  maxLength={200}
+                  className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+            )}
 
             {cascadePreview && (
               <div className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">
                 <p className="font-semibold">
-                  {cascadePreview.deltaDays > 0 ? `+${cascadePreview.deltaDays}` : cascadePreview.deltaDays} day
+                  {cascadePreview.deltaDays > 0 ? `+${cascadePreview.deltaDays}` : cascadePreview.deltaDays} working day
                   {Math.abs(cascadePreview.deltaDays) !== 1 ? "s" : ""}
                 </p>
                 <p className="text-xs mt-0.5">

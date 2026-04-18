@@ -84,9 +84,10 @@ export async function POST(
     return NextResponse.json({ error: "No file provided" }, { status: 400 });
   }
 
-  // 10MB limit
-  if (file.size > 10 * 1024 * 1024) {
-    return NextResponse.json({ error: "File too large (max 10MB)" }, { status: 400 });
+  // 50MB limit — construction drawings (PDFs) frequently exceed 10MB,
+  // especially multi-page layouts or CAD exports.
+  if (file.size > 50 * 1024 * 1024) {
+    return NextResponse.json({ error: `File too large (${Math.round(file.size / (1024 * 1024))}MB) — max 50MB` }, { status: 400 });
   }
 
   // If jobId provided, get the plotId from the job

@@ -40,6 +40,11 @@ export async function POST(
     return NextResponse.json({ error: "file and name are required" }, { status: 400 });
   }
 
+  // 50MB limit — construction drawings (PDFs) frequently exceed 10MB.
+  if (file.size > 50 * 1024 * 1024) {
+    return NextResponse.json({ error: `File too large (${Math.round(file.size / (1024 * 1024))}MB) — max 50MB` }, { status: 400 });
+  }
+
   const ext = file.name.split(".").pop() || "bin";
   const storagePath = `template-docs/${templateId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
   const arrayBuffer = await file.arrayBuffer();

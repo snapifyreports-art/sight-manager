@@ -35,14 +35,27 @@ interface Drawing {
 }
 interface Plot { id: string; plotNumber: string | null; name: string }
 
+// A single file queued for upload. Starts with the OS filename as its
+// label and the picker's default plot assignment; user can edit both
+// before confirming. "pending" / "done" / "error" tracks the per-file
+// state once upload starts.
+interface PendingUpload {
+  tempId: string;
+  file: File;
+  name: string;
+  plotId: string; // "__site__" means site-wide
+  status: "pending" | "uploading" | "done" | "error";
+  errorMsg?: string;
+}
+
 export function SiteDrawingsClient({ siteId, plots }: { siteId: string; plots: Plot[] }) {
   const [drawings, setDrawings] = useState<Drawing[]>([]);
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
   const [uploadOpen, setUploadOpen] = useState(false);
-  const [uploadName, setUploadName] = useState("");
-  const [uploadPlotId, setUploadPlotId] = useState("__site__");
+  const [pending, setPending] = useState<PendingUpload[]>([]);
+  const [defaultPlotId, setDefaultPlotId] = useState("__site__");
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [linkCopied, setLinkCopied] = useState<string | null>(null);
   const toast = useToast();
@@ -76,27 +89,77 @@ export function SiteDrawingsClient({ siteId, plots }: { siteId: string; plots: P
     return { siteWide: sw, byPlot: bp };
   }, [drawings]);
 
-  async function upload() {
-    const file = fileRef.current?.files?.[0];
-    if (!file) return;
+  // When the user picks files, queue them with default name + plot.
+  function handleFilesPicked(files: FileList | null) {
+    if (!files || files.length === 0) return;
+    const now = Date.now();
+    const queued = Array.from(files).map((file, i) => ({
+      tempId: `${now}-${i}`,
+      file,
+      // Strip extension for a nicer default label
+      name: file.name.replace(/\.[^.]+$/, ""),
+      plotId: defaultPlotId,
+      status: "pending" as const,
+    }));
+    setPending((prev) => [...prev, ...queued]);
+    if (fileRef.current) fileRef.current.value = "";
+  }
+
+  function updatePending(tempId: string, patch: Partial<PendingUpload>) {
+    setPending((prev) => prev.map((p) => (p.tempId === tempId ? { ...p, ...patch } : p)));
+  }
+
+  function removePending(tempId: string) {
+    setPending((prev) => prev.filter((p) => p.tempId !== tempId));
+  }
+
+  // Upload every queued file in parallel. Per-file status + error tracked so
+  // a partial failure shows which files didn't make it. 50MB/file limit is
+  // enforced server-side; we echo the filename back in the error.
+  async function uploadAll() {
+    if (pending.length === 0 || uploading) return;
     setUploading(true);
     try {
-      const fd = new FormData();
-      fd.append("file", file);
-      fd.append("name", uploadName || file.name);
-      fd.append("category", "DRAWING");
-      if (uploadPlotId !== "__site__") fd.append("plotId", uploadPlotId);
-      const res = await fetch(`/api/sites/${siteId}/documents`, { method: "POST", body: fd });
-      if (res.ok) {
+      let successCount = 0;
+      let errorCount = 0;
+      await Promise.all(
+        pending.map(async (p) => {
+          if (p.status === "done") return;
+          updatePending(p.tempId, { status: "uploading", errorMsg: undefined });
+          try {
+            const fd = new FormData();
+            fd.append("file", p.file);
+            fd.append("name", p.name || p.file.name);
+            fd.append("category", "DRAWING");
+            if (p.plotId !== "__site__") fd.append("plotId", p.plotId);
+            const res = await fetch(`/api/sites/${siteId}/documents`, { method: "POST", body: fd });
+            if (res.ok) {
+              updatePending(p.tempId, { status: "done" });
+              successCount++;
+            } else {
+              const data = await res.json().catch(() => ({}));
+              updatePending(p.tempId, { status: "error", errorMsg: data.error ?? `HTTP ${res.status}` });
+              errorCount++;
+            }
+          } catch (e) {
+            updatePending(p.tempId, { status: "error", errorMsg: e instanceof Error ? e.message : "Network error" });
+            errorCount++;
+          }
+        })
+      );
+      if (successCount > 0) refresh();
+      if (errorCount === 0) {
         setUploadOpen(false);
-        setUploadName(""); setUploadPlotId("__site__");
-        if (fileRef.current) fileRef.current.value = "";
-        refresh();
-      } else {
-        const err = await res.json().catch(() => ({}));
-        setError(err.error || "Upload failed");
+        setPending([]);
+        setDefaultPlotId("__site__");
+      } else if (successCount > 0) {
+        // Partial success — keep dialog open so user can see which failed, but
+        // drop the completed rows so they can retry only the failures.
+        setPending((prev) => prev.filter((p) => p.status !== "done"));
       }
-    } finally { setUploading(false); }
+    } finally {
+      setUploading(false);
+    }
   }
 
   async function deleteDrawing(d: Drawing) {
@@ -167,22 +230,19 @@ export function SiteDrawingsClient({ siteId, plots }: { siteId: string; plots: P
         )}
       </div>
 
-      {/* Upload dialog */}
-      <Dialog open={uploadOpen} onOpenChange={setUploadOpen}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>Upload drawing</DialogTitle></DialogHeader>
+      {/* Upload dialog — supports multiple files at once, each with its own
+          label and per-file plot assignment. */}
+      <Dialog open={uploadOpen} onOpenChange={(o) => { setUploadOpen(o); if (!o) { setPending([]); setDefaultPlotId("__site__"); } }}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Upload drawings</DialogTitle>
+          </DialogHeader>
+
           <div className="space-y-3 py-2">
+            {/* Default plot for newly-added files. Can be overridden per file. */}
             <div>
-              <Label>File</Label>
-              <Input type="file" ref={fileRef} accept=".pdf,image/*,.dwg" />
-            </div>
-            <div>
-              <Label>Name (optional)</Label>
-              <Input value={uploadName} onChange={(e) => setUploadName(e.target.value)} placeholder="Uses filename if blank" />
-            </div>
-            <div>
-              <Label>Attach to</Label>
-              <Select value={uploadPlotId} onValueChange={(v) => setUploadPlotId(v ?? "__site__")}>
+              <Label className="text-xs">Default plot for new files</Label>
+              <Select value={defaultPlotId} onValueChange={(v) => setDefaultPlotId(v ?? "__site__")}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="__site__">Site-wide (visible on all plots)</SelectItem>
@@ -190,12 +250,72 @@ export function SiteDrawingsClient({ siteId, plots }: { siteId: string; plots: P
                 </SelectContent>
               </Select>
             </div>
+
+            {/* File picker — multiple */}
+            <div>
+              <Label className="text-xs">Add files</Label>
+              <Input
+                type="file"
+                ref={fileRef}
+                accept=".pdf,image/*,.dwg"
+                multiple
+                onChange={(e) => handleFilesPicked(e.target.files)}
+              />
+              <p className="mt-1 text-[11px] text-muted-foreground">PDF, images, or DWG · 50MB per file max · select multiple with Ctrl/Cmd-click</p>
+            </div>
+
+            {/* Queued files list — each row editable */}
+            {pending.length > 0 && (
+              <div className="space-y-1.5 rounded-lg border bg-slate-50/40 p-2">
+                <p className="text-[11px] font-medium text-muted-foreground">{pending.length} file{pending.length !== 1 ? "s" : ""} queued</p>
+                {pending.map((p) => (
+                  <div key={p.tempId} className="flex items-center gap-2 rounded bg-white px-2 py-1.5">
+                    <FileText className="size-4 shrink-0 text-blue-600" />
+                    <div className="min-w-0 flex-1">
+                      <Input
+                        value={p.name}
+                        onChange={(e) => updatePending(p.tempId, { name: e.target.value })}
+                        placeholder={p.file.name}
+                        className="h-7 text-xs"
+                        disabled={p.status === "uploading" || p.status === "done"}
+                      />
+                      <p className="mt-0.5 truncate text-[10px] text-muted-foreground">
+                        {p.file.name} · {Math.round(p.file.size / 1024)} KB
+                        {p.status === "error" && p.errorMsg && <span className="ml-1 text-red-600">— {p.errorMsg}</span>}
+                        {p.status === "done" && <span className="ml-1 text-green-600">— uploaded</span>}
+                      </p>
+                    </div>
+                    <Select
+                      value={p.plotId}
+                      onValueChange={(v) => updatePending(p.tempId, { plotId: v ?? "__site__" })}
+                      disabled={p.status === "uploading" || p.status === "done"}
+                    >
+                      <SelectTrigger className="h-7 w-40 text-[11px]"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__site__">Site-wide</SelectItem>
+                        {plots.map((pl) => <SelectItem key={pl.id} value={pl.id}>{pl.plotNumber ? `Plot ${pl.plotNumber}` : pl.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                    <button
+                      type="button"
+                      onClick={() => removePending(p.tempId)}
+                      className="rounded p-1 text-muted-foreground hover:bg-slate-100 hover:text-destructive disabled:opacity-50"
+                      disabled={p.status === "uploading"}
+                      aria-label="Remove"
+                    >
+                      <Trash2 className="size-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
+
           <DialogFooter>
-            <Button variant="outline" onClick={() => setUploadOpen(false)}>Cancel</Button>
-            <Button onClick={upload} disabled={uploading}>
+            <Button variant="outline" onClick={() => setUploadOpen(false)} disabled={uploading}>Cancel</Button>
+            <Button onClick={uploadAll} disabled={uploading || pending.length === 0}>
               {uploading && <Loader2 className="size-4 animate-spin" />}
-              Upload
+              Upload {pending.length > 0 ? `${pending.length} file${pending.length !== 1 ? "s" : ""}` : ""}
             </Button>
           </DialogFooter>
         </DialogContent>
