@@ -748,17 +748,41 @@ export function useJobAction(
                     </div>
                   </div>
                 )}
-                {preStartChecks.nearestEvent && activeJob && !preStartChecks.nearestEvent.alreadyTimed && (
-                  <button
-                    onClick={() => {
-                      if (!activeJob || !preStartChecks.nearestEvent) return;
-                      const targetDate = new Date(preStartChecks.nearestEvent.date);
-                      const planned = activeJob.startDate ? new Date(activeJob.startDate) : null;
-                      if (planned && activeJob.endDate) {
-                        // Working-day delta matches the cascade engine. The target
-                        // date above was computed in working days too.
-                        const deltaWD = differenceInWorkingDays(targetDate, planned);
-                        if (deltaWD !== 0) {
+                {preStartChecks.nearestEvent && activeJob && !preStartChecks.nearestEvent.alreadyTimed && (() => {
+                  // Pre-compute the delta once so we can both label the button
+                  // with it and decide whether it's a no-op (in which case we
+                  // render a grey "already timed" chip instead).
+                  const targetDate = new Date(preStartChecks.nearestEvent.date);
+                  const plannedPreview = activeJob.startDate ? new Date(activeJob.startDate) : null;
+                  const deltaWDPreview = plannedPreview
+                    ? differenceInWorkingDays(targetDate, plannedPreview)
+                    : 0;
+                  // If the delta is zero (order already matches today's working-
+                  // day gap) show the grey chip — no cascade needed.
+                  if (deltaWDPreview === 0) {
+                    return (
+                      <div className="flex w-full items-start gap-3 rounded-xl border-2 border-slate-200 bg-slate-50 px-4 py-3 text-left opacity-80">
+                        <span className="mt-0.5 text-lg">✅</span>
+                        <div>
+                          <p className="text-sm font-semibold text-slate-700">
+                            Already perfectly timed
+                          </p>
+                          <p className="text-xs text-slate-500">
+                            The order is already scheduled for the right working day — pull-forward would make no change. Use &ldquo;Start today&rdquo; above to send the order and begin, or &ldquo;Pick a start date&rdquo; to reschedule.
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  }
+                  // Non-zero delta: render the actual pull-forward button.
+                  const direction = deltaWDPreview < 0 ? "earlier" : "later";
+                  return (
+                    <button
+                      onClick={() => {
+                        if (!activeJob || !preStartChecks.nearestEvent) return;
+                        const planned = activeJob.startDate ? new Date(activeJob.startDate) : null;
+                        if (planned && activeJob.endDate) {
+                          const deltaWD = differenceInWorkingDays(targetDate, planned);
                           const newEnd = addWorkingDays(new Date(activeJob.endDate), deltaWD).toISOString().split("T")[0];
                           setPreStartChecks(null);
                           setCascadeLoading(true);
@@ -770,7 +794,7 @@ export function useJobAction(
                           }).then(async (res) => {
                             if (res.ok) {
                               const data = await res.json().catch(() => ({ jobsUpdated: 0, deltaDays: deltaWD }));
-                              toast.success(`Programme shifted ${Math.abs(data.deltaDays)} working day${Math.abs(data.deltaDays) !== 1 ? "s" : ""} earlier — ${data.jobsUpdated} job${data.jobsUpdated !== 1 ? "s" : ""} updated`);
+                              toast.success(`Programme shifted ${Math.abs(data.deltaDays)} working day${Math.abs(data.deltaDays) !== 1 ? "s" : ""} ${data.deltaDays < 0 ? "earlier" : "later"} — ${data.jobsUpdated} job${data.jobsUpdated !== 1 ? "s" : ""} updated`);
                               await executeAction(activeJob.id, "start");
                             } else if (res.status === 409) {
                               const data = await res.json().catch(() => null);
@@ -789,22 +813,22 @@ export function useJobAction(
                             toast.error(e instanceof Error ? e.message : "Cascade failed");
                           });
                         }
-                      }
-                    }}
-                    disabled={preStartLoading}
-                    className="flex w-full items-start gap-3 rounded-xl border-2 border-purple-200 bg-purple-50 px-4 py-3 text-left hover:border-purple-400 transition-colors"
-                  >
-                    <span className="mt-0.5 text-lg">🎯</span>
-                    <div>
-                      <p className="text-sm font-semibold text-purple-800">
-                        Pull forward — {preStartChecks.nearestEvent.label}
-                      </p>
-                      <p className="text-xs text-purple-600">
-                        Programme shifts to start {format(new Date(preStartChecks.nearestEvent.date), "dd MMM")} — order placed today
-                      </p>
-                    </div>
-                  </button>
-                )}
+                      }}
+                      disabled={preStartLoading}
+                      className="flex w-full items-start gap-3 rounded-xl border-2 border-purple-200 bg-purple-50 px-4 py-3 text-left hover:border-purple-400 transition-colors"
+                    >
+                      <span className="mt-0.5 text-lg">🎯</span>
+                      <div>
+                        <p className="text-sm font-semibold text-purple-800">
+                          Pull forward — {preStartChecks.nearestEvent.label}
+                        </p>
+                        <p className="text-xs text-purple-600">
+                          Programme shifts {Math.abs(deltaWDPreview)} working day{Math.abs(deltaWDPreview) !== 1 ? "s" : ""} {direction} — order placed today
+                        </p>
+                      </div>
+                    </button>
+                  );
+                })()}
 
                 {/* Option 4: Skip order check */}
                 <button
