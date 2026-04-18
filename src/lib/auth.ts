@@ -3,7 +3,7 @@ import Credentials from "next-auth/providers/credentials";
 import { compare } from "bcryptjs";
 import { prisma } from "./prisma";
 
-export const { handlers, auth, signIn, signOut } = NextAuth({
+const nextAuthResult = NextAuth({
   session: { strategy: "jwt" },
   pages: {
     signIn: "/login",
@@ -53,27 +53,41 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         token.role = (user as { role: string }).role;
         token.permissions = (user as { permissions: string[] }).permissions;
       }
-      // Always refresh permissions from DB so changes take effect instantly
+      // Always refresh permissions + verify the user still exists. If the
+      // user row was deleted (e.g. data reset, manual removal) the JWT is
+      // stale — we mark it invalid so session() returns no user, forcing
+      // a clean re-login. Without this, every downstream mutation that
+      // records `userId: session.user.id` on EventLog/JobAction/etc. fails
+      // with a foreign-key constraint violation.
       if (token.id) {
         try {
+          const freshUser = await prisma.user.findUnique({
+            where: { id: token.id as string },
+            select: { id: true, role: true },
+          });
+          if (!freshUser) {
+            token.invalidated = true;
+            return token;
+          }
+          token.role = freshUser.role;
           const freshPerms = await prisma.userPermission.findMany({
             where: { userId: token.id as string },
             select: { permission: true },
           });
           token.permissions = freshPerms.map((p) => p.permission);
-          // Also refresh role in case it changed
-          const freshUser = await prisma.user.findUnique({
-            where: { id: token.id as string },
-            select: { role: true },
-          });
-          if (freshUser) token.role = freshUser.role;
         } catch {
-          // Non-critical — keep existing token permissions
+          // DB error is non-critical — keep existing token data so a brief
+          // DB outage doesn't log everyone out.
         }
       }
       return token;
     },
     async session({ session, token }) {
+      // Flag stale tokens so our auth() wrapper below returns null.
+      if (token.invalidated) {
+        (session as { _invalidated?: boolean })._invalidated = true;
+        return session;
+      }
       if (session.user) {
         session.user.id = token.id as string;
         (session.user as { role: string }).role = token.role as string;
@@ -83,3 +97,16 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     },
   },
 });
+
+export const { handlers, signIn, signOut } = nextAuthResult;
+
+// Wrapped auth() — returns null for stale sessions (user deleted from DB).
+// Routes do `if (!session)` as their first gate; without this wrap, a stale
+// token would slip through and cause FK violations on audit-log writes.
+export const auth = (async () => {
+  const session = await nextAuthResult.auth();
+  if (!session) return null;
+  if ((session as { _invalidated?: boolean })._invalidated) return null;
+  if (!session.user?.id) return null;
+  return session;
+}) as typeof nextAuthResult.auth;
