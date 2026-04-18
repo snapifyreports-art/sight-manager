@@ -130,6 +130,100 @@ export function useJobAction(
     [onSuccess, toast]
   );
 
+  // ---- Simple-action executor (no pre-start checks) ----
+  // For surfaces that need the pre-start dialog flow, use triggerAction.
+  // For everywhere else (note, signoff on already-completed, stop, complete
+  // without pre-start checks), use this lean alternative.
+  // Accepts the full action body — normalises `notes` vs `note` to prevent
+  // the silent data-drop bug we had across 11 components.
+  const runSimpleAction = useCallback(
+    async (
+      jobId: string,
+      action: "start" | "stop" | "complete" | "signoff" | "note",
+      opts?: {
+        notes?: string;
+        signOffNotes?: string;
+        skipOrderProgression?: boolean;
+        actualStartDate?: string;
+        silent?: boolean; // if true, skip success toast (caller will do its own feedback)
+      }
+    ): Promise<{ ok: boolean; data?: unknown; error?: string }> => {
+      setIsLoading(true);
+      try {
+        const body: Record<string, unknown> = { action };
+        if (opts?.notes !== undefined) body.notes = opts.notes;
+        if (opts?.signOffNotes !== undefined) body.signOffNotes = opts.signOffNotes;
+        if (opts?.skipOrderProgression) body.skipOrderProgression = true;
+        if (opts?.actualStartDate) body.actualStartDate = opts.actualStartDate;
+
+        const res = await fetch(`/api/jobs/${jobId}/actions`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          if (!opts?.silent) {
+            if (action === "start") toast.success("Job started");
+            else if (action === "complete") toast.success("Job marked complete");
+            else if (action === "signoff") toast.success("Job signed off");
+            else if (action === "stop") toast.success("Job put on hold");
+            else if (action === "note") toast.success("Note added");
+          }
+          onSuccess?.(action, jobId, data);
+          return { ok: true, data };
+        } else {
+          const err = await res.json().catch(() => null);
+          const msg = err?.error ?? `Failed to ${action} job (HTTP ${res.status})`;
+          if (!opts?.silent) toast.error(msg);
+          return { ok: false, error: msg };
+        }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : `Failed to ${action} job`;
+        if (!opts?.silent) toast.error(msg);
+        return { ok: false, error: msg };
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [onSuccess, toast]
+  );
+
+  // ---- Preview a cascade without applying ----
+  // Used by Walkthrough's "Preview Impact" button. Single source of truth
+  // for cascade preview calls — if the preview API shape ever changes,
+  // there's one place to update.
+  const previewCascade = useCallback(
+    async (
+      jobId: string,
+      newEndDate: string
+    ): Promise<{ ok: boolean; deltaDays?: number; jobUpdates?: unknown[]; orderUpdates?: unknown[]; conflicts?: unknown[]; error?: string }> => {
+      try {
+        const res = await fetch(`/api/jobs/${jobId}/cascade`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ newEndDate }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => null);
+          return { ok: false, error: err?.error ?? `Preview failed (HTTP ${res.status})` };
+        }
+        const data = await res.json();
+        return {
+          ok: true,
+          deltaDays: data.deltaDays,
+          jobUpdates: data.jobUpdates,
+          orderUpdates: data.orderUpdates,
+          conflicts: data.conflicts,
+        };
+      } catch (e) {
+        return { ok: false, error: e instanceof Error ? e.message : "Preview failed" };
+      }
+    },
+    []
+  );
+
   // ---- Pull forward then start ----
   // `daysEarly` is in WORKING days — matches the cascade engine (see
   // docs/cascade-spec.md). Caller computes this via differenceInWorkingDays.
@@ -1314,7 +1408,17 @@ export function useJobAction(
   );
 
   return {
+    /** Full pre-start flow — use for "Start" buttons. Opens dialogs for
+     *  pre-start checks, early/late start, order resolution. */
     triggerAction,
+    /** Lightweight job-action runner — no dialogs, no pre-start checks.
+     *  Use for stop / complete / signoff / note buttons that shouldn't
+     *  walk through the pre-start flow. Returns a result so the caller
+     *  can react to success/failure. */
+    runSimpleAction,
+    /** Preview a cascade without applying. Used by walkthrough's
+     *  "Preview Impact" button. */
+    previewCascade,
     isLoading: isLoading || preStartLoading || cascadeLoading,
     dialogs,
   };
