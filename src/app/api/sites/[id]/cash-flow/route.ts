@@ -84,10 +84,12 @@ export async function GET(
     { committed: number; forecast: number; actual: number }
   >();
 
-  // Helper: remap a date to original timeline if in original mode and job has original dates
+  // Helper: remap a date to original timeline if in original mode and job has original dates.
+  // For one-off orders, job is null — skip remap.
   function resolveDate(date: Date, job: typeof orderValues[number]["job"]): Date {
     if (
       dateMode !== "original" ||
+      !job ||
       !job.startDate ||
       !job.endDate ||
       !job.originalStartDate ||

@@ -136,9 +136,9 @@ export async function POST(req: NextRequest) {
   await prisma.eventLog.create({
     data: {
       type: "ORDER_PLACED",
-      description: `[${order.supplier.name}] Order created for ${order.job.name}`,
-      siteId: order.job.plot.siteId,
-      plotId: order.job.plotId,
+      description: `[${order.supplier.name}] Order created for ${order.job?.name ?? "one-off order"}`,
+      siteId: order.job?.plot.siteId ?? order.siteId ?? null,
+      plotId: order.job?.plotId ?? order.plotId ?? null,
       jobId: order.jobId,
       userId: session.user?.id || null,
     },

@@ -143,9 +143,11 @@ export async function GET(
       })
     : [];
 
-  // Group orders by jobId for quick lookup
+  // Group orders by jobId for quick lookup. Contractor comms only shows job-based
+  // orders (one-off orders aren't tied to a contractor's work).
   const ordersByJob = new Map<string, typeof materialOrders>();
   for (const o of materialOrders) {
+    if (!o.jobId) continue;
     const existing = ordersByJob.get(o.jobId) ?? [];
     existing.push(o);
     ordersByJob.set(o.jobId, existing);

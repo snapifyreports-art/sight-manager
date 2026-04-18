@@ -11,7 +11,7 @@ interface CascadeJob {
 
 interface CascadeOrder {
   id: string;
-  jobId: string;
+  jobId: string | null;
   dateOfOrder: Date;
   expectedDeliveryDate: Date | null;
 }
@@ -27,7 +27,7 @@ export interface CascadeJobUpdate {
 
 export interface CascadeOrderUpdate {
   orderId: string;
-  jobId: string;
+  jobId: string | null;
   originalOrderDate: Date;
   originalDeliveryDate: Date | null;
   newOrderDate: Date;

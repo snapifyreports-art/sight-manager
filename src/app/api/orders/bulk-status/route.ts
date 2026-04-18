@@ -75,9 +75,9 @@ export async function POST(req: NextRequest) {
         await prisma.eventLog.create({
           data: {
             type: eventType,
-            description: `[${existing.supplier.name}] Order for ${existing.job.name} status changed to ${status} (bulk)`,
-            siteId: existing.job.plot.siteId,
-            plotId: existing.job.plotId,
+            description: `[${existing.supplier.name}] Order for ${existing.job?.name ?? "one-off order"} status changed to ${status} (bulk)`,
+            siteId: existing.job?.plot.siteId ?? existing.siteId ?? null,
+            plotId: existing.job?.plotId ?? existing.plotId ?? null,
             jobId: existing.jobId,
             userId: session.user?.id || null,
           },

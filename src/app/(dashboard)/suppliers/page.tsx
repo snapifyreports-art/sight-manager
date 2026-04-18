@@ -67,6 +67,8 @@ export default async function SuppliersPage() {
   const serializedSuppliers = suppliers.map((s) => {
     const siteMap = new Map<string, { id: string; name: string; status: string; openOrders: number; totalOrders: number }>();
     for (const o of s.orders) {
+      // jobId is nullable for one-off orders — skip link derivation for those here
+      if (!o.job) continue;
       const site = o.job.plot.site;
       const e = siteMap.get(site.id) ?? { id: site.id, name: site.name, status: site.status, openOrders: 0, totalOrders: 0 };
       e.totalOrders++;
@@ -98,6 +100,7 @@ export default async function SuppliersPage() {
       siteMap.set(site.id, e);
     }
     for (const o of c.orders) {
+      if (!o.job) continue;
       const site = o.job.plot.site;
       const e = siteMap.get(site.id) ?? { id: site.id, name: site.name, status: site.status, activeJobs: 0, totalJobs: 0, openOrders: 0 };
       if (o.status !== "DELIVERED") e.openOrders++;

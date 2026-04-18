@@ -143,8 +143,8 @@ export async function GET(
       deliveredDate: d.deliveredDate?.toISOString() ?? null,
       supplier: d.supplier.name,
       supplierEmail: d.supplier.contactEmail ?? null,
-      job: d.job.name,
-      plot: d.job.plot,
+      job: d.job?.name ?? "",
+      plot: d.job?.plot ?? { plotNumber: null, name: "" },
     })),
     ordersToPlace: ordersToPlace.map((o) => ({
       id: o.id,
@@ -152,8 +152,8 @@ export async function GET(
       dateOfOrder: o.dateOfOrder.toISOString(),
       supplier: o.supplier.name,
       supplierEmail: o.supplier.contactEmail ?? null,
-      job: o.job.name,
-      plot: o.job.plot,
+      job: o.job?.name ?? "",
+      plot: o.job?.plot ?? { plotNumber: null, name: "" },
     })),
     rainedOffDays: rainedOffDays.map((r) => ({
       date: r.date.toISOString(),

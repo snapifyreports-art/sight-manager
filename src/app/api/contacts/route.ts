@@ -74,6 +74,7 @@ export async function GET(req: NextRequest) {
       siteMap.set(s.id, e);
     }
     for (const o of c.orders) {
+      if (!o.job) continue; // one-off orders don't have a jobId
       const s = o.job.plot.site;
       const e = siteMap.get(s.id) ?? { id: s.id, name: s.name, status: s.status, activeJobs: 0, totalJobs: 0, openOrders: 0 };
       if (o.status !== "DELIVERED") e.openOrders++;

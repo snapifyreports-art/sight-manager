@@ -170,7 +170,7 @@ export async function GET(request: NextRequest) {
       id: o.id,
       description: o.itemsDescription,
       supplierName: o.supplier.name,
-      jobName: o.job.name,
+      jobName: o.job?.name ?? "One-off order",
     })),
     snags: snags.map((s) => ({
       id: s.id,

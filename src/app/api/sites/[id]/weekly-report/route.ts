@@ -258,8 +258,8 @@ export async function GET(
       expectedDate: d.expectedDeliveryDate?.toISOString() ?? null,
       deliveredDate: d.deliveredDate?.toISOString() ?? null,
       supplier: d.supplier.name,
-      job: d.job.name,
-      plot: d.job.plot,
+      job: d.job?.name ?? "",
+      plot: d.job?.plot ?? { plotNumber: null, name: "" },
     })),
 
     activity: eventsThisWeek.map((e) => ({
@@ -281,7 +281,7 @@ export async function GET(
         items: d.itemsDescription,
         expectedDate: d.expectedDeliveryDate?.toISOString() ?? null,
         supplier: d.supplier.name,
-        plot: d.job.plot,
+        plot: d.job?.plot ?? { plotNumber: null },
       })),
     },
   });

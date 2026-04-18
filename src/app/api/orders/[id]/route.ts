@@ -74,7 +74,9 @@ export async function PUT(
     const { getUserSiteIds } = await import("@/lib/site-access");
     const accessibleSites = await getUserSiteIds(session.user.id, (session.user as { role: string }).role);
     if (accessibleSites !== null) {
-      if (!accessibleSites.includes(existing.job.plot.siteId) || !accessibleSites.includes(targetJob.plot.siteId)) {
+      // Source site: for job-based orders use job.plot.siteId; for one-offs use existing.siteId/plotId→siteId
+      const sourceSiteId = existing.job?.plot.siteId ?? existing.siteId ?? null;
+      if (!sourceSiteId || !accessibleSites.includes(sourceSiteId) || !accessibleSites.includes(targetJob.plot.siteId)) {
         return NextResponse.json(
           { error: "You do not have access to both the source and target site" },
           { status: 403 }
@@ -158,12 +160,13 @@ export async function PUT(
             ? "ORDER_CANCELLED"
             : "ORDER_PLACED";
 
+      const orderLabel = existing.job?.name ?? "one-off order";
       await prisma.eventLog.create({
         data: {
           type: eventType,
-          description: `[${existing.supplier.name}] Order for ${existing.job.name} ${body.status === "DELIVERED" ? "delivery confirmed" : `status changed to ${body.status}`}`,
-          siteId: existing.job.plot.siteId,
-          plotId: existing.job.plotId,
+          description: `[${existing.supplier.name}] Order for ${orderLabel} ${body.status === "DELIVERED" ? "delivery confirmed" : `status changed to ${body.status}`}`,
+          siteId: existing.job?.plot.siteId ?? existing.siteId ?? null,
+          plotId: existing.job?.plotId ?? existing.plotId ?? null,
           jobId: existing.jobId,
           userId: session.user?.id || null,
         },
@@ -219,9 +222,9 @@ export async function DELETE(
   await prisma.eventLog.create({
     data: {
       type: "ORDER_CANCELLED",
-      description: `[${existing.supplier.name}] Order for ${existing.job.name} was deleted`,
-      siteId: existing.job.plot.siteId,
-      plotId: existing.job.plotId,
+      description: `[${existing.supplier.name}] Order for ${existing.job?.name ?? "one-off order"} was deleted`,
+      siteId: existing.job?.plot.siteId ?? existing.siteId ?? null,
+      plotId: existing.job?.plotId ?? existing.plotId ?? null,
       jobId: existing.jobId,
       userId: session.user?.id || null,
     },

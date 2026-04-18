@@ -21,7 +21,9 @@ export default async function OrdersPage() {
 
   const [orders, suppliers, jobs] = await Promise.all([
     prisma.materialOrder.findMany({
-      where: orderWhere,
+      // Main Orders page shows job-based orders only. One-off orders (jobId=null)
+      // live under the Quants tab at site admin level.
+      where: { ...orderWhere, jobId: { not: null } },
       include: {
         supplier: true,
         contact: true,
@@ -46,41 +48,44 @@ export default async function OrdersPage() {
     }),
   ]);
 
-  // Serialize dates for client component
-  const serializedOrders = orders.map((order) => ({
-    ...order,
-    dateOfOrder: order.dateOfOrder.toISOString(),
-    expectedDeliveryDate: order.expectedDeliveryDate?.toISOString() ?? null,
-    deliveredDate: order.deliveredDate?.toISOString() ?? null,
-    createdAt: order.createdAt.toISOString(),
-    updatedAt: order.updatedAt.toISOString(),
-    supplier: {
-      ...order.supplier,
-      createdAt: order.supplier.createdAt.toISOString(),
-      updatedAt: order.supplier.updatedAt.toISOString(),
-    },
-    orderItems: order.orderItems.map((item) => ({
-      ...item,
-      createdAt: item.createdAt.toISOString(),
-    })),
-    job: {
-      ...order.job,
-      startDate: order.job.startDate?.toISOString() ?? null,
-      endDate: order.job.endDate?.toISOString() ?? null,
-      createdAt: order.job.createdAt.toISOString(),
-      updatedAt: order.job.updatedAt.toISOString(),
-      plot: {
-        ...order.job.plot,
-        createdAt: order.job.plot.createdAt.toISOString(),
-        updatedAt: order.job.plot.updatedAt.toISOString(),
-        site: {
-          ...order.job.plot.site,
-          createdAt: order.job.plot.site.createdAt.toISOString(),
-          updatedAt: order.job.plot.site.updatedAt.toISOString(),
+  // Serialize dates for client component. Query filters jobId: not null so job is guaranteed.
+  const serializedOrders = orders
+    .filter((o): o is typeof o & { jobId: string; job: NonNullable<typeof o.job> } => !!o.job)
+    .map((order) => ({
+      ...order,
+      jobId: order.jobId as string,
+      dateOfOrder: order.dateOfOrder.toISOString(),
+      expectedDeliveryDate: order.expectedDeliveryDate?.toISOString() ?? null,
+      deliveredDate: order.deliveredDate?.toISOString() ?? null,
+      createdAt: order.createdAt.toISOString(),
+      updatedAt: order.updatedAt.toISOString(),
+      supplier: {
+        ...order.supplier,
+        createdAt: order.supplier.createdAt.toISOString(),
+        updatedAt: order.supplier.updatedAt.toISOString(),
+      },
+      orderItems: order.orderItems.map((item) => ({
+        ...item,
+        createdAt: item.createdAt.toISOString(),
+      })),
+      job: {
+        ...order.job,
+        startDate: order.job.startDate?.toISOString() ?? null,
+        endDate: order.job.endDate?.toISOString() ?? null,
+        createdAt: order.job.createdAt.toISOString(),
+        updatedAt: order.job.updatedAt.toISOString(),
+        plot: {
+          ...order.job.plot,
+          createdAt: order.job.plot.createdAt.toISOString(),
+          updatedAt: order.job.plot.updatedAt.toISOString(),
+          site: {
+            ...order.job.plot.site,
+            createdAt: order.job.plot.site.createdAt.toISOString(),
+            updatedAt: order.job.plot.site.updatedAt.toISOString(),
+          },
         },
       },
-    },
-  }));
+    }));
 
   const serializedSuppliers = suppliers.map((s) => ({
     ...s,

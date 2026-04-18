@@ -156,7 +156,7 @@ export default async function ContractorSharePage({
               <p className="text-xs text-muted-foreground">{order.itemsDescription}</p>
             ) : null}
             <p className="mt-1 text-[11px] text-muted-foreground">
-              {plotLabel(order.job.plot)} · {order.job.name}
+              {order.job ? `${plotLabel(order.job.plot)} · ${order.job.name}` : "One-off order"}
             </p>
             <p className="text-[11px] text-muted-foreground">{orderDateLabel(order)}</p>
           </div>

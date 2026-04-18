@@ -112,7 +112,7 @@ interface JobDetail {
   orders: Array<{
     id: string;
     supplierId: string;
-    jobId: string;
+    jobId: string | null;
     orderDetails: string | null;
     dateOfOrder: string;
     orderType: string | null;

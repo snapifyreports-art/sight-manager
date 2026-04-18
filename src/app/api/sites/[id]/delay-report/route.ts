@@ -290,8 +290,8 @@ export async function GET(
       items: d.itemsDescription,
       supplier: d.supplier.name,
       expectedDate: d.expectedDeliveryDate?.toISOString() ?? null,
-      job: d.job.name,
-      plot: d.job.plot,
+      job: d.job?.name ?? "",
+      plot: d.job?.plot ?? { plotNumber: null, name: "" },
       daysOverdue: d.expectedDeliveryDate
         ? differenceInDays(today, new Date(d.expectedDeliveryDate))
         : 0,

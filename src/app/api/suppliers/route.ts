@@ -46,6 +46,7 @@ export async function GET() {
       { id: string; name: string; status: string; openOrders: number; totalOrders: number }
     >();
     for (const o of sup.orders) {
+      if (!o.job) continue; // one-off orders
       const s = o.job.plot.site;
       const existing = siteMap.get(s.id) ?? {
         id: s.id,
