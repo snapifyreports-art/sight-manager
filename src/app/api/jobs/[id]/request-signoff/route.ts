@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { sendPushToAll } from "@/lib/push";
+import { canAccessSite } from "@/lib/site-access";
 
 export const dynamic = "force-dynamic";
 
@@ -29,6 +30,11 @@ export async function POST(
 
   if (!job) {
     return NextResponse.json({ error: "Job not found" }, { status: 404 });
+  }
+
+  // Site-access check
+  if (!(await canAccessSite(session.user.id, (session.user as { role: string }).role, job.plot.site.id))) {
+    return NextResponse.json({ error: "You do not have access to this site" }, { status: 403 });
   }
 
   if (job.status !== "IN_PROGRESS") {

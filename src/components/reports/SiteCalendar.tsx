@@ -37,6 +37,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { useJobAction } from "@/hooks/useJobAction";
 
 interface SiteCalendarProps {
   siteId: string;
@@ -204,7 +205,24 @@ export function SiteCalendar({ siteId }: SiteCalendarProps) {
       .then(setData);
   }, [siteId, currentMonth]);
 
+  // Centralised pre-start flow — wraps start with predecessor/order/early-late dialogs.
+  // Complete/signoff skip the pre-start UX and go directly via the raw endpoint.
+  const { triggerAction: triggerJobAction, dialogs: jobActionDialogs } = useJobAction(
+    (_action, _jobId) => { refreshData(); }
+  );
+
   const handleJobAction = useCallback(async (jobId: string, action: "start" | "complete" | "signoff") => {
+    if (action === "start") {
+      // Look up the job in the current calendar data so the hook has dates/orders to work with
+      const allJobs = data?.jobs ?? [];
+      const j = allJobs.find((x) => x.id === jobId);
+      if (!j) return;
+      await triggerJobAction(
+        { id: j.id, name: j.name, status: j.status, startDate: j.startDate, endDate: j.endDate },
+        "start"
+      );
+      return;
+    }
     setPendingActions((prev) => new Set(prev).add(jobId));
     try {
       const res = await fetch(`/api/jobs/${jobId}/actions`, {
@@ -216,7 +234,7 @@ export function SiteCalendar({ siteId }: SiteCalendarProps) {
     } finally {
       setPendingActions((prev) => { const n = new Set(prev); n.delete(jobId); return n; });
     }
-  }, [refreshData]);
+  }, [refreshData, triggerJobAction, data]);
 
   const handleOrderAction = useCallback(async (orderId: string, status: string) => {
     setPendingActions((prev) => new Set(prev).add(orderId));
@@ -242,6 +260,7 @@ export function SiteCalendar({ siteId }: SiteCalendarProps) {
 
   return (
     <div className="space-y-4">
+      {jobActionDialogs}
       {/* Month navigation */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">

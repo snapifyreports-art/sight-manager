@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { getUserSiteIds } from "@/lib/site-access";
 
 export const dynamic = "force-dynamic";
 
@@ -22,10 +23,19 @@ export async function GET(request: NextRequest) {
   const search = q.trim();
   const contains = { contains: search, mode: "insensitive" as const };
 
+  // Scope search results to sites the user can access.
+  // For admins (CEO/DIRECTOR) accessibleSiteIds is null → no filter.
+  const accessibleSiteIds = await getUserSiteIds(session.user.id, (session.user as { role: string }).role);
+  const siteFilter = accessibleSiteIds === null ? {} : { id: { in: accessibleSiteIds } };
+  const viaSiteFilter = accessibleSiteIds === null ? {} : { siteId: { in: accessibleSiteIds } };
+  const viaPlotSiteFilter = accessibleSiteIds === null ? {} : { plot: { siteId: { in: accessibleSiteIds } } };
+  const viaJobPlotSiteFilter = accessibleSiteIds === null ? {} : { job: { plot: { siteId: { in: accessibleSiteIds } } } };
+
   const [sites, plots, jobs, contacts, orders, snags] = await Promise.all([
     // Sites — search by name, location, address
     prisma.site.findMany({
       where: {
+        ...siteFilter,
         OR: [
           { name: contains },
           { location: contains },
@@ -39,6 +49,7 @@ export async function GET(request: NextRequest) {
     // Plots — search by plotNumber, name, houseType
     prisma.plot.findMany({
       where: {
+        ...viaSiteFilter,
         OR: [
           { plotNumber: contains },
           { name: contains },
@@ -55,9 +66,11 @@ export async function GET(request: NextRequest) {
       take: 5,
     }),
 
-    // Jobs — search by name, description
+    // Jobs — search by name, description (leaf jobs + scoped to accessible sites)
     prisma.job.findMany({
       where: {
+        ...viaPlotSiteFilter,
+        children: { none: {} },
         OR: [{ name: contains }, { description: contains }],
       },
       select: {
@@ -88,9 +101,9 @@ export async function GET(request: NextRequest) {
       take: 5,
     }),
 
-    // Material Orders — search by itemsDescription
+    // Material Orders — search by itemsDescription (scoped to accessible sites)
     prisma.materialOrder.findMany({
-      where: { itemsDescription: contains },
+      where: { ...viaJobPlotSiteFilter, itemsDescription: contains },
       select: {
         id: true,
         itemsDescription: true,
@@ -105,9 +118,10 @@ export async function GET(request: NextRequest) {
       take: 5,
     }),
 
-    // Snags — search by description, location
+    // Snags — search by description, location (scoped to accessible sites)
     prisma.snag.findMany({
       where: {
+        ...viaPlotSiteFilter,
         OR: [{ description: contains }, { location: contains }],
       },
       select: {

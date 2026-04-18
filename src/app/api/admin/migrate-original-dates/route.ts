@@ -15,6 +15,11 @@ export async function GET(req: NextRequest) {
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  // Admin-only: DDL migration should not be runnable by any authenticated user
+  const role = (session.user as { role: string }).role;
+  if (role !== "CEO" && role !== "DIRECTOR") {
+    return NextResponse.json({ error: "Admins only" }, { status: 403 });
+  }
 
   try {
     // Add columns if they don't exist (PostgreSQL idempotent)

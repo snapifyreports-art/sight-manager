@@ -41,17 +41,23 @@ export async function GET(req: NextRequest) {
         ordersToPlace,
         openSnags,
       ] = await Promise.all([
+        // All job counts filter to LEAF jobs only (parents are derived rollups)
         prisma.job.count({
-          where: { plot: { siteId: site.id }, endDate: { lt: todayStart }, status: { not: "COMPLETED" } },
+          where: { plot: { siteId: site.id }, endDate: { lt: todayStart }, status: { not: "COMPLETED" }, children: { none: {} } },
         }),
         prisma.job.count({
-          where: { plot: { siteId: site.id }, status: "NOT_STARTED", startDate: { lt: todayStart } },
+          where: { plot: { siteId: site.id }, status: "NOT_STARTED", startDate: { lt: todayStart }, children: { none: {} } },
         }),
         prisma.job.count({
-          where: { plot: { siteId: site.id }, status: "IN_PROGRESS" },
+          where: { plot: { siteId: site.id }, status: "IN_PROGRESS", children: { none: {} } },
         }),
         prisma.job.count({
-          where: { plot: { siteId: site.id }, startDate: { gte: todayStart, lt: new Date(todayStart.getTime() + 86400000) } },
+          where: {
+            plot: { siteId: site.id },
+            startDate: { gte: todayStart, lt: new Date(todayStart.getTime() + 86400000) },
+            children: { none: {} },
+            status: { in: ["NOT_STARTED", "IN_PROGRESS"] },
+          },
         }),
         prisma.materialOrder.count({
           where: {

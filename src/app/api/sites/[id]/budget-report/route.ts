@@ -133,27 +133,37 @@ export async function GET(
     let plotBudget = template?.total ?? 0;
     let plotDelivered = 0;
     let plotCommitted = 0;
+    let plotPending = 0;
 
     const jobBreakdown = plot.jobs.map((job) => {
       const budgeted = template?.jobs[job.name] ?? 0;
 
+      // committed = money actually locked in with a supplier: ORDERED + DELIVERED.
+      // PENDING orders (not yet placed) are excluded so we don't over-report spend.
+      // This definition is consistent with /api/sites/[id]/cash-flow.
       let delivered = 0;
       let committed = 0;
+      let pending = 0;
       for (const order of job.orders) {
-        if (order.status !== "CANCELLED") {
-          let orderTotal = 0;
-          for (const item of order.orderItems) {
-            orderTotal += item.totalCost;
-          }
+        if (order.status === "CANCELLED") continue;
+        let orderTotal = 0;
+        for (const item of order.orderItems) {
+          orderTotal += item.totalCost;
+        }
+        if (order.status === "PENDING") {
+          pending += orderTotal;
+        } else if (order.status === "DELIVERED") {
+          delivered += orderTotal;
           committed += orderTotal;
-          if (order.status === "DELIVERED") {
-            delivered += orderTotal;
-          }
+        } else {
+          // ORDERED / CONFIRMED
+          committed += orderTotal;
         }
       }
 
       plotDelivered += delivered;
       plotCommitted += committed;
+      plotPending += pending;
 
       const variance = committed - budgeted;
       const variancePercent =
@@ -167,6 +177,7 @@ export async function GET(
         actual: Math.round(delivered * 100) / 100,
         delivered: Math.round(delivered * 100) / 100,
         committed: Math.round(committed * 100) / 100,
+        pending: Math.round(pending * 100) / 100,
         variance: Math.round(variance * 100) / 100,
         variancePercent,
         orderCount: job.orders.filter((o) => o.status !== "CANCELLED").length,
@@ -185,6 +196,7 @@ export async function GET(
       actual: Math.round(plotCommitted * 100) / 100,
       delivered: Math.round(plotDelivered * 100) / 100,
       committed: Math.round(plotCommitted * 100) / 100,
+      pending: Math.round(plotPending * 100) / 100,
       variance: Math.round(plotVariance * 100) / 100,
       variancePercent:
         plotBudget > 0
@@ -200,6 +212,7 @@ export async function GET(
   const siteBudget = plotReports.reduce((sum, p) => sum + p.budgeted, 0);
   const siteDelivered = plotReports.reduce((sum, p) => sum + p.delivered, 0);
   const siteCommitted = plotReports.reduce((sum, p) => sum + p.committed, 0);
+  const sitePending = plotReports.reduce((sum, p) => sum + p.pending, 0);
   const siteActual = siteCommitted; // backward compat alias
   const siteVariance = siteCommitted - siteBudget;
 
@@ -225,6 +238,7 @@ export async function GET(
       totalActual: Math.round(siteActual * 100) / 100,
       totalDelivered: Math.round(siteDelivered * 100) / 100,
       totalCommitted: Math.round(siteCommitted * 100) / 100,
+      totalPending: Math.round(sitePending * 100) / 100,
       totalVariance: Math.round(siteVariance * 100) / 100,
       variancePercent:
         siteBudget > 0 ? Math.round((siteVariance / siteBudget) * 100) : 0,

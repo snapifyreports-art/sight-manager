@@ -164,7 +164,9 @@ export async function GET(
     };
   });
 
-  const totalCommitted = orderValues
+  // "committed" in totals matches Budget Report: money locked in with a supplier
+  // (ORDERED or already DELIVERED). PENDING shown separately as "forecast"/pipeline.
+  const totalOrderedOpen = orderValues
     .filter((o) => o.status === "ORDERED")
     .reduce((s, o) => s + o.total, 0);
   const totalForecast = orderValues
@@ -173,11 +175,13 @@ export async function GET(
   const totalActual = orderValues
     .filter((o) => o.status === "DELIVERED")
     .reduce((s, o) => s + o.total, 0);
+  const totalCommitted = totalOrderedOpen + totalActual;
 
   return NextResponse.json({
     months,
     totals: {
       committed: Math.round(totalCommitted * 100) / 100,
+      orderedOpen: Math.round(totalOrderedOpen * 100) / 100,
       forecast: Math.round(totalForecast * 100) / 100,
       actual: Math.round(totalActual * 100) / 100,
     },

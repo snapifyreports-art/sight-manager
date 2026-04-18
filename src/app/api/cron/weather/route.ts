@@ -96,6 +96,7 @@ export async function GET(req: NextRequest) {
               weatherAffected: true,
               status: { in: ["NOT_STARTED", "IN_PROGRESS"] },
               startDate: { lte: in3Days },
+              children: { none: {} },
             },
           });
 

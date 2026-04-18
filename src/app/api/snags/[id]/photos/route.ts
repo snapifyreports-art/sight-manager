@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getSupabase, PHOTOS_BUCKET } from "@/lib/supabase";
+import { canAccessSite } from "@/lib/site-access";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +17,15 @@ export async function GET(
   }
 
   const { id } = await params;
+
+  const snagForCheck = await prisma.snag.findUnique({
+    where: { id },
+    select: { plot: { select: { siteId: true } } },
+  });
+  if (!snagForCheck) return NextResponse.json({ error: "Snag not found" }, { status: 404 });
+  if (!(await canAccessSite(session.user.id, (session.user as { role: string }).role, snagForCheck.plot.siteId))) {
+    return NextResponse.json({ error: "You do not have access to this site" }, { status: 403 });
+  }
 
   const photos = await prisma.snagPhoto.findMany({
     where: { snagId: id },
@@ -43,6 +53,11 @@ export async function POST(
   });
   if (!snag) {
     return NextResponse.json({ error: "Snag not found" }, { status: 404 });
+  }
+
+  // Site-access check
+  if (!(await canAccessSite(session.user.id, (session.user as { role: string }).role, snag.plot.siteId))) {
+    return NextResponse.json({ error: "You do not have access to this site" }, { status: 403 });
   }
 
   const contentType = req.headers.get("content-type") || "";

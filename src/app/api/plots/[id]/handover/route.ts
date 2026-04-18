@@ -2,6 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getServerCurrentDate } from "@/lib/dev-date";
+import { canAccessSite } from "@/lib/site-access";
+
+async function guardPlotAccess(plotId: string, userId: string, role: string) {
+  const plot = await prisma.plot.findUnique({ where: { id: plotId }, select: { siteId: true } });
+  if (!plot) return { status: 404, body: { error: "Plot not found" } };
+  const ok = await canAccessSite(userId, role, plot.siteId);
+  if (!ok) return { status: 403, body: { error: "You do not have access to this site" } };
+  return null;
+}
 
 export const dynamic = "force-dynamic";
 
@@ -40,6 +49,8 @@ export async function GET(
   }
 
   const { id } = await params;
+  const guard = await guardPlotAccess(id, session.user.id, (session.user as { role: string }).role);
+  if (guard) return NextResponse.json(guard.body, { status: guard.status });
 
   // Check existing items
   let items = await prisma.handoverChecklist.findMany({
@@ -106,6 +117,17 @@ export async function PATCH(
 
   if (!itemId) {
     return NextResponse.json({ error: "itemId required" }, { status: 400 });
+  }
+
+  // Verify the checklist item belongs to a plot the caller can access
+  const item = await prisma.handoverChecklist.findUnique({
+    where: { id: itemId },
+    select: { plot: { select: { siteId: true } } },
+  });
+  if (!item) return NextResponse.json({ error: "Item not found" }, { status: 404 });
+  const role = (session.user as { role: string }).role;
+  if (!(await canAccessSite(session.user.id, role, item.plot.siteId))) {
+    return NextResponse.json({ error: "You do not have access to this site" }, { status: 403 });
   }
 
   const updateData: Record<string, unknown> = {};

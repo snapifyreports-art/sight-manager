@@ -35,8 +35,9 @@ export async function GET(req: NextRequest) {
     pendingOrdersCount,
     lateStartCount,
   ] = await Promise.all([
+    // All job counts filter to LEAF jobs only (parents are derived rollups)
     prisma.job.count({
-      where: { status: "IN_PROGRESS", endDate: { lt: now } },
+      where: { status: "IN_PROGRESS", endDate: { lt: now }, children: { none: {} } },
     }),
     prisma.materialOrder.count({
       where: {
@@ -48,6 +49,7 @@ export async function GET(req: NextRequest) {
       where: {
         status: { in: ["NOT_STARTED", "IN_PROGRESS"] },
         startDate: { gte: todayStart, lt: todayEnd },
+        children: { none: {} },
       },
     }),
     prisma.materialOrder.count({
@@ -60,14 +62,15 @@ export async function GET(req: NextRequest) {
       where: {
         status: "IN_PROGRESS",
         endDate: { gte: now, lte: in3Days },
+        children: { none: {} },
       },
     }),
     prisma.materialOrder.count({
       where: { status: "PENDING", dateOfOrder: { lte: todayEnd } },
     }),
-    // Late starts: NOT_STARTED jobs whose start date has already passed
+    // Late starts: NOT_STARTED leaf jobs whose start date has already passed
     prisma.job.count({
-      where: { status: "NOT_STARTED", startDate: { lt: todayStart } },
+      where: { status: "NOT_STARTED", startDate: { lt: todayStart }, children: { none: {} } },
     }),
   ]);
 

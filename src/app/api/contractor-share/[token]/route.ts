@@ -34,9 +34,10 @@ export async function GET(
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  // Jobs this contractor is assigned to on this site
+  // Jobs this contractor is assigned to on this site — LEAF jobs only
+  // (parents are derived rollups; contractor does the actual sub-tasks)
   const jobContractors = await prisma.jobContractor.findMany({
-    where: { contactId, job: { plot: { siteId } } },
+    where: { contactId, job: { plot: { siteId }, children: { none: {} } } },
     select: {
       job: {
         select: {

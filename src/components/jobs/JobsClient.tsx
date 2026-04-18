@@ -53,6 +53,7 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
+import { useJobAction } from "@/hooks/useJobAction";
 
 // ---------- Types ----------
 
@@ -273,8 +274,30 @@ export function JobsClient({ initialJobs, workflows, users }: JobsClientProps) {
     }
   }
 
-  // Job actions (start, stop, complete)
+  // Centralised pre-start flow (predecessor + order + early/late dialogs)
+  const { triggerAction: triggerJobAction, dialogs: jobActionDialogs } = useJobAction(
+    (_action, _jobId) => { router.refresh(); }
+  );
+
+  // Job actions (start, stop, complete). Start routes through useJobAction so
+  // users see the pre-start dialogs; stop/complete call the raw endpoint since
+  // those don't need the pre-start UX.
   async function handleAction(jobId: string, action: string) {
+    if (action === "start") {
+      const j = jobs.find((x) => x.id === jobId);
+      if (!j) return;
+      await triggerJobAction(
+        {
+          id: j.id,
+          name: j.name,
+          status: j.status,
+          startDate: j.startDate,
+          endDate: j.endDate,
+        },
+        "start"
+      );
+      return;
+    }
     const res = await fetch(`/api/jobs/${jobId}/actions`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -339,6 +362,7 @@ export function JobsClient({ initialJobs, workflows, users }: JobsClientProps) {
 
   return (
     <div className="space-y-6">
+      {jobActionDialogs}
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-2">
