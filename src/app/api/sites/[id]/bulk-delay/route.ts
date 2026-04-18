@@ -79,12 +79,16 @@ export async function POST(
     const newEndDate = addWorkingDays(currentJob.endDate, days);
 
     const allPlotJobs = await prisma.job.findMany({
-      where: { plotId },
+      where: { plotId, status: { not: "ON_HOLD" } },
       orderBy: { sortOrder: "asc" },
     });
 
     const allOrders = await prisma.materialOrder.findMany({
-      where: { jobId: { in: allPlotJobs.map((j) => j.id) } },
+      // Don't rewrite dates on already-delivered or cancelled orders — those are historical
+      where: {
+        jobId: { in: allPlotJobs.map((j) => j.id) },
+        status: { notIn: ["CANCELLED", "DELIVERED"] },
+      },
     });
 
     const cascade = calculateCascade(

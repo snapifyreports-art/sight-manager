@@ -139,6 +139,14 @@ export async function PUT(
         data: { assignedToId: assignedToId || null },
       });
     }
+    // Auto-grant UserSite access to the new manager so they can actually see the site
+    if (assignedToId) {
+      await prisma.userSite.upsert({
+        where: { userId_siteId: { userId: assignedToId, siteId: id } },
+        update: {},
+        create: { userId: assignedToId, siteId: id },
+      });
+    }
   }
 
   await prisma.eventLog.create({
@@ -173,6 +181,16 @@ export async function DELETE(
   if (!existing) {
     return NextResponse.json({ error: "Site not found" }, { status: 404 });
   }
+
+  // Audit trail — EventLog.siteId cascade-deletes with the site, so record to a
+  // site-less audit entry instead (plotId/jobId/userId SetNull survive)
+  await prisma.eventLog.create({
+    data: {
+      type: "USER_ACTION",
+      description: `Site "${existing.name}" was deleted`,
+      userId: session.user.id,
+    },
+  });
 
   await prisma.site.delete({ where: { id } });
 

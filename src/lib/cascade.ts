@@ -92,8 +92,10 @@ export function calculateCascade(
     // Never push start date into the past, snap to working day
     if (newStart < today) newStart = snapToWorkingDay(today, "forward");
     else newStart = snapToWorkingDay(newStart, "forward");
-    const newEnd = new Date(newStart);
+    let newEnd = new Date(newStart);
     newEnd.setDate(newEnd.getDate() + duration); // duration stays calendar days
+    // Also snap end to a working day — weekend endDates break downstream cascade
+    newEnd = snapToWorkingDay(newEnd, "forward");
 
     jobUpdates.push({
       jobId: job.id,

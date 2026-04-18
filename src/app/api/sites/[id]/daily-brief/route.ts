@@ -315,6 +315,7 @@ export async function GET(
       where: {
         plot: { siteId: id },
         startDate: { gte: tomorrowStart, lte: tomorrowEnd },
+        status: { in: ["NOT_STARTED", "IN_PROGRESS"] },
       },
       select: {
         id: true, name: true, status: true,
@@ -452,8 +453,11 @@ export async function GET(
     }
   }
 
-  // Completed jobs without sign-off documentation
+  // Completed jobs without sign-off documentation — but ONLY those already signed off
+  // (jobs awaiting sign-off have their own section; listing them here too is duplicate noise)
+  const awaitingSignOffIds = new Set(awaitingSignOff.map((j) => j.id));
   for (const j of unsignedCompletions) {
+    if (awaitingSignOffIds.has(j.id)) continue;
     const m: string[] = [];
     if (!j.signOffNotes) m.push("No sign-off notes");
     if (j._count.photos === 0) m.push("No completion photos");

@@ -69,6 +69,16 @@ export async function POST(request: NextRequest) {
     },
   });
 
+  // Auto-grant UserSite access so non-admin creators/managers can see their own site.
+  // CEOs/DIRECTORs bypass UserSite entirely (site-access.ts), so these rows are a safety
+  // net for other roles — idempotent via skipDuplicates.
+  const grantees = new Set<string>([session.user.id]);
+  if (assignedToId && assignedToId !== session.user.id) grantees.add(assignedToId);
+  await prisma.userSite.createMany({
+    data: Array.from(grantees).map((userId) => ({ userId, siteId: site.id })),
+    skipDuplicates: true,
+  });
+
   // Log the event
   await prisma.eventLog.create({
     data: {

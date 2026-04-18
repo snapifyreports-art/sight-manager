@@ -418,6 +418,177 @@ async function testBlockPendingDirectDelivery(siteId: string) {
   );
 }
 
+async function testDelayIgnoresOnHold(siteId: string) {
+  // F2: /api/jobs/[id]/delay should NOT shift ON_HOLD jobs
+  const { jobs } = await makePlotWithJobs(siteId, {
+    plotNumber: "T9",
+    jobs: [
+      { name: "J1", sortOrder: 0, status: "IN_PROGRESS", startOffsetDays: -2, endOffsetDays: 2 },
+      { name: "J2-OnHold", sortOrder: 1, status: "ON_HOLD", startOffsetDays: 3, endOffsetDays: 5 },
+      { name: "J3", sortOrder: 2, status: "NOT_STARTED", startOffsetDays: 6, endOffsetDays: 9 },
+    ],
+  });
+  const beforeOnHold = await prisma.job.findUnique({ where: { id: jobs[1].id }, select: { endDate: true } });
+  const res = await req(`/api/jobs/${jobs[0].id}/delay`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ days: 3, delayReasonType: "OTHER", reason: "test" }),
+  });
+  const afterOnHold = await prisma.job.findUnique({ where: { id: jobs[1].id }, select: { endDate: true } });
+  record(
+    "F2: Single delay leaves ON_HOLD jobs untouched",
+    res.ok && beforeOnHold?.endDate?.getTime() === afterOnHold?.endDate?.getTime(),
+    `HTTP=${res.status}`
+  );
+}
+
+async function testBulkDelayIgnoresOnHold(siteId: string) {
+  // F3: bulk-delay should NOT shift ON_HOLD jobs
+  const { plot, jobs } = await makePlotWithJobs(siteId, {
+    plotNumber: "T10",
+    jobs: [
+      { name: "J1", sortOrder: 0, status: "IN_PROGRESS", startOffsetDays: -2, endOffsetDays: 2 },
+      { name: "J2-OnHold", sortOrder: 1, status: "ON_HOLD", startOffsetDays: 3, endOffsetDays: 5 },
+    ],
+  });
+  const beforeOnHold = await prisma.job.findUnique({ where: { id: jobs[1].id }, select: { endDate: true } });
+  const res = await req(`/api/sites/${siteId}/bulk-delay`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ plotIds: [plot.id], days: 3, delayReasonType: "OTHER", reason: "test" }),
+  });
+  const afterOnHold = await prisma.job.findUnique({ where: { id: jobs[1].id }, select: { endDate: true } });
+  record(
+    "F3: Bulk-delay leaves ON_HOLD jobs untouched",
+    res.ok && beforeOnHold?.endDate?.getTime() === afterOnHold?.endDate?.getTime(),
+    `HTTP=${res.status}`
+  );
+}
+
+async function testBackdateActualStart(siteId: string) {
+  // B2: Backdate passes original startDate as actualStartDate
+  const { jobs } = await makePlotWithJobs(siteId, {
+    plotNumber: "T11",
+    jobs: [
+      { name: "J1", sortOrder: 0, status: "NOT_STARTED", startOffsetDays: -10, endOffsetDays: -5 },
+    ],
+  });
+  const originalStart = (await prisma.job.findUnique({ where: { id: jobs[0].id }, select: { startDate: true } }))!.startDate!;
+  const res = await req(`/api/jobs/${jobs[0].id}/actions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "start", actualStartDate: originalStart.toISOString() }),
+  });
+  const after = await prisma.job.findUnique({ where: { id: jobs[0].id } });
+  const now = new Date();
+  const matchesOriginal = !!after?.actualStartDate && Math.abs(after.actualStartDate.getTime() - originalStart.getTime()) < 1000;
+  const isBackdated = !!after?.actualStartDate && after.actualStartDate < now;
+  record(
+    "B2: Backdate sets actualStartDate to the provided past date",
+    res.ok && matchesOriginal && isBackdated,
+    `actualStart=${after?.actualStartDate?.toISOString()} expected=${originalStart.toISOString()}`
+  );
+}
+
+async function testJobDeleteEventLog(userId: string, siteId: string) {
+  // B4: Job delete writes an audit event
+  const { jobs } = await makePlotWithJobs(siteId, {
+    plotNumber: "T12",
+    jobs: [{ name: "Doomed Job", sortOrder: 0, status: "NOT_STARTED" }],
+  });
+  const jobName = "Doomed Job";
+  const res = await req(`/api/jobs/${jobs[0].id}`, { method: "DELETE" });
+  const evt = await prisma.eventLog.findFirst({
+    where: { siteId, userId, description: { contains: jobName } },
+    orderBy: { createdAt: "desc" },
+  });
+  record(
+    "B4: Job delete writes audit event",
+    res.ok && !!evt,
+    `HTTP=${res.status}, event found=${!!evt}`
+  );
+}
+
+async function testJobPutPermissions(siteId: string) {
+  // B1: Keith (CEO) can edit; cross-site plot reassignment via PUT still needs both sites accessible.
+  // CEO bypasses the permission AND site-access check (role === CEO). So this just verifies
+  // that EDIT_PROGRAMME gate doesn't block Keith (happy path).
+  const { jobs } = await makePlotWithJobs(siteId, {
+    plotNumber: "T13",
+    jobs: [{ name: "Editable", sortOrder: 0, status: "NOT_STARTED" }],
+  });
+  const res = await req(`/api/jobs/${jobs[0].id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: "Edited Name" }),
+  });
+  const after = await prisma.job.findUnique({ where: { id: jobs[0].id } });
+  record(
+    "B1: Job PUT with EDIT_PROGRAMME permission succeeds for CEO",
+    res.ok && after?.name === "Edited Name",
+    `HTTP=${res.status}, name=${after?.name}`
+  );
+}
+
+async function testSiteCreateGrantsUserSite(userId: string) {
+  // H9: POST /api/sites auto-grants UserSite to the creator
+  const res = await req(`/api/sites`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: "__AUDIT_TEMP_SITE_H9__" }),
+  });
+  const body = await res.json();
+  const grant = await prisma.userSite.findFirst({
+    where: { userId, siteId: body.id },
+  });
+  record(
+    "H9: Site creation auto-grants UserSite to creator",
+    res.ok && !!grant,
+    `grant found=${!!grant}`
+  );
+  // Clean up
+  if (body.id) await prisma.site.delete({ where: { id: body.id } }).catch(() => {});
+}
+
+async function testDailyBriefDedup(userId: string, siteId: string) {
+  // H8: COMPLETED job with no signedOffAt/notes should appear in awaitingSignOff, NOT also in needsAttention
+  const { jobs } = await makePlotWithJobs(siteId, {
+    plotNumber: "T14",
+    jobs: [{ name: "CompleteNoSignoff", sortOrder: 0, status: "COMPLETED" }],
+  });
+  // Ensure the job has no signedOffAt and no signOffNotes
+  await prisma.job.update({ where: { id: jobs[0].id }, data: { signedOffAt: null, signOffNotes: null } });
+  const res = await req(`/api/sites/${siteId}/daily-brief`);
+  if (!res.ok) return record("H8: Daily Brief dedup", false, `HTTP ${res.status}`);
+  const body = await res.json();
+  const inAwaiting = (body.awaitingSignOff || []).some((j: { id: string }) => j.id === jobs[0].id);
+  const inNeedsAttention = (body.needsAttention || []).some((n: { id: string }) => n.id === jobs[0].id);
+  record(
+    "H8: Daily Brief does NOT double-count awaitingSignOff in needsAttention",
+    inAwaiting && !inNeedsAttention,
+    `awaiting=${inAwaiting}, needsAttention=${inNeedsAttention}`
+  );
+}
+
+async function testDailyBriefStartingTomorrowFilter(siteId: string) {
+  // F1: jobsStartingTomorrow should exclude COMPLETED jobs
+  await makePlotWithJobs(siteId, {
+    plotNumber: "T15",
+    jobs: [
+      { name: "T-Should-Show", sortOrder: 0, status: "NOT_STARTED", startOffsetDays: 1, endOffsetDays: 3 },
+      { name: "T-Should-Hide", sortOrder: 1, status: "COMPLETED", startOffsetDays: 1, endOffsetDays: 1 },
+    ],
+  });
+  const res = await req(`/api/sites/${siteId}/daily-brief`);
+  const body = await res.json();
+  const names = (body.jobsStartingTomorrow || []).map((j: { name: string }) => j.name);
+  record(
+    "F1: Daily Brief 'startingTomorrow' excludes COMPLETED",
+    names.includes("T-Should-Show") && !names.includes("T-Should-Hide"),
+    `got=${JSON.stringify(names)}`
+  );
+}
+
 /* ---------------- Runner ---------------- */
 
 async function main() {
@@ -439,6 +610,15 @@ async function main() {
     await testBulkStatusComplete(site.id);
     await testOrderDateOfOrderStamp(site.id);
     await testBlockPendingDirectDelivery(site.id);
+    // Round 2 fixes
+    await testDailyBriefStartingTomorrowFilter(site.id);
+    await testDelayIgnoresOnHold(site.id);
+    await testBulkDelayIgnoresOnHold(site.id);
+    await testJobPutPermissions(site.id);
+    await testBackdateActualStart(site.id);
+    await testJobDeleteEventLog(userId, site.id);
+    await testDailyBriefDedup(userId, site.id);
+    await testSiteCreateGrantsUserSite(userId);
   } finally {
     console.log("\nCleaning up test data…");
     await cleanupTestSite();

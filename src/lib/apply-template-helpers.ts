@@ -1,4 +1,5 @@
 import { addWeeks, addDays } from "date-fns";
+import { snapToWorkingDay } from "@/lib/working-days";
 
 // Types matching what Prisma returns for template jobs with children
 interface TemplateOrderItem {
@@ -56,6 +57,12 @@ interface TemplateJobWithChildren {
  * @param templateJobs - Top-level template jobs (parentId === null)
  * @param supplierMappings - Map of templateOrderId → supplierId
  */
+export interface TemplateApplyWarning {
+  kind: "order_skipped_no_supplier";
+  templateJobName: string;
+  itemsDescription: string | null;
+}
+
 export async function createJobsFromTemplate(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   tx: any,
@@ -64,15 +71,20 @@ export async function createJobsFromTemplate(
   templateJobs: TemplateJobWithChildren[],
   supplierMappings: Record<string, string> | null,
   assignedToId?: string | null
-) {
+): Promise<TemplateApplyWarning[]> {
+  const warnings: TemplateApplyWarning[] = [];
   for (const templateJob of templateJobs) {
     if (templateJob.children && templateJob.children.length > 0) {
       // HIERARCHICAL: create individual Job records for each sub-job
       for (const child of templateJob.children) {
-        const jobStartDate = addWeeks(plotStartDate, child.startWeek - 1);
-        const jobEndDate = addDays(
-          addWeeks(plotStartDate, child.endWeek - 1),
-          6
+        // Snap to working days — weekends cause downstream cascade/report issues
+        const jobStartDate = snapToWorkingDay(
+          addWeeks(plotStartDate, child.startWeek - 1),
+          "forward"
+        );
+        const jobEndDate = snapToWorkingDay(
+          addDays(addWeeks(plotStartDate, child.endWeek - 1), 6),
+          "forward"
         );
 
         const job = await tx.job.create({
@@ -107,7 +119,9 @@ export async function createJobsFromTemplate(
           job.id,
           jobStartDate,
           child.orders,
-          supplierMappings
+          supplierMappings,
+          `${templateJob.name} / ${child.name}`,
+          warnings
         );
       }
 
@@ -133,16 +147,21 @@ export async function createJobsFromTemplate(
             firstChildJob.id,
             firstChildStartDate,
             templateJob.orders,
-            supplierMappings
+            supplierMappings,
+            templateJob.name,
+            warnings
           );
         }
       }
     } else {
       // FLAT (legacy): create Job directly from template job
-      const jobStartDate = addWeeks(plotStartDate, templateJob.startWeek - 1);
-      const jobEndDate = addDays(
-        addWeeks(plotStartDate, templateJob.endWeek - 1),
-        6
+      const jobStartDate = snapToWorkingDay(
+        addWeeks(plotStartDate, templateJob.startWeek - 1),
+        "forward"
+      );
+      const jobEndDate = snapToWorkingDay(
+        addDays(addWeeks(plotStartDate, templateJob.endWeek - 1), 6),
+        "forward"
       );
 
       const job = await tx.job.create({
@@ -175,10 +194,13 @@ export async function createJobsFromTemplate(
         job.id,
         jobStartDate,
         templateJob.orders,
-        supplierMappings
+        supplierMappings,
+        templateJob.name,
+        warnings
       );
     }
   }
+  return warnings;
 }
 
 async function createOrdersFromTemplate(
@@ -187,7 +209,9 @@ async function createOrdersFromTemplate(
   jobId: string,
   jobStartDate: Date,
   orders: TemplateOrderWithItems[],
-  supplierMappings: Record<string, string> | null
+  supplierMappings: Record<string, string> | null,
+  templateJobName: string,
+  warnings: TemplateApplyWarning[]
 ) {
   for (const templateOrder of orders) {
     // Use explicit mapping if provided, otherwise fall back to template's supplier
@@ -195,9 +219,19 @@ async function createOrdersFromTemplate(
       supplierMappings?.[templateOrder.id] ||
       templateOrder.supplierId ||
       null;
-    if (!supplierId) continue; // skip only if no supplier anywhere
+    if (!supplierId) {
+      // Surface to caller so user knows something was silently dropped
+      warnings.push({
+        kind: "order_skipped_no_supplier",
+        templateJobName,
+        itemsDescription: templateOrder.itemsDescription,
+      });
+      continue;
+    }
 
-    const dateOfOrder = addWeeks(jobStartDate, templateOrder.orderWeekOffset);
+    // Snap dates to working days — prevents weekend orderDate/deliveryDate that confuse cascade
+    const rawDateOfOrder = addWeeks(jobStartDate, templateOrder.orderWeekOffset);
+    const dateOfOrder = snapToWorkingDay(rawDateOfOrder, "back");
 
     // Calculate lead time in days from template fields
     let leadTimeDays: number | null = null;
@@ -211,9 +245,10 @@ async function createOrdersFromTemplate(
       leadTimeDays = templateOrder.deliveryWeekOffset * 7;
     }
 
-    const expectedDeliveryDate = leadTimeDays
+    const rawExpectedDelivery = leadTimeDays
       ? addDays(dateOfOrder, leadTimeDays)
       : addWeeks(dateOfOrder, templateOrder.deliveryWeekOffset);
+    const expectedDeliveryDate = snapToWorkingDay(rawExpectedDelivery, "forward");
 
     await tx.materialOrder.create({
       data: {

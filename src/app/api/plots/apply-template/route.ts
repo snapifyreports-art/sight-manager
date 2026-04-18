@@ -70,7 +70,7 @@ export async function POST(request: NextRequest) {
     });
 
     // 2. Create Jobs from template (handles both hierarchical and flat)
-    await createJobsFromTemplate(
+    const warnings = await createJobsFromTemplate(
       tx,
       plot.id,
       plotStartDate,
@@ -91,7 +91,7 @@ export async function POST(request: NextRequest) {
     });
 
     // Return the created plot with all its data
-    return tx.plot.findUnique({
+    const created = await tx.plot.findUnique({
       where: { id: plot.id },
       include: {
         jobs: {
@@ -108,7 +108,8 @@ export async function POST(request: NextRequest) {
         },
       },
     });
+    return { plot: created, warnings };
   });
 
-  return NextResponse.json(result, { status: 201 });
+  return NextResponse.json({ ...result.plot, _warnings: result.warnings }, { status: 201 });
 }

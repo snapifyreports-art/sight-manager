@@ -34,7 +34,7 @@ export async function POST(
 
   const { id } = await params;
   const body = await req.json();
-  const { action, notes, signOffNotes, skipOrderProgression } = body;
+  const { action, notes, signOffNotes, skipOrderProgression, actualStartDate } = body;
 
   if (!action) {
     return NextResponse.json(
@@ -106,8 +106,11 @@ export async function POST(
     const updateData: Record<string, unknown> = { status: newStatus };
 
     // Handle start action — set actualStartDate + progress orders + clear awaitingRestart
+    // Supports an optional `actualStartDate` override for backdating (late-start "Start from Original Date")
     if (action === "start" && !existing.actualStartDate) {
-      updateData.actualStartDate = now;
+      const backdated = actualStartDate ? new Date(actualStartDate) : null;
+      // Only accept backdates — never future dates — and never later than `now`
+      updateData.actualStartDate = backdated && backdated < now ? backdated : now;
     }
     if (action === "start") {
       // Progress PENDING material orders to ORDERED — unless user chose "start anyway"

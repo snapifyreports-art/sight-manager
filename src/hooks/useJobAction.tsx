@@ -299,7 +299,18 @@ export function useJobAction(
     if (!activeJob) return;
     setCascadeLoading(true);
     try {
-      await executeAction(activeJob.id, "start", undefined, skipOrderProgression ? { skipOrderProgression: true } : undefined);
+      // Backdate: record the ORIGINAL planned start as actualStartDate
+      // (not today, which is what Compress does)
+      const extraBody: Record<string, unknown> = {
+        ...(skipOrderProgression ? { skipOrderProgression: true } : {}),
+        ...(activeJob.startDate ? { actualStartDate: activeJob.startDate } : {}),
+      };
+      await executeAction(
+        activeJob.id,
+        "start",
+        undefined,
+        Object.keys(extraBody).length > 0 ? extraBody : undefined
+      );
       setLateStartDialog(null);
       setSkipOrderProgression(false);
     } finally {

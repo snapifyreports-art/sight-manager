@@ -52,6 +52,11 @@ export async function PUT(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  // Editing job details (name, dates, assignee) is a programme change
+  if (!sessionHasPermission(session.user as { role?: string; permissions?: string[] }, "EDIT_PROGRAMME")) {
+    return NextResponse.json({ error: "You do not have permission to edit jobs" }, { status: 403 });
+  }
+
   const { id } = await params;
   const body = await req.json();
 
@@ -61,6 +66,27 @@ export async function PUT(
   });
   if (!existing) {
     return NextResponse.json({ error: "Job not found" }, { status: 404 });
+  }
+
+  // Guard cross-site plot reassignment — both source & target must be accessible to the caller
+  if (body.plotId !== undefined && body.plotId !== existing.plotId) {
+    const targetPlot = await prisma.plot.findUnique({
+      where: { id: body.plotId },
+      select: { siteId: true },
+    });
+    if (!targetPlot) {
+      return NextResponse.json({ error: "Target plot not found" }, { status: 404 });
+    }
+    const { getUserSiteIds } = await import("@/lib/site-access");
+    const accessibleSites = await getUserSiteIds(session.user.id, (session.user as { role: string }).role);
+    if (accessibleSites !== null) {
+      if (!accessibleSites.includes(existing.plot.siteId) || !accessibleSites.includes(targetPlot.siteId)) {
+        return NextResponse.json(
+          { error: "You do not have access to both the source and target site" },
+          { status: 403 }
+        );
+      }
+    }
   }
 
   const updateData: Record<string, unknown> = {
@@ -135,10 +161,26 @@ export async function DELETE(
 
   const { id } = await params;
 
-  const existing = await prisma.job.findUnique({ where: { id } });
+  const existing = await prisma.job.findUnique({
+    where: { id },
+    include: { plot: { select: { siteId: true, plotNumber: true, name: true } } },
+  });
   if (!existing) {
     return NextResponse.json({ error: "Job not found" }, { status: 404 });
   }
+
+  // Write event log BEFORE deletion so siteId is captured; the event survives
+  // the job delete because of onDelete: SetNull on EventLog.jobId
+  await prisma.eventLog.create({
+    data: {
+      type: "USER_ACTION",
+      description: `Job "${existing.name}" was deleted from plot ${existing.plot.plotNumber || existing.plot.name}`,
+      siteId: existing.plot.siteId,
+      plotId: existing.plotId,
+      jobId: existing.id,
+      userId: session.user.id,
+    },
+  });
 
   await prisma.job.delete({ where: { id } });
 

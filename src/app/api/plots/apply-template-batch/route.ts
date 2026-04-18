@@ -88,10 +88,11 @@ export async function POST(request: NextRequest) {
   // Create each plot in its own transaction to avoid timeout on large batches
   const createdPlots: string[] = [];
   const errors: Array<{ plotNumber: string; error: string }> = [];
+  const warningsByPlot: Record<string, { templateJobName: string; itemsDescription: string | null }[]> = {};
 
   for (const plotInput of plots) {
     try {
-      const plotId = await prisma.$transaction(async (tx) => {
+      const { plotId, warnings } = await prisma.$transaction(async (tx) => {
         const plot = await tx.plot.create({
           data: {
             name: plotInput.plotName.trim(),
@@ -101,7 +102,7 @@ export async function POST(request: NextRequest) {
           },
         });
 
-        await createJobsFromTemplate(
+        const w = await createJobsFromTemplate(
           tx,
           plot.id,
           plotStartDate,
@@ -120,9 +121,14 @@ export async function POST(request: NextRequest) {
           },
         });
 
-        return plot.id;
+        return { plotId: plot.id, warnings: w };
       }, { timeout: 60_000 }); // complex templates can have 20+ jobs + 10+ orders each
       createdPlots.push(plotId);
+      if (warnings.length > 0) {
+        warningsByPlot[plotInput.plotNumber || plotInput.plotName] = warnings.map(
+          ({ templateJobName, itemsDescription }) => ({ templateJobName, itemsDescription })
+        );
+      }
     } catch (err) {
       errors.push({
         plotNumber: plotInput.plotNumber || plotInput.plotName,
@@ -139,7 +145,7 @@ export async function POST(request: NextRequest) {
   }
 
   return NextResponse.json(
-    { created: createdPlots.length, plotIds: createdPlots, errors },
+    { created: createdPlots.length, plotIds: createdPlots, errors, warnings: warningsByPlot },
     { status: 201 }
   );
 }

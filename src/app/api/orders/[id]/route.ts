@@ -62,6 +62,27 @@ export async function PUT(
     return NextResponse.json({ error: "Order not found" }, { status: 404 });
   }
 
+  // Guard cross-site job reassignment — same class as job PUT
+  if (body.jobId !== undefined && body.jobId !== existing.jobId) {
+    const targetJob = await prisma.job.findUnique({
+      where: { id: body.jobId },
+      select: { plot: { select: { siteId: true } } },
+    });
+    if (!targetJob) {
+      return NextResponse.json({ error: "Target job not found" }, { status: 404 });
+    }
+    const { getUserSiteIds } = await import("@/lib/site-access");
+    const accessibleSites = await getUserSiteIds(session.user.id, (session.user as { role: string }).role);
+    if (accessibleSites !== null) {
+      if (!accessibleSites.includes(existing.job.plot.siteId) || !accessibleSites.includes(targetJob.plot.siteId)) {
+        return NextResponse.json(
+          { error: "You do not have access to both the source and target site" },
+          { status: 403 }
+        );
+      }
+    }
+  }
+
   const data: Record<string, unknown> = {};
 
   if (body.supplierId !== undefined) data.supplierId = body.supplierId;
