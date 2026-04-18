@@ -126,11 +126,7 @@ export async function POST(
   });
 
   const allOrders = await prisma.materialOrder.findMany({
-    // Don't rewrite dates on already-delivered or cancelled orders — those are historical
-    where: {
-      jobId: { in: allPlotJobs.map((j) => j.id) },
-      status: { notIn: ["CANCELLED", "DELIVERED"] },
-    },
+    where: { jobId: { in: allPlotJobs.map((j) => j.id) } },
   });
 
   const cascade = calculateCascade(
@@ -142,12 +138,14 @@ export async function POST(
       startDate: j.startDate,
       endDate: j.endDate,
       sortOrder: j.sortOrder,
+      status: j.status,
     })),
     allOrders.map((o) => ({
       id: o.id,
       jobId: o.jobId,
       dateOfOrder: o.dateOfOrder,
       expectedDeliveryDate: o.expectedDeliveryDate,
+      status: o.status,
     }))
   );
 
@@ -170,15 +168,8 @@ export async function POST(
 
   try {
   await prisma.$transaction(async (tx) => {
-    // Update triggering job — preserve originals on first change
-    const triggerData: Record<string, unknown> = { endDate: newEndDate };
-    if (!job.originalEndDate && job.endDate) triggerData.originalEndDate = job.endDate;
-    if (job.status === "NOT_STARTED" && job.startDate) {
-      if (!job.originalStartDate) triggerData.originalStartDate = job.startDate;
-      triggerData.startDate = addWorkingDays(job.startDate, days);
-    }
-    await tx.job.update({ where: { id }, data: triggerData });
-
+    // The cascade library returns the trigger job in jobUpdates along with
+    // downstream jobs — apply them uniformly. No separate trigger handling.
     for (const update of cascade.jobUpdates) {
       const currentJob = jobMap.get(update.jobId);
       await tx.job.update({
@@ -226,13 +217,13 @@ export async function POST(
   });
 
   // Recompute every affected parent job's dates/status from its shifted children
+  // (cascade.jobUpdates already includes the trigger, no need to add `id` separately)
   {
     const { recomputeParentFromChildren } = await import("@/lib/parent-job");
-    const shiftedIds = [id, ...cascade.jobUpdates.map((u) => u.jobId)];
     const parentIds = new Set<string>();
-    for (const shiftedId of shiftedIds) {
+    for (const update of cascade.jobUpdates) {
       const shiftedJob = await prisma.job.findUnique({
-        where: { id: shiftedId },
+        where: { id: update.jobId },
         select: { parentId: true },
       });
       if (shiftedJob?.parentId) parentIds.add(shiftedJob.parentId);

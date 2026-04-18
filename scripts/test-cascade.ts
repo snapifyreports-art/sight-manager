@@ -466,6 +466,88 @@ async function scenarioCascadePreviewMatchesApply() {
   }
 }
 
+async function scenarioConflictJobInPast() {
+  const scenario = "Conflict: job would start in past";
+  console.log(`\n## ${scenario}`);
+  const f = await setupFixture("conflict-job-past");
+  try {
+    const [a] = f.jobs;
+    // Try to pull forward by a huge amount — e.g. 50 working days.
+    // This would put every downstream job's start before today.
+    const newEndA = addWorkingDays(a.endDate!, -50);
+    const allPlotJobs = f.jobs.map((j) => ({
+      id: j.id, name: j.name, startDate: j.startDate, endDate: j.endDate, sortOrder: j.sortOrder, status: j.status,
+    }));
+    const allOrders = f.jobs.flatMap((j) => j.orders.map((o) => ({
+      id: o.id, jobId: o.jobId, dateOfOrder: o.dateOfOrder, expectedDeliveryDate: o.expectedDeliveryDate, status: o.status,
+    })));
+    const result = calculateCascade(a.id, newEndA, allPlotJobs, allOrders);
+
+    // I7: should have conflicts
+    assert(scenario, "I7: conflicts returned", result.conflicts.length > 0,
+      `count=${result.conflicts.length}`);
+    const jobInPast = result.conflicts.find((c) => c.kind === "job_in_past");
+    assert(scenario, "I7: job_in_past conflict present", !!jobInPast,
+      jobInPast ? `jobId=${jobInPast.jobId}` : "missing");
+    // But the updates should still be computed (caller decides whether to apply)
+    assert(scenario, "updates still computed despite conflicts", result.jobUpdates.length > 0,
+      `count=${result.jobUpdates.length}`);
+  } finally {
+    await teardownFixture(f);
+  }
+}
+
+async function scenarioConflictOrderInPast() {
+  const scenario = "Conflict: pending order would need placing in past";
+  console.log(`\n## ${scenario}`);
+  const f = await setupFixture("conflict-order-past");
+  try {
+    const [a] = f.jobs;
+    // A pull forward of 20 WD should put the order dates in the past but maybe not the jobs.
+    const newEndA = addWorkingDays(a.endDate!, -20);
+    const allPlotJobs = f.jobs.map((j) => ({
+      id: j.id, name: j.name, startDate: j.startDate, endDate: j.endDate, sortOrder: j.sortOrder, status: j.status,
+    }));
+    const allOrders = f.jobs.flatMap((j) => j.orders.map((o) => ({
+      id: o.id, jobId: o.jobId, dateOfOrder: o.dateOfOrder, expectedDeliveryDate: o.expectedDeliveryDate, status: o.status,
+    })));
+    const result = calculateCascade(a.id, newEndA, allPlotJobs, allOrders);
+    const orderInPast = result.conflicts.find((c) => c.kind === "order_in_past");
+    assert(scenario, "I7: order_in_past conflict fires when PENDING order is pushed past", !!orderInPast,
+      orderInPast ? `orderId=${orderInPast.orderId}` : "missing — but could also be because deltaWD fell short of triggering");
+  } finally {
+    await teardownFixture(f);
+  }
+}
+
+async function scenarioTriggerInJobUpdates() {
+  const scenario = "Trigger job included in jobUpdates (not separate)";
+  console.log(`\n## ${scenario}`);
+  const f = await setupFixture("trigger-in-updates");
+  try {
+    const [a] = f.jobs;
+    const newEndA = addWorkingDays(a.endDate!, +3);
+    const allPlotJobs = f.jobs.map((j) => ({
+      id: j.id, name: j.name, startDate: j.startDate, endDate: j.endDate, sortOrder: j.sortOrder, status: j.status,
+    }));
+    const allOrders = f.jobs.flatMap((j) => j.orders.map((o) => ({
+      id: o.id, jobId: o.jobId, dateOfOrder: o.dateOfOrder, expectedDeliveryDate: o.expectedDeliveryDate, status: o.status,
+    })));
+    const result = calculateCascade(a.id, newEndA, allPlotJobs, allOrders);
+
+    const aUpdate = result.jobUpdates.find((u) => u.jobId === a.id);
+    assert(scenario, "trigger job A is in jobUpdates", !!aUpdate,
+      aUpdate ? `newStart=${aUpdate.newStart.toISOString().slice(0, 10)} newEnd=${aUpdate.newEnd.toISOString().slice(0, 10)}` : "missing");
+    if (aUpdate) {
+      assertShift(scenario, "trigger Job A start", a.startDate!, aUpdate.newStart, +3);
+      assertShift(scenario, "trigger Job A end", a.endDate!, aUpdate.newEnd, +3);
+      assertDurationPreserved(scenario, "trigger Job A", { start: a.startDate!, end: a.endDate! }, { start: aUpdate.newStart, end: aUpdate.newEnd });
+    }
+  } finally {
+    await teardownFixture(f);
+  }
+}
+
 // ---------- Main runner ----------
 
 async function main() {
@@ -481,6 +563,9 @@ async function main() {
     scenarioCrossPlotIsolation,
     scenarioZeroDelta,
     scenarioCascadePreviewMatchesApply,
+    scenarioConflictJobInPast,
+    scenarioConflictOrderInPast,
+    scenarioTriggerInJobUpdates,
   ];
 
   for (const test of tests) {

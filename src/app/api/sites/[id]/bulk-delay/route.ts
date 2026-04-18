@@ -91,11 +91,7 @@ export async function POST(
     });
 
     const allOrders = await prisma.materialOrder.findMany({
-      // Don't rewrite dates on already-delivered or cancelled orders — those are historical
-      where: {
-        jobId: { in: allPlotJobs.map((j) => j.id) },
-        status: { notIn: ["CANCELLED", "DELIVERED"] },
-      },
+      where: { jobId: { in: allPlotJobs.map((j) => j.id) } },
     });
 
     const cascade = calculateCascade(
@@ -107,51 +103,38 @@ export async function POST(
         startDate: j.startDate,
         endDate: j.endDate,
         sortOrder: j.sortOrder,
+        status: j.status,
       })),
       allOrders.map((o) => ({
         id: o.id,
         jobId: o.jobId,
         dateOfOrder: o.dateOfOrder,
         expectedDeliveryDate: o.expectedDeliveryDate,
+        status: o.status,
       }))
     );
 
     await prisma.$transaction(async (tx) => {
-      // Preserve original dates on first shift (only if not already set)
-      const triggerData: Record<string, unknown> = { endDate: newEndDate };
-      if (!currentJob.originalEndDate && currentJob.endDate) {
-        triggerData.originalEndDate = currentJob.endDate;
-      }
-      if (currentJob.status === "NOT_STARTED" && currentJob.startDate) {
-        triggerData.startDate = addWorkingDays(currentJob.startDate, days);
-        if (!currentJob.originalStartDate) {
-          triggerData.originalStartDate = currentJob.startDate;
-        }
-      }
-      await tx.job.update({
-        where: { id: currentJob.id },
-        data: triggerData,
-      });
-
-      // Preserve originals on cascaded siblings too
+      // The cascade library returns the trigger + downstream uniformly.
+      // Apply them all the same way; set originalStart/End on first shift.
       for (const update of cascade.jobUpdates) {
-        const sibling = await tx.job.findUnique({
+        const current = await tx.job.findUnique({
           where: { id: update.jobId },
           select: { startDate: true, endDate: true, originalStartDate: true, originalEndDate: true },
         });
-        const siblingData: Record<string, unknown> = {
+        const data: Record<string, unknown> = {
           startDate: update.newStart,
           endDate: update.newEnd,
         };
-        if (sibling && !sibling.originalStartDate && sibling.startDate) {
-          siblingData.originalStartDate = sibling.startDate;
+        if (current && !current.originalStartDate && current.startDate) {
+          data.originalStartDate = current.startDate;
         }
-        if (sibling && !sibling.originalEndDate && sibling.endDate) {
-          siblingData.originalEndDate = sibling.endDate;
+        if (current && !current.originalEndDate && current.endDate) {
+          data.originalEndDate = current.endDate;
         }
         await tx.job.update({
           where: { id: update.jobId },
-          data: siblingData,
+          data,
         });
       }
 
@@ -195,12 +178,12 @@ export async function POST(
       });
 
       // Recompute parents of any shifted child jobs on this plot
+      // (cascade.jobUpdates already includes the trigger)
       const { recomputeParentFromChildren } = await import("@/lib/parent-job");
-      const shiftedIds = [currentJob.id, ...cascade.jobUpdates.map((u) => u.jobId)];
       const parentIds = new Set<string>();
-      for (const shiftedId of shiftedIds) {
+      for (const update of cascade.jobUpdates) {
         const shiftedJob = await tx.job.findUnique({
-          where: { id: shiftedId },
+          where: { id: update.jobId },
           select: { parentId: true },
         });
         if (shiftedJob?.parentId) parentIds.add(shiftedJob.parentId);
