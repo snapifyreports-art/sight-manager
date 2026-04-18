@@ -2,11 +2,44 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { calculateCascade } from "@/lib/cascade";
-import { addWorkingDays, snapToWorkingDay } from "@/lib/working-days";
 import { canAccessSite } from "@/lib/site-access";
 import { apiError } from "@/lib/api-errors";
 
 export const dynamic = "force-dynamic";
+
+/**
+ * Cascade endpoint. See docs/cascade-spec.md for the full contract.
+ *
+ * POST  — preview the cascade (no DB writes). Returns jobUpdates, orderUpdates,
+ *         conflicts, and deltaDays (in working days).
+ * PUT   — apply the cascade. Returns a 409 if there are conflicts unless the
+ *         caller passes `force: true`.
+ *
+ * The trigger job is handled uniformly with downstream jobs — calculateCascade
+ * returns an updates list that includes the trigger. This fixes the prior bug
+ * where the trigger's end was set to the raw client value while its start was
+ * recomputed separately, causing duration drift.
+ */
+
+function buildCascadeArgs(allPlotJobs: Array<{ id: string; name: string; startDate: Date | null; endDate: Date | null; sortOrder: number; status: string }>, allOrders: Array<{ id: string; jobId: string | null; dateOfOrder: Date; expectedDeliveryDate: Date | null; status: string }>) {
+  return {
+    jobs: allPlotJobs.map((j) => ({
+      id: j.id,
+      name: j.name,
+      startDate: j.startDate,
+      endDate: j.endDate,
+      sortOrder: j.sortOrder,
+      status: j.status,
+    })),
+    orders: allOrders.map((o) => ({
+      id: o.id,
+      jobId: o.jobId,
+      dateOfOrder: o.dateOfOrder,
+      expectedDeliveryDate: o.expectedDeliveryDate,
+      status: o.status,
+    })),
+  };
+}
 
 // POST /api/jobs/[id]/cascade — preview cascade effects
 export async function POST(
@@ -23,13 +56,9 @@ export async function POST(
   const { newEndDate } = body;
 
   if (!newEndDate) {
-    return NextResponse.json(
-      { error: "newEndDate is required" },
-      { status: 400 }
-    );
+    return NextResponse.json({ error: "newEndDate is required" }, { status: 400 });
   }
 
-  // Get the job and all sibling jobs on the same plot
   const job = await prisma.job.findUnique({
     where: { id },
     include: { plot: true },
@@ -39,43 +68,20 @@ export async function POST(
     return NextResponse.json({ error: "Job not found" }, { status: 404 });
   }
 
-  // Site-access check
   if (!(await canAccessSite(session.user.id, (session.user as { role: string }).role, job.plot.siteId))) {
     return NextResponse.json({ error: "You do not have access to this site" }, { status: 403 });
   }
 
   const allPlotJobs = await prisma.job.findMany({
-    where: {
-      plotId: job.plotId,
-      status: { not: "ON_HOLD" },
-    },
+    where: { plotId: job.plotId, status: { not: "ON_HOLD" } },
     orderBy: { sortOrder: "asc" },
   });
-
   const allOrders = await prisma.materialOrder.findMany({
-    where: {
-      jobId: { in: allPlotJobs.map((j) => j.id) },
-      status: { not: "CANCELLED" },
-    },
+    where: { jobId: { in: allPlotJobs.map((j) => j.id) } },
   });
 
-  const result = calculateCascade(
-    id,
-    new Date(newEndDate),
-    allPlotJobs.map((j) => ({
-      id: j.id,
-      name: j.name,
-      startDate: j.startDate,
-      endDate: j.endDate,
-      sortOrder: j.sortOrder,
-    })),
-    allOrders.map((o) => ({
-      id: o.id,
-      jobId: o.jobId,
-      dateOfOrder: o.dateOfOrder,
-      expectedDeliveryDate: o.expectedDeliveryDate,
-    }))
-  );
+  const { jobs, orders } = buildCascadeArgs(allPlotJobs, allOrders);
+  const result = calculateCascade(id, new Date(newEndDate), jobs, orders);
 
   return NextResponse.json({
     preview: true,
@@ -83,7 +89,7 @@ export async function POST(
   });
 }
 
-// PUT /api/jobs/[id]/cascade — apply cascade
+// PUT /api/jobs/[id]/cascade — apply the cascade
 export async function PUT(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -95,7 +101,7 @@ export async function PUT(
 
   const { id } = await params;
   const body = await req.json();
-  const { newEndDate, confirm } = body;
+  const { newEndDate, confirm, force } = body;
 
   if (!newEndDate || !confirm) {
     return NextResponse.json(
@@ -113,108 +119,76 @@ export async function PUT(
     return NextResponse.json({ error: "Job not found" }, { status: 404 });
   }
 
-  // Site-access check
   if (!(await canAccessSite(session.user.id, (session.user as { role: string }).role, job.plot.siteId))) {
     return NextResponse.json({ error: "You do not have access to this site" }, { status: 403 });
   }
 
   const allPlotJobs = await prisma.job.findMany({
-    where: {
-      plotId: job.plotId,
-      status: { not: "ON_HOLD" },
-    },
+    where: { plotId: job.plotId, status: { not: "ON_HOLD" } },
     orderBy: { sortOrder: "asc" },
   });
-
   const allOrders = await prisma.materialOrder.findMany({
-    where: {
-      jobId: { in: allPlotJobs.map((j) => j.id) },
-      status: { not: "CANCELLED" },
-    },
+    where: { jobId: { in: allPlotJobs.map((j) => j.id) } },
   });
 
-  const result = calculateCascade(
-    id,
-    new Date(newEndDate),
-    allPlotJobs.map((j) => ({
-      id: j.id,
-      name: j.name,
-      startDate: j.startDate,
-      endDate: j.endDate,
-      sortOrder: j.sortOrder,
-    })),
-    allOrders.map((o) => ({
-      id: o.id,
-      jobId: o.jobId,
-      dateOfOrder: o.dateOfOrder,
-      expectedDeliveryDate: o.expectedDeliveryDate,
-    }))
-  );
+  const { jobs: cascadeJobs, orders: cascadeOrders } = buildCascadeArgs(allPlotJobs, allOrders);
+  const result = calculateCascade(id, new Date(newEndDate), cascadeJobs, cascadeOrders);
+
+  // I7: block the apply if there are conflicts unless force=true.
+  if (result.conflicts.length > 0 && !force) {
+    return NextResponse.json(
+      {
+        error: "Cascade would cause conflicts",
+        conflicts: JSON.parse(JSON.stringify(result.conflicts)),
+        deltaDays: result.deltaDays,
+      },
+      { status: 409 }
+    );
+  }
 
   try {
-  // Apply updates directly (no transaction — all updates are on the same plot, safe without wrapping)
-  {
-    // Update the changed job — shift both start and end dates, preserve originals
-    // Snap endDate to working day to prevent weekend misalignment in downstream cascade
-    const rawEndDate = new Date(newEndDate);
-    const snappedEndDate = snapToWorkingDay(rawEndDate, "forward");
-    const triggerUpdate: Record<string, unknown> = {
-      endDate: snappedEndDate,
-    };
-    if (job.startDate && result.deltaDays !== 0) {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      let newStart = addWorkingDays(job.startDate, result.deltaDays);
-      if (newStart < today) newStart = snapToWorkingDay(today, "forward");
-      else newStart = snapToWorkingDay(newStart, "forward");
-      triggerUpdate.startDate = newStart;
-    }
-    if (!job.originalEndDate && job.endDate) {
-      triggerUpdate.originalEndDate = job.endDate;
-    }
-    if (!job.originalStartDate && job.startDate) {
-      triggerUpdate.originalStartDate = job.startDate;
-    }
-    await prisma.job.update({
-      where: { id },
-      data: triggerUpdate,
-    });
-
-    // Build a map of current job dates for preserving originals
+    // Build a lookup so we can preserve originalStart/End on first move (I9).
     const jobMap = new Map(allPlotJobs.map((j) => [j.id, j]));
 
-    // Batch update subsequent jobs using Promise.all for speed
-    await Promise.all(result.jobUpdates.map((update) => {
-      const currentJob = jobMap.get(update.jobId);
-      return prisma.job.update({
-        where: { id: update.jobId },
-        data: {
-          startDate: update.newStart,
-          endDate: update.newEnd,
-          ...(!currentJob?.originalStartDate && currentJob?.startDate ? { originalStartDate: currentJob.startDate } : {}),
-          ...(!currentJob?.originalEndDate && currentJob?.endDate ? { originalEndDate: currentJob.endDate } : {}),
-        },
-      });
-    }));
-
-    // Batch update orders using Promise.all for speed
-    await Promise.all(result.orderUpdates.map((update) =>
-      prisma.materialOrder.update({
-        where: { id: update.orderId },
-        data: {
-          dateOfOrder: update.newOrderDate,
-          expectedDeliveryDate: update.newDeliveryDate,
-        },
+    // Apply every job update uniformly — trigger + downstream.
+    await Promise.all(
+      result.jobUpdates.map((update) => {
+        const current = jobMap.get(update.jobId);
+        return prisma.job.update({
+          where: { id: update.jobId },
+          data: {
+            startDate: update.newStart,
+            endDate: update.newEnd,
+            ...(!current?.originalStartDate && current?.startDate
+              ? { originalStartDate: current.startDate }
+              : {}),
+            ...(!current?.originalEndDate && current?.endDate
+              ? { originalEndDate: current.endDate }
+              : {}),
+          },
+        });
       })
-    ));
+    );
 
-    // Recompute every affected parent job's dates/status from its (now-shifted) children
+    // Apply order updates.
+    await Promise.all(
+      result.orderUpdates.map((update) =>
+        prisma.materialOrder.update({
+          where: { id: update.orderId },
+          data: {
+            dateOfOrder: update.newOrderDate,
+            expectedDeliveryDate: update.newDeliveryDate,
+          },
+        })
+      )
+    );
+
+    // I6: parent-stage rollup — recompute any parent whose children moved.
     const { recomputeParentFromChildren } = await import("@/lib/parent-job");
-    const shiftedIds = [id, ...result.jobUpdates.map((u) => u.jobId)];
     const parentIds = new Set<string>();
-    for (const shiftedId of shiftedIds) {
+    for (const update of result.jobUpdates) {
       const shiftedJob = await prisma.job.findUnique({
-        where: { id: shiftedId },
+        where: { id: update.jobId },
         select: { parentId: true },
       });
       if (shiftedJob?.parentId) parentIds.add(shiftedJob.parentId);
@@ -223,25 +197,24 @@ export async function PUT(
       await recomputeParentFromChildren(prisma, parentId);
     }
 
-    // Log event
     await prisma.eventLog.create({
       data: {
         type: "SCHEDULE_CASCADED",
-        description: `Schedule cascaded from "${job.name}" — ${result.deltaDays > 0 ? "+" : ""}${result.deltaDays} days, ${result.jobUpdates.length} jobs shifted`,
+        description: `Schedule cascaded from "${job.name}" — ${result.deltaDays > 0 ? "+" : ""}${result.deltaDays} working days, ${result.jobUpdates.length} jobs shifted`,
         siteId: job.plot.siteId,
         plotId: job.plotId,
         jobId: id,
         userId: session.user.id,
       },
     });
-  }
 
-  return NextResponse.json({
-    applied: true,
-    deltaDays: result.deltaDays,
-    jobsUpdated: result.jobUpdates.length,
-    ordersUpdated: result.orderUpdates.length,
-  });
+    return NextResponse.json({
+      applied: true,
+      deltaDays: result.deltaDays,
+      jobsUpdated: result.jobUpdates.length,
+      ordersUpdated: result.orderUpdates.length,
+      conflicts: JSON.parse(JSON.stringify(result.conflicts)), // included for visibility, caller opted in via force
+    });
   } catch (err) {
     return apiError(err, "Failed to apply cascade");
   }
