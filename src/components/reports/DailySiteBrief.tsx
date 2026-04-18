@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { format, addDays, differenceInCalendarDays } from "date-fns";
+import { addWorkingDays, differenceInWorkingDays } from "@/lib/working-days";
 import { PostCompletionDialog } from "@/components/PostCompletionDialog";
 import { getCurrentDate } from "@/lib/dev-date";
 import { useDevDate } from "@/lib/dev-date-context";
@@ -467,10 +468,12 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
   const [selectedJobIds, setSelectedJobIds] = useState<Set<string>>(new Set());
   const [bulkProcessing, setBulkProcessing] = useState(false);
 
-  // Push/Delay dialog state (for late-start jobs)
+  // Delay dialog state (for jobs that need to shift forward — weather, contractor issue, etc.)
   const [pushTarget, setPushTarget] = useState<{ id: string; name: string; startDate: string | null; endDate: string | null } | null>(null);
   const [pushDays, setPushDays] = useState(1);
   const [pushLoading, setPushLoading] = useState(false);
+  const [delayReasonType, setDelayReasonType] = useState<"WEATHER_RAIN" | "WEATHER_TEMPERATURE" | "OTHER">("OTHER");
+  const [delayReasonNote, setDelayReasonNote] = useState("");
 
   // Snag & order inline actions
   const [pendingSnagActions, setPendingSnagActions] = useState<Set<string>>(new Set());
@@ -932,33 +935,44 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
     }
   };
 
-  const handlePushJob = async () => {
+  // Delay a job via the proper /api/jobs/[id]/delay endpoint. That endpoint:
+  //   - shifts start + end by N working days (not calendar — matches cascade)
+  //   - cascades every downstream job on the same plot by the same WD delta
+  //   - records a jobAction with the reason + optional note
+  //   - logs a SCHEDULE_CASCADED event
+  //   - notifies the assigned user via push if configured
+  // Previously this component manually PATCH'd the job's dates and then called
+  // the cascade PREVIEW (POST) endpoint — which never actually moved downstream
+  // jobs. Jobs shifted in isolation; the programme silently fell out of sync.
+  const handleDelayJob = async () => {
     if (!pushTarget) return;
     setPushLoading(true);
     try {
-      const newStartDate = pushTarget.startDate
-        ? addDays(new Date(pushTarget.startDate), pushDays).toISOString()
-        : null;
-      const newEndDate = pushTarget.endDate
-        ? addDays(new Date(pushTarget.endDate), pushDays).toISOString()
-        : null;
-      await fetch(`/api/jobs/${pushTarget.id}`, {
-        method: "PATCH",
+      const res = await fetch(`/api/jobs/${pushTarget.id}/delay`, {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ startDate: newStartDate, endDate: newEndDate }),
+        body: JSON.stringify({
+          days: pushDays,
+          delayReasonType,
+          reason: delayReasonNote.trim() || undefined,
+        }),
       });
-      // Also cascade end date change to dependent jobs
-      if (newEndDate) {
-        await fetch(`/api/jobs/${pushTarget.id}/cascade`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ newEndDate }),
-        });
+      if (!res.ok) {
+        const err = await res.json().catch(() => null);
+        showToast(err?.error ?? `Failed to delay job (HTTP ${res.status})`, "error");
+        return;
       }
+      const data = await res.json().catch(() => ({ jobsShifted: 0 }));
+      showToast(
+        `Delayed ${pushDays} working day${pushDays !== 1 ? "s" : ""} — ${data.jobsShifted} downstream job${data.jobsShifted !== 1 ? "s" : ""} shifted`,
+        "success"
+      );
       setPushTarget(null);
+      setDelayReasonType("OTHER");
+      setDelayReasonNote("");
       setRefreshKey((k) => k + 1);
-    } catch {
-      showToast("Failed to push job dates — please try again");
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : "Failed to delay job — please try again", "error");
     } finally {
       setPushLoading(false);
     }
@@ -1789,7 +1803,15 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                               <Button variant="outline" size="sm" className="h-6 gap-1 border-orange-200 px-2 text-[10px] text-orange-700 hover:bg-orange-50" onClick={() => handleExtendOpen(j.id)}>
                                 <Clock className="size-2.5" /> Extend
                               </Button>
-                              <Button variant="outline" size="sm" className="h-6 gap-1 border-amber-200 px-2 text-[10px] text-amber-700 hover:bg-amber-50" onClick={() => { setPushTarget({ id: j.id, name: j.name, startDate: null, endDate: null }); setPushDays(1); }}>
+                              <Button variant="outline" size="sm" className="h-6 gap-1 border-amber-200 px-2 text-[10px] text-amber-700 hover:bg-amber-50" onClick={() => {
+                                // In this branch the job row doesn't carry startDate/endDate
+                                // (it's the simplified "jobs starting today" view); the delay
+                                // endpoint fetches them server-side from the job record.
+                                setPushTarget({ id: j.id, name: j.name, startDate: null, endDate: null });
+                                setPushDays(1);
+                                setDelayReasonType("OTHER");
+                                setDelayReasonNote("");
+                              }}>
                                 <CalendarClock className="size-2.5" /> Delay
                               </Button>
                               <Button variant="outline" size="sm" className="h-6 gap-1 px-2 text-[10px]" onClick={() => setNoteTarget({ jobId: j.id, jobName: j.name })}>
@@ -1884,8 +1906,17 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                         <Button variant="outline" size="sm" className="h-6 gap-1 border-green-200 px-2 text-[10px] text-green-700 hover:bg-green-50" disabled={pendingActions.has(j.id)} onClick={() => triggerJobAction({ id: j.id, name: j.name, status: "NOT_STARTED", startDate: j.startDate, endDate: j.endDate ?? null }, "start")}>
                           <Play className="size-2.5" /> Start
                         </Button>
-                        <Button variant="outline" size="sm" className="h-6 gap-1 border-amber-200 px-2 text-[10px] text-amber-700 hover:bg-amber-50" onClick={() => { setPushTarget(j); setPushDays(differenceInCalendarDays(date, j.startDate ? new Date(j.startDate) : date) || 1); }}>
-                          <CalendarClock className="size-2.5" /> Push
+                        <Button variant="outline" size="sm" className="h-6 gap-1 border-amber-200 px-2 text-[10px] text-amber-700 hover:bg-amber-50" onClick={() => {
+                          setPushTarget(j);
+                          // Pre-fill with the working-day gap between the original planned
+                          // start and today, so the user just has to confirm the common case.
+                          const planned = j.startDate ? new Date(j.startDate) : date;
+                          const wd = Math.abs(differenceInWorkingDays(date, planned));
+                          setPushDays(Math.max(1, wd));
+                          setDelayReasonType("OTHER");
+                          setDelayReasonNote("");
+                        }}>
+                          <CalendarClock className="size-2.5" /> Delay
                         </Button>
                       </div>
                     </div>
@@ -2263,8 +2294,13 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                         <Button variant="outline" size="sm" className="h-6 gap-1 border-green-200 px-2 text-[10px] text-green-700 hover:bg-green-50" onClick={() => triggerJobAction({ id: j.id, name: j.name, status: "NOT_STARTED", startDate: j.startDate, endDate: j.endDate }, "start")}>
                           <Play className="size-2.5" /> Start Now
                         </Button>
-                        <Button variant="outline" size="sm" className="h-6 gap-1 border-purple-200 px-2 text-[10px] text-purple-700 hover:bg-purple-50" onClick={() => { setPushTarget({ id: j.id, name: j.name, startDate: j.startDate, endDate: j.endDate }); setPushDays(1); }}>
-                          <CalendarClock className="size-2.5" /> Push Further
+                        <Button variant="outline" size="sm" className="h-6 gap-1 border-purple-200 px-2 text-[10px] text-purple-700 hover:bg-purple-50" onClick={() => {
+                          setPushTarget({ id: j.id, name: j.name, startDate: j.startDate, endDate: j.endDate });
+                          setPushDays(1);
+                          setDelayReasonType("OTHER");
+                          setDelayReasonNote("");
+                        }}>
+                          <CalendarClock className="size-2.5" /> Delay Further
                         </Button>
                       </div>
                     </div>
@@ -2903,39 +2939,105 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
         </Card>
       )}
 
-      {/* Push/Delay Dialog for late-start jobs */}
-      <Dialog open={!!pushTarget} onOpenChange={(o) => !o && setPushTarget(null)}>
-        <DialogContent className="sm:max-w-sm">
+      {/* Delay dialog — shift a job forward in time, cascading dependent jobs.
+          See docs/cascade-spec.md action A8. Works in WORKING days so the
+          preview matches what the engine actually does. */}
+      <Dialog
+        open={!!pushTarget}
+        onOpenChange={(o) => {
+          if (!o) {
+            setPushTarget(null);
+            setDelayReasonType("OTHER");
+            setDelayReasonNote("");
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Push Job Forward</DialogTitle>
+            <DialogTitle className="flex items-center gap-2">
+              <CalendarClock className="size-5 text-amber-600" />
+              Delay Job
+            </DialogTitle>
             <DialogDescription>
-              <span className="font-medium">{pushTarget?.name}</span> was due to start{" "}
-              {pushTarget?.startDate ? format(new Date(pushTarget.startDate), "dd MMM") : "earlier"}.
-              Shift its start and end dates forward by:
+              <span className="font-medium">{pushTarget?.name}</span>
+              {pushTarget?.startDate
+                ? <> was due to start <strong>{format(new Date(pushTarget.startDate), "dd MMM")}</strong>.</>
+                : null}
+              {" "}How many working days to push the programme forward?
             </DialogDescription>
           </DialogHeader>
-          <div className="flex items-center gap-3 py-2">
-            <Input
-              type="number"
-              min={1}
-              max={90}
-              value={pushDays}
-              onChange={(e) => setPushDays(Math.max(1, parseInt(e.target.value) || 1))}
-              className="w-20"
-            />
-            <span className="text-sm text-muted-foreground">days</span>
-            {pushTarget?.startDate && pushTarget?.endDate && (
-              <span className="text-xs text-muted-foreground">
-                → {format(addDays(new Date(pushTarget.startDate), pushDays), "dd MMM")} – {format(addDays(new Date(pushTarget.endDate), pushDays), "dd MMM")}
-              </span>
+
+          <div className="space-y-3 py-2">
+            {/* Days input + new-dates preview (in working days) */}
+            <div className="flex items-center gap-3">
+              <Input
+                type="number"
+                min={1}
+                max={90}
+                value={pushDays}
+                onChange={(e) => setPushDays(Math.max(1, parseInt(e.target.value) || 1))}
+                className="w-20"
+              />
+              <span className="text-sm text-muted-foreground">working day{pushDays !== 1 ? "s" : ""}</span>
+              {pushTarget?.startDate && pushTarget?.endDate && (
+                <span className="ml-auto text-xs text-muted-foreground">
+                  → {format(addWorkingDays(new Date(pushTarget.startDate), pushDays), "dd MMM")} – {format(addWorkingDays(new Date(pushTarget.endDate), pushDays), "dd MMM")}
+                </span>
+              )}
+            </div>
+
+            {/* Reason — required for reporting so Delay Report can categorise it */}
+            <div className="space-y-1.5">
+              <Label className="text-xs font-medium">Reason</Label>
+              <div className="grid grid-cols-3 gap-1.5">
+                {[
+                  { v: "WEATHER_RAIN" as const, label: "Rain", emoji: "☔" },
+                  { v: "WEATHER_TEMPERATURE" as const, label: "Temperature", emoji: "🌡️" },
+                  { v: "OTHER" as const, label: "Other", emoji: "⏳" },
+                ].map((r) => (
+                  <button
+                    key={r.v}
+                    type="button"
+                    onClick={() => setDelayReasonType(r.v)}
+                    className={cn(
+                      "rounded-lg border px-2 py-1.5 text-xs font-medium transition-colors",
+                      delayReasonType === r.v
+                        ? "border-amber-400 bg-amber-50 text-amber-900"
+                        : "border-border bg-white text-muted-foreground hover:bg-slate-50"
+                    )}
+                  >
+                    <span className="mr-1">{r.emoji}</span>{r.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Optional note */}
+            {delayReasonType === "OTHER" && (
+              <div className="space-y-1.5">
+                <Label htmlFor="delay-note" className="text-xs font-medium">
+                  Notes <span className="text-muted-foreground">(optional — shows on delay report)</span>
+                </Label>
+                <Input
+                  id="delay-note"
+                  value={delayReasonNote}
+                  onChange={(e) => setDelayReasonNote(e.target.value)}
+                  placeholder="e.g. Contractor no-show, material not on site yet"
+                  maxLength={200}
+                />
+              </div>
             )}
+
+            <p className="text-xs text-muted-foreground">
+              Dependent jobs on the same plot will shift by the same amount.
+            </p>
           </div>
-          <p className="text-xs text-muted-foreground">Dependent jobs will also be shifted via cascade.</p>
+
           <DialogFooter>
             <DialogClose render={<Button variant="outline" size="sm" />}>Cancel</DialogClose>
-            <Button size="sm" disabled={pushLoading} onClick={handlePushJob}>
+            <Button size="sm" disabled={pushLoading} onClick={handleDelayJob}>
               {pushLoading ? <Loader2 className="size-3.5 animate-spin" /> : <CalendarClock className="size-3.5" />}
-              Push {pushDays} day{pushDays !== 1 ? "s" : ""}
+              Delay {pushDays} day{pushDays !== 1 ? "s" : ""}
             </Button>
           </DialogFooter>
         </DialogContent>

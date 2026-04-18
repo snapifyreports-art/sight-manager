@@ -1037,14 +1037,17 @@ export default function SiteWalkthrough({
                 </button>
               )}
 
-              {/* Delay row — available for both IN_PROGRESS and NOT_STARTED */}
+              {/* Delay row — available for both IN_PROGRESS and NOT_STARTED.
+                  Label stays consistent across walkthrough and Daily Brief so
+                  users learn one concept: "Delay" shifts the job + downstream
+                  forward by N working days (see docs/cascade-spec.md A8). */}
               {(canFinish || canStart) && (
                 <button
                   onClick={() => setActiveModal("delay")}
                   className="flex w-full items-center justify-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700 hover:bg-red-100 active:scale-95 transition-all"
                 >
                   <Clock className="size-4" />
-                  {canFinish ? "Delay / Push Job" : "Push Job Forward"}
+                  Delay Job
                 </button>
               )}
 
