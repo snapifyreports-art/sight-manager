@@ -73,6 +73,8 @@ import { DelayReport } from "@/components/reports/DelayReport";
 import { BudgetReport } from "@/components/reports/BudgetReport";
 import { SiteCalendar } from "@/components/reports/SiteCalendar";
 import { BatchPlotQR } from "@/components/plots/PlotQRCode";
+import { SiteQuantsClient } from "@/components/admin/SiteQuantsClient";
+import { SiteDrawingsClient } from "@/components/admin/SiteDrawingsClient";
 import { WeeklySiteReport } from "@/components/reports/WeeklySiteReport";
 import { CriticalPath } from "@/components/reports/CriticalPath";
 import { SiteOrders } from "@/components/orders/SiteOrders";
@@ -2028,6 +2030,24 @@ export function SiteDetailClient({
               <SiteLogClient
                 siteId={site.id}
                 plots={site.plots.map((p) => ({ id: p.id, name: p.name, plotNumber: p.plotNumber }))}
+              />
+            )}
+          </div>
+
+          <div className={activeTab !== "quants" ? "hidden" : undefined}>
+            {visitedTabs.has("quants") && (
+              <SiteQuantsClient
+                siteId={site.id}
+                plots={site.plots.map((p) => ({ id: p.id, plotNumber: p.plotNumber, name: p.name }))}
+              />
+            )}
+          </div>
+
+          <div className={activeTab !== "drawings" ? "hidden" : undefined}>
+            {visitedTabs.has("drawings") && (
+              <SiteDrawingsClient
+                siteId={site.id}
+                plots={site.plots.map((p) => ({ id: p.id, plotNumber: p.plotNumber, name: p.name }))}
               />
             )}
           </div>

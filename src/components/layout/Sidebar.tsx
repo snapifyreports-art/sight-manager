@@ -68,6 +68,8 @@ const SITE_TAB_GROUPS = [
     label: "Site Admin",
     icon: FolderOpen,
     tabs: [
+      { label: "Quants",        tab: "quants" },
+      { label: "Drawings",      tab: "drawings" },
       { label: "Documents",     tab: "documents" },
       { label: "Critical Path", tab: "critical-path" },
       { label: "QR Codes",      tab: "qr-codes" },
