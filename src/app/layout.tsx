@@ -5,6 +5,7 @@ import { AuthProvider } from "@/components/providers/SessionProvider";
 import { ServiceWorkerRegistrar } from "@/components/providers/ServiceWorkerProvider";
 import { DevDateProvider } from "@/lib/dev-date-context";
 import { FetchPatchProvider } from "@/components/providers/FetchPatchProvider";
+import { ToastProvider } from "@/components/ui/toast";
 
 export const metadata: Metadata = {
   title: "Sight Manager",
@@ -31,7 +32,9 @@ export default function RootLayout({
         <AuthProvider>
           <DevDateProvider>
             <TooltipProvider>
-              {children}
+              <ToastProvider>
+                {children}
+              </ToastProvider>
             </TooltipProvider>
           </DevDateProvider>
         </AuthProvider>
