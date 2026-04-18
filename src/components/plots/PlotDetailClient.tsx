@@ -62,6 +62,8 @@ import { GanttChart } from "@/components/gantt/GanttChart";
 import { PlotTodoList } from "@/components/plots/PlotTodoList";
 import { PlotHistoryTab } from "@/components/plots/PlotHistoryTab";
 import { HandoverChecklist } from "@/components/handover/HandoverChecklist";
+import { PlotMaterialsSection } from "@/components/plots/PlotMaterialsSection";
+import { PlotDrawingsSection } from "@/components/plots/PlotDrawingsSection";
 
 // ---------- Types ----------
 
@@ -1037,6 +1039,14 @@ export function PlotDetailClient({
             <Clock className="size-4" />
             History
           </TabsTrigger>
+          <TabsTrigger value="materials">
+            <Package className="size-4" />
+            Materials
+          </TabsTrigger>
+          <TabsTrigger value="drawings">
+            <FileCheck className="size-4" />
+            Drawings
+          </TabsTrigger>
           <TabsTrigger value="handover">
             <FileCheck className="size-4" />
             Handover
@@ -1163,6 +1173,16 @@ export function PlotDetailClient({
         {/* History Tab */}
         <TabsContent value="history">
           <PlotHistoryTab plotId={plot.id} />
+        </TabsContent>
+
+        {/* Materials Tab */}
+        <TabsContent value="materials">
+          <PlotMaterialsSection plotId={plot.id} />
+        </TabsContent>
+
+        {/* Drawings Tab */}
+        <TabsContent value="drawings">
+          <PlotDrawingsSection plotId={plot.id} siteId={plot.site.id} />
         </TabsContent>
 
         <TabsContent value="handover">

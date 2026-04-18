@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Package, Boxes, ShoppingCart, Plus, Loader2, Trash2 } from "lucide-react";
+import { Package, Boxes, ShoppingCart, Plus, Loader2, Trash2, Send, Truck, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -132,6 +132,23 @@ export function SiteQuantsClient({
       });
       refresh();
     } catch {}
+  }
+
+  // One-off order status transitions
+  const [pendingStatusIds, setPendingStatusIds] = useState<Set<string>>(new Set());
+  async function updateOneOffStatus(orderId: string, status: "ORDERED" | "DELIVERED" | "CANCELLED") {
+    if (status === "CANCELLED" && !confirm("Cancel this one-off order? Line-item costs will no longer count toward totals.")) return;
+    setPendingStatusIds((prev) => new Set(prev).add(orderId));
+    try {
+      await fetch(`/api/orders/${orderId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+      await refresh();
+    } finally {
+      setPendingStatusIds((prev) => { const n = new Set(prev); n.delete(orderId); return n; });
+    }
   }
   async function deletePerPlot(m: ManualPerPlot) {
     if (!confirm(`Delete "${m.name}" from ${m.plotNumber ? `Plot ${m.plotNumber}` : m.plotName}?`)) return;
@@ -379,21 +396,61 @@ export function SiteQuantsClient({
             <div className="p-4 text-sm text-muted-foreground">No one-off orders yet. Click &quot;New one-off order&quot; to add extras not tied to a specific plot or job.</div>
           ) : (
             <div className="divide-y">
-              {data.oneOff.map((o) => (
-                <div key={o.id} className="grid grid-cols-[1fr_100px_140px] gap-3 px-4 py-2.5 text-sm">
-                  <div>
-                    <p className="font-medium">{o.supplier}</p>
-                    <p className="text-[11px] text-muted-foreground">
-                      {o.itemsDescription || o.items.map((i) => i.name).join(", ") || "—"}
-                      {o.plot ? ` · Plot ${o.plot.plotNumber ?? ""}` : " · Site-wide"}
-                    </p>
+              {data.oneOff.map((o) => {
+                const isPending = pendingStatusIds.has(o.id);
+                const statusColour =
+                  o.status === "DELIVERED" ? "bg-green-100 text-green-700"
+                  : o.status === "ORDERED" ? "bg-blue-100 text-blue-700"
+                  : o.status === "CANCELLED" ? "bg-slate-200 text-slate-600"
+                  : "bg-amber-100 text-amber-700";
+                return (
+                  <div key={o.id} className="flex flex-wrap items-center gap-3 px-4 py-2.5 text-sm">
+                    <div className="min-w-[200px] flex-1">
+                      <p className="font-medium">{o.supplier}</p>
+                      <p className="text-[11px] text-muted-foreground">
+                        {o.itemsDescription || o.items.map((i) => i.name).join(", ") || "—"}
+                        {o.plot ? ` · Plot ${o.plot.plotNumber ?? ""}` : " · Site-wide"}
+                      </p>
+                    </div>
+                    <div className="shrink-0">
+                      <span className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-medium ${statusColour}`}>{o.status}</span>
+                    </div>
+                    <p className="w-20 shrink-0 text-right font-medium tabular-nums">£{o.total.toFixed(2)}</p>
+                    <div className="flex shrink-0 items-center gap-1">
+                      {isPending ? (
+                        <Loader2 className="size-4 animate-spin text-muted-foreground" />
+                      ) : (
+                        <>
+                          {o.status === "PENDING" && (
+                            <>
+                              <Button size="sm" variant="outline" className="h-7 gap-1 border-blue-200 px-2 text-[11px] text-blue-700 hover:bg-blue-50"
+                                onClick={() => updateOneOffStatus(o.id, "ORDERED")}>
+                                <Send className="size-3" /> Mark Sent
+                              </Button>
+                              <Button size="sm" variant="outline" className="h-7 gap-1 border-slate-200 px-2 text-[11px] text-slate-600 hover:bg-slate-50"
+                                onClick={() => updateOneOffStatus(o.id, "CANCELLED")}>
+                                <X className="size-3" /> Cancel
+                              </Button>
+                            </>
+                          )}
+                          {o.status === "ORDERED" && (
+                            <>
+                              <Button size="sm" variant="outline" className="h-7 gap-1 border-green-200 px-2 text-[11px] text-green-700 hover:bg-green-50"
+                                onClick={() => updateOneOffStatus(o.id, "DELIVERED")}>
+                                <Truck className="size-3" /> Mark Delivered
+                              </Button>
+                              <Button size="sm" variant="outline" className="h-7 gap-1 border-slate-200 px-2 text-[11px] text-slate-600 hover:bg-slate-50"
+                                onClick={() => updateOneOffStatus(o.id, "CANCELLED")}>
+                                <X className="size-3" /> Cancel
+                              </Button>
+                            </>
+                          )}
+                        </>
+                      )}
+                    </div>
                   </div>
-                  <div>
-                    <span className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-medium ${o.status === "DELIVERED" ? "bg-green-100 text-green-700" : o.status === "ORDERED" ? "bg-blue-100 text-blue-700" : "bg-amber-100 text-amber-700"}`}>{o.status}</span>
-                  </div>
-                  <p className="text-right font-medium">£{o.total.toFixed(2)}</p>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>

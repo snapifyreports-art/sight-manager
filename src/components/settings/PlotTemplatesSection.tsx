@@ -32,6 +32,7 @@ import {
   DialogClose,
 } from "@/components/ui/dialog";
 import { TemplateEditor } from "./TemplateEditor";
+import { TemplateExtras } from "./TemplateExtras";
 import type { TemplateData } from "./types";
 
 export function PlotTemplatesSection({
@@ -109,17 +110,20 @@ export function PlotTemplatesSection({
     setEditingTemplate(updated);
   }
 
-  // If editing, show the editor
+  // If editing, show the editor + materials/drawings extras panel below
   if (editingTemplate) {
     return (
-      <TemplateEditor
-        template={editingTemplate}
-        onBack={() => {
-          setEditingTemplate(null);
-          router.refresh();
-        }}
-        onUpdate={handleTemplateUpdated}
-      />
+      <div className="space-y-6">
+        <TemplateEditor
+          template={editingTemplate}
+          onBack={() => {
+            setEditingTemplate(null);
+            router.refresh();
+          }}
+          onUpdate={handleTemplateUpdated}
+        />
+        <TemplateExtras templateId={editingTemplate.id} templateName={editingTemplate.name} />
+      </div>
     );
   }
 

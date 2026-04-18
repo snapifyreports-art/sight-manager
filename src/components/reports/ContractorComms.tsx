@@ -23,6 +23,9 @@ import {
   Send,
   Package,
   Camera,
+  FileText,
+  Download,
+  ExternalLink,
 } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -60,6 +63,17 @@ interface ContractorOrder {
   items: Array<{ name: string; quantity: number; unit: string }>;
 }
 
+interface ContractorDrawing {
+  id: string;
+  name: string;
+  url: string;
+  fileName: string;
+  fileSize: number | null;
+  mimeType: string | null;
+  createdAt: string;
+  plot: { id: string; plotNumber: string | null; name: string } | null;
+}
+
 interface Contractor {
   id: string;
   name: string;
@@ -71,6 +85,7 @@ interface Contractor {
   nextJobs: Job[];
   openSnags: Snag[];
   orders?: ContractorOrder[];
+  drawings?: ContractorDrawing[];
 }
 
 interface CommsData {
@@ -537,6 +552,57 @@ function ContractorCard({
               {contractor.openSnags.map((snag) => (
                 <SnagCard key={snag.id} snag={snag} siteId={siteId} />
               ))}
+            </div>
+          </details>
+        )}
+
+        {/* Drawings */}
+        {contractor.drawings && contractor.drawings.length > 0 && (
+          <details className="group">
+            <summary className="flex cursor-pointer items-center gap-2 px-4 py-3 sm:px-5 [&::-webkit-details-marker]:hidden">
+              <FileText className="size-4 text-blue-500" />
+              <span className="text-xs font-semibold uppercase tracking-wider text-blue-700">
+                Drawings ({contractor.drawings.length})
+              </span>
+              <ChevronRight className="ml-auto size-3.5 text-muted-foreground transition-transform group-open:rotate-90" />
+            </summary>
+            <div className="px-4 pb-3 sm:px-5 space-y-1.5">
+              {contractor.drawings.map((d) => {
+                const sizeKb = d.fileSize ? Math.round(d.fileSize / 1024) : null;
+                return (
+                  <div key={d.id} className="flex items-center justify-between gap-2 rounded-lg bg-blue-50/50 px-3 py-2">
+                    <div className="flex min-w-0 flex-1 items-center gap-2">
+                      <FileText className="size-4 shrink-0 text-blue-600" />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium">{d.name}</p>
+                        <p className="truncate text-[11px] text-muted-foreground">
+                          {d.plot ? (d.plot.plotNumber ? `Plot ${d.plot.plotNumber}` : d.plot.name) : "Site-wide"}
+                          {sizeKb !== null ? ` · ${sizeKb} KB` : ""}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-1">
+                      <a
+                        href={d.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="rounded p-1 text-muted-foreground hover:bg-white hover:text-foreground"
+                        title="Open"
+                      >
+                        <ExternalLink className="size-3.5" />
+                      </a>
+                      <a
+                        href={d.url}
+                        download={d.fileName}
+                        className="rounded p-1 text-muted-foreground hover:bg-white hover:text-foreground"
+                        title="Download"
+                      >
+                        <Download className="size-3.5" />
+                      </a>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </details>
         )}
