@@ -4,6 +4,91 @@
 
 ---
 
+## 0.0 STATE-OF-PLAY — LATE APR 2026 SESSION (GO-LIVE TOMORROW)
+
+**Read this section first. Everything below it is historical; this is right now.**
+
+### What Keith is doing
+Going live with the app tomorrow (20 Apr 2026 in dev-date terms). He's actively stress-testing — clicking through, spotting bugs, demanding fixes. He is frustrated with me for missing UX bugs that a proper browser test would have caught. He is right. "tsc passing ≠ UX passing" is the lesson.
+
+### What's shipped in this session (most recent first)
+```
+135fddc  fix(budget): render availableTemplates section (was loaded, not shown)
+b3bcd05  fix(daily-brief): show ALL pills incl. missing ones; 0-values dimmed
+a4d52c2  fix(site-header): hide Raise Snag button when already on Snags tab
+4efa45c  fix(email-dialog): wider on desktop, scrollable body, footer pinned
+e95300d  Tasks → Daily Brief merge (Keith Q1=b)
+fbeb6ec  Send Orders grouping: one batch per supplier + dateOfOrder (JIT)
+144a216  Contacts → Contractors + Suppliers/Contractors blue/amber + deliveries stacked by day
+5f64551  nav: remove duplicated global Daily Brief + Orders entries
+8e0e35b  share page parity with Contractor Comms + collapse Mini Programme default
+5ac0bc0  UX audit fixes: proper contact page, nav, links, inline priority, clone templates, share-page actions
+754076a  RAMS + perf audit (27-41% speedup via indexes) + photo test plan
+cd874ad  Contractor Comms tabs (3 of 4 shipped) + report exports + handover update
+2c88bfa  walkthrough UX sharpening (Keith's Apr 2026 asks)
+e7d0cd8  clearing batch 2: unlimited hierarchy render + report drill-throughs
+f2349e4  clearing batch: HelpTips, Walkthrough unification, 2 audits resolved
+cd35409  spot-check sweep: fix handover inaccuracies + clear Priority 1 items
+fbdee5f  docs: triple-check handover — add Quick Start + Workflow + complete Deferred table
+```
+
+### Honest testing state
+
+| Area | State | Notes |
+|---|---|---|
+| `tsc --noEmit` | ✅ clean | |
+| `scripts/test-cascade.ts` | ✅ 59/59 | |
+| `npm run lint` | ✅ 0 errors | 126 warnings (unused imports) |
+| `npx next build` | ✅ clean (last full run at `4efa45c`) | |
+| DB integrity (`scripts/audit-integrity.ts`) | ✅ 13/14 checks clean | 1 soft historical (3 IN_PROGRESS jobs without actualStartDate — pre-existing) |
+| Analytics vs Brief reconciliation | ✅ clean (72/72 matches) | |
+| Contact dedup | ✅ clean (26 contacts, no dupes) | |
+| API endpoints return 200 | ✅ all 27 spot-checked | |
+| HTTP perf under 500ms | ⚠️ DB-level yes; HTTP 2–5s on heavy endpoints | Parallelisation of /api/tasks + /api/analytics done; still noisy |
+| E2E test harness ran | ✅ 22 PASS / 0 FAIL / 1 WARN (test harness bug, not app) | `scripts/e2e-full-test.ts` — creates QA_E2E site + templates |
+| **Full browser click-through of every view** | ❌ **NOT DONE** | Keith has caught multiple bugs I missed. This is the known gap. |
+
+### Known fragile — for tomorrow's go-live
+
+1. **Daily Brief pills** — just fixed (`b3bcd05`). Every pill now always shows, 0-values dimmed. Missing pills added to all 3 rows. If you see a pill row with nothing visible, check that the data field name matches the API.
+2. **Budget Report** — just fixed (`135fddc`). `availableTemplates` now renders as "Template Budgets" card. **Pattern: other reports likely have the same bug of API-loaded-but-not-rendered fields. Running sweep now.**
+3. **Raise Snag on site header** — just fixed. Was duplicating with the tab's own button. Now hidden when `activeTab === "snags"`.
+4. **Email dialog overflow** — just fixed. Previously `sm:max-w-lg` + no max-height → footer off-screen on long bodies. Now `max-h-[90vh]` + internal scroll + `lg:max-w-3xl`.
+5. **Tasks / Daily Brief merge** — Tasks page retired, `/tasks` redirects to `/daily-brief`. Sidebar "Daily Brief" entry now points at the global view. DailySiteBrief renders for picked site; TasksClient (relabelled) renders for "All Sites".
+6. **Send Orders batching** — per-supplier + per-dateOfOrder (not per-supplier lumped). Each batch is one JIT email.
+7. **Contact detail page** — new route at `/contacts/[id]`. Replaces the `?highlight=id` hack. 5 places fixed to link through.
+8. **Contractor share page parity** — Mini Programme / Day Sheets / Drawings / RAMS / Messages Log all added.
+9. **RAMS upload** — new route per contractor. Schema: `SiteDocument.contactId` was added.
+
+### Session scripts added (keep around, useful for re-runs)
+
+- `scripts/e2e-full-test.ts` — creates a throwaway test site with 2 templates + 3 plots + exercises every action. Re-run any time to regenerate QA fixtures.
+- `scripts/audit-performance.ts` — times 12 representative Prisma queries, flags >500ms.
+- `scripts/audit-integrity.ts` — 14 DB invariant checks (orphans, rollup, weekend-dates, etc.).
+- `scripts/audit-contact-dedup.ts` — Contact email/phone/name collisions.
+- `scripts/audit-analytics-vs-brief.ts` — same-metric comparison across Brief vs Analytics.
+- `scripts/check-contact-split.ts` — Contact-type-SUPPLIER vs Supplier-table inspection.
+- `scripts/list-db-indexes.ts` — lists every `@@index` actually applied.
+
+### Active test site (seeded this session)
+
+- Site: `QA_E2E_TEST__2026-04-19T20-01` (id `cmo66yr69000gph0ohelwq5gy`)
+- Template A: `QA_E2E__TPL_A__2026-04-19T20-01` — simple 3-stage build with order on Brickwork
+- Template B: `QA_E2E__TPL_B__2026-04-19T20-01` — parent stage Groundworks + 3 sub-jobs
+- 3 plots created, every action exercised (start / complete / signoff / delay / pull-forward attempted / note / snag raise+resolve / order PENDING→ORDERED→DELIVERED / doc upload / RAMS upload / photo)
+- Invariants checked: I6 rollup ✓, I2 weekend alignment ✓, I4 immovable completed ✓, order state machine ✓
+
+Safe to delete via site-delete UI or `DELETE FROM "Site" WHERE name LIKE 'QA_E2E_TEST__%'`.
+
+### What's NOT done yet — in this session's TODO
+
+- [ ] Exhaustive browser click-through of every view. Keith said "automatically start on B but don't skip corners". This is B.
+- [ ] For each view: API-vs-render diff (catch "data loaded, not shown" bugs like the Budget/DailyBrief ones).
+- [ ] Click every button, check states (0 / 1 / many / overflow / error).
+- [ ] Visual consistency at common breakpoints.
+
+---
+
 ## 0. QUICK START — IF YOU ARE A NEW CLAUDE, READ THIS FIRST
 
 You are taking over Sight Manager from a previous session. Keith (the user) is a UK construction business owner, non-technical but domain-expert. He has stakes — "people's families depend on this working". He expects defensive engineering, not MVP shortcuts.
