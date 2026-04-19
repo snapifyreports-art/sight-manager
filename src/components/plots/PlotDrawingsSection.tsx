@@ -13,6 +13,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { useToast, fetchErrorMessage } from "@/components/ui/toast";
+import { useCopyToClipboard } from "@/hooks/useCopyToClipboard";
 
 interface Drawing {
   id: string;
@@ -44,7 +45,7 @@ export function PlotDrawingsSection({ plotId, siteId }: { plotId: string; siteId
   const [uploadOpen, setUploadOpen] = useState(false);
   const [pending, setPending] = useState<PendingUpload[]>([]);
   const fileRef = useRef<HTMLInputElement | null>(null);
-  const [linkCopied, setLinkCopied] = useState<string | null>(null);
+  const { copy, copiedKey } = useCopyToClipboard();
   const toast = useToast();
 
   const refresh = useCallback(async () => {
@@ -147,11 +148,7 @@ export function PlotDrawingsSection({ plotId, siteId }: { plotId: string; siteId
     refresh();
   }
 
-  function copyLink(url: string, id: string) {
-    navigator.clipboard.writeText(url);
-    setLinkCopied(id);
-    setTimeout(() => setLinkCopied(null), 1500);
-  }
+  const copyLink = (url: string, id: string) => { void copy(url, id); };
 
   if (loading && drawings.length === 0) return <div className="p-6 text-sm text-muted-foreground"><Loader2 className="inline size-4 animate-spin mr-2" />Loading drawings…</div>;
 
@@ -190,7 +187,7 @@ export function PlotDrawingsSection({ plotId, siteId }: { plotId: string; siteId
                 d={d}
                 onDelete={deleteDrawing}
                 onCopy={copyLink}
-                copied={linkCopied === d.id}
+                copied={copiedKey === d.id}
               />
             ))}
           </div>
@@ -211,7 +208,7 @@ export function PlotDrawingsSection({ plotId, siteId }: { plotId: string; siteId
                 d={d}
                 onDelete={deleteDrawing}
                 onCopy={copyLink}
-                copied={linkCopied === d.id}
+                copied={copiedKey === d.id}
                 readOnly
               />
             ))}

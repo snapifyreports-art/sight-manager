@@ -18,7 +18,6 @@ import {
   LayoutGrid,
   ShoppingCart,
   Clock,
-  CircleDot,
   Package,
   HardHat,
   UserPlus,
@@ -60,6 +59,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { PhotoUpload } from "./PhotoUpload";
 import { useJobAction } from "@/hooks/useJobAction";
 import { useToast, fetchErrorMessage } from "@/components/ui/toast";
+import { JobStatusBadge, OrderStatusBadge } from "@/components/shared/StatusBadge";
 
 // ---------- Types ----------
 
@@ -215,41 +215,8 @@ interface NextJobResponse {
 
 // ---------- Status Config ----------
 
-const STATUS_CONFIG: Record<
-  string,
-  { label: string; bgColor: string; dotColor: string }
-> = {
-  NOT_STARTED: {
-    label: "Not Started",
-    bgColor: "bg-slate-400/10",
-    dotColor: "text-slate-400",
-  },
-  IN_PROGRESS: {
-    label: "In Progress",
-    bgColor: "bg-amber-500/10",
-    dotColor: "text-amber-500",
-  },
-  ON_HOLD: {
-    label: "On Hold",
-    bgColor: "bg-red-500/10",
-    dotColor: "text-red-500",
-  },
-  COMPLETED: {
-    label: "Completed",
-    bgColor: "bg-green-500/10",
-    dotColor: "text-green-500",
-  },
-};
-
-const ORDER_STATUS_CONFIG: Record<
-  string,
-  { label: string; variant: "default" | "secondary" | "destructive" | "outline" }
-> = {
-  PENDING: { label: "Pending", variant: "outline" },
-  ORDERED: { label: "Ordered", variant: "secondary" },
-  DELIVERED: { label: "Delivered", variant: "default" },
-  CANCELLED: { label: "Cancelled", variant: "destructive" },
-};
+// Status badges moved to @/components/shared/StatusBadge — single source
+// of truth so IN_PROGRESS looks identical everywhere in the app.
 
 const ACTION_ICON_MAP: Record<string, { icon: typeof Play; color: string }> = {
   start: { icon: Play, color: "text-amber-500" },
@@ -257,18 +224,6 @@ const ACTION_ICON_MAP: Record<string, { icon: typeof Play; color: string }> = {
   complete: { icon: CheckCircle, color: "text-green-500" },
   edit: { icon: Briefcase, color: "text-blue-500" },
 };
-
-function StatusBadge({ status }: { status: string }) {
-  const config = STATUS_CONFIG[status] ?? STATUS_CONFIG.NOT_STARTED;
-  return (
-    <div
-      className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-medium ${config.bgColor}`}
-    >
-      <CircleDot className={`size-3 ${config.dotColor}`} />
-      <span>{config.label}</span>
-    </div>
-  );
-}
 
 // ---------- Main Component ----------
 
@@ -829,7 +784,7 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
           </div>
 
           <div className="flex items-center gap-2">
-            <StatusBadge status={job.status} />
+            <JobStatusBadge status={job.status} size="md" />
             {job.status !== "IN_PROGRESS" && job.status !== "COMPLETED" && (
               <Button
                 size="sm"
@@ -1012,9 +967,6 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
             ) : (
               <div className="space-y-3">
                 {job.orders.map((order) => {
-                  const orderConfig =
-                    ORDER_STATUS_CONFIG[order.status] ??
-                    ORDER_STATUS_CONFIG.PENDING;
                   const orderTotal = order.orderItems.reduce(
                     (sum, item) => sum + item.totalCost,
                     0
@@ -1059,9 +1011,7 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
                         </p>
                       </div>
                       <div className="flex flex-col items-end gap-1.5">
-                        <Badge variant={orderConfig.variant}>
-                          {orderConfig.label}
-                        </Badge>
+                        <OrderStatusBadge status={order.status} />
                         {order.status !== "DELIVERED" &&
                           order.status !== "CANCELLED" && (
                             <Button

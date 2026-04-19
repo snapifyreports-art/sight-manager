@@ -20,6 +20,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useToast, fetchErrorMessage } from "@/components/ui/toast";
+import { useCopyToClipboard } from "@/hooks/useCopyToClipboard";
 
 interface Drawing {
   id: string;
@@ -57,7 +58,7 @@ export function SiteDrawingsClient({ siteId, plots }: { siteId: string; plots: P
   const [pending, setPending] = useState<PendingUpload[]>([]);
   const [defaultPlotId, setDefaultPlotId] = useState("__site__");
   const fileRef = useRef<HTMLInputElement | null>(null);
-  const [linkCopied, setLinkCopied] = useState<string | null>(null);
+  const { copy, copiedKey } = useCopyToClipboard();
   const toast = useToast();
 
   const refresh = useCallback(async () => {
@@ -173,11 +174,8 @@ export function SiteDrawingsClient({ siteId, plots }: { siteId: string; plots: P
     refresh();
   }
 
-  function copyLink(url: string, id: string) {
-    navigator.clipboard.writeText(url);
-    setLinkCopied(id);
-    setTimeout(() => setLinkCopied(null), 1500);
-  }
+  // Wraps useCopyToClipboard for the drawing-row signature the component uses.
+  const copyLink = (url: string, id: string) => { void copy(url, id); };
 
   if (loading && drawings.length === 0) return <div className="p-6 text-sm text-muted-foreground"><Loader2 className="inline size-4 animate-spin mr-2" />Loading drawings…</div>;
 
@@ -199,7 +197,7 @@ export function SiteDrawingsClient({ siteId, plots }: { siteId: string; plots: P
           <p className="p-4 text-sm text-muted-foreground">No site-wide drawings uploaded.</p>
         ) : (
           <div className="divide-y">
-            {siteWide.map((d) => <DrawingRow key={d.id} d={d} onDelete={deleteDrawing} onCopy={copyLink} copied={linkCopied === d.id} />)}
+            {siteWide.map((d) => <DrawingRow key={d.id} d={d} onDelete={deleteDrawing} onCopy={copyLink} copied={copiedKey === d.id} />)}
           </div>
         )}
       </div>
@@ -221,7 +219,7 @@ export function SiteDrawingsClient({ siteId, plots }: { siteId: string; plots: P
                     <span className="text-muted-foreground">· {ds.length} drawing{ds.length !== 1 ? "s" : ""}</span>
                   </div>
                   <div className="space-y-1">
-                    {ds.map((d) => <DrawingRow key={d.id} d={d} onDelete={deleteDrawing} onCopy={copyLink} copied={linkCopied === d.id} compact />)}
+                    {ds.map((d) => <DrawingRow key={d.id} d={d} onDelete={deleteDrawing} onCopy={copyLink} copied={copiedKey === d.id} compact />)}
                   </div>
                 </div>
               );

@@ -33,6 +33,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { fetchErrorMessage } from "@/components/ui/toast";
+import { useCopyToClipboard } from "@/hooks/useCopyToClipboard";
 
 interface Job {
   id: string;
@@ -123,8 +124,8 @@ function ShareDialog({
 }) {
   const [loading, setLoading] = useState(true);
   const [url, setUrl] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
   const [emailBody, setEmailBody] = useState("");
+  const { copy: copyUrlToClipboard, copied } = useCopyToClipboard();
 
   // Keep the latest onLinkGenerated in a ref so the effect doesn't re-fire if
   // the parent re-creates the callback on every render (which would cause us
@@ -155,9 +156,7 @@ function ShareDialog({
 
   const copy = async () => {
     if (!url) return;
-    await navigator.clipboard.writeText(url);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    await copyUrlToClipboard(url);
   };
 
   return (

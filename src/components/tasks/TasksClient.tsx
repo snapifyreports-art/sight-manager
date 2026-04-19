@@ -260,11 +260,9 @@ export function TasksClient() {
   // ── Delay job ──
   // Unified via useDelayJob — replaces the prior ~80 lines of bespoke
   // dialog state + Dialog JSX. Keeps the Tasks page consistent with
-  // Daily Brief / Walkthrough / JobWeekPanel: both input modes (days
-  // OR new end date) and rain/temperature/other reason picker.
-  // NOTE: the prior impl prefetched weather-suggestion days from
-  // GET /api/jobs/:id/delay and pre-selected the reason — that's
-  // tracked as a follow-up; unification takes priority.
+  // Daily Brief / Walkthrough / JobWeekPanel: both input modes (days OR
+  // new end date), rain/temperature/other reason picker, AND weather
+  // auto-suggestion (lives inside useDelayJob now).
   const { openDelayDialog, dialogs: delayDialogs } = useDelayJob(() => {
     setRefreshKey((k) => k + 1);
   });

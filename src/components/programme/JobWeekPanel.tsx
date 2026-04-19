@@ -309,9 +309,8 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
   const [signOffNotesInput, setSignOffNotesInput] = useState("");
 
   // Unified delay dialog — same UX as Daily Brief / Walkthrough / Tasks.
-  // Replaces a prior inline days-only form. NOTE: the prior impl prefetched
-  // weather-suggestion days from GET /api/jobs/:id/delay and pre-selected
-  // the reason — tracked as a follow-up to add to useDelayJob.
+  // Replaces a prior inline days-only form. Weather auto-suggestion lives
+  // inside useDelayJob now — same behaviour the inline form had.
   const { openDelayDialog, dialogs: delayDialogs } = useDelayJob(() => {
     onJobUpdated?.();
   });

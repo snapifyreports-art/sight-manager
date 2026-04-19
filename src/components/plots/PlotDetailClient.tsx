@@ -15,7 +15,6 @@ import {
   CalendarDays,
   User,
   ShoppingCart,
-  CircleDot,
   BarChart3,
   ListChecks,
   List,
@@ -65,6 +64,8 @@ import { PlotHistoryTab } from "@/components/plots/PlotHistoryTab";
 import { HandoverChecklist } from "@/components/handover/HandoverChecklist";
 import { PlotMaterialsSection } from "@/components/plots/PlotMaterialsSection";
 import { PlotDrawingsSection } from "@/components/plots/PlotDrawingsSection";
+import { JobStatusBadge, JOB_STATUS_CONFIG } from "@/components/shared/StatusBadge";
+import { useCopyToClipboard } from "@/hooks/useCopyToClipboard";
 
 // ---------- Types ----------
 
@@ -115,43 +116,9 @@ interface PlotData {
 
 // ---------- Status Config ----------
 
-const JOB_STATUS_CONFIG: Record<
-  string,
-  { label: string; bgColor: string; dotColor: string }
-> = {
-  NOT_STARTED: {
-    label: "Not Started",
-    bgColor: "bg-slate-400/10",
-    dotColor: "text-slate-400",
-  },
-  IN_PROGRESS: {
-    label: "In Progress",
-    bgColor: "bg-amber-500/10",
-    dotColor: "text-amber-500",
-  },
-  ON_HOLD: {
-    label: "On Hold",
-    bgColor: "bg-red-500/10",
-    dotColor: "text-red-500",
-  },
-  COMPLETED: {
-    label: "Completed",
-    bgColor: "bg-green-500/10",
-    dotColor: "text-green-500",
-  },
-};
-
-function StatusBadge({ status }: { status: string }) {
-  const config = JOB_STATUS_CONFIG[status] ?? JOB_STATUS_CONFIG.NOT_STARTED;
-  return (
-    <div
-      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ${config.bgColor}`}
-    >
-      <CircleDot className={`size-3 ${config.dotColor}`} />
-      <span>{config.label}</span>
-    </div>
-  );
-}
+// Status badge moved to @/components/shared/StatusBadge — single source of
+// truth so a job that's IN_PROGRESS looks identical on the plot page, job
+// detail page, contractor sheet, and everywhere else.
 
 // ---------- Add Job Dialog ----------
 
@@ -926,8 +893,8 @@ export function PlotDetailClient({
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [shareExpiry, setShareExpiry] = useState<string | null>(null);
   const [shareLoading, setShareLoading] = useState(false);
-  const [shareCopied, setShareCopied] = useState(false);
   const [shareError, setShareError] = useState<string | null>(null);
+  const { copy: copyShareToClipboard, copied: shareCopied } = useCopyToClipboard();
 
   const handleGenerateShareLink = async () => {
     setShareLoading(true);
@@ -954,9 +921,7 @@ export function PlotDetailClient({
 
   const handleCopyShareLink = async () => {
     if (!shareUrl) return;
-    await navigator.clipboard.writeText(shareUrl);
-    setShareCopied(true);
-    setTimeout(() => setShareCopied(false), 2000);
+    await copyShareToClipboard(shareUrl);
   };
 
   return (
@@ -1116,7 +1081,7 @@ export function PlotDetailClient({
                             </p>
                           )}
                         </div>
-                        <StatusBadge status={job.status} />
+                        <JobStatusBadge status={job.status} />
                       </div>
                     </CardHeader>
                     <CardContent>

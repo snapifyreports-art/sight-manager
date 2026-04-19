@@ -280,8 +280,8 @@ export function JobsClient({ initialJobs, workflows, users }: JobsClientProps) {
     (_action, _jobId) => { router.refresh(); }
   );
 
-  // Centralised delay flow — TODO: the old dialog showed a weather auto-suggestion
-  // via GET /api/jobs/[id]/delay that the shared dialog doesn't yet have.
+  // Centralised delay flow — both input modes + weather auto-suggestion all
+  // live in useDelayJob (same dialog used by Daily Brief / Walkthrough / Tasks).
   const { openDelayDialog: openDelayJobDialog, dialogs: delayDialogs } = useDelayJob(
     () => { router.refresh(); }
   );

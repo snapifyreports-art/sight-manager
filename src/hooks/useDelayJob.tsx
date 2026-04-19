@@ -17,7 +17,7 @@
  * See docs/cascade-spec.md action A8 for the engine contract.
  */
 
-import { useCallback, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { format } from "date-fns";
 import { CalendarClock, Loader2 } from "lucide-react";
 import { addWorkingDays, differenceInWorkingDays } from "@/lib/working-days";
@@ -63,6 +63,14 @@ export function useDelayJob(onSuccess?: () => void): DelayHookResult {
   const [reasonType, setReasonType] = useState<DelayReasonType>("OTHER");
   const [reasonNote, setReasonNote] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  // Weather suggestion — fetched when dialog opens. Pre-selects the reason
+  // type if there are rained-off days logged during the job's period so the
+  // user doesn't have to manually classify routine weather delays. Same
+  // feature that lived in TasksClient + JobWeekPanel before unification.
+  const [weatherSuggestion, setWeatherSuggestion] = useState<{
+    rainDays: number;
+    temperatureDays: number;
+  } | null>(null);
 
   const close = useCallback(() => {
     setTarget(null);
@@ -71,6 +79,7 @@ export function useDelayJob(onSuccess?: () => void): DelayHookResult {
     setPickedEndDate("");
     setReasonType("OTHER");
     setReasonNote("");
+    setWeatherSuggestion(null);
   }, []);
 
   const openDelayDialog = useCallback((job: DelayableJob, defaultDays = 1) => {
@@ -80,7 +89,35 @@ export function useDelayJob(onSuccess?: () => void): DelayHookResult {
     setReasonType("OTHER");
     setReasonNote("");
     setInputMode("days");
+    setWeatherSuggestion(null);
   }, []);
+
+  // Fetch weather suggestion when dialog opens for a specific job. Silent
+  // failure on error — this is an enhancement, not a blocker for submitting.
+  useEffect(() => {
+    if (!target) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/jobs/${target.id}/delay`);
+        if (!res.ok) return;
+        const data = await res.json() as {
+          rainDays: number;
+          temperatureDays: number;
+          suggestedReason: DelayReasonType | null;
+        };
+        if (cancelled) return;
+        setWeatherSuggestion({
+          rainDays: data.rainDays ?? 0,
+          temperatureDays: data.temperatureDays ?? 0,
+        });
+        if (data.suggestedReason) setReasonType(data.suggestedReason);
+      } catch {
+        /* non-critical */
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [target]);
 
   // Resolve the working-day delta from whichever input mode is active.
   // Returns null if the input doesn't produce a positive shift.
@@ -158,6 +195,22 @@ export function useDelayJob(onSuccess?: () => void): DelayHookResult {
         </DialogHeader>
 
         <div className="space-y-3 py-2">
+          {/* Weather suggestion — only shown if the site has rained-off days
+              logged during this job's period. Pre-selects the reason above
+              so in the common case the user doesn't need to reclassify. */}
+          {weatherSuggestion && (weatherSuggestion.rainDays > 0 || weatherSuggestion.temperatureDays > 0) && (
+            <div className="rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-800">
+              {weatherSuggestion.rainDays > 0 && (
+                <span>☔ {weatherSuggestion.rainDays} rain day{weatherSuggestion.rainDays !== 1 ? "s" : ""}</span>
+              )}
+              {weatherSuggestion.rainDays > 0 && weatherSuggestion.temperatureDays > 0 && <span> · </span>}
+              {weatherSuggestion.temperatureDays > 0 && (
+                <span>🌡️ {weatherSuggestion.temperatureDays} temperature day{weatherSuggestion.temperatureDays !== 1 ? "s" : ""}</span>
+              )}
+              <span className="ml-1 opacity-75">logged on this job&apos;s period — reason pre-selected</span>
+            </div>
+          )}
+
           {/* Input mode toggle */}
           <div className="flex items-center gap-1 rounded-lg border p-0.5 text-xs">
             <button
