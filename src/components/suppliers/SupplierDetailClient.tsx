@@ -29,6 +29,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { fetchErrorMessage } from "@/components/ui/toast";
+import { useConfirmAction } from "@/hooks/useConfirmAction";
 
 // ---------- Types ----------
 
@@ -99,7 +100,7 @@ export function SupplierDetailClient({ supplier: initial }: { supplier: Supplier
   const [addForm, setAddForm] = useState({ name: "", unit: "each", unitCost: "", category: "", sku: "" });
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState({ name: "", unit: "", unitCost: "", category: "", sku: "" });
-  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const { confirmAction, dialogs: confirmDialogs } = useConfirmAction();
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
 
@@ -219,22 +220,27 @@ export function SupplierDetailClient({ supplier: initial }: { supplier: Supplier
     }
   };
 
-  // ── Delete Item ──
-  const handleDelete = async (id: string) => {
-    try {
-      const res = await fetch(`/api/suppliers/${supplier.id}/pricelist/${id}`, {
-        method: "DELETE",
-      });
-      if (!res.ok) {
-        showToast(await fetchErrorMessage(res, "Failed to delete item"), "error");
-        return;
-      }
-      setItems((prev) => prev.filter((i) => i.id !== id));
-      setDeleteConfirm(null);
-      showToast("Item deleted");
-    } catch {
-      showToast("Failed to delete", "error");
-    }
+  // ── Delete Item (via shared confirm dialog) ──
+  const handleOpenDelete = (id: string, name: string) => {
+    confirmAction({
+      title: "Delete Item",
+      description: (
+        <>
+          Remove <span className="font-medium text-foreground">{name}</span>{" "}
+          from this supplier&apos;s pricelist?
+        </>
+      ),
+      onConfirm: async () => {
+        const res = await fetch(`/api/suppliers/${supplier.id}/pricelist/${id}`, {
+          method: "DELETE",
+        });
+        if (!res.ok) {
+          throw new Error(await fetchErrorMessage(res, "Failed to delete item"));
+        }
+        setItems((prev) => prev.filter((i) => i.id !== id));
+        showToast("Item deleted");
+      },
+    });
   };
 
   // ── Download Template ──
@@ -496,7 +502,7 @@ export function SupplierDetailClient({ supplier: initial }: { supplier: Supplier
                           </button>
                           <button
                             className="rounded p-1 text-muted-foreground hover:bg-red-50 hover:text-red-600"
-                            onClick={() => setDeleteConfirm(item.id)}
+                            onClick={() => handleOpenDelete(item.id, item.name)}
                           >
                             <Trash2 className="size-3.5" />
                           </button>
@@ -591,29 +597,8 @@ export function SupplierDetailClient({ supplier: initial }: { supplier: Supplier
         </DialogContent>
       </Dialog>
 
-      {/* Delete Confirmation Dialog */}
-      <Dialog open={!!deleteConfirm} onOpenChange={() => setDeleteConfirm(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Delete Item</DialogTitle>
-          </DialogHeader>
-          <p className="text-sm text-muted-foreground">
-            Are you sure you want to remove &ldquo;{items.find((i) => i.id === deleteConfirm)?.name}&rdquo; from the pricelist?
-          </p>
-          <div className="flex justify-end gap-2 pt-2">
-            <Button variant="outline" size="sm" onClick={() => setDeleteConfirm(null)}>
-              Cancel
-            </Button>
-            <Button
-              variant="destructive"
-              size="sm"
-              onClick={() => deleteConfirm && handleDelete(deleteConfirm)}
-            >
-              Delete
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+      {/* Shared confirm-delete dialog (useConfirmAction) */}
+      {confirmDialogs}
 
       {/* Edit Supplier Dialog */}
       <Dialog open={editSupplierOpen} onOpenChange={setEditSupplierOpen}>
