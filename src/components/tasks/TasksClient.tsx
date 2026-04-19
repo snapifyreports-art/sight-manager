@@ -113,10 +113,16 @@ interface TaskData {
 }
 
 interface SupplierGroup {
+  // Group key is supplier + dateOfOrder so each "batch" is a distinct
+  // email — matches Keith's just-in-time workflow. Two batches to the
+  // same supplier on different dates are two separate emails, sent at
+  // their respective times, not lumped into one over-early order.
+  key: string;
   supplierId: string;
   supplierName: string;
   contactEmail: string | null;
   contactName: string | null;
+  orderDateISO: string;  // YYYY-MM-DD for display + grouping
   orders: OrderTask[];
   sites: string[];
 }
@@ -170,12 +176,19 @@ export function TasksClient() {
       .finally(() => setLoading(false));
   }, [devDate, refreshKey]);
 
-  // ── Group send orders by supplier ──
+  // ── Group send orders by supplier + dateOfOrder (JIT batch) ──
+  // Keith Apr 2026: "its confusing because we're running just-in-time".
+  // An order with dateOfOrder=20 Apr and another with dateOfOrder=27 Apr
+  // are two separate emails, sent on two separate days. Previously this
+  // lumped them into one card which prompted sending everything early
+  // and breaks the JIT model.
   const supplierGroups = useMemo(() => {
     if (!data) return [];
     const map = new Map<string, SupplierGroup>();
     for (const order of data.sendOrder) {
-      const existing = map.get(order.supplier.id);
+      const dateKey = order.dateOfOrder.slice(0, 10); // YYYY-MM-DD
+      const key = `${order.supplier.id}__${dateKey}`;
+      const existing = map.get(key);
       if (existing) {
         existing.orders.push(order);
         const siteName = order.job.plot.site.name;
@@ -183,20 +196,21 @@ export function TasksClient() {
           existing.sites.push(siteName);
         }
       } else {
-        map.set(order.supplier.id, {
+        map.set(key, {
+          key,
           supplierId: order.supplier.id,
           supplierName: order.supplier.name,
           contactEmail: order.supplier.contactEmail ?? null,
           contactName: order.supplier.contactName ?? null,
+          orderDateISO: dateKey,
           orders: [order],
           sites: [order.job.plot.site.name],
         });
       }
     }
+    // Sort: earliest dateOfOrder first (most urgent to send).
     return Array.from(map.values()).sort(
-      (a, b) =>
-        new Date(a.orders[0].dateOfOrder).getTime() -
-        new Date(b.orders[0].dateOfOrder).getTime()
+      (a, b) => a.orderDateISO.localeCompare(b.orderDateISO)
     );
   }, [data]);
 
@@ -313,10 +327,13 @@ export function TasksClient() {
     });
   }
 
-  // ── Mark a whole supplier group as ORDERED ──
+  // ── Mark a whole supplier-date batch as ORDERED ──
+  // Uses the composite group.key (supplier + dateOfOrder) for the pending
+  // state so two batches to the same supplier on different dates show
+  // their spinners independently.
   async function handleMarkGroupSent(group: SupplierGroup) {
-    const supplierId = group.supplierId;
-    setSendingGroupIds((prev) => new Set(prev).add(supplierId));
+    const stateKey = group.key;
+    setSendingGroupIds((prev) => new Set(prev).add(stateKey));
     try {
       const orderIds = group.orders.map((o) => o.id);
       const res = await fetch("/api/orders/bulk-status", {
@@ -342,7 +359,7 @@ export function TasksClient() {
     } finally {
       setSendingGroupIds((prev) => {
         const next = new Set(prev);
-        next.delete(supplierId);
+        next.delete(stateKey);
         return next;
       });
     }
@@ -759,13 +776,13 @@ export function TasksClient() {
               <CardTitle>Send Orders</CardTitle>
             </div>
             <CardDescription>
-              {data.counts.sendOrder} order{data.counts.sendOrder !== 1 ? "s" : ""} across {supplierGroups.length} supplier{supplierGroups.length !== 1 ? "s" : ""}
+              {data.counts.sendOrder} order{data.counts.sendOrder !== 1 ? "s" : ""} in {supplierGroups.length} batch{supplierGroups.length !== 1 ? "es" : ""} (one per supplier + placement date — just-in-time)
             </CardDescription>
           </CardHeader>
           <CardContent>
             <div className="space-y-3">
               {supplierGroups.map((group) => {
-                const isGroupSending = sendingGroupIds.has(group.supplierId);
+                const isGroupSending = sendingGroupIds.has(group.key);
                 const plotNames = [...new Set(group.orders.map((o) => o.job.plot.name))];
                 // Aggregate items across all orders in the group
                 const itemMap = new Map<string, { name: string; unit: string; quantity: number }>();
@@ -782,15 +799,39 @@ export function TasksClient() {
                 }
                 const aggregatedItems = Array.from(itemMap.values());
 
+                // Urgency pill for the order-placement date (when this
+                // email needs to go out).
+                const orderDateObj = new Date(group.orderDateISO);
+                const todayMidnight = getCurrentDateAtMidnight();
+                const daysUntilOrder = Math.ceil(
+                  (orderDateObj.getTime() - todayMidnight.getTime()) / 86400000
+                );
+                const orderUrgency: "overdue" | "today" | "upcoming" =
+                  daysUntilOrder < 0 ? "overdue" : daysUntilOrder === 0 ? "today" : "upcoming";
+                const urgencyLabel =
+                  orderUrgency === "overdue"
+                    ? `${Math.abs(daysUntilOrder)} day${Math.abs(daysUntilOrder) === 1 ? "" : "s"} overdue`
+                    : orderUrgency === "today"
+                      ? "Send today"
+                      : `Send in ${daysUntilOrder} day${daysUntilOrder === 1 ? "" : "s"}`;
+
                 return (
                   <div
-                    key={group.supplierId}
+                    key={group.key}
                     className="rounded-lg border border-blue-200/50 bg-blue-50/50 p-3"
                   >
-                    {/* Supplier header with actions */}
+                    {/* Supplier + date header with actions */}
                     <div className="flex items-center gap-2">
                       <div className="min-w-0 flex-1">
-                        <p className="text-sm font-semibold">{group.supplierName}</p>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="text-sm font-semibold">{group.supplierName}</p>
+                          <span className="text-sm font-semibold text-slate-700">
+                            {format(orderDateObj, "d MMM")}
+                          </span>
+                          <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${urgencyBadge[orderUrgency]}`}>
+                            {urgencyLabel}
+                          </span>
+                        </div>
                         <p className="text-xs text-muted-foreground">
                           {group.sites.join(", ")} &bull; {plotNames.join(", ")}
                           {group.orders.length > 1 && (
