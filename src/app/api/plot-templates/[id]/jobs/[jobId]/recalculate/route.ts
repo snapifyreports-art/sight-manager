@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { templateJobsInclude } from "@/lib/template-includes";
+import { templateJobsInclude, normaliseTemplateParentDates } from "@/lib/template-includes";
 import { apiError } from "@/lib/api-errors";
 
 export const dynamic = "force-dynamic";
@@ -77,7 +77,7 @@ export async function POST(
       },
     });
 
-    return NextResponse.json(template);
+    return NextResponse.json(template ? normaliseTemplateParentDates(template) : template);
   } catch (err) {
     return apiError(err, "Failed to recalculate job");
   }

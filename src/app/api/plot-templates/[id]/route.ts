@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { templateJobsInclude } from "@/lib/template-includes";
+import { templateJobsInclude, normaliseTemplateParentDates } from "@/lib/template-includes";
 import { apiError } from "@/lib/api-errors";
 
 export const dynamic = "force-dynamic";
@@ -32,7 +32,9 @@ export async function GET(
     );
   }
 
-  return NextResponse.json(template);
+  // Normalise parent startWeek/endWeek from children — stored parent
+  // values drift from the source of truth (children) over time.
+  return NextResponse.json(normaliseTemplateParentDates(template));
 }
 
 // PUT /api/plot-templates/[id] — update template metadata
@@ -74,7 +76,7 @@ export async function PUT(
       },
     });
 
-    return NextResponse.json(template);
+    return NextResponse.json(normaliseTemplateParentDates(template));
   } catch (err) {
     return apiError(err, "Failed to update template");
   }

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { UK_HOUSEBUILDING_STAGES } from "@/lib/stage-library";
-import { templateJobsInclude } from "@/lib/template-includes";
+import { templateJobsInclude, normaliseTemplateParentDates } from "@/lib/template-includes";
 import { apiError } from "@/lib/api-errors";
 
 export const dynamic = "force-dynamic";
@@ -142,7 +142,7 @@ export async function POST(
       });
     });
 
-    return NextResponse.json(result, { status: 201 });
+    return NextResponse.json(result ? normaliseTemplateParentDates(result) : result, { status: 201 });
   } catch (err) {
     return apiError(err, "Failed to update stages");
   }
