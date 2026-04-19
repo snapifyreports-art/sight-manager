@@ -92,6 +92,9 @@ export function TemplateEditor({
   const [jobDescription, setJobDescription] = useState("");
   const [jobStartWeek, setJobStartWeek] = useState(1);
   const [jobEndWeek, setJobEndWeek] = useState(2);
+  // Days override on edit — lets you set a leaf job to e.g. 3 working
+  // days spanning less than a full week (Q6 Apr 2026 for stages + sub-jobs).
+  const [jobDurationDays, setJobDurationDays] = useState<number | "">("");
   const [jobStageCode, setJobStageCode] = useState("");
   const [jobWeatherAffected, setJobWeatherAffected] = useState(false);
   const [jobWeatherAffectedType, setJobWeatherAffectedType] = useState<"RAIN" | "TEMPERATURE" | "BOTH" | null>(null);
@@ -610,6 +613,7 @@ export function TemplateEditor({
     setJobWeatherAffected(job.weatherAffected ?? false);
     setJobWeatherAffectedType(job.weatherAffectedType ?? null);
     setJobContractorId(job.contactId ?? "");
+    setJobDurationDays(job.durationDays ?? "");
     setJobDialogOpen(true);
   }
 
@@ -637,6 +641,10 @@ export function TemplateEditor({
               weatherAffectedType: jobWeatherAffected ? jobWeatherAffectedType : null,
               contactId: jobContractorId && jobContractorId !== "__none__" ? jobContractorId : null,
               ...(isSubJob && { durationWeeks }),
+              // durationDays: send null if field cleared, the number if set.
+              // Applies to both leaf stages and sub-jobs — apply-template
+              // honours it over durationWeeks at create time.
+              durationDays: typeof jobDurationDays === "number" && jobDurationDays > 0 ? jobDurationDays : null,
             }),
           }
         );
@@ -2310,6 +2318,28 @@ export function TemplateEditor({
                   }
                 />
               </div>
+            </div>
+            {/* Days-granularity override — applies to both stages and sub-jobs.
+                When set, takes precedence over the week range at apply time.
+                Blank = use weeks, any positive number = use that many working days. */}
+            <div className="space-y-2">
+              <Label>Duration in days (optional)</Label>
+              <Input
+                type="number"
+                min={1}
+                max={90}
+                value={jobDurationDays}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setJobDurationDays(v === "" ? "" : (parseInt(v) || ""));
+                }}
+                placeholder="Leave blank for weeks"
+                className="w-40"
+              />
+              <p className="text-[11px] text-muted-foreground">
+                Leave blank to use the Start / End Week above. Set a number
+                for sub-week jobs (e.g. 3 for a 3-day paint touch-up).
+              </p>
             </div>
           </div>
           <DialogFooter>

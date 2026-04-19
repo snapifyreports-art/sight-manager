@@ -235,103 +235,53 @@ export function TasksClient() {
     setRefreshKey((k) => k + 1);
   });
 
-  // ── Chase supplier email ──
+  // ── Chase + Send order email (unified via useOrderEmail) ──
+  // The hook owns the dialog, mailto, event log, and (for send mode) the
+  // mark-as-ORDERED status update. onSent fires after the user hits send
+  // so we refresh the task list to drop the cleared items.
+  const { openSendOrderEmail, openChaseOrderEmail, dialogs: emailDialogs } = useOrderEmail(() => {
+    setRefreshKey((k) => k + 1);
+  });
+
   function openChaseDialog(order: OrderTask) {
-    const days = daysOverdue(order.expectedDeliveryDate);
-    const siteName = order.job.plot.site.name;
-    const contactName = order.supplier.contactName || order.supplier.name;
-    const itemsList = order.orderItems.length > 0
-      ? order.orderItems.map((i) => `${i.quantity} ${i.unit} ${i.name}`).join(", ")
-      : order.itemsDescription || "materials";
-    const expectedDate = order.expectedDeliveryDate
-      ? format(new Date(order.expectedDeliveryDate), "dd MMM yyyy")
-      : "N/A";
-
-    setChaseOrder(order);
-    setChaseSubject(`Overdue Delivery — Order for ${order.job.name} at ${siteName}`);
-    setChaseBody(
-      `Hi ${contactName},\n\n` +
-      `We are chasing delivery of the following order for ${order.job.name} at ${siteName}, ${order.job.plot.name}:\n\n` +
-      `Items: ${itemsList}\n\n` +
-      `The expected delivery date was ${expectedDate} and the order is now ${days} day${days !== 1 ? "s" : ""} overdue.\n\n` +
-      `Please confirm the updated delivery date at your earliest convenience.\n\n` +
-      `Regards`
-    );
-    setChaseDialogOpen(true);
+    openChaseOrderEmail({
+      orderId: order.id,
+      supplierName: order.supplier.name,
+      supplierContactName: order.supplier.contactName ?? null,
+      supplierContactEmail: order.supplier.contactEmail ?? null,
+      jobId: order.job.id,
+      jobName: order.job.name,
+      plotName: order.job.plot.name,
+      siteId: order.job.plot.site.id,
+      siteName: order.job.plot.site.name,
+      itemsDescription: order.itemsDescription ?? null,
+      items: order.orderItems.map((i) => ({ name: i.name, quantity: i.quantity, unit: i.unit })),
+      expectedDeliveryDate: order.expectedDeliveryDate,
+      daysOverdue: daysOverdue(order.expectedDeliveryDate),
+    });
   }
 
-  function handleSendChase() {
-    if (!chaseOrder) return;
-    const email = chaseOrder.supplier.contactEmail || "";
-    const mailto = `mailto:${encodeURIComponent(email)}?subject=${encodeURIComponent(chaseSubject)}&body=${encodeURIComponent(chaseBody)}`;
-    window.open(mailto, "_blank");
-
-    // Log event (fire and forget)
-    fetch("/api/events", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        type: "USER_ACTION",
-        description: `Chased ${chaseOrder.supplier.name} for overdue delivery — ${chaseOrder.job.name}`,
-        siteId: chaseOrder.job.plot.site.id,
-        jobId: chaseOrder.job.id,
-      }),
-    }).catch(() => {});
-
-    setChaseDialogOpen(false);
-  }
-
-  // ── Send order to supplier via email (grouped) ──
   function openSendOrderDialogForGroup(group: SupplierGroup) {
-    const contactName = group.contactName || group.supplierName;
-    const siteNames = group.sites.join(", ");
-    const plotNames = [...new Set(group.orders.map((o) => o.job.plot.name))].join(", ");
-
-    // Aggregate items: sum quantities for same name+unit
-    const itemMap = new Map<string, { name: string; unit: string; quantity: number }>();
-    for (const order of group.orders) {
-      for (const item of order.orderItems) {
-        const key = `${item.name}|||${item.unit}`;
-        const existing = itemMap.get(key);
-        if (existing) {
-          existing.quantity += item.quantity;
-        } else {
-          itemMap.set(key, { name: item.name, unit: item.unit, quantity: item.quantity });
-        }
-      }
-    }
-    const aggregatedItems = Array.from(itemMap.values());
-    const itemsList = aggregatedItems.length > 0
-      ? aggregatedItems.map((i) => `- ${i.quantity} ${i.unit} ${i.name}`).join("\n")
-      : "Materials as discussed";
-
-    // Delivery dates
-    const deliveryDates = group.orders
-      .filter((o) => o.expectedDeliveryDate)
-      .map((o) => new Date(o.expectedDeliveryDate!).getTime());
-    const uniqueDates = [...new Set(deliveryDates)];
-    let deliveryLine: string;
-    if (uniqueDates.length === 0) {
-      deliveryLine = "Required delivery date: ASAP";
-    } else if (uniqueDates.length === 1) {
-      deliveryLine = `Required delivery date: ${format(new Date(uniqueDates[0]), "dd MMM yyyy")}`;
-    } else {
-      const earliest = format(new Date(Math.min(...uniqueDates)), "dd MMM yyyy");
-      const latest = format(new Date(Math.max(...uniqueDates)), "dd MMM yyyy");
-      deliveryLine = `Required delivery dates: ${earliest} — ${latest}`;
-    }
-
-    setSendOrderGroup(group);
-    setSendOrderSubject(`Material Order — ${siteNames}`);
-    setSendOrderBody(
-      `Hi ${contactName},\n\n` +
-      `Please find below our material order covering plots: ${plotNames}.\n\n` +
-      `${itemsList}\n\n` +
-      `${deliveryLine}\n\n` +
-      `Please confirm receipt and expected delivery.\n\n` +
-      `Regards`
-    );
-    setSendOrderDialogOpen(true);
+    openSendOrderEmail({
+      supplierId: group.supplierId,
+      supplierName: group.supplierName,
+      contactName: group.contactName,
+      contactEmail: group.contactEmail,
+      orders: group.orders.map((o) => ({
+        id: o.id,
+        job: {
+          id: o.job.id,
+          name: o.job.name,
+          plot: {
+            name: o.job.plot.name,
+            site: { id: o.job.plot.site.id, name: o.job.plot.site.name },
+          },
+        },
+        expectedDeliveryDate: o.expectedDeliveryDate,
+        items: o.orderItems.map((i) => ({ name: i.name, quantity: i.quantity, unit: i.unit })),
+      })),
+      siteNames: group.sites,
+    });
   }
 
   // ── Mark a whole supplier group as ORDERED ──
@@ -369,29 +319,9 @@ export function TasksClient() {
     }
   }
 
-  async function handleSendGroupOrderEmail() {
-    if (!sendOrderGroup) return;
-    const email = sendOrderGroup.contactEmail || "";
-    const mailto = `mailto:${encodeURIComponent(email)}?subject=${encodeURIComponent(sendOrderSubject)}&body=${encodeURIComponent(sendOrderBody)}`;
-    window.open(mailto, "_blank");
-
-    // Mark all orders in group as ORDERED
-    await handleMarkGroupSent(sendOrderGroup);
-
-    // Log event
-    fetch("/api/events", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        type: "USER_ACTION",
-        description: `Sent bulk order to ${sendOrderGroup.supplierName} — ${sendOrderGroup.orders.length} order(s)`,
-        siteId: sendOrderGroup.orders[0].job.plot.site.id,
-        jobId: sendOrderGroup.orders[0].job.id,
-      }),
-    }).catch(() => {});
-
-    setSendOrderDialogOpen(false);
-  }
+  // handleSendGroupOrderEmail is gone — useOrderEmail owns mailto + event
+  // log + mark-as-ORDERED now, and the onSent callback refreshes the
+  // task list so the cleared orders disappear.
 
   if (loading) {
     return (
@@ -1093,108 +1023,9 @@ export function TasksClient() {
         </Card>
       )}
 
-      {/* ── Chase Supplier Email Dialog ── */}
-      <Dialog open={chaseDialogOpen} onOpenChange={setChaseDialogOpen}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Chase Supplier</DialogTitle>
-            <DialogDescription>
-              Send a chaser email to {chaseOrder?.supplier.name} for overdue delivery
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-2">
-            <div className="space-y-2">
-              <Label>To</Label>
-              <Input
-                value={chaseOrder?.supplier.contactEmail || "No email on file"}
-                disabled
-                className="bg-muted"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Subject</Label>
-              <Input
-                value={chaseSubject}
-                onChange={(e) => setChaseSubject(e.target.value)}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Message</Label>
-              <Textarea
-                value={chaseBody}
-                onChange={(e) => setChaseBody(e.target.value)}
-                rows={8}
-                className="text-sm"
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <DialogClose render={<Button variant="outline" />}>
-              Cancel
-            </DialogClose>
-            <Button
-              onClick={handleSendChase}
-              disabled={!chaseOrder?.supplier.contactEmail}
-            >
-              <Mail className="size-4" />
-              Open in Email
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* ── Send Order Email Dialog (grouped) ── */}
-      <Dialog open={sendOrderDialogOpen} onOpenChange={setSendOrderDialogOpen}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Send Order</DialogTitle>
-            <DialogDescription>
-              Email order to {sendOrderGroup?.supplierName}
-              {sendOrderGroup && sendOrderGroup.orders.length > 1 && (
-                <> — {sendOrderGroup.orders.length} orders will be marked as Ordered</>
-              )}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-2">
-            <div className="space-y-2">
-              <Label>To</Label>
-              <Input
-                value={sendOrderGroup?.contactEmail || "No email on file"}
-                disabled
-                className="bg-muted"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Subject</Label>
-              <Input
-                value={sendOrderSubject}
-                onChange={(e) => setSendOrderSubject(e.target.value)}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Message</Label>
-              <Textarea
-                value={sendOrderBody}
-                onChange={(e) => setSendOrderBody(e.target.value)}
-                rows={10}
-                className="text-sm"
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <DialogClose render={<Button variant="outline" />}>
-              Cancel
-            </DialogClose>
-            <Button
-              onClick={handleSendGroupOrderEmail}
-              disabled={!sendOrderGroup?.contactEmail}
-            >
-              <Send className="size-4" />
-              Send &amp; Mark Ordered
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* Shared supplier-email dialog (useOrderEmail) — one dialog for
+          both Chase (overdue) and Send Order (bulk) flows. */}
+      {emailDialogs}
 
       {/* Unified delay dialog (useDelayJob) — same UX as Daily Brief, Walkthrough,
           and JobWeekPanel. Both input modes + reason picker live in one place. */}
