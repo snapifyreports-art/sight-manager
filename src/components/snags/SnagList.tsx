@@ -26,6 +26,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import * as XLSX from "xlsx";
+import { SnagStatusBadge, SnagPriorityBadge } from "@/components/shared/StatusBadge";
+import { useSnagAction, type SnagStatus } from "@/hooks/useSnagAction";
 
 interface SnagPhoto {
   id: string;
@@ -59,27 +61,6 @@ interface SnagListProps {
   siteId?: string;
 }
 
-const PRIORITY_STYLES: Record<string, string> = {
-  LOW: "bg-slate-100 text-slate-600",
-  MEDIUM: "bg-blue-100 text-blue-700",
-  HIGH: "bg-amber-100 text-amber-700",
-  CRITICAL: "bg-red-100 text-red-700",
-};
-
-const STATUS_STYLES: Record<string, string> = {
-  OPEN: "bg-slate-100 text-slate-600",
-  IN_PROGRESS: "bg-blue-100 text-blue-700",
-  RESOLVED: "bg-green-100 text-green-700",
-  CLOSED: "bg-gray-100 text-gray-500",
-};
-
-const STATUS_LABELS: Record<string, string> = {
-  OPEN: "Open",
-  IN_PROGRESS: "In Progress",
-  RESOLVED: "Resolved",
-  CLOSED: "Closed",
-};
-
 export function SnagList({ snags, onSelect, onRefresh, showPlot, highlightId, siteId }: SnagListProps) {
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [filterPriority, setFilterPriority] = useState<string>("all");
@@ -108,22 +89,14 @@ export function SnagList({ snags, onSelect, onRefresh, showPlot, highlightId, si
     return aLabel.localeCompare(bLabel, undefined, { numeric: true });
   });
 
-  // Quick status action state
-  const [pendingSnagActions, setPendingSnagActions] = useState<Set<string>>(new Set());
+  // Quick status action — delegated to shared hook
+  const { setSnagStatus, isPending: isSnagPending } = useSnagAction({
+    onChange: () => onRefresh?.(),
+  });
 
-  const handleQuickStatus = async (e: React.MouseEvent, snagId: string, status: string) => {
+  const handleQuickStatus = (e: React.MouseEvent, snagId: string, status: SnagStatus) => {
     e.stopPropagation();
-    setPendingSnagActions((prev) => new Set(prev).add(snagId));
-    try {
-      await fetch(`/api/snags/${snagId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status }),
-      });
-      onRefresh?.();
-    } finally {
-      setPendingSnagActions((prev) => { const n = new Set(prev); n.delete(snagId); return n; });
-    }
+    void setSnagStatus(snagId, status);
   };
 
   // Close snag dialog state
@@ -383,19 +356,13 @@ export function SnagList({ snags, onSelect, onRefresh, showPlot, highlightId, si
                     <p className="line-clamp-2 text-sm font-medium">
                       {snag.description}
                     </p>
-                    <span
-                      className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${PRIORITY_STYLES[snag.priority]}`}
-                    >
-                      {snag.priority}
+                    <span className="shrink-0">
+                      <SnagPriorityBadge priority={snag.priority} />
                     </span>
                   </div>
 
                   <div className="mt-2 flex flex-wrap items-center gap-2">
-                    <span
-                      className={`rounded-full px-1.5 py-0.5 text-[10px] font-medium ${STATUS_STYLES[snag.status]}`}
-                    >
-                      {STATUS_LABELS[snag.status]}
-                    </span>
+                    <SnagStatusBadge status={snag.status} />
 
                     {snag.location && (
                       <span className="flex items-center gap-0.5 text-[10px] text-muted-foreground">
@@ -473,7 +440,7 @@ export function SnagList({ snags, onSelect, onRefresh, showPlot, highlightId, si
                 {/* Inline quick actions */}
                 {snag.status !== "CLOSED" && (
                   <div className="mt-2 flex gap-1.5 border-t pt-2">
-                    {pendingSnagActions.has(snag.id) ? (
+                    {isSnagPending(snag.id) ? (
                       <Loader2 className="size-4 animate-spin text-muted-foreground" />
                     ) : (
                       <>

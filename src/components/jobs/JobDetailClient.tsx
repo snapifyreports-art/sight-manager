@@ -59,7 +59,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { PhotoUpload } from "./PhotoUpload";
 import { useJobAction } from "@/hooks/useJobAction";
 import { useToast, fetchErrorMessage } from "@/components/ui/toast";
-import { JobStatusBadge, OrderStatusBadge } from "@/components/shared/StatusBadge";
+import { JobStatusBadge, OrderStatusBadge, SnagStatusBadge, SnagPriorityBadge } from "@/components/shared/StatusBadge";
 import { useJobContractorPicker } from "@/hooks/useJobContractorPicker";
 
 // ---------- Types ----------
@@ -245,19 +245,6 @@ interface JobSnag {
   assignedTo: { name: string } | null;
   contact: { name: string; company: string | null } | null;
 }
-
-const SNAG_PRIORITY_COLOR: Record<string, string> = {
-  CRITICAL: "bg-red-100 text-red-700",
-  HIGH: "bg-orange-100 text-orange-700",
-  MEDIUM: "bg-amber-100 text-amber-700",
-  LOW: "bg-slate-100 text-slate-600",
-};
-const SNAG_STATUS_COLOR: Record<string, string> = {
-  OPEN: "bg-red-100 text-red-700",
-  IN_PROGRESS: "bg-blue-100 text-blue-700",
-  RESOLVED: "bg-green-100 text-green-700",
-  CLOSED: "bg-slate-100 text-slate-500",
-};
 
 export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
   const router = useRouter();
@@ -1176,12 +1163,8 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
                     )}
                   </div>
                   <div className="ml-3 flex flex-col items-end gap-1 shrink-0">
-                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${SNAG_STATUS_COLOR[snag.status] ?? "bg-slate-100 text-slate-600"}`}>
-                      {snag.status === "IN_PROGRESS" ? "In Progress" : snag.status.charAt(0) + snag.status.slice(1).toLowerCase()}
-                    </span>
-                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${SNAG_PRIORITY_COLOR[snag.priority] ?? "bg-slate-100 text-slate-600"}`}>
-                      {snag.priority.charAt(0) + snag.priority.slice(1).toLowerCase()}
-                    </span>
+                    <SnagStatusBadge status={snag.status} />
+                    <SnagPriorityBadge priority={snag.priority} />
                   </div>
                 </Link>
               ))}
