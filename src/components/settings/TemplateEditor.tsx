@@ -104,6 +104,11 @@ export function TemplateEditor({
     new Set()
   );
   const [savingStage, setSavingStage] = useState(false);
+  // Drag-to-reorder state for stages. HTML5 native drag.
+  // draggedJobId is the top-level job currently being dragged;
+  // dragOverJobId highlights the drop target as you hover.
+  const [draggedJobId, setDraggedJobId] = useState<string | null>(null);
+  const [dragOverJobId, setDragOverJobId] = useState<string | null>(null);
   // Custom stage fields
   const [customStageName, setCustomStageName] = useState("");
   const [customStageCode, setCustomStageCode] = useState("");
@@ -237,6 +242,58 @@ export function TemplateEditor({
       else next.add(jobId);
       return next;
     });
+  }
+
+  // ---------- Drag-to-reorder stages (Q4 Apr 2026) ----------
+
+  /** Persist new sort orders for a reordered stage list. Calls PUT in
+   *  parallel for every job whose sortOrder actually changed. */
+  async function persistStageOrder(reorderedJobs: TemplateJobData[]) {
+    const updates = reorderedJobs
+      .map((job, newIdx) => ({ job, newIdx }))
+      .filter(({ job, newIdx }) => job.sortOrder !== newIdx);
+    if (updates.length === 0) return;
+
+    try {
+      await Promise.all(
+        updates.map(({ job, newIdx }) =>
+          fetch(`/api/plot-templates/${template.id}/jobs/${job.id}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sortOrder: newIdx }),
+          })
+        )
+      );
+      // Re-fetch template to get normalised state.
+      const tplRes = await fetch(`/api/plot-templates/${template.id}`, { cache: "no-store" });
+      if (tplRes.ok) {
+        const updated = await tplRes.json();
+        onUpdate(updated);
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to save new order");
+    }
+  }
+
+  /** Handle drop: reorder the stage list, clear drag state, persist. */
+  function handleStageDrop(targetJobId: string) {
+    if (!draggedJobId || draggedJobId === targetJobId) {
+      setDraggedJobId(null);
+      setDragOverJobId(null);
+      return;
+    }
+    const stages = [...template.jobs];
+    const fromIdx = stages.findIndex((j) => j.id === draggedJobId);
+    const toIdx = stages.findIndex((j) => j.id === targetJobId);
+    if (fromIdx < 0 || toIdx < 0) return;
+    // Remove from current position, insert before the target.
+    const [moved] = stages.splice(fromIdx, 1);
+    stages.splice(toIdx, 0, moved);
+    // Optimistic local update
+    onUpdate({ ...template, jobs: stages });
+    setDraggedJobId(null);
+    setDragOverJobId(null);
+    void persistStageOrder(stages);
   }
 
   // ---------- Split flat job into sub-jobs ----------
@@ -1164,7 +1221,16 @@ export function TemplateEditor({
                   <Card
                     key={job.id}
                     data-job-id={job.id}
-                    className="overflow-hidden border-border/50"
+                    draggable
+                    onDragStart={() => setDraggedJobId(job.id)}
+                    onDragEnd={() => { setDraggedJobId(null); setDragOverJobId(null); }}
+                    onDragOver={(e) => { e.preventDefault(); setDragOverJobId(job.id); }}
+                    onDragLeave={() => setDragOverJobId((id) => (id === job.id ? null : id))}
+                    onDrop={(e) => { e.preventDefault(); handleStageDrop(job.id); }}
+                    className={`overflow-hidden border-border/50 transition-colors ${
+                      draggedJobId === job.id ? "opacity-50" :
+                      dragOverJobId === job.id ? "ring-2 ring-blue-400" : ""
+                    }`}
                   >
                     <div
                       className="flex cursor-pointer items-center gap-3 px-4 py-3 hover:bg-slate-50/50"
@@ -1382,7 +1448,16 @@ export function TemplateEditor({
                 <Card
                   key={job.id}
                   data-job-id={job.id}
-                  className="overflow-hidden border-border/50"
+                  draggable
+                  onDragStart={() => setDraggedJobId(job.id)}
+                  onDragEnd={() => { setDraggedJobId(null); setDragOverJobId(null); }}
+                  onDragOver={(e) => { e.preventDefault(); setDragOverJobId(job.id); }}
+                  onDragLeave={() => setDragOverJobId((id) => (id === job.id ? null : id))}
+                  onDrop={(e) => { e.preventDefault(); handleStageDrop(job.id); }}
+                  className={`overflow-hidden border-border/50 transition-colors ${
+                    draggedJobId === job.id ? "opacity-50" :
+                    dragOverJobId === job.id ? "ring-2 ring-blue-400" : ""
+                  }`}
                 >
                   {/* Stage header row */}
                   <div

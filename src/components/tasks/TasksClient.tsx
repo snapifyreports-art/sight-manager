@@ -31,20 +31,9 @@ import {
   CardDescription,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
-  DialogClose,
-} from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { useDelayJob } from "@/hooks/useDelayJob";
 import { useOrderStatus } from "@/hooks/useOrderStatus";
+import { useOrderEmail } from "@/hooks/useOrderEmail";
 
 // ---------- Types ----------
 
@@ -155,14 +144,6 @@ export function TasksClient() {
   const [loading, setLoading] = useState(true);
   const [refreshKey, setRefreshKey] = useState(0);
   const [stoppingIds, setStoppingIds] = useState<Set<string>>(new Set());
-  const [chaseDialogOpen, setChaseDialogOpen] = useState(false);
-  const [chaseOrder, setChaseOrder] = useState<OrderTask | null>(null);
-  const [chaseSubject, setChaseSubject] = useState("");
-  const [chaseBody, setChaseBody] = useState("");
-  const [sendOrderDialogOpen, setSendOrderDialogOpen] = useState(false);
-  const [sendOrderGroup, setSendOrderGroup] = useState<SupplierGroup | null>(null);
-  const [sendOrderSubject, setSendOrderSubject] = useState("");
-  const [sendOrderBody, setSendOrderBody] = useState("");
   const [sendingGroupIds, setSendingGroupIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
