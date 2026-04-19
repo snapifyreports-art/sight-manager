@@ -32,6 +32,7 @@ import {
   DialogClose,
 } from "@/components/ui/dialog";
 import { ContractorDetailSheet } from "@/components/contacts/ContractorDetailSheet";
+import { HelpTip } from "@/components/shared/HelpTip";
 import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 import { useConfirmAction } from "@/hooks/useConfirmAction";
 
@@ -412,6 +413,11 @@ export function ContactsClient({
       {/* Create / Edit Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="sm:max-w-md">
+          <HelpTip title="About Contacts" anchor="below-left">
+            <p><strong>What it does:</strong> a contact is anyone you work with — contractors, suppliers, clients, and internal staff all live here.</p>
+            <p><strong>Type drives the UI:</strong> a contact&apos;s <em>type</em> controls which surfaces show them (contractors appear on job assignments, suppliers on orders, clients on handovers). One person can hold multiple types.</p>
+            <p><strong>Gotcha:</strong> email / phone on a contact are the defaults used when Sight Manager sends automated comms (snag emails, order emails). If those fields are blank the &ldquo;Send&rdquo; buttons across the app go hidden.</p>
+          </HelpTip>
           <DialogHeader>
             <DialogTitle>
               {editingContact ? "Edit Contractor" : "Add Contractor"}
