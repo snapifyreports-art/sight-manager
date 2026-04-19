@@ -22,6 +22,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 
 interface Supplier {
   id: string;
@@ -39,6 +40,7 @@ interface Supplier {
 
 export function SuppliersListClient({ suppliers: initial }: { suppliers: Supplier[] }) {
   const router = useRouter();
+  const toast = useToast();
   const [suppliers, setSuppliers] = useState(initial);
   const [search, setSearch] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
@@ -65,7 +67,12 @@ export function SuppliersListClient({ suppliers: initial }: { suppliers: Supplie
         setSuppliers((prev) => [...prev, newSupplier].sort((a, b) => a.name.localeCompare(b.name)));
         setCreateOpen(false);
         setForm({ name: "", contactName: "", contactEmail: "", contactNumber: "", type: "", accountNumber: "" });
+        toast.success("Supplier added");
+      } else {
+        toast.error(await fetchErrorMessage(res, "Failed to add supplier"));
       }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Network error adding supplier");
     } finally {
       setSaving(false);
     }

@@ -60,6 +60,7 @@ import {
 } from "@/components/ui/dialog";
 // Tabs replaced with custom buttons + conditional rendering (Base UI Tabs click bug)
 import { ClientOnly } from "@/components/ui/ClientOnly";
+import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 import { SiteProgramme } from "@/components/programme/SiteProgramme";
 import { SiteHeatmap } from "@/components/sites/SiteHeatmap";
 import { SnagList } from "@/components/snags/SnagList";
@@ -389,6 +390,7 @@ export function SiteDetailClient({
   initialSnagId?: string;
 }) {
   const router = useRouter();
+  const toast = useToast();
   const [site, setSite] = useState(initialSite);
 
   // Sync site state when server re-renders (e.g. after router.refresh())
@@ -603,12 +605,15 @@ export function SiteDetailClient({
       const res = await fetch(`/api/plots/${deletePlotTarget.id}`, {
         method: "DELETE",
       });
-      if (!res.ok) throw new Error("Failed to delete plot");
+      if (!res.ok) {
+        const msg = await fetchErrorMessage(res, "Failed to delete plot");
+        throw new Error(msg);
+      }
       setDeletePlotTarget(null);
+      toast.success("Plot deleted");
       router.refresh();
     } catch (err) {
-      console.error(err);
-      alert("Failed to delete plot. Please try again.");
+      toast.error(err instanceof Error ? err.message : "Failed to delete plot");
     } finally {
       setDeletingPlot(false);
     }
@@ -681,9 +686,10 @@ export function SiteDetailClient({
       }));
       setEditDialogOpen(false);
       setSitePostcodeInvalid(postcodeValid === false);
+      toast.success("Site updated");
       router.refresh();
     } catch (error) {
-      console.error("Failed to update site:", error);
+      toast.error(error instanceof Error ? error.message : "Failed to update site");
     } finally {
       setSaving(false);
     }

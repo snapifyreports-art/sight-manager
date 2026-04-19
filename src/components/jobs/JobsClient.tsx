@@ -56,6 +56,7 @@ import {
 import { useJobAction } from "@/hooks/useJobAction";
 import { useDelayJob } from "@/hooks/useDelayJob";
 import { usePullForwardDecision } from "@/hooks/usePullForwardDecision";
+import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 
 // ---------- Types ----------
 
@@ -168,6 +169,7 @@ const EMPTY_FORM: JobFormData = {
 
 export function JobsClient({ initialJobs, workflows, users }: JobsClientProps) {
   const router = useRouter();
+  const toast = useToast();
   const [jobs, setJobs] = useState(initialJobs);
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [workflowFilter, setWorkflowFilter] = useState<string>("all");
@@ -218,7 +220,11 @@ export function JobsClient({ initialJobs, workflows, users }: JobsClientProps) {
         setJobs((prev) => [newJob, ...prev]);
         setCreateOpen(false);
         setForm(EMPTY_FORM);
+      } else {
+        toast.error(await fetchErrorMessage(res, "Failed to create job"));
       }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Network error creating job");
     } finally {
       setSaving(false);
     }
@@ -270,7 +276,11 @@ export function JobsClient({ initialJobs, workflows, users }: JobsClientProps) {
         setEditOpen(false);
         setEditingJob(null);
         setForm(EMPTY_FORM);
+      } else {
+        toast.error(await fetchErrorMessage(res, "Failed to save job"));
       }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Network error saving job");
     } finally {
       setSaving(false);
     }
@@ -321,9 +331,17 @@ export function JobsClient({ initialJobs, workflows, users }: JobsClientProps) {
 
   // Delete job
   async function handleDelete(jobId: string) {
-    const res = await fetch(`/api/jobs/${jobId}`, { method: "DELETE" });
-    if (res.ok) {
-      setJobs((prev) => prev.filter((j) => j.id !== jobId));
+    if (!confirm("Delete this job? Linked orders, photos, and notes will be removed.")) return;
+    try {
+      const res = await fetch(`/api/jobs/${jobId}`, { method: "DELETE" });
+      if (res.ok) {
+        setJobs((prev) => prev.filter((j) => j.id !== jobId));
+        toast.success("Job deleted");
+      } else {
+        toast.error(await fetchErrorMessage(res, "Failed to delete job"));
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Network error deleting job");
     }
   }
 

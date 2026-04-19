@@ -23,6 +23,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useOrderStatus } from "@/hooks/useOrderStatus";
 import { HelpTip } from "@/components/shared/HelpTip";
+import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 
 interface NextJobOrder {
   id: string;
@@ -69,6 +70,7 @@ export function PostCompletionDialog({
   onClose,
   onDecisionMade,
 }: PostCompletionDialogProps) {
+  const toast = useToast();
   const [loading, setLoading] = useState<string | null>(null);
   const [pushWeeks, setPushWeeks] = useState(1);
   const [showPush, setShowPush] = useState(false);
@@ -119,7 +121,11 @@ export function PostCompletionDialog({
       if (res.ok) {
         onDecisionMade();
         onClose();
+      } else {
+        toast.error(await fetchErrorMessage(res, "Failed to save decision"));
       }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Network error saving decision");
     } finally {
       setLoading(null);
     }

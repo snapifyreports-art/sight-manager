@@ -37,6 +37,7 @@ import { useDelayJob } from "@/hooks/useDelayJob";
 import { usePullForwardDecision } from "@/hooks/usePullForwardDecision";
 import { useOrderStatus } from "@/hooks/useOrderStatus";
 import { useOrderEmail } from "@/hooks/useOrderEmail";
+import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 
 // ---------- Types ----------
 
@@ -161,6 +162,7 @@ const urgencyBadge = {
 
 export function TasksClient() {
   const router = useRouter();
+  const toast = useToast();
   const { devDate } = useDevDate();
   const [data, setData] = useState<TaskData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -243,9 +245,12 @@ export function TasksClient() {
       });
       if (res.ok) {
         setRefreshKey((k) => k + 1);
+        toast.success("Job put on hold");
+      } else {
+        toast.error(await fetchErrorMessage(res, "Failed to stop job"));
       }
     } catch (err) {
-      console.error("Failed to stop job:", err);
+      toast.error(err instanceof Error ? err.message : "Network error stopping job");
     } finally {
       setStoppingIds((prev) => {
         const next = new Set(prev);
@@ -359,9 +364,12 @@ export function TasksClient() {
             sendOrder: remainingOrders.length,
           },
         });
+        toast.success(`${orderIds.length} order${orderIds.length !== 1 ? "s" : ""} marked as sent`);
+      } else if (!res.ok) {
+        toast.error(await fetchErrorMessage(res, "Failed to mark orders as sent"));
       }
     } catch (err) {
-      console.error("Failed to mark group as sent:", err);
+      toast.error(err instanceof Error ? err.message : "Network error marking orders as sent");
     } finally {
       setSendingGroupIds((prev) => {
         const next = new Set(prev);
