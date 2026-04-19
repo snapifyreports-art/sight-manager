@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Link from "next/link";
 import { format } from "date-fns";
 import {
   DollarSign,
@@ -306,12 +307,13 @@ export function BudgetReport({ siteId }: BudgetReportProps) {
                   ) : (
                     <div className="divide-y rounded-lg border">
                       {plot.jobs.map((job) => (
-                        <div
+                        <Link
+                          href={`/jobs/${job.jobId}`}
                           key={job.jobId}
-                          className="grid grid-cols-[1fr_auto_auto_auto] items-center gap-3 px-3 py-2 text-sm"
+                          className="grid grid-cols-[1fr_auto_auto_auto] items-center gap-3 px-3 py-2 text-sm hover:bg-blue-50/50"
                         >
                           <div>
-                            <p className="font-medium">{job.jobName}</p>
+                            <p className="font-medium hover:text-blue-700">{job.jobName}</p>
                             <p className="text-[10px] text-muted-foreground">
                               {job.orderCount} order{job.orderCount !== 1 ? "s" : ""} · {job.status.replace("_", " ")}
                             </p>
@@ -323,7 +325,7 @@ export function BudgetReport({ siteId }: BudgetReportProps) {
                             {formatCurrency(job.actual)}
                           </span>
                           <VarianceIndicator variance={job.variance} percent={job.variancePercent} />
-                        </div>
+                        </Link>
                       ))}
                     </div>
                   )}

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Link from "next/link";
 import { format, differenceInDays } from "date-fns";
 import { getCurrentDate } from "@/lib/dev-date";
 import {
@@ -323,11 +324,14 @@ export function CriticalPath({ siteId }: CriticalPathProps) {
                 <div className="space-y-1.5">
                   {jobs.map((job) => (
                     <div key={job.jobId} className="flex items-center gap-2">
-                      {/* Job name */}
+                      {/* Job name — links to the job detail page */}
                       <div className="w-36 shrink-0 truncate text-xs">
-                        <span className={job.isCritical ? "font-semibold text-red-700" : ""}>
+                        <Link
+                          href={`/jobs/${job.jobId}`}
+                          className={`hover:underline ${job.isCritical ? "font-semibold text-red-700" : "text-foreground hover:text-blue-600"}`}
+                        >
                           {job.name}
-                        </span>
+                        </Link>
                       </div>
 
                       {/* Bar */}

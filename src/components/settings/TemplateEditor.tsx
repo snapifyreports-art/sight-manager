@@ -1086,6 +1086,168 @@ export function TemplateEditor({
 
   const sourcedPlotsCount = template._count?.sourcedPlots ?? 0;
 
+  /**
+   * Recursive sub-job row renderer. Handles 2 levels (direct children),
+   * 3 levels (grandchildren under a stage → sub-stage → work item),
+   * and deeper if templates get that ornate.
+   *
+   * - depth=1: direct child of a top-level stage
+   * - depth=2+: nested under a sub-job
+   *
+   * Each depth indents left (via ml- + border-l) so the hierarchy is
+   * visually obvious. Orders and the "Add Sub-Job" button are available
+   * at every depth so any node can become a parent if Keith needs more
+   * granularity later.
+   */
+  const renderSubJobNode = (child: TemplateJobData, depth: number): React.ReactNode => {
+    const durationValue =
+      editingDurations[child.id] !== undefined
+        ? editingDurations[child.id]
+        : (child.durationWeeks ?? 1);
+    const isChildExpanded = expandedJobs.has(child.id);
+    const hasGrandchildren = !!(child.children && child.children.length > 0);
+    return (
+      <div key={child.id} className="space-y-0">
+        <div
+          className={`flex items-center gap-2 rounded-md border bg-white px-3 py-2 ${child.orders.length > 0 ? "cursor-pointer hover:bg-slate-50" : ""}`}
+          onClick={() => {
+            if (child.orders.length > 0) toggleJobExpand(child.id);
+          }}
+        >
+          <Badge
+            variant="secondary"
+            className="shrink-0 font-mono text-[10px]"
+          >
+            {child.stageCode}
+          </Badge>
+          <span className="min-w-0 flex-1 truncate text-sm">
+            {child.name}
+            {depth > 1 && (
+              <span className="ml-1 text-[10px] text-muted-foreground">
+                (level {depth + 1})
+              </span>
+            )}
+          </span>
+          {child.orders.length > 0 && (
+            <span className="flex items-center gap-1 text-xs text-muted-foreground">
+              <Package className="size-3" />
+              {child.orders.length}
+            </span>
+          )}
+          <div className="hidden shrink-0 items-center gap-1 sm:flex">
+            <Input
+              type="number"
+              min={1}
+              value={durationValue}
+              onClick={(e) => e.stopPropagation()}
+              onChange={(e) => {
+                const val = parseInt(e.target.value) || 1;
+                setEditingDurations((prev) => ({
+                  ...prev,
+                  [child.id]: val,
+                }));
+              }}
+              onBlur={() => handleDurationBlur(child, child.parentId ?? "")}
+              className="h-7 w-16 text-center text-xs"
+            />
+            <span className="text-xs text-muted-foreground">
+              wk
+            </span>
+          </div>
+          <div className="flex shrink-0 items-center gap-0.5">
+            <button
+              onClick={(e) => { e.stopPropagation(); openAddSubJob(child); }}
+              className="rounded p-1 text-muted-foreground hover:bg-emerald-50 hover:text-emerald-700"
+              title={depth === 1 ? "Add a nested sub-job under this one" : `Add a level-${depth + 2} sub-job`}
+            >
+              <Plus className="size-3" />
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); openEditJob(child); }}
+              className="rounded p-1 text-muted-foreground hover:bg-slate-100 hover:text-slate-700"
+            >
+              <Pencil className="size-3" />
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setDeletingJobId(child.id);
+                setDeleteJobDialogOpen(true);
+              }}
+              className="rounded p-1 text-muted-foreground hover:bg-red-50 hover:text-red-600"
+            >
+              <Trash2 className="size-3" />
+            </button>
+          </div>
+        </div>
+        {/* Recursive: grandchildren render directly beneath this row,
+            indented further and with a left rule so the hierarchy reads. */}
+        {hasGrandchildren && (
+          <div className="ml-4 mt-1 space-y-1.5 border-l-2 border-slate-100 pl-2">
+            {child.children!.map((grandchild) => renderSubJobNode(grandchild, depth + 1))}
+          </div>
+        )}
+        {isChildExpanded && child.orders.length > 0 && (
+          <div className="ml-8 space-y-1.5 border-l-2 border-slate-200 py-2 pl-3">
+            {child.orders.map((order) => (
+              <div
+                key={order.id}
+                className="rounded-lg border bg-white p-2.5"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <p className="text-xs font-medium">
+                        {order.itemsDescription || "Material Order"}
+                      </p>
+                      {order.supplier && (
+                        <Badge variant="outline" className="text-[10px]">
+                          {order.supplier.name}
+                        </Badge>
+                      )}
+                    </div>
+                    {order.items.length > 0 && (
+                      <p className="mt-1 text-[10px] text-muted-foreground">
+                        {order.items.map((it) => it.name).join(", ")}
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex shrink-0 items-center gap-0.5">
+                    <button
+                      onClick={() => openEditOrder(child.id, order)}
+                      className="rounded p-1 text-muted-foreground hover:bg-slate-100"
+                    >
+                      <Pencil className="size-3" />
+                    </button>
+                    <button
+                      onClick={() => {
+                        setDeletingOrderId(order.id);
+                        setOrderJobId(child.id);
+                        setDeleteOrderDialogOpen(true);
+                      }}
+                      className="rounded p-1 text-muted-foreground hover:bg-red-50 hover:text-red-600"
+                    >
+                      <Trash2 className="size-3" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-6 text-[10px] text-muted-foreground"
+              onClick={() => openAddOrder(child.id)}
+            >
+              <Plus className="size-3" />
+              Add Order
+            </Button>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="space-y-6">
       {/* Back button + Header */}
@@ -1543,149 +1705,7 @@ export function TemplateEditor({
                       <div className="ml-9 space-y-3">
                         {/* Sub-jobs section */}
                         <div className="space-y-1.5">
-                          {job.children.map((child) => {
-                            const durationValue =
-                              editingDurations[child.id] !== undefined
-                                ? editingDurations[child.id]
-                                : (child.durationWeeks ?? 1);
-                            const isChildExpanded = expandedJobs.has(child.id);
-                            return (
-                              <div key={child.id} className="space-y-0">
-                                <div
-                                  className={`flex items-center gap-2 rounded-md border bg-white px-3 py-2 ${child.orders.length > 0 ? "cursor-pointer hover:bg-slate-50" : ""}`}
-                                  onClick={() => {
-                                    if (child.orders.length > 0) toggleJobExpand(child.id);
-                                  }}
-                                >
-                                  <Badge
-                                    variant="secondary"
-                                    className="shrink-0 font-mono text-[10px]"
-                                  >
-                                    {child.stageCode}
-                                  </Badge>
-                                  <span className="min-w-0 flex-1 truncate text-sm">
-                                    {child.name}
-                                  </span>
-                                  {child.orders.length > 0 && (
-                                    <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                                      <Package className="size-3" />
-                                      {child.orders.length}
-                                    </span>
-                                  )}
-                                  <div className="hidden shrink-0 items-center gap-1 sm:flex">
-                                    <Input
-                                      type="number"
-                                      min={1}
-                                      value={durationValue}
-                                      onClick={(e) => e.stopPropagation()}
-                                      onChange={(e) => {
-                                        const val =
-                                          parseInt(e.target.value) || 1;
-                                        setEditingDurations((prev) => ({
-                                          ...prev,
-                                          [child.id]: val,
-                                        }));
-                                      }}
-                                      onBlur={() =>
-                                        handleDurationBlur(child, job.id)
-                                      }
-                                      className="h-7 w-16 text-center text-xs"
-                                    />
-                                    <span className="text-xs text-muted-foreground">
-                                      wk
-                                    </span>
-                                  </div>
-                                  <div className="flex shrink-0 items-center gap-0.5">
-                                    {/* Add nested sub-job — enables 3+ level
-                                        hierarchies (Q7 Apr 2026: "so deep
-                                        it's unreal"). The model already
-                                        supports recursive parentId; this
-                                        surfaces it in the UI. */}
-                                    <button
-                                      onClick={(e) => { e.stopPropagation(); openAddSubJob(child); }}
-                                      className="rounded p-1 text-muted-foreground hover:bg-emerald-50 hover:text-emerald-700"
-                                      title="Add a nested sub-job under this one"
-                                    >
-                                      <Plus className="size-3" />
-                                    </button>
-                                    <button
-                                      onClick={(e) => { e.stopPropagation(); openEditJob(child); }}
-                                      className="rounded p-1 text-muted-foreground hover:bg-slate-100 hover:text-slate-700"
-                                    >
-                                      <Pencil className="size-3" />
-                                    </button>
-                                    <button
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        setDeletingJobId(child.id);
-                                        setDeleteJobDialogOpen(true);
-                                      }}
-                                      className="rounded p-1 text-muted-foreground hover:bg-red-50 hover:text-red-600"
-                                    >
-                                      <Trash2 className="size-3" />
-                                    </button>
-                                  </div>
-                                </div>
-                                {isChildExpanded && child.orders.length > 0 && (
-                                  <div className="ml-8 space-y-1.5 border-l-2 border-slate-200 py-2 pl-3">
-                                    {child.orders.map((order) => (
-                                      <div
-                                        key={order.id}
-                                        className="rounded-lg border bg-white p-2.5"
-                                      >
-                                        <div className="flex items-start justify-between gap-2">
-                                          <div className="min-w-0 flex-1">
-                                            <div className="flex items-center gap-2">
-                                              <p className="text-xs font-medium">
-                                                {order.itemsDescription || "Material Order"}
-                                              </p>
-                                              {order.supplier && (
-                                                <Badge variant="outline" className="text-[10px]">
-                                                  {order.supplier.name}
-                                                </Badge>
-                                              )}
-                                            </div>
-                                            {order.items.length > 0 && (
-                                              <p className="mt-1 text-[10px] text-muted-foreground">
-                                                {order.items.map((it) => it.name).join(", ")}
-                                              </p>
-                                            )}
-                                          </div>
-                                          <div className="flex shrink-0 items-center gap-0.5">
-                                            <button
-                                              onClick={() => openEditOrder(child.id, order)}
-                                              className="rounded p-1 text-muted-foreground hover:bg-slate-100"
-                                            >
-                                              <Pencil className="size-3" />
-                                            </button>
-                                            <button
-                                              onClick={() => {
-                                                setDeletingOrderId(order.id);
-                                                setOrderJobId(child.id);
-                                                setDeleteOrderDialogOpen(true);
-                                              }}
-                                              className="rounded p-1 text-muted-foreground hover:bg-red-50 hover:text-red-600"
-                                            >
-                                              <Trash2 className="size-3" />
-                                            </button>
-                                          </div>
-                                        </div>
-                                      </div>
-                                    ))}
-                                    <Button
-                                      size="sm"
-                                      variant="ghost"
-                                      className="h-6 text-[10px] text-muted-foreground"
-                                      onClick={() => openAddOrder(child.id)}
-                                    >
-                                      <Plus className="size-3" />
-                                      Add Order
-                                    </Button>
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })}
+                          {job.children.map((child) => renderSubJobNode(child, 1))}
                           <Button
                             size="sm"
                             variant="ghost"

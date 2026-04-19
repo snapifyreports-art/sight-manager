@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Link from "next/link";
 import { useDevDate } from "@/lib/dev-date-context";
 import { format } from "date-fns";
 import {
@@ -100,7 +101,9 @@ function JobDelayCard({ job }: { job: DelayedJob }) {
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="flex items-center gap-1.5 flex-wrap">
-            <p className="font-medium text-sm">{job.name}</p>
+            <Link href={`/jobs/${job.id}`} className="font-medium text-sm hover:underline hover:text-blue-700">
+              {job.name}
+            </Link>
             {isWeather && (
               <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-medium text-green-700">
                 <ShieldCheck className="size-3" />
