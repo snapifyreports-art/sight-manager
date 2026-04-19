@@ -19,7 +19,6 @@ import {
   Mail,
 } from "lucide-react";
 import { buildOrderMailto } from "@/lib/order-email";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -30,6 +29,8 @@ import {
   SheetDescription,
 } from "@/components/ui/sheet";
 import { useToast, fetchErrorMessage } from "@/components/ui/toast";
+import { OrderStatusBadge } from "@/components/shared/StatusBadge";
+import { useOrderStatus } from "@/hooks/useOrderStatus";
 
 // ---------- Types (mirrors OrdersClient) ----------
 
@@ -118,20 +119,6 @@ interface Order {
 
 type OrderStatus = "PENDING" | "ORDERED" | "DELIVERED" | "CANCELLED";
 
-// ---------- Status helpers ----------
-
-const STATUS_CONFIG: Record<string, { label: string; className: string }> = {
-  PENDING: { label: "Pending", className: "bg-yellow-500/15 text-yellow-700" },
-  ORDERED: { label: "Ordered", className: "bg-blue-500/15 text-blue-700" },
-  DELIVERED: { label: "Delivered", className: "bg-green-500/15 text-green-700" },
-  CANCELLED: { label: "Cancelled", className: "bg-red-500/15 text-red-700" },
-};
-
-function StatusBadge({ status }: { status: string }) {
-  const config = STATUS_CONFIG[status] || { label: status, className: "" };
-  return <Badge className={config.className}>{config.label}</Badge>;
-}
-
 // ---------- Component ----------
 
 interface OrderDetailSheetProps {
@@ -152,8 +139,6 @@ export function OrderDetailSheet({
   onEditClick,
 }: OrderDetailSheetProps) {
   const toast = useToast();
-  const [statusLoading, setStatusLoading] = useState<string | null>(null);
-  const [items, setItems] = useState<OrderItem[]>([]);
   const [addingItem, setAddingItem] = useState(false);
   const [newItemName, setNewItemName] = useState("");
   const [newItemQty, setNewItemQty] = useState("1");
@@ -170,24 +155,20 @@ export function OrderDetailSheet({
       isBefore(new Date(order.expectedDeliveryDate), getCurrentDate())
     : false;
 
-  async function handleStatusChange(newStatus: OrderStatus) {
+  const { setOrderStatus, isBusy: statusBusy } = useOrderStatus({
+    onChange: (orderId, newStatus) => {
+      if (!order || order.id !== orderId) return;
+      const now = new Date().toISOString();
+      const next: Order = { ...order, status: newStatus };
+      if (newStatus === "ORDERED") next.dateOfOrder = now;
+      if (newStatus === "DELIVERED") next.deliveredDate = now;
+      onUpdated(next);
+    },
+  });
+
+  function handleStatusChange(newStatus: OrderStatus) {
     if (!order) return;
-    setStatusLoading(newStatus);
-    try {
-      const res = await fetch(`/api/orders/${order.id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: newStatus }),
-      });
-      if (!res.ok) {
-        toast.error(await fetchErrorMessage(res, "Failed to update order status"));
-        return;
-      }
-      const updated = await res.json();
-      onUpdated(updated);
-    } finally {
-      setStatusLoading(null);
-    }
+    void setOrderStatus(order.id, newStatus);
   }
 
   async function handleDelete() {
@@ -270,7 +251,7 @@ export function OrderDetailSheet({
       <SheetContent side="right" className="sm:max-w-lg overflow-y-auto">
         <SheetHeader>
           <div className="flex items-center gap-2">
-            <StatusBadge status={order.status} />
+            <OrderStatusBadge status={order.status} />
             {isOverdue && (
               <span className="flex items-center gap-1 text-xs text-red-600">
                 <AlertTriangle className="size-3" /> Overdue
@@ -371,7 +352,7 @@ export function OrderDetailSheet({
                       variant="secondary"
                       size="sm"
                       className="gap-1.5 text-xs"
-                      disabled={statusLoading !== null}
+                      disabled={statusBusy}
                       onClick={() => { window.open(mailto, "_blank"); handleStatusChange("ORDERED"); }}
                     >
                       <Mail className="size-3.5" />
@@ -385,10 +366,10 @@ export function OrderDetailSheet({
                     variant={action.status === "CANCELLED" ? "outline" : "secondary"}
                     size="sm"
                     className="gap-1.5 text-xs"
-                    disabled={statusLoading !== null}
+                    disabled={statusBusy}
                     onClick={() => handleStatusChange(action.status)}
                   >
-                    {statusLoading === action.status ? "..." : action.icon}
+                    {action.icon}
                     {action.label}
                   </Button>
                 ))}

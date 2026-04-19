@@ -59,6 +59,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useToast, fetchErrorMessage } from "@/components/ui/toast";
+import { OrderStatusBadge, ORDER_STATUS_CONFIG } from "@/components/shared/StatusBadge";
+import { useOrderStatus } from "@/hooks/useOrderStatus";
 
 // ---------- Types ----------
 
@@ -155,28 +157,6 @@ interface OrdersClientProps {
 
 // ---------- Constants ----------
 
-const STATUS_CONFIG: Record<
-  OrderStatus,
-  { label: string; className: string }
-> = {
-  PENDING: {
-    label: "Pending",
-    className: "bg-yellow-500/15 text-yellow-700 dark:text-yellow-400",
-  },
-  ORDERED: {
-    label: "Ordered",
-    className: "bg-blue-500/15 text-blue-700 dark:text-blue-400",
-  },
-  DELIVERED: {
-    label: "Delivered",
-    className: "bg-green-500/15 text-green-700 dark:text-green-400",
-  },
-  CANCELLED: {
-    label: "Cancelled",
-    className: "bg-red-500/15 text-red-700 dark:text-red-400",
-  },
-};
-
 const ALL_STATUSES: OrderStatus[] = [
   "PENDING",
   "ORDERED",
@@ -192,19 +172,18 @@ function isOverdue(order: Order): boolean {
   return isBefore(new Date(order.expectedDeliveryDate), getCurrentDate());
 }
 
-// ---------- Status Badge ----------
+// ---------- Status Badge (with optional click-to-filter affordance) ----------
 
-function StatusBadge({ status, onClick }: { status: string; onClick?: () => void }) {
-  const config = STATUS_CONFIG[status as OrderStatus];
-  if (!config) return <Badge variant="outline">{status}</Badge>;
-
+function ClickableStatusBadge({ status, onClick }: { status: string; onClick?: () => void }) {
+  if (!ORDER_STATUS_CONFIG[status]) return <Badge variant="outline">{status}</Badge>;
+  if (!onClick) return <OrderStatusBadge status={status} />;
   return (
     <span
-      role={onClick ? "button" : undefined}
-      onClick={onClick ? (e) => { e.stopPropagation(); onClick(); } : undefined}
-      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${config.className}${onClick ? " cursor-pointer hover:ring-2 hover:ring-offset-1 hover:ring-current/20 transition-shadow" : ""}`}
+      role="button"
+      onClick={(e) => { e.stopPropagation(); onClick(); }}
+      className="cursor-pointer transition-shadow hover:ring-2 hover:ring-offset-1 hover:ring-current/20"
     >
-      {config.label}
+      <OrderStatusBadge status={status} />
     </span>
   );
 }
@@ -878,19 +857,32 @@ export function OrdersClient({
     }
   }
 
-  async function handleStatusChange(orderId: string, newStatus: OrderStatus) {
-    const res = await fetch(`/api/orders/${orderId}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status: newStatus }),
-    });
+  const { setOrderStatus } = useOrderStatus({
+    onChange: (orderId, newStatus) => {
+      const now = new Date().toISOString();
+      setOrders((prev) =>
+        prev.map((o) => {
+          if (o.id !== orderId) return o;
+          const next = { ...o, status: newStatus };
+          if (newStatus === "ORDERED") next.dateOfOrder = now;
+          if (newStatus === "DELIVERED") next.deliveredDate = now;
+          return next;
+        })
+      );
+      if (selectedOrder?.id === orderId) {
+        setSelectedOrder((prev) => {
+          if (!prev) return prev;
+          const next = { ...prev, status: newStatus };
+          if (newStatus === "ORDERED") next.dateOfOrder = now;
+          if (newStatus === "DELIVERED") next.deliveredDate = now;
+          return next;
+        });
+      }
+    },
+  });
 
-    if (!res.ok) {
-      toast.error(await fetchErrorMessage(res, "Failed to update order status"));
-      return;
-    }
-    const updated = await res.json();
-    handleUpdated(updated);
+  function handleStatusChange(orderId: string, newStatus: OrderStatus) {
+    void setOrderStatus(orderId, newStatus);
   }
 
   async function handleDelete(orderId: string) {
@@ -1171,7 +1163,7 @@ export function OrdersClient({
                       </TableCell>
                       <TableCell onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center gap-1.5">
-                          <StatusBadge status={order.status} onClick={() => setStatusFilter(order.status)} />
+                          <ClickableStatusBadge status={order.status} onClick={() => setStatusFilter(order.status)} />
                           {overdue && (
                             <AlertTriangle className="size-3.5 text-red-500" />
                           )}
