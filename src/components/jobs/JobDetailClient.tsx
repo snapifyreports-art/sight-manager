@@ -56,6 +56,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { HelpTip } from "@/components/shared/HelpTip";
 import { PhotoUpload } from "./PhotoUpload";
 import { useJobAction } from "@/hooks/useJobAction";
 import { useToast, fetchErrorMessage } from "@/components/ui/toast";
@@ -1179,6 +1180,11 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
       {/* Sign-Off Dialog */}
       <Dialog open={signOffDialogOpen} onOpenChange={setSignOffDialogOpen}>
         <DialogContent className="sm:max-w-2xl">
+          <HelpTip title="About Sign-Off" anchor="below-left">
+            <p><strong>What it does:</strong> locks the actual end date on this job and triggers the post-completion decision flow (cascade / notify downstream).</p>
+            <p><strong>Why:</strong> sign-off is the point where &ldquo;done&rdquo; becomes auditable — it snapshots the date, attaches your notes and photos, and wakes up the next job in the programme.</p>
+            <p><strong>Gotcha:</strong> once signed off you can&apos;t edit the actual end date from this screen — do any final date fixes <em>before</em> signing off. If the job ran early or late, the next step offers to pull forward or delay downstream jobs.</p>
+          </HelpTip>
           <DialogHeader>
             <DialogTitle>Sign Off Job</DialogTitle>
             <DialogDescription>
