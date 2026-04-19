@@ -38,6 +38,8 @@ import { PostCompletionDialog } from "@/components/PostCompletionDialog";
 import { useJobAction } from "@/hooks/useJobAction";
 import { useDelayJob } from "@/hooks/useDelayJob";
 import { usePullForwardDecision } from "@/hooks/usePullForwardDecision";
+import { useSnagAction } from "@/hooks/useSnagAction";
+import { useOrderStatus } from "@/hooks/useOrderStatus";
 import { useToast } from "@/components/ui/toast";
 import { Breadcrumbs } from "@/components/ui/breadcrumbs";
 
@@ -228,6 +230,17 @@ export default function SiteWalkthrough({
   // constraint-aware date picker (predecessor + order lead times).
   const { openPullForwardDialog, dialogs: pullForwardDialogs } = usePullForwardDecision(async () => {
     await fetchData(true);
+  });
+
+  // On-site quick flips: "mark snag resolved" + "mark ordered / delivered"
+  // The walkthrough is the canonical surface for these transitions — they
+  // naturally happen while physically on site. Full photo-attached close
+  // still routes to the snag detail page for the rich dialog.
+  const { setSnagStatus, isPending: isSnagPending } = useSnagAction({
+    onChange: () => { fetchData(true); },
+  });
+  const { setOrderStatus, isPending: isOrderPending } = useOrderStatus({
+    onChange: () => { fetchData(true); },
   });
 
   // Touch/swipe
@@ -933,23 +946,59 @@ export default function SiteWalkthrough({
                             snag.priority === "CRITICAL" ? "text-red-600" :
                             snag.priority === "HIGH" ? "text-orange-600" :
                             "text-amber-600";
+                          const pending = isSnagPending(snag.id);
                           return (
-                            <Link
+                            <div
                               key={snag.id}
-                              href={`/sites/${siteId}?tab=snags&snagId=${snag.id}`}
-                              className="flex w-full items-start gap-2 rounded-lg border border-amber-100 bg-white px-3 py-2 text-left hover:bg-amber-50 transition-colors"
+                              className="rounded-lg border border-amber-100 bg-white px-3 py-2 hover:bg-amber-50 transition-colors"
                             >
-                              <AlertTriangle className={cn("size-3.5 mt-0.5 shrink-0", priorityColor)} />
-                              <div className="min-w-0 flex-1">
-                                <p className="text-xs font-medium text-foreground line-clamp-2">{snag.description}</p>
-                                {snag.location && (
-                                  <p className="text-[10px] text-muted-foreground">{snag.location}</p>
-                                )}
+                              <Link
+                                href={`/sites/${siteId}?tab=snags&snagId=${snag.id}`}
+                                className="flex w-full items-start gap-2"
+                              >
+                                <AlertTriangle className={cn("size-3.5 mt-0.5 shrink-0", priorityColor)} />
+                                <div className="min-w-0 flex-1">
+                                  <p className="text-xs font-medium text-foreground line-clamp-2">{snag.description}</p>
+                                  {snag.location && (
+                                    <p className="text-[10px] text-muted-foreground">{snag.location}</p>
+                                  )}
+                                </div>
+                                <span className={cn("shrink-0 text-[10px] font-semibold uppercase", priorityColor)}>
+                                  {snag.priority}
+                                </span>
+                              </Link>
+                              {/* Quick-flip for on-site use — tapped while standing
+                                  next to the issue. Rich close-with-photo lives on
+                                  the snag detail page. */}
+                              <div className="mt-1.5 flex gap-1 border-t border-amber-100 pt-1.5">
+                                <button
+                                  type="button"
+                                  disabled={pending}
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    setSnagStatus(snag.id, "IN_PROGRESS");
+                                  }}
+                                  className="flex items-center gap-1 rounded-md border border-blue-200 bg-blue-50 px-2 py-0.5 text-[10px] font-medium text-blue-700 hover:bg-blue-100 disabled:opacity-50"
+                                >
+                                  {pending ? <Loader2 className="size-2.5 animate-spin" /> : null}
+                                  In progress
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={pending}
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    setSnagStatus(snag.id, "RESOLVED");
+                                  }}
+                                  className="flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700 hover:bg-emerald-100 disabled:opacity-50"
+                                >
+                                  {pending ? <Loader2 className="size-2.5 animate-spin" /> : null}
+                                  Resolved
+                                </button>
                               </div>
-                              <span className={cn("shrink-0 text-[10px] font-semibold uppercase", priorityColor)}>
-                                {snag.priority}
-                              </span>
-                            </Link>
+                            </div>
                           );
                         })}
                       </div>
@@ -1474,30 +1523,70 @@ export default function SiteWalkthrough({
                     o.status === "ORDERED" ? "bg-blue-100 text-blue-700" :
                     o.status === "PENDING" ? "bg-amber-100 text-amber-700" :
                     "bg-slate-100 text-slate-700";
+                  const pending = isOrderPending(o.id);
                   return (
-                    <Link
+                    <div
                       key={o.id}
-                      href={`/orders?orderId=${o.id}`}
-                      className="flex items-start justify-between gap-3 rounded-lg border border-border bg-white p-3 hover:bg-blue-50/50 hover:border-blue-200 transition-colors"
+                      className="rounded-lg border border-border bg-white hover:bg-blue-50/50 hover:border-blue-200 transition-colors"
                     >
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm font-medium text-foreground truncate">
-                          {o.supplier?.name ? `${o.supplier.name} — ${o.status === "DELIVERED" ? "Delivered" : o.status === "ORDERED" ? "On order" : "Pending"}` : "Material Order"}
-                        </p>
-                        {o.supplier && (
-                          <p className="text-xs text-muted-foreground">{o.supplier.name}</p>
-                        )}
-                        {o.expectedDeliveryDate && (
-                          <p className="text-[11px] text-muted-foreground mt-0.5">
-                            {o.status === "DELIVERED" ? "Delivered" : "Expected"}{" "}
-                            {format(parseISO(o.expectedDeliveryDate), "d MMM yyyy")}
+                      <Link
+                        href={`/orders?orderId=${o.id}`}
+                        className="flex items-start justify-between gap-3 p-3"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium text-foreground truncate">
+                            {o.supplier?.name ? `${o.supplier.name} — ${o.status === "DELIVERED" ? "Delivered" : o.status === "ORDERED" ? "On order" : "Pending"}` : "Material Order"}
                           </p>
-                        )}
-                      </div>
-                      <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${statusColor}`}>
-                        {o.status}
-                      </span>
-                    </Link>
+                          {o.supplier && (
+                            <p className="text-xs text-muted-foreground">{o.supplier.name}</p>
+                          )}
+                          {o.expectedDeliveryDate && (
+                            <p className="text-[11px] text-muted-foreground mt-0.5">
+                              {o.status === "DELIVERED" ? "Delivered" : "Expected"}{" "}
+                              {format(parseISO(o.expectedDeliveryDate), "d MMM yyyy")}
+                            </p>
+                          )}
+                        </div>
+                        <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${statusColor}`}>
+                          {o.status}
+                        </span>
+                      </Link>
+                      {/* Quick flips — on-site: "supplier just rang" (Mark Ordered)
+                          or "van just arrived" (Mark Delivered). No photo prompt
+                          here, that's the rich order detail. */}
+                      {(o.status === "PENDING" || o.status === "ORDERED") && (
+                        <div className="flex gap-1 border-t px-3 py-1.5">
+                          {o.status === "PENDING" && (
+                            <button
+                              type="button"
+                              disabled={pending}
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                setOrderStatus(o.id, "ORDERED");
+                              }}
+                              className="flex items-center gap-1 rounded-md border border-blue-200 bg-blue-50 px-2 py-0.5 text-[10px] font-medium text-blue-700 hover:bg-blue-100 disabled:opacity-50"
+                            >
+                              {pending ? <Loader2 className="size-2.5 animate-spin" /> : null}
+                              Mark Ordered
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            disabled={pending}
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setOrderStatus(o.id, "DELIVERED");
+                            }}
+                            className="flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700 hover:bg-emerald-100 disabled:opacity-50"
+                          >
+                            {pending ? <Loader2 className="size-2.5 animate-spin" /> : null}
+                            Mark Delivered
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   );
                 })
               )}
