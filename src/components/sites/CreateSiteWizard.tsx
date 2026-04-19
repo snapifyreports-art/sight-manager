@@ -35,6 +35,7 @@ import {
   DialogClose,
 } from "@/components/ui/dialog";
 import { useToast, fetchErrorMessage } from "@/components/ui/toast";
+import { usePlotCreation } from "@/hooks/usePlotCreation";
 
 // ---------- Types ----------
 
@@ -165,6 +166,10 @@ export function CreateSiteWizard({
   const [submitting, setSubmitting] = useState(false);
   const [submitProgress, setSubmitProgress] = useState("");
   const [error, setError] = useState("");
+
+  // Shared plot creation hook — used for the batch step. Same endpoints
+  // and behaviour as SiteDetailClient so you learn one flow.
+  const { createBlankBatch, createBatchFromTemplate } = usePlotCreation();
 
   // Reset on close
   useEffect(() => {
@@ -433,56 +438,28 @@ export function CreateSiteWizard({
         setSubmitProgress(`Creating ${rangeLabel}...`);
 
         try {
+          const start = parseInt(batch.rangeStart);
+          const end = parseInt(batch.rangeEnd);
+          const plots = Array.from({ length: end - start + 1 }, (_, i) => ({
+            plotNumber: String(start + i),
+            plotName: `Plot ${start + i}`,
+          }));
+
           if (batch.mode === "blank") {
-            const start = parseInt(batch.rangeStart);
-            const end = parseInt(batch.rangeEnd);
-            // Batch in groups of 3 for Supabase pool limit
-            for (let n = start; n <= end; n += 3) {
-              const chunk = [];
-              for (let k = n; k <= Math.min(n + 2, end); k++) {
-                chunk.push(
-                  fetch(`/api/sites/${createdSite.id}/plots`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ name: `Plot ${k}`, plotNumber: String(k) }),
-                  })
-                );
-              }
-              const results = await Promise.all(chunk);
-              for (const r of results) {
-                if (!r.ok) {
-                  let errorMsg = "Failed to create plot";
-                  try { const err = await r.json(); errorMsg = err.error || errorMsg; } catch {}
-                  throw new Error(errorMsg);
-                }
-              }
-            }
+            // Chunked batch of blank plots via the shared hook (groups of 3
+            // for Supabase pool limit — same behaviour as before).
+            const res = await createBlankBatch({ siteId: createdSite.id, plots }, { silent: true });
+            if (!res.ok) throw new Error(res.error ?? "Failed to create plots");
           } else {
-            // Template batch
-            const start = parseInt(batch.rangeStart);
-            const end = parseInt(batch.rangeEnd);
-            const plots = Array.from({ length: end - start + 1 }, (_, i) => ({
-              plotNumber: String(start + i),
-              plotName: `Plot ${start + i}`,
-            }));
-
-            const res = await fetch("/api/plots/apply-template-batch", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                siteId: createdSite.id,
-                templateId: batch.templateId,
-                startDate: batch.startDate,
-                supplierMappings,
-                plots,
-              }),
-            });
-
-            if (!res.ok) {
-              let errorMsg = "Failed to create plots";
-              try { const err = await res.json(); errorMsg = err.error || errorMsg; } catch {}
-              throw new Error(errorMsg);
-            }
+            // Template batch via shared hook — one call to apply-template-batch.
+            const res = await createBatchFromTemplate({
+              siteId: createdSite.id,
+              templateId: batch.templateId,
+              startDate: batch.startDate,
+              supplierMappings,
+              plots,
+            }, { silent: true });
+            if (!res.ok) throw new Error(res.error ?? "Failed to create plots");
           }
         } catch (batchErr: unknown) {
           const msg =

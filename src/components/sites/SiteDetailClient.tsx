@@ -79,6 +79,7 @@ import { WeeklySiteReport } from "@/components/reports/WeeklySiteReport";
 import { CriticalPath } from "@/components/reports/CriticalPath";
 import { SiteOrders } from "@/components/orders/SiteOrders";
 import { SiteLogClient } from "@/components/sites/SiteLogClient";
+import { usePlotCreation } from "@/hooks/usePlotCreation";
 import { SnagAgeingReport } from "@/components/snags/SnagAgeingReport";
 import { CashFlowReport } from "@/components/reports/CashFlowReport";
 import { Badge } from "@/components/ui/badge";
@@ -687,32 +688,27 @@ export function SiteDetailClient({
     }
   }
 
+  // Plot creation unified via usePlotCreation — one hook, three paths
+  // (blank single / template single / template batch). Same error
+  // handling everywhere.
+  const { createBlank, createFromTemplate, createBatchFromTemplate } = usePlotCreation();
+
   async function handleAddPlotBlank() {
     if (!plotName.trim()) return;
-
     setCreatingPlot(true);
     try {
-      const res = await fetch(`/api/sites/${site.id}/plots`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: plotName,
-          plotNumber: plotName.match(/(\d+)/)?.[1] || null,
-          description: plotDescription || null,
-          houseType: plotHouseType || null,
-        }),
+      const res = await createBlank({
+        siteId: site.id,
+        name: plotName,
+        plotNumber: plotName.match(/(\d+)/)?.[1] || null,
+        description: plotDescription || null,
+        houseType: plotHouseType || null,
       });
-
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || "Failed to create plot");
+      if (res.ok) {
+        resetAddPlotDialog();
+        setAddPlotDialogOpen(false);
+        router.refresh();
       }
-
-      resetAddPlotDialog();
-      setAddPlotDialogOpen(false);
-      router.refresh();
-    } catch (error) {
-      console.error("Failed to create plot:", error);
     } finally {
       setCreatingPlot(false);
     }
@@ -720,36 +716,26 @@ export function SiteDetailClient({
 
   async function handleAddPlotFromTemplate() {
     if (!selectedTemplateId || !plotName.trim() || !startDate) return;
-
     setCreatingPlot(true);
     try {
-      const res = await fetch("/api/plots/apply-template", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          siteId: site.id,
-          plotName,
-          plotNumber: plotName.match(/(\d+)/)?.[1] || null,
-          plotDescription: plotDescription || null,
-          templateId: selectedTemplateId,
-          startDate,
-          supplierMappings,
-        }),
-      });
-
+      const res = await createFromTemplate({
+        siteId: site.id,
+        templateId: selectedTemplateId,
+        startDate,
+        plotName,
+        plotNumber: plotName.match(/(\d+)/)?.[1] || null,
+        plotDescription: plotDescription || null,
+        supplierMappings,
+      }, { silent: true }); // we surface inline errors below
       if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || `Failed to create plot from template (HTTP ${res.status})`);
+        setPlotCreateError(res.error ?? "Failed to create plot from template");
+        return;
       }
 
       resetAddPlotDialog();
       setAddPlotDialogOpen(false);
       setPlotCreateError(null);
       router.refresh();
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : "Unknown error";
-      console.error("Failed to create plot from template:", error);
-      setPlotCreateError(msg);
     } finally {
       setCreatingPlot(false);
     }
@@ -768,52 +754,34 @@ export function SiteDetailClient({
   })();
 
   async function handleBulkCreate() {
-    if (
-      !selectedTemplateId ||
-      !startDate ||
-      bulkPlots.length === 0
-    )
-      return;
-
+    if (!selectedTemplateId || !startDate || bulkPlots.length === 0) return;
     setCreatingPlot(true);
     try {
-      const res = await fetch("/api/plots/apply-template-batch", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          siteId: site.id,
-          templateId: selectedTemplateId,
-          startDate,
-          supplierMappings,
-          plots: bulkPlots,
-        }),
-      });
+      const res = await createBatchFromTemplate({
+        siteId: site.id,
+        templateId: selectedTemplateId,
+        startDate,
+        supplierMappings,
+        plots: bulkPlots,
+      }, { silent: true });
 
       if (!res.ok) {
-        let errorMsg = `Failed to create plots (HTTP ${res.status})`;
-        try {
-          const err = await res.json();
-          errorMsg = err.error || errorMsg;
-          // Surface per-plot errors if the server included them
-          if (Array.isArray(err.errors) && err.errors.length > 0) {
-            const details = err.errors
-              .slice(0, 3)
-              .map((e: { plotNumber: string; error: string }) => `Plot ${e.plotNumber}: ${e.error}`)
-              .join("; ");
-            errorMsg += ` — ${details}${err.errors.length > 3 ? ` (and ${err.errors.length - 3} more)` : ""}`;
-          }
-        } catch {}
-        throw new Error(errorMsg);
+        let errorMsg = res.error ?? "Failed to create plots";
+        if (res.plotErrors && res.plotErrors.length > 0) {
+          const details = res.plotErrors
+            .slice(0, 3)
+            .map((e) => `Plot ${e.plotNumber}: ${e.error}`)
+            .join("; ");
+          errorMsg += ` — ${details}${res.plotErrors.length > 3 ? ` (and ${res.plotErrors.length - 3} more)` : ""}`;
+        }
+        setPlotCreateError(errorMsg);
+        return;
       }
 
       resetAddPlotDialog();
       setAddPlotDialogOpen(false);
       setPlotCreateError(null);
       router.refresh();
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : "Unknown error";
-      console.error("Failed to bulk create plots:", error);
-      setPlotCreateError(msg);
     } finally {
       setCreatingPlot(false);
     }
