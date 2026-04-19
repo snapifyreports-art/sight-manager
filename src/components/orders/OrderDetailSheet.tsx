@@ -31,6 +31,7 @@ import {
 import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 import { OrderStatusBadge } from "@/components/shared/StatusBadge";
 import { useOrderStatus } from "@/hooks/useOrderStatus";
+import { useConfirmAction } from "@/hooks/useConfirmAction";
 
 // ---------- Types (mirrors OrdersClient) ----------
 
@@ -171,15 +172,33 @@ export function OrderDetailSheet({
     void setOrderStatus(order.id, newStatus);
   }
 
-  async function handleDelete() {
-    if (!order || !confirm("Delete this order?")) return;
-    const res = await fetch(`/api/orders/${order.id}`, { method: "DELETE" });
-    if (!res.ok) {
-      toast.error(await fetchErrorMessage(res, "Failed to delete order"));
-      return;
-    }
-    onDeleted(order.id);
-    onOpenChange(false);
+  // Confirm-delete flow shared via useConfirmAction.
+  const { confirmAction, dialogs: confirmDialogs } = useConfirmAction();
+
+  function handleDelete() {
+    if (!order) return;
+    confirmAction({
+      title: "Delete Order",
+      description: (
+        <>
+          Are you sure you want to delete the{" "}
+          <span className="font-medium text-foreground">{order.supplier.name}</span>{" "}
+          order for{" "}
+          <span className="font-medium text-foreground">{order.job.plot.name} — {order.job.name}</span>?
+          This cannot be undone.
+        </>
+      ),
+      confirmLabel: "Delete Order",
+      onConfirm: async () => {
+        const res = await fetch(`/api/orders/${order.id}`, { method: "DELETE" });
+        if (!res.ok) {
+          throw new Error(await fetchErrorMessage(res, "Failed to delete order"));
+        }
+        onDeleted(order.id);
+        onOpenChange(false);
+        toast.success("Order deleted");
+      },
+    });
   }
 
   async function handleAddItem() {
@@ -247,6 +266,7 @@ export function OrderDetailSheet({
   const totalValue = orderItems.reduce((sum, item) => sum + item.totalCost, 0);
 
   return (
+    <>
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="right" className="sm:max-w-lg overflow-y-auto">
         <SheetHeader>
@@ -492,5 +512,8 @@ export function OrderDetailSheet({
         </div>
       </SheetContent>
     </Sheet>
+    {/* Shared confirm-delete dialog (useConfirmAction) */}
+    {confirmDialogs}
+    </>
   );
 }

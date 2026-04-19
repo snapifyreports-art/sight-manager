@@ -655,15 +655,28 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
     const jobData = await fetch(`/api/jobs/${jobId}`, { cache: "no-store" }).then((r) => r.json());
     setActions(Array.isArray(jobData.actions) ? jobData.actions : []);
     onJobUpdated?.();
-    // After completing, offer programme adjustment if job deviated from schedule
+    // Post-completion: show a toast with a button instead of auto-opening
+    // the shift dialog. Honours Keith's "manual trigger only" rule — the
+    // site manager clicks through IF they want to react to the deviation.
     if (action === "complete" && responseData._completionContext) {
       const ctx = responseData._completionContext;
       if (ctx.daysDeviation !== 0) {
-        setCompletionShiftDialog({
-          jobId,
-          daysDeviation: ctx.daysDeviation,
-          nextJob: ctx.nextJob ?? null,
-          plotId: ctx.plotId,
+        const dev = ctx.daysDeviation;
+        const summary = dev > 0
+          ? `Finished ${dev} day${dev !== 1 ? "s" : ""} early`
+          : `Finished ${Math.abs(dev)} day${Math.abs(dev) !== 1 ? "s" : ""} late`;
+        toast.success(summary, {
+          action: {
+            label: "Adjust programme?",
+            onClick: () => {
+              setCompletionShiftDialog({
+                jobId,
+                daysDeviation: ctx.daysDeviation,
+                nextJob: ctx.nextJob ?? null,
+                plotId: ctx.plotId,
+              });
+            },
+          },
         });
       }
     }

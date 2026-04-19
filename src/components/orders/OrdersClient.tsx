@@ -61,6 +61,7 @@ import {
 import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 import { OrderStatusBadge, ORDER_STATUS_CONFIG } from "@/components/shared/StatusBadge";
 import { useOrderStatus } from "@/hooks/useOrderStatus";
+import { useConfirmAction } from "@/hooks/useConfirmAction";
 
 // ---------- Types ----------
 
@@ -885,16 +886,31 @@ export function OrdersClient({
     void setOrderStatus(orderId, newStatus);
   }
 
-  async function handleDelete(orderId: string) {
-    const res = await fetch(`/api/orders/${orderId}`, {
-      method: "DELETE",
-    });
+  // Confirm-delete flow shared via useConfirmAction.
+  const { confirmAction, dialogs: confirmDialogs } = useConfirmAction();
 
-    if (!res.ok) {
-      toast.error(await fetchErrorMessage(res, "Failed to delete order"));
-      return;
-    }
-    setOrders((prev) => prev.filter((o) => o.id !== orderId));
+  function handleDelete(order: Order) {
+    confirmAction({
+      title: "Delete Order",
+      description: (
+        <>
+          Are you sure you want to delete the{" "}
+          <span className="font-medium text-foreground">{order.supplier.name}</span>{" "}
+          order for{" "}
+          <span className="font-medium text-foreground">{order.job.plot.name} — {order.job.name}</span>?
+          This cannot be undone.
+        </>
+      ),
+      confirmLabel: "Delete Order",
+      onConfirm: async () => {
+        const res = await fetch(`/api/orders/${order.id}`, { method: "DELETE" });
+        if (!res.ok) {
+          throw new Error(await fetchErrorMessage(res, "Failed to delete order"));
+        }
+        setOrders((prev) => prev.filter((o) => o.id !== order.id));
+        toast.success("Order deleted");
+      },
+    });
   }
 
   return (
@@ -1258,7 +1274,7 @@ export function OrdersClient({
                             </DropdownMenuItem>
                             <DropdownMenuItem
                               variant="destructive"
-                              onClick={() => handleDelete(order.id)}
+                              onClick={() => handleDelete(order)}
                             >
                               <Trash2 className="size-4" />
                               Delete
@@ -1290,6 +1306,9 @@ export function OrdersClient({
           setSelectedOrder(null);
         }}
       />
+
+      {/* Shared confirm-delete dialog (useConfirmAction) */}
+      {confirmDialogs}
 
     </div>
   );

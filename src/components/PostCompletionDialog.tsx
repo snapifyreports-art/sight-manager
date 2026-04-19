@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { format } from "date-fns";
+import { format, addDays, startOfWeek } from "date-fns";
+import { getCurrentDateAtMidnight } from "@/lib/dev-date";
 import {
   CheckCircle2,
   PlayCircle,
@@ -84,6 +85,16 @@ export function PostCompletionDialog({
   const ahead = daysDeviation > 0;
   const behind = daysDeviation < 0;
   const absDays = Math.abs(daysDeviation);
+
+  // Explicit dates for the decision buttons — Keith's rule (Apr 2026):
+  // "say the date to avoid confusion", never just "today" / "Monday".
+  const today = getCurrentDateAtMidnight();
+  const todayLabel = format(today, "EEE d MMM");
+  const nextMonday = (() => {
+    const thisWeekMon = startOfWeek(today, { weekStartsOn: 1 });
+    return addDays(thisWeekMon, 7);
+  })();
+  const nextMondayLabel = format(nextMonday, "EEE d MMM");
 
   // Determine which orders need attention
   const orders = nextJob?.orders ?? [];
@@ -220,13 +231,16 @@ export function PostCompletionDialog({
                     <button onClick={handleStartToday} disabled={!!loading}
                       className="flex w-full items-center gap-3 rounded-xl bg-blue-600 px-4 py-3 text-left text-sm font-semibold text-white hover:bg-blue-700 active:scale-[0.98] disabled:opacity-60 transition-all">
                       {loading === "start_today" ? <Loader2 className="size-4 shrink-0 animate-spin" /> : <PlayCircle className="size-4 shrink-0" />}
-                      <span>Start today{ahead && absDays > 0 && <span className="ml-1 font-normal opacity-80">&amp; pull programme forward {absDays}d</span>}</span>
+                      <span>
+                        Start today ({todayLabel})
+                        {ahead && absDays > 0 && <span className="ml-1 font-normal opacity-80">&amp; pull programme forward {absDays}d</span>}
+                      </span>
                     </button>
 
                     <button onClick={() => decide("start_next_monday")} disabled={!!loading}
                       className="flex w-full items-center gap-3 rounded-xl border border-border/60 bg-white px-4 py-3 text-left text-sm font-medium text-foreground hover:bg-accent active:scale-[0.98] disabled:opacity-60 transition-all">
                       {loading === "start_next_monday" ? <Loader2 className="size-4 shrink-0 animate-spin" /> : <CalendarDays className="size-4 shrink-0 text-blue-500" />}
-                      Start next Monday &amp; update programme
+                      Start Monday {nextMondayLabel} &amp; update programme
                     </button>
 
                     {!showPush ? (
