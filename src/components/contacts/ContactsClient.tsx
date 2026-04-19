@@ -33,6 +33,7 @@ import {
 } from "@/components/ui/dialog";
 import { ContractorDetailSheet } from "@/components/contacts/ContractorDetailSheet";
 import { useToast, fetchErrorMessage } from "@/components/ui/toast";
+import { useConfirmAction } from "@/hooks/useConfirmAction";
 
 // ---------- Types ----------
 
@@ -86,12 +87,12 @@ export function ContactsClient({
 
   // Dialog state
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [editingContact, setEditingContact] = useState<Contact | null>(null);
-  const [deletingContact, setDeletingContact] = useState<Contact | null>(null);
   const [form, setForm] = useState<ContactFormData>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
-  const [deleting, setDeleting] = useState(false);
+
+  // Confirm-delete flow — shared across the app via useConfirmAction.
+  const { confirmAction, dialogs: confirmDialogs } = useConfirmAction();
 
   // Detail sheet state
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -135,10 +136,28 @@ export function ContactsClient({
     setDialogOpen(true);
   }
 
-  // Open delete confirmation
+  // Open delete confirmation via the shared hook.
   function handleOpenDelete(contact: Contact) {
-    setDeletingContact(contact);
-    setDeleteDialogOpen(true);
+    confirmAction({
+      title: "Delete Contractor",
+      description: (
+        <>
+          Are you sure you want to delete{" "}
+          <span className="font-medium text-foreground">{contact.name}</span>?
+          This action cannot be undone.
+        </>
+      ),
+      confirmLabel: "Delete",
+      onConfirm: async () => {
+        const res = await fetch(`/api/contacts/${contact.id}`, { method: "DELETE" });
+        if (!res.ok) {
+          throw new Error(await fetchErrorMessage(res, "Failed to delete contractor"));
+        }
+        setContacts((prev) => prev.filter((c) => c.id !== contact.id));
+        toast.success(`${contact.name} deleted`);
+        router.refresh();
+      },
+    });
   }
 
   // Open detail sheet
@@ -220,31 +239,7 @@ export function ContactsClient({
     }
   }
 
-  // Delete
-  async function handleDelete() {
-    if (!deletingContact) return;
-
-    setDeleting(true);
-    try {
-      const res = await fetch(`/api/contacts/${deletingContact.id}`, {
-        method: "DELETE",
-      });
-
-      if (!res.ok) {
-        toast.error(await fetchErrorMessage(res, "Failed to delete contractor"));
-        return;
-      }
-
-      setContacts((prev) => prev.filter((c) => c.id !== deletingContact.id));
-      setDeleteDialogOpen(false);
-      setDeletingContact(null);
-      router.refresh();
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to delete contractor");
-    } finally {
-      setDeleting(false);
-    }
-  }
+  // handleDelete lives inside handleOpenDelete's onConfirm closure now.
 
   return (
     <div className="space-y-6">
@@ -513,33 +508,8 @@ export function ContactsClient({
         </DialogContent>
       </Dialog>
 
-      {/* Delete Confirmation Dialog */}
-      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Delete Contractor</DialogTitle>
-            <DialogDescription>
-              Are you sure you want to delete{" "}
-              <span className="font-medium text-foreground">
-                {deletingContact?.name}
-              </span>
-              ? This action cannot be undone.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <DialogClose render={<Button variant="outline" />}>
-              Cancel
-            </DialogClose>
-            <Button
-              variant="destructive"
-              onClick={handleDelete}
-              disabled={deleting}
-            >
-              {deleting ? "Deleting..." : "Delete"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* Shared confirm-action dialog (useConfirmAction) */}
+      {confirmDialogs}
     </div>
   );
 }
