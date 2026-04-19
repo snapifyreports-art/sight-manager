@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/dialog";
 import { CreateSiteWizard } from "./CreateSiteWizard";
 import { useToast, fetchErrorMessage } from "@/components/ui/toast";
+import { useConfirmAction } from "@/hooks/useConfirmAction";
 
 // ---------- Types ----------
 
@@ -94,10 +95,8 @@ export function SitesClient({
   const [sites, setSites] = useState(initialSites);
   const [dialogOpen, setDialogOpen] = useState(false);
 
-  // Delete state
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [siteToDelete, setSiteToDelete] = useState<SiteItem | null>(null);
-  const [deleting, setDeleting] = useState(false);
+  // Confirm-delete shared via useConfirmAction
+  const { confirmAction, dialogs: confirmDialogs } = useConfirmAction();
 
   function handleSiteCreated(created: Omit<SiteItem, "jobStatusSummary">) {
     setSites((prev) => [
@@ -115,29 +114,28 @@ export function SitesClient({
     router.refresh();
   }
 
-  async function handleDelete() {
-    if (!siteToDelete) return;
-
-    setDeleting(true);
-    try {
-      const res = await fetch(`/api/sites/${siteToDelete.id}`, {
-        method: "DELETE",
-      });
-
-      if (!res.ok) {
-        toast.error(await fetchErrorMessage(res, "Failed to delete site"));
-        return;
-      }
-
-      setSites((prev) => prev.filter((s) => s.id !== siteToDelete.id));
-      setDeleteDialogOpen(false);
-      setSiteToDelete(null);
-      router.refresh();
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to delete site");
-    } finally {
-      setDeleting(false);
-    }
+  function handleOpenDelete(site: SiteItem) {
+    confirmAction({
+      title: "Delete Site",
+      description: (
+        <>
+          Are you sure you want to delete{" "}
+          <span className="font-semibold text-foreground">{site.name}</span>?
+          This will permanently remove the site and all its plots, jobs,
+          photos, and notes. This action cannot be undone.
+        </>
+      ),
+      confirmLabel: "Delete Site",
+      onConfirm: async () => {
+        const res = await fetch(`/api/sites/${site.id}`, { method: "DELETE" });
+        if (!res.ok) {
+          throw new Error(await fetchErrorMessage(res, "Failed to delete site"));
+        }
+        setSites((prev) => prev.filter((s) => s.id !== site.id));
+        toast.success(`${site.name} deleted`);
+        router.refresh();
+      },
+    });
   }
 
   return (
@@ -215,8 +213,7 @@ export function SitesClient({
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          setSiteToDelete(site);
-                          setDeleteDialogOpen(true);
+                          handleOpenDelete(site);
                         }}
                         className="rounded-md p-1 text-muted-foreground opacity-0 transition-all hover:bg-red-50 hover:text-red-600 group-hover:opacity-100"
                         title="Delete site"
@@ -292,50 +289,8 @@ export function SitesClient({
           })}
         </div>
       )}
-      {/* Delete Confirmation Dialog */}
-      <Dialog open={deleteDialogOpen} onOpenChange={(open) => {
-        setDeleteDialogOpen(open);
-        if (!open) setSiteToDelete(null);
-      }}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Delete Site</DialogTitle>
-            <DialogDescription>
-              Are you sure you want to delete{" "}
-              <span className="font-semibold text-foreground">
-                {siteToDelete?.name}
-              </span>
-              ? This will permanently remove the site and all its plots, jobs,
-              photos, and notes. This action cannot be undone.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <DialogClose
-              render={<Button variant="outline" />}
-              disabled={deleting}
-            >
-              Cancel
-            </DialogClose>
-            <Button
-              variant="destructive"
-              onClick={handleDelete}
-              disabled={deleting}
-            >
-              {deleting ? (
-                <>
-                  <Loader2 className="size-4 animate-spin" />
-                  Deleting...
-                </>
-              ) : (
-                <>
-                  <Trash2 className="size-4" />
-                  Delete Site
-                </>
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* Shared confirm-delete (useConfirmAction) */}
+      {confirmDialogs}
     </div>
   );
 }

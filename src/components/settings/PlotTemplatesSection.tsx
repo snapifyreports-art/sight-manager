@@ -35,6 +35,7 @@ import { TemplateEditor } from "./TemplateEditor";
 import { TemplateExtras } from "./TemplateExtras";
 import type { TemplateData } from "./types";
 import { useToast, fetchErrorMessage } from "@/components/ui/toast";
+import { useConfirmAction } from "@/hooks/useConfirmAction";
 
 export function PlotTemplatesSection({
   initialTemplates,
@@ -48,10 +49,8 @@ export function PlotTemplatesSection({
     null
   );
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
-  const [deleting, setDeleting] = useState(false);
+  const { confirmAction, dialogs: confirmDialogs } = useConfirmAction();
 
   // Create form
   const [newName, setNewName] = useState("");
@@ -90,25 +89,26 @@ export function PlotTemplatesSection({
     }
   }
 
-  async function handleDelete() {
-    if (!deletingId) return;
-    setDeleting(true);
-    try {
-      const res = await fetch(`/api/plot-templates/${deletingId}`, {
-        method: "DELETE",
-      });
-      if (!res.ok) {
-        toast.error(await fetchErrorMessage(res, "Failed to delete template"));
-        return;
-      }
-      setTemplates((prev) => prev.filter((t) => t.id !== deletingId));
-      setDeleteDialogOpen(false);
-      setDeletingId(null);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to delete template");
-    } finally {
-      setDeleting(false);
-    }
+  function handleOpenDelete(templateId: string, templateName: string) {
+    confirmAction({
+      title: "Delete Template",
+      description: (
+        <>
+          Delete <span className="font-medium text-foreground">{templateName}</span>?
+          This will permanently delete this template and all its jobs and orders.
+          This action cannot be undone.
+        </>
+      ),
+      confirmLabel: "Delete Template",
+      onConfirm: async () => {
+        const res = await fetch(`/api/plot-templates/${templateId}`, { method: "DELETE" });
+        if (!res.ok) {
+          throw new Error(await fetchErrorMessage(res, "Failed to delete template"));
+        }
+        setTemplates((prev) => prev.filter((t) => t.id !== templateId));
+        toast.success(`${templateName} deleted`);
+      },
+    });
   }
 
   function handleTemplateUpdated(updated: TemplateData) {
@@ -253,8 +253,7 @@ export function PlotTemplatesSection({
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        setDeletingId(template.id);
-                        setDeleteDialogOpen(true);
+                        handleOpenDelete(template.id, template.name);
                       }}
                       className="rounded p-1 text-muted-foreground transition-colors hover:bg-red-50 hover:text-red-600"
                     >
@@ -321,30 +320,8 @@ export function PlotTemplatesSection({
         </DialogContent>
       </Dialog>
 
-      {/* Delete Confirmation Dialog */}
-      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Delete Template</DialogTitle>
-            <DialogDescription>
-              This will permanently delete this template and all its jobs and
-              orders. This action cannot be undone.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <DialogClose render={<Button variant="outline" />}>
-              Cancel
-            </DialogClose>
-            <Button
-              variant="destructive"
-              onClick={handleDelete}
-              disabled={deleting}
-            >
-              {deleting ? "Deleting..." : "Delete Template"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* Shared confirm-delete dialog (useConfirmAction) */}
+      {confirmDialogs}
     </div>
   );
 }
