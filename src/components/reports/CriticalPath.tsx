@@ -29,6 +29,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { fetchErrorMessage } from "@/components/ui/toast";
+import { ReportExportButtons } from "@/components/shared/ReportExportButtons";
 
 interface CriticalPathProps {
   siteId: string;
@@ -146,10 +147,28 @@ export function CriticalPath({ siteId }: CriticalPathProps) {
 
   const today = getCurrentDate();
 
+  // Flat export: one row per job across all plots, with critical flag.
+  const exportRows = data.plots.flatMap((p) =>
+    (p.allJobs.length > 0 ? p.allJobs : p.criticalPathJobs).map((j) => ({
+      Plot: p.plotNumber ? `Plot ${p.plotNumber}` : p.plotName,
+      "House Type": p.houseType || "",
+      Job: j.name,
+      Status: j.status.replace("_", " "),
+      "Duration (days)": j.duration,
+      Slack: j.slack,
+      Critical: j.isCritical ? "Yes" : "No",
+      "Weather Affected": j.weatherAffected ? "Yes" : "No",
+      Assignee: j.assignee || "",
+      "Start Date": j.startDate ? format(new Date(j.startDate), "yyyy-MM-dd") : "",
+      "End Date": j.endDate ? format(new Date(j.endDate), "yyyy-MM-dd") : "",
+    }))
+  );
+
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <h3 className="text-lg font-semibold">Critical Path Analysis</h3>
+        <div className="flex items-center gap-3">
         <Select value={selectedPlotId} onValueChange={(v) => v !== null && setSelectedPlotId(v)}>
           <SelectTrigger className="w-48">
             <SelectValue placeholder="All Plots">
@@ -170,6 +189,13 @@ export function CriticalPath({ siteId }: CriticalPathProps) {
             ))}
           </SelectContent>
         </Select>
+        <ReportExportButtons
+          filename={`critical-path-${format(new Date(), "yyyy-MM-dd")}`}
+          rows={exportRows}
+          sheetName="Critical Path"
+          compact
+        />
+        </div>
       </div>
 
       {/* Site summary */}

@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { fetchErrorMessage } from "@/components/ui/toast";
+import { ReportExportButtons } from "@/components/shared/ReportExportButtons";
 
 interface DelayReportProps {
   siteId: string;
@@ -247,13 +248,55 @@ export function DelayReport({ siteId }: DelayReportProps) {
   const otherDelays = nonWeatherJobs.filter((j) => !j.contractor);
   const totalImpactDays = data.totalWeatherImpactDays ?? data.totalRainedOffDays;
 
+  // Flat rows for Excel: one row per delayed job with blame-bucket.
+  const exportRows = [
+    ...weatherExcusedJobs.map((j) => ({
+      Plot: j.plot.plotNumber ? `Plot ${j.plot.plotNumber}` : j.plot.name,
+      Job: j.name,
+      Status: j.status.replace("_", " "),
+      "Days Overdue": j.daysOverdue,
+      Bucket: "Weather",
+      "Excused": "Yes",
+      Contractor: j.contractor || "",
+      Assignee: j.assignedTo || "",
+    })),
+    ...contractorDelays.map((j) => ({
+      Plot: j.plot.plotNumber ? `Plot ${j.plot.plotNumber}` : j.plot.name,
+      Job: j.name,
+      Status: j.status.replace("_", " "),
+      "Days Overdue": j.daysOverdue,
+      Bucket: "Contractor",
+      "Excused": "No",
+      Contractor: j.contractor || "",
+      Assignee: j.assignedTo || "",
+    })),
+    ...otherDelays.map((j) => ({
+      Plot: j.plot.plotNumber ? `Plot ${j.plot.plotNumber}` : j.plot.name,
+      Job: j.name,
+      Status: j.status.replace("_", " "),
+      "Days Overdue": j.daysOverdue,
+      Bucket: "Other",
+      "Excused": "No",
+      Contractor: j.contractor || "",
+      Assignee: j.assignedTo || "",
+    })),
+  ];
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-lg font-semibold">Delay Justification Report</h3>
-        <p className="text-xs text-muted-foreground">
-          Generated {format(new Date(data.generatedAt), "dd MMM yyyy HH:mm")}
-        </p>
+        <div className="flex items-center gap-3">
+          <p className="text-xs text-muted-foreground">
+            Generated {format(new Date(data.generatedAt), "dd MMM yyyy HH:mm")}
+          </p>
+          <ReportExportButtons
+            filename={`delay-report-${format(new Date(), "yyyy-MM-dd")}`}
+            rows={exportRows}
+            sheetName="Delays"
+            compact
+          />
+        </div>
       </div>
 
       {/* Plot filter */}

@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { fetchErrorMessage } from "@/components/ui/toast";
+import { ReportExportButtons } from "@/components/shared/ReportExportButtons";
 
 interface BudgetReportProps {
   siteId: string;
@@ -167,13 +168,36 @@ export function BudgetReport({ siteId }: BudgetReportProps) {
 
   const s = data.siteSummary;
 
+  // Flatten the tree into rows for Excel export.
+  const exportRows = data.plots.flatMap((p) =>
+    p.jobs.map((j) => ({
+      Plot: p.plotNumber || p.plotName,
+      "House Type": p.houseType || "",
+      Job: j.jobName,
+      Status: j.status.replace("_", " "),
+      Orders: j.orderCount,
+      Budgeted: j.budgeted,
+      Actual: j.actual,
+      Variance: j.variance,
+      "Variance %": j.variancePercent,
+    }))
+  );
+
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-lg font-semibold">Budget vs Actual Report</h3>
-        <p className="text-xs text-muted-foreground">
-          Generated {format(new Date(data.generatedAt), "dd MMM yyyy HH:mm")}
-        </p>
+        <div className="flex items-center gap-3">
+          <p className="text-xs text-muted-foreground">
+            Generated {format(new Date(data.generatedAt), "dd MMM yyyy HH:mm")}
+          </p>
+          <ReportExportButtons
+            filename={`budget-${format(new Date(), "yyyy-MM-dd")}`}
+            rows={exportRows}
+            sheetName="Budget"
+            compact
+          />
+        </div>
       </div>
 
       {/* Site summary */}

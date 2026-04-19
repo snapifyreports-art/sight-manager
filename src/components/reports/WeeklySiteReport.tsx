@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
+import { ReportExportButtons } from "@/components/shared/ReportExportButtons";
 import { format, startOfWeek, subWeeks, addWeeks } from "date-fns";
 import { getCurrentDate } from "@/lib/dev-date";
 import { useDevDate } from "@/lib/dev-date-context";
@@ -204,14 +205,31 @@ export function WeeklySiteReport({ siteId }: WeeklySiteReportProps) {
           <Button variant="outline" size="sm" onClick={goThisWeek}>
             This Week
           </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => window.print()}
-          >
-            <Printer className="mr-1 size-4" />
-            Print
-          </Button>
+          <ReportExportButtons
+            filename={`weekly-${data.weekOf}`}
+            rows={[
+              {
+                "Week Of": data.weekLabel,
+                "Total Plots": ov.totalPlots,
+                "Total Jobs": ov.totalJobs,
+                "Completed Jobs": ov.completedJobs,
+                "Active Jobs": ov.activeJobs,
+                "Overdue Jobs": ov.overdueJobs,
+                "Progress %": ov.progressPercent,
+                "Jobs Started (this week)": tw.jobsStarted,
+                "Jobs Completed (this week)": tw.jobsCompleted,
+                "Jobs Completed (last week)": tw.jobsCompletedLastWeek,
+                "Orders Placed": tw.ordersPlaced,
+                "Photos Uploaded": tw.photosUploaded,
+                "Snags Opened": tw.snagsOpened,
+                "Snags Resolved": tw.snagsResolved,
+                "Total Open Snags": tw.totalOpenSnags,
+                "Rained Off Days": tw.rainedOffDays,
+              },
+            ]}
+            sheetName="Weekly Summary"
+            compact
+          />
         </div>
       </div>
 

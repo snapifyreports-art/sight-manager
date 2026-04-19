@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useRefreshOnFocus } from "@/hooks/useRefreshOnFocus";
-import { format, parseISO } from "date-fns";
+import { format, parseISO, addDays, startOfWeek, isWithinInterval } from "date-fns";
 import {
   Loader2,
   HardHat,
@@ -26,6 +26,8 @@ import {
   FileText,
   Download,
   ExternalLink,
+  CalendarDays,
+  MessageSquare,
 } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -536,19 +538,34 @@ function SnagCard({ snag, siteId }: { snag: Snag; siteId: string }) {
 
 function useLastShareSent(siteId: string, contactId: string) {
   const key = `share-sent:${siteId}:${contactId}`;
+  const logKey = `share-log:${siteId}:${contactId}`;
   const [lastSent, setLastSent] = useState<string | null>(null);
+  const [log, setLog] = useState<string[]>([]);
 
   useEffect(() => {
-    try { setLastSent(localStorage.getItem(key)); } catch { /* SSR / private mode */ }
-  }, [key]);
+    try {
+      setLastSent(localStorage.getItem(key));
+      const raw = localStorage.getItem(logKey);
+      setLog(raw ? JSON.parse(raw) : []);
+    } catch { /* SSR / private mode */ }
+  }, [key, logKey]);
 
   const markSent = useCallback(() => {
     const now = new Date().toISOString();
-    try { localStorage.setItem(key, now); } catch { /* ignore */ }
+    try {
+      localStorage.setItem(key, now);
+      // Append to rolling log; keep last 20 entries so the messages log
+      // has history without growing unbounded.
+      const raw = localStorage.getItem(logKey);
+      const existing: string[] = raw ? JSON.parse(raw) : [];
+      const next = [now, ...existing].slice(0, 20);
+      localStorage.setItem(logKey, JSON.stringify(next));
+      setLog(next);
+    } catch { /* ignore */ }
     setLastSent(now);
-  }, [key]);
+  }, [key, logKey]);
 
-  return { lastSent, markSent };
+  return { lastSent, log, markSent };
 }
 
 function formatRelativeDate(iso: string): string {
@@ -574,7 +591,7 @@ function ContractorCard({
   siteId: string;
 }) {
   const [shareOpen, setShareOpen] = useState(false);
-  const { lastSent, markSent } = useLastShareSent(siteId, contractor.id);
+  const { lastSent, log: shareLog, markSent } = useLastShareSent(siteId, contractor.id);
   const [requestingSignOff, setRequestingSignOff] = useState<Set<string>>(new Set());
   const [requestedSignOff, setRequestedSignOff] = useState<Set<string>>(
     new Set(contractor.liveJobs.filter((j) => j.signOffRequested).map((j) => j.id))
@@ -679,6 +696,96 @@ function ContractorCard({
           </details>
         )}
 
+        {/* Day Sheets — this week, Mon-Sun, jobs active on each day.
+            Keith Apr 2026 Q1=c: inline view + printable. Print button uses
+            the browser's print dialog which emits PDF on "Save as PDF".
+            The existing print:* CSS classes (break-inside-avoid on the
+            card, print:hidden on the share button) scope what prints. */}
+        {(contractor.liveJobs.length > 0 || contractor.nextJobs.length > 0) && (() => {
+          // Build the Mon-Sun range starting this week.
+          const weekStart = startOfWeek(new Date(), { weekStartsOn: 1 });
+          const days = Array.from({ length: 7 }).map((_, i) => addDays(weekStart, i));
+          const allJobs = [...contractor.liveJobs, ...contractor.nextJobs];
+          const jobsForDay = (day: Date) => {
+            return allJobs.filter((j) => {
+              if (!j.startDate || !j.endDate) return false;
+              const start = parseISO(j.startDate);
+              const end = parseISO(j.endDate);
+              return isWithinInterval(day, { start, end });
+            });
+          };
+          const hasAnything = days.some((d) => jobsForDay(d).length > 0);
+          if (!hasAnything) return null;
+          return (
+            <details className="group">
+              <summary className="flex cursor-pointer items-center gap-2 px-4 py-3 sm:px-5 [&::-webkit-details-marker]:hidden">
+                <CalendarDays className="size-4 text-indigo-600" />
+                <span className="text-xs font-semibold uppercase tracking-wider text-indigo-700">
+                  Day Sheets (this week)
+                </span>
+                <ChevronRight className="ml-auto size-3.5 text-muted-foreground transition-transform group-open:rotate-90" />
+              </summary>
+              <div className="px-4 pb-3 sm:px-5">
+                <div className="mb-2 flex justify-end print:hidden">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 gap-1 text-xs"
+                    onClick={() => window.print()}
+                  >
+                    <Printer className="size-3" />
+                    Print / PDF
+                  </Button>
+                </div>
+                <div className="space-y-1.5">
+                  {days.map((day) => {
+                    const jobs = jobsForDay(day);
+                    const isWeekend = day.getDay() === 0 || day.getDay() === 6;
+                    return (
+                      <div
+                        key={day.toISOString()}
+                        className={cn(
+                          "rounded-lg border px-3 py-2",
+                          isWeekend ? "bg-slate-50 border-slate-100" : "bg-white border-border"
+                        )}
+                      >
+                        <div className="flex items-center justify-between">
+                          <p className="text-xs font-semibold">
+                            {format(day, "EEE d MMM")}
+                            {isWeekend && (
+                              <span className="ml-1.5 text-[10px] font-normal text-muted-foreground">(weekend)</span>
+                            )}
+                          </p>
+                          <span className="text-[10px] text-muted-foreground">
+                            {jobs.length === 0 ? "No work" : `${jobs.length} job${jobs.length === 1 ? "" : "s"}`}
+                          </span>
+                        </div>
+                        {jobs.length > 0 && (
+                          <ul className="mt-1 space-y-0.5">
+                            {jobs.map((j) => (
+                              <li key={j.id} className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                                <span className="inline-block size-1.5 shrink-0 rounded-full bg-green-500" />
+                                <Link
+                                  href={`/jobs/${j.id}`}
+                                  className="truncate hover:text-blue-600 hover:underline"
+                                >
+                                  {j.name}
+                                </Link>
+                                <span className="text-slate-400">·</span>
+                                <span className="shrink-0">{plotLabel(j.plot)}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </details>
+          );
+        })()}
+
         {/* Live Jobs */}
         <details className="group">
           <summary className="flex cursor-pointer items-center gap-2 px-4 py-3 sm:px-5 [&::-webkit-details-marker]:hidden">
@@ -760,13 +867,14 @@ function ContractorCard({
           </div>
         </details>
 
-        {/* Open Snags */}
+        {/* Open Snags — filtered to this contractor (Keith Apr 2026:
+            "snags-assigned tab"). Already per-contractor via openSnags. */}
         {contractor.openSnags.length > 0 && (
           <details className="group">
             <summary className="flex cursor-pointer items-center gap-2 px-4 py-3 sm:px-5 [&::-webkit-details-marker]:hidden">
               <AlertTriangle className="size-4 text-orange-500" />
               <span className="text-xs font-semibold uppercase tracking-wider text-orange-700">
-                Open Snags ({contractor.openSnags.length})
+                Snags Assigned ({contractor.openSnags.length})
               </span>
               <ChevronRight className="ml-auto size-3.5 text-muted-foreground transition-transform group-open:rotate-90" />
             </summary>
@@ -777,6 +885,46 @@ function ContractorCard({
             </div>
           </details>
         )}
+
+        {/* Messages Log — history of contractor-facing comms events.
+            Keith Apr 2026 Q2=b: reuse existing logging rather than a new
+            ContractorMessage model. Currently captures: Send Link (share
+            URL emailed). Future: sign-off requests, day-sheet sends.
+            Storage: localStorage rolling-20 per contractor. Lightweight
+            but real — no data loss on reload. */}
+        <details className="group">
+          <summary className="flex cursor-pointer items-center gap-2 px-4 py-3 sm:px-5 [&::-webkit-details-marker]:hidden">
+            <MessageSquare className="size-4 text-slate-500" />
+            <span className="text-xs font-semibold uppercase tracking-wider text-slate-700">
+              Messages Log ({shareLog.length})
+            </span>
+            <ChevronRight className="ml-auto size-3.5 text-muted-foreground transition-transform group-open:rotate-90" />
+          </summary>
+          <div className="px-4 pb-3 sm:px-5">
+            {shareLog.length === 0 ? (
+              <p className="text-xs text-muted-foreground">
+                No messages sent to {contractor.name} yet. When you tap <strong>Send Link</strong> above, it&apos;ll log here.
+              </p>
+            ) : (
+              <ul className="space-y-1">
+                {shareLog.map((iso) => (
+                  <li
+                    key={iso}
+                    className="flex items-center justify-between rounded-md bg-slate-50 px-3 py-1.5 text-xs"
+                  >
+                    <span className="flex items-center gap-1.5 text-slate-700">
+                      <Link2 className="size-3 text-slate-500" />
+                      Share link sent
+                    </span>
+                    <span className="text-[10px] text-muted-foreground">
+                      {formatRelativeDate(iso)} · {format(parseISO(iso), "d MMM yy HH:mm")}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </details>
 
         {/* Drawings */}
         {contractor.drawings && contractor.drawings.length > 0 && (

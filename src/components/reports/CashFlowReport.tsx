@@ -27,6 +27,8 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import { fetchErrorMessage } from "@/components/ui/toast";
+import { ReportExportButtons } from "@/components/shared/ReportExportButtons";
+import { format } from "date-fns";
 
 interface MonthData {
   month: string;
@@ -133,9 +135,21 @@ export function CashFlowReport({ siteId }: { siteId: string }) {
     Forecast: m.cumulativeForecast,
   }));
 
+  // Monthly rows for Excel — one row per month with the key figures.
+  const exportRows = data.months.map((m) => ({
+    Month: formatMonth(m.month),
+    Committed: m.committed,
+    Forecast: m.forecast,
+    Actual: m.actual,
+    "Cumulative Committed": m.cumulativeCommitted,
+    "Cumulative Forecast": m.cumulativeForecast,
+    "Cumulative Actual": m.cumulativeActual,
+  }));
+
   return (
     <div className="space-y-4">
-      {/* Date mode toggle */}
+      {/* Date mode toggle + exports */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
       <div className="flex items-center gap-3">
         <div className="flex items-center gap-1 rounded-lg border p-0.5">
           <button
@@ -170,6 +184,13 @@ export function CashFlowReport({ siteId }: { siteId: string }) {
             </span>
           </div>
         )}
+      </div>
+        <ReportExportButtons
+          filename={`cashflow-${format(new Date(), "yyyy-MM-dd")}`}
+          rows={exportRows}
+          sheetName="Cash Flow"
+          compact
+        />
       </div>
 
       {/* Summary cards */}
