@@ -358,7 +358,14 @@ export function JobsClient({ initialJobs, workflows, users }: JobsClientProps) {
 
         <Select value={workflowFilter} onValueChange={(v) => v !== null && setWorkflowFilter(v)}>
           <SelectTrigger className="w-[180px]">
-            <SelectValue placeholder="All Workflows" />
+            {/* Explicit label resolution — value is a workflow ID, Base UI
+                SelectValue falls back to showing the raw ID if the item
+                isn't in the DOM. Keith flagged "IDs shown not names". */}
+            <SelectValue placeholder="All Workflows">
+              {workflowFilter === "all"
+                ? "All Workflows"
+                : workflows.find((wf) => wf.id === workflowFilter)?.name ?? "Loading..."}
+            </SelectValue>
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Workflows</SelectItem>
@@ -668,7 +675,12 @@ function JobForm({
             onValueChange={(val) => val !== null && updateField("workflowId", val)}
           >
             <SelectTrigger className="w-full">
-              <SelectValue placeholder="Select workflow" />
+              {/* Explicit label resolution — value is a workflow ID. */}
+              <SelectValue placeholder="Select workflow">
+                {form.workflowId
+                  ? workflows.find((wf) => wf.id === form.workflowId)?.name ?? "Loading..."
+                  : undefined}
+              </SelectValue>
             </SelectTrigger>
             <SelectContent>
               {workflows.map((wf) => (
