@@ -18,7 +18,6 @@ import {
   AlertTriangle,
   Mail,
 } from "lucide-react";
-import { buildOrderMailto } from "@/lib/order-email";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -31,6 +30,7 @@ import {
 import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 import { OrderStatusBadge } from "@/components/shared/StatusBadge";
 import { useOrderStatus } from "@/hooks/useOrderStatus";
+import { useOrderEmail } from "@/hooks/useOrderEmail";
 import { useConfirmAction } from "@/hooks/useConfirmAction";
 
 // ---------- Types (mirrors OrdersClient) ----------
@@ -171,6 +171,15 @@ export function OrderDetailSheet({
     if (!order) return;
     void setOrderStatus(order.id, newStatus);
   }
+
+  // Shared supplier email flow — rich template, marks ORDERED on send.
+  // The hook manages the status change internally; we refresh the order
+  // locally via onSent so the parent's badge + dateOfOrder reflect it.
+  const { openSendOrderEmail, dialogs: orderEmailDialogs } = useOrderEmail(() => {
+    if (!order) return;
+    const now = new Date().toISOString();
+    onUpdated({ ...order, status: "ORDERED", dateOfOrder: now });
+  });
 
   // Confirm-delete flow shared via useConfirmAction.
   const { confirmAction, dialogs: confirmDialogs } = useConfirmAction();
@@ -352,34 +361,51 @@ export function OrderDetailSheet({
             <div className="space-y-1.5">
               <p className="text-xs font-medium text-muted-foreground">Actions</p>
               <div className="flex flex-wrap gap-1.5">
-                {order.status === "PENDING" && order.supplier.contactEmail && (() => {
-                  const mailto = buildOrderMailto(order.supplier.contactEmail!, {
-                    supplierName: order.supplier.name,
-                    supplierContactName: order.supplier.contactName,
-                    supplierAccountNumber: order.supplier.accountNumber,
-                    jobName: order.job.name,
-                    siteName: order.job.plot.site.name,
-                    siteAddress: order.job.plot.site.address,
-                    sitePostcode: order.job.plot.site.postcode,
-                    plotNumbers: [order.job.plot.name],
-                    items: (order.orderItems ?? []).map((i) => ({ name: i.name, quantity: i.quantity, unit: i.unit, unitCost: i.unitCost })),
-                    itemsDescriptionFallback: order.itemsDescription,
-                    expectedDeliveryDate: order.expectedDeliveryDate,
-                    orderDate: order.dateOfOrder,
-                  });
-                  return (
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      className="gap-1.5 text-xs"
-                      disabled={statusBusy}
-                      onClick={() => { window.open(mailto, "_blank"); handleStatusChange("ORDERED"); }}
-                    >
-                      <Mail className="size-3.5" />
-                      Send Order to Supplier
-                    </Button>
-                  );
-                })()}
+                {order.status === "PENDING" && order.supplier.contactEmail && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="gap-1.5 text-xs"
+                    disabled={statusBusy}
+                    onClick={() => openSendOrderEmail({
+                      supplierId: order.supplier.id,
+                      supplierName: order.supplier.name,
+                      contactName: order.supplier.contactName,
+                      contactEmail: order.supplier.contactEmail,
+                      accountNumber: order.supplier.accountNumber,
+                      siteNames: [order.job.plot.site.name],
+                      orders: [{
+                        id: order.id,
+                        job: {
+                          id: order.job.id,
+                          name: order.job.name,
+                          plot: {
+                            name: order.job.plot.name,
+                            plotNumber: null,
+                            site: {
+                              id: order.job.plot.site.id,
+                              name: order.job.plot.site.name,
+                              address: order.job.plot.site.address,
+                              postcode: order.job.plot.site.postcode,
+                            },
+                          },
+                        },
+                        expectedDeliveryDate: order.expectedDeliveryDate,
+                        dateOfOrder: order.dateOfOrder,
+                        itemsDescription: order.itemsDescription,
+                        items: (order.orderItems ?? []).map((i) => ({
+                          name: i.name,
+                          quantity: i.quantity,
+                          unit: i.unit,
+                          unitCost: i.unitCost,
+                        })),
+                      }],
+                    })}
+                  >
+                    <Mail className="size-3.5" />
+                    Send Order to Supplier
+                  </Button>
+                )}
                 {statusActions.map((action) => (
                   <Button
                     key={action.status}
@@ -514,6 +540,8 @@ export function OrderDetailSheet({
     </Sheet>
     {/* Shared confirm-delete dialog (useConfirmAction) */}
     {confirmDialogs}
+    {/* Shared supplier email dialog (useOrderEmail) */}
+    {orderEmailDialogs}
     </>
   );
 }
