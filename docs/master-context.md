@@ -181,105 +181,158 @@ Any new endpoint that does `Promise.all` over per-plot or per-job queries must s
 
 ---
 
-## 6. CURRENT BUILD STATE
+## 6. CURRENT BUILD STATE (Apr 2026 session update)
 
-### Completed (shipped to `main`, live on Vercel)
+Everything below is live on `main`. TypeScript clean, 59/59 cascade tests pass, schema migrated on Supabase.
 
-- **Cascade engine + spec + 59-test harness** — `src/lib/cascade.ts`, `docs/cascade-spec.md`, `scripts/test-cascade.ts`
-- **`useJobAction` hook** — `src/hooks/useJobAction.tsx`. Exports:
-  - `triggerAction(job, action)` — full pre-start flow
-  - `runSimpleAction(jobId, action, opts)` — lightweight mutation (new, Batch 1 infra)
-  - `previewCascade(jobId, newEndDate)` — cascade preview (new, Batch 1 infra)
-  - `isLoading`, `dialogs` (JSX to render)
-- **`useDelayJob` hook** — `src/hooks/useDelayJob.tsx`. `openDelayDialog(job)` + `dialogs`. Dual input (days or date). Reason picker (Rain/Temperature/Other + free text for OTHER). Live preview of new dates.
-- **`useOrderStatus` hook** — `src/hooks/useOrderStatus.ts`. `setOrderStatus`, `setManyOrderStatus`, `isPending(id)`, `isBusy`. Records `dateOfOrder=now` on ORDERED and `deliveredDate=now` on DELIVERED.
-- **`useSnagAction` hook** — `src/hooks/useSnagAction.ts`. `setSnagStatus`, `requestSignOff`. For inline chips; close-with-photo still goes through `SnagDialog`.
-- **50 API mutation routes** wrapped with `apiError()` helper
-- **78 client mutation handlers** surface errors via toast
-- **16 data-load failures** show inline error + retry banner
-- **Stale JWT handling** — `auth.ts` wrapper returns null for deleted-user tokens
-- **Hydration fix** — `getCurrentDateAtMidnight` in 6 render sites
-- **Mark Sent records `dateOfOrder=today`** — Daily Brief, order resolution
-- **Drawing upload: 50MB, multi-file, per-file labels** — 3 components + 2 API routes
-- **Delay flow** unified across Daily Brief (3 variants) + SiteWalkthrough — reason capture, working-day math, `/api/jobs/[id]/delay` endpoint
-- **Pull-forward "already perfectly timed" chip** when delta = 0
-- **50+ API errors** now Prisma-code-mapped to friendly messages
-- **Sidebar navigation** with Quants + Drawings under Site Admin
+### Canonical hooks (the "one source of truth" stack)
 
-### In progress (at time of writing)
+Every action flows through one of these — never duplicate. Before adding any button in a screen, check if a hook already handles it.
 
-- **Batch 1 migration agent running in background** (agentId `ad278278aa1b74224`)
-  - Migrating ~11 files from raw `/api/jobs/[id]/actions` fetches to `useJobAction.runSimpleAction`
-  - Migrating 5 custom delay dialogs to `useDelayJob`
-  - Migrating Walkthrough cascade preview to `useJobAction.previewCascade`
+| Concept | Hook | File |
+|---|---|---|
+| Job lifecycle (start / stop / complete / signoff) + pre-start dialogs | `useJobAction` | `src/hooks/useJobAction.tsx` |
+| Delay a job (dual input: days OR new-end-date + reason picker + weather auto-suggestion) | `useDelayJob` | `src/hooks/useDelayJob.tsx` |
+| Pull a job forward (4 options: today / next Monday / keep / pick; constraint-aware picker) | `usePullForwardDecision` | `src/hooks/usePullForwardDecision.tsx` |
+| Order status PENDING → ORDERED → DELIVERED → CANCELLED | `useOrderStatus` | `src/hooks/useOrderStatus.ts` |
+| Snag status chip changes (no photo) | `useSnagAction` | `src/hooks/useSnagAction.ts` |
+| Contractor assignment (single OR multi-select modes) | `useJobContractorPicker` | `src/hooks/useJobContractorPicker.tsx` |
+| Destructive confirms (Delete X) | `useConfirmAction` | `src/hooks/useConfirmAction.tsx` |
+| Copy-to-clipboard with keyed feedback | `useCopyToClipboard` | `src/hooks/useCopyToClipboard.ts` |
+| Plot creation (4 paths: blank / template / batch-from-template / chunked-blank-batch) | `usePlotCreation` | `src/hooks/usePlotCreation.ts` |
+| Inline note on a job | `useAddNote` | `src/hooks/useAddNote.tsx` |
+| Order email (send or chase, rich table template) | `useOrderEmail` | `src/hooks/useOrderEmail.tsx` — uses `buildOrderEmailBody` from `src/lib/order-email.ts` |
 
-### Not yet built (queued for Batches 2 & 3)
+### Shared UI components
 
-**Batch 2:**
-- Migrate ~12 files from raw order-status fetches to `useOrderStatus`
-- Migrate snag close-with-photo flows in 4 modals to open `SnagDialog` instead
-- Migrate inline snag-status chips to `useSnagAction`
+| Purpose | Component | File |
+|---|---|---|
+| Job / order / snag status badges + snag priority | `JobStatusBadge`, `OrderStatusBadge`, `SnagStatusBadge`, `SnagPriorityBadge` | `src/components/shared/StatusBadge.tsx` |
+| "Failed to load — Retry" banner on reports | `ReportErrorBanner` | `src/components/shared/ReportErrorBanner.tsx` |
+| Quick photo upload on jobs/snags | `InlinePhotoCapture` | `src/components/shared/InlinePhotoCapture.tsx` |
+| Explanation popover (? icon → expanded panel) | `HelpTip` | `src/components/shared/HelpTip.tsx` |
+| Full snag form | `SnagDialog` | `src/components/snags/SnagDialog.tsx` — canonical surface; close-with-photo still routes here |
 
-**Batch 3:**
-- `<ReportErrorBanner>` shared component — replace 6 copy-pasted retry banners, retrofit 3 silent reports
-- `<InlinePhotoCapture>` shared component — replace 14 inline `FormData` + fetch photo uploads (jobs + snags); fix tag inconsistency
-- `<AddPlotForm>` shared component — replace duplicate Add Plot dialogs in `SiteDetailClient` and `CreateSiteWizard`; bring chunked POST (from wizard) to SiteDetailClient
+### Templates (schema + UX)
 
-**Deferred / not doing (for now):**
-- Renaming "one-off order" to avoid confusion with regular orders — user decided to leave as-is
-- Unifying walkthrough cascade UX into `useJobAction` fully — in progress via Batch 1
+- **`TemplateJob.durationDays`** (new column) — optional days-granularity override. Wins over `durationWeeks` at apply-template time via `computeJobEndDate()` in `src/lib/apply-template-helpers.ts`.
+- **`Plot.sourceTemplateId`** (new column) — informational link back to the source template. No auto-sync. Lets TemplateEditor show a "snapshot-model" banner when plots exist that used this template.
+- **Parent TemplateJob dates are normalised on every read** — `normaliseTemplateParentDates()` in `src/lib/template-includes.ts` overwrites parent `startWeek`/`endWeek`/`durationWeeks` with min/max of children. Wired into every template GET/PUT route.
+- **TemplateEditor UX**:
+  - Drag-to-reorder stages (HTML5 native drag)
+  - "+" icon on every flat job AND every child row to add a sub-job (supports 3+ level hierarchies; model is recursive, render is 2-deep)
+  - Add Sub-Job dialog has **Weeks / Days toggle**
+  - Edit Job dialog has **Duration in days (optional)** override
+  - Split dialog asks where existing orders go when splitting a flat job into sub-jobs
+  - Snapshot-model banner when `_count.sourcedPlots > 0`
+- **Apply-template endpoints** reject empty-jobs templates with a 400.
+
+### Programme / Gantt
+
+- **Overlay mode** renders two rows per plot (Current + Original) with a dashed divider + "now" / "was" labels in the plot-metadata column. Replaces an illegible 4px ghost strip.
+- **Partial-week fills** — day-granularity sub-jobs render as a fractional-width bar in Week view (e.g. a 3-day job = 60% of the cell). Day view is per-day and unaffected.
+- **Pull Forward button** on every non-completed job in JobWeekPanel + Walkthrough.
+- **Delay Job button** paired with Pull Forward everywhere.
+- **Predecessor detection** ignores parent aggregates (a stage with children whose dates span the whole stage isn't a valid predecessor).
+
+### Contractor Comms
+
+- **Mini Programme** at the top of each contractor card — rows = plots, columns = 12 weekly slots, bars = their jobs placed by date. Green = live, blue = upcoming, red vertical line = today.
+- Existing sections (Live Jobs / Coming Up / Open Snags / Drawings / Orders & Deliveries) still present as collapsible details below.
+- Share-page generates permanent tokens via `/api/sites/:id/contractor-comms/share` — link emails use `useCopyToClipboard`.
+
+### Post-completion flow
+
+- After sign-off, a **toast with "Review next steps" button** appears instead of auto-opening `PostCompletionDialog`. Site manager chooses to engage.
+- PostCompletionDialog decision buttons show **explicit dates** ("Start today (Wed 19 Apr)" / "Start Monday 20 Apr") — never ambiguous.
+- Same flow in DailySiteBrief, SiteWalkthrough, and (partially) JobWeekPanel.
+
+### Delay job flow
+
+- Weather auto-suggestion: `useDelayJob` fetches rain/temperature logs for the job's period on open and pre-selects the reason.
+- Four surfaces (DailyBrief, Walkthrough, TasksClient, JobWeekPanel, JobsClient) use the same dialog — two input modes (days or date), reason picker, live preview of new dates.
+
+### Order email (Apr 2026 unified)
+
+- **One template** now — `buildOrderEmailBody` in `src/lib/order-email.ts` (rich: account number, site address, items table with unit costs, subtotals, per-plot totals).
+- `useOrderEmail` refactored to call `buildOrderEmailBody` internally. Subject: `Material Order — {job} — {site}{(N plots)}`. Chase mode adds "URGENT" banner and overdue-days context.
+- `/api/tasks` response enriched with `supplier.accountNumber`, `site.address/postcode`, `plot.plotNumber`, `orderItems.unitCost` so TasksClient passes rich data.
+- Callers still using `buildOrderMailto` directly (DailyBrief, OrderDetailSheet, PlotTodoList) — migration to the hook is a pure code-aesthetics refactor; templates are already byte-identical. (Background agent is finishing these migrations as of latest commits.)
+
+### Interaction rules banked to memory
+
+`~/.claude/projects/.../memory/feedback_core_flows.md` now enshrines:
+
+1. Every question ends with one recommended option marked ⭐.
+2. Use multiple-choice dialog format for decisions — Keith whips through "a, a, a, a".
+3. Test in Keith's browser before pushing — Claude_in_Chrome tools.
+4. Button clickability is a permanent review item (5-point checklist).
+5. Wording must be crisp; use `<HelpTip>` for long context.
+6. Keith's 4-stage framework for audits: Setup → Creation → Management → Analytics.
 
 ### Repo state
 
 - Latest commits (most recent first):
-  - `c85a0c9` Batch 1 infra (useJobAction extension + useDelayJob hook)
-  - `4d62830` Walkthrough delay unify + drawing uploads 50MB/multi-file
-  - `8b43bb2` Push Job Forward → Delay Job rework
-  - `b043b68` Pull-forward button 0-delta fix
-  - `509ebae` N+1 perf + hydration fix + Mark Sent records today
-  - `da562b7` 78 client mutation silent-failures fixed
-  - `d037d16` JWT stale-session fix
-  - `845afd4` 50 API routes wrapped with apiError
-  - `d345181` Cascade engine rewrite (59/59 tests pass)
+  - `39fc911` Gantt partial-week fills for day-granularity jobs
+  - `9311ca1` Contractor Comms mini-Gantt
+  - `94576ea` Option A: email templates unified on rich `buildOrderEmailBody`
+  - `2bc1427` Add Sub-Job on child rows (3+ level hierarchy)
+  - `559ac1e` Days override on Edit-Job dialog
+  - `5e7ecf2` Drag-to-reorder stages
+  - `1f897b9` JobWeekPanel completion toast + PostCompletion explicit dates
+  - `8a90d02` Split dialog order placement
+  - `13c2dd1` Schema live: `sourceTemplateId` + `durationDays`
+  - `62af91a` Normalise parent TemplateJob dates on every read
+  - `72f62bc` Reject empty template apply + ID→name sweep
+  - (Many more — see `git log --oneline`)
 
 ---
 
-## 7. KNOWN ISSUES / BUGS
+## 7. KNOWN ISSUES / BUGS (Apr 2026 snapshot)
 
 ### Active
 
-None critical as of commit `c85a0c9`. Cascade 59/59 passes, typecheck clean, lint 0 errors (121 warnings, all pre-existing unused-import noise).
+None blocking. 59/59 cascade tests pass, TypeScript clean. Schema in sync with Supabase.
 
-### Latent / to watch
+### Deferred / cosmetic / non-blocking
 
-1. **Some Batch 1 migrations may still be landing** — the migration agent is running. Verify its output before saying "unification complete".
-2. **`note`/`notes` keyname drift** in raw fetches — Batch 1 agent is fixing this but raw sites in JobsClient, TasksClient, ContractorDaySheets, SiteCalendar may still be passing `{ note }` (API accepts `{ notes }`). Grep for `"note":` in fetch bodies.
-3. **Bundle caching after deploy** — Vercel sometimes serves stale bundles; hard-refresh (Ctrl+Shift+R) to get latest after pushing.
-4. **`bulk-status` orphan endpoint** — `/api/orders/bulk-status` has no client. Dead or secretly used.
-5. **Walkthrough still has its own `cascadePreview` state** — post-Batch 1 this should be removed; verify.
-6. **lint: 121 warnings of unused imports/vars** — not blocking but noisy. An earlier audit flagged 10 as "assigned but never used" that represent actual dead features (DailyBrief cascade flow, SiteProgramme cell order-dots, contractor-share expiry notice); these are documented for later decision.
+1. **Templates with >2 hierarchy levels render only 2 levels deep** — creation now supports N levels (recursive `parentId`, Add Sub-Job on child rows); rendering in TemplateEditor is still a 2-deep nested map. Not urgent — no 3+ level templates exist yet.
+2. **JobDetailClient admin date-edit** — kept as a bespoke flow (separate from `useDelayJob`) because it's an admin correction without a reason. Legitimate difference, not a regression.
+3. **PostCompletionDialog body** still has its own decision buttons (not migrated to `usePullForwardDecision`) — the orders + contractor guidance steps add value the shared dialog doesn't have. Decision kept explicit.
+4. **DailyBrief / OrderDetailSheet / PlotTodoList** still call `buildOrderMailto` directly. Migration to `useOrderEmail` hook is in progress (bg agent). Templates are already identical — pure code-aesthetics refactor.
+5. **Batch 2 agent skipped 6 photo-coupled flows** (SnagDialog close-with-photo, DailyBrief snag photo close, SnagList handleConfirmClose, ContractorComms/Walkthrough/SnagSignOffCard photo uploads). Needs a focused session with live photo-upload testing.
+6. **`bulk-status` orphan endpoint** — `/api/orders/bulk-status` still has no user-facing caller (TasksClient's mark-sent POSTs to it via handleMarkGroupSent but the migration note said to keep this path since it's atomic-different-semantics). Either adopt or delete.
+
+### Watch-outs
+
+1. **Vercel bundle cache** — hard-refresh (Ctrl+Shift+R) after pushing if UI looks stale.
+2. **Prisma pool cap** — keep `Promise.all` over Prisma to ≤3 concurrent.
+3. **DB schema changes need `npm run db:push`** — Vercel's postinstall only runs `prisma generate`, not `migrate deploy`. Use the session-mode pooler URL for connectivity: `aws-1-eu-west-1.pooler.supabase.com:5432`.
 
 ---
 
-## 8. NEXT PRIORITIES
+## 8. NEXT PRIORITIES (Apr 2026)
 
-**Immediate (finish what's in flight):**
+**In flight right now:**
 
-1. **Wait for Batch 1 migration agent** to complete, verify tsc clean + tests pass, commit + push.
-2. **Batch 2**: Migrate 12 files to `useOrderStatus`, migrate snag close flows to `SnagDialog`, migrate inline snag chips to `useSnagAction`. Ship + push.
-3. **Batch 3**: Build `<ReportErrorBanner>`, `<InlinePhotoCapture>`, `<AddPlotForm>`. Migrate consumers. Ship + push.
+- Background agent (agentId recorded in session log) migrating DailyBrief + OrderDetailSheet + PlotTodoList to `useOrderEmail` hook, plus HelpTip rollout to SnagDialog / JobDetailClient sign-off / OrderDetailSheet / ContactsClient. Commits landing autonomously.
 
-**Follow-up audit items:**
+**Product priorities Keith named:**
 
-- Delete or adopt `/api/orders/bulk-status` endpoint.
-- Re-audit the 121 lint warnings — separate "truly dead" from "feature built but not wired up" and act on the second category.
-- End-to-end E2E tests via browser-based MCP (Claude_in_Chrome) for the unified flows — browser tests have been flaky during development.
+1. **Contractor Comms expansion** — Mini Programme shipped. Next: day-sheets tab, messages log, RAMS/method-statements upload per contractor, snags-assigned tab separate from general snags.
+2. **Analytics reconciliation audit** — confirm Daily Brief counts match Analytics dashboard (read-only audit first, fix after).
+3. **Critical Path Report legend** — Keith flagged missing.
+4. **Export buttons standardisation** — some reports have PDF, some Excel, some missing.
+5. **Report → Job drill-through** — reports currently dead-end browsing.
+6. **Performance audit** — profile N+1 and slow endpoints. Earlier fixes (batched findMany + in-memory maps) helped but no profiler run has been done.
 
-**Product priorities from Keith (in backlog, not yet promised):**
+**Rollout still to do:**
 
-- More comprehensive contractor comms (reason for unifying delay — the delay report needs to categorise by weather/contractor/material, feeding back into contractor performance metrics).
-- Walkthrough enhancements — already a primary mobile surface, deserves more unified UX with Daily Brief.
-- Dev Mode improvements — let Keith simulate multi-week build-outs deterministically.
+- **HelpTip** to more dialogs (snag, order detail, contact edit, add plot, etc.) — partial via bg agent.
+- **Unified Modal vs Dialog** — Walkthrough still has bespoke mobile-first Modal; either share it as BottomSheetDialog or migrate to Dialog.
+- **Supplier vs Contractor data-model** — both are Contacts with a type. Verify no duplicate-record drift.
+- **Template orders anchor UI polish** — anchor fields work but UI is power-user-level.
+- **Unlimited hierarchy depth UI** — creation supports N, render is 2-deep. Recursion needed in TemplateEditor's children map.
 
 ---
 
@@ -334,17 +387,29 @@ None critical as of commit `c85a0c9`. Cascade 59/59 passes, typecheck clean, lin
 - `src/lib/auth.ts` — NextAuth + stale-JWT fix
 - `src/lib/dev-date.ts` — date override for dev mode (use `getCurrentDateAtMidnight()` in render)
 
-### Hooks
-- `src/hooks/useJobAction.tsx` — job mutation + pre-start dialogs + cascade preview
-- `src/hooks/useDelayJob.tsx` — shared delay dialog (days or date input, reason capture)
+### Hooks (full list — check here BEFORE adding any new action button)
+- `src/hooks/useJobAction.tsx` — job mutations + pre-start dialogs + cascade preview
+- `src/hooks/useDelayJob.tsx` — delay dialog with weather auto-suggestion
+- `src/hooks/usePullForwardDecision.tsx` — 4-option pull-forward with constraint-aware picker
 - `src/hooks/useOrderStatus.ts` — order status transitions
-- `src/hooks/useSnagAction.ts` — snag status flip + request sign-off
-- `src/hooks/useRefreshOnFocus.ts` — refetch on window focus / popstate (uses refs initialised to 0 to avoid purity warnings)
+- `src/hooks/useSnagAction.ts` — snag status chip flips
+- `src/hooks/useJobContractorPicker.tsx` — contractor assignment (single/multi)
+- `src/hooks/useConfirmAction.tsx` — shared destructive-confirm dialog
+- `src/hooks/useCopyToClipboard.ts` — keyed copy-feedback
+- `src/hooks/usePlotCreation.ts` — 4 plot-creation paths
+- `src/hooks/useAddNote.tsx` — inline note dialog
+- `src/hooks/useOrderEmail.tsx` — supplier email (send + chase, rich template)
+- `src/hooks/useRefreshOnFocus.ts` — refetch on window focus / popstate
 
 ### Shared UI
-- `src/components/ui/toast.tsx` — `ToastProvider` + `useToast()` + `fetchErrorMessage()`
-- `src/components/ui/ClientOnly.tsx` — uses `useSyncExternalStore` to defer client-only rendering
-- `src/components/PostCompletionDialog.tsx` — post-completion cascade choice
+- `src/components/shared/StatusBadge.tsx` — `JobStatusBadge`, `OrderStatusBadge`, `SnagStatusBadge`, `SnagPriorityBadge`
+- `src/components/shared/ReportErrorBanner.tsx` — shared "Failed to load — Retry"
+- `src/components/shared/InlinePhotoCapture.tsx` — quick photo upload for jobs + snags
+- `src/components/shared/HelpTip.tsx` — ? icon + expandable explanation panel
+- `src/components/ui/toast.tsx` — `ToastProvider` + `useToast()` + `fetchErrorMessage()` (toast supports optional `action` button)
+- `src/components/ui/ClientOnly.tsx` — `useSyncExternalStore` to defer client-only rendering
+- `src/components/PostCompletionDialog.tsx` — post-completion cascade choice (not migrated to `usePullForwardDecision` by design — has orders + contractor steps)
+- `src/components/snags/SnagDialog.tsx` — canonical snag surface
 
 ### Docs
 - `docs/cascade-spec.md` — cascade engine contract + action table + invariants + test matrix
