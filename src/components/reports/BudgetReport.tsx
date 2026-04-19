@@ -12,6 +12,7 @@ import {
   ChevronDown,
   ChevronRight,
   AlertTriangle,
+  Briefcase,
 } from "lucide-react";
 import {
   Card,
@@ -264,6 +265,33 @@ export function BudgetReport({ siteId }: BudgetReportProps) {
                   </div>
                   <span className="font-medium text-red-600">
                     +{formatCurrency(item.variance)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Template budgets — average cost per house type. Apr 2026 audit:
+          this data was loaded by the API but never rendered. Useful for
+          "how much does a Detached cost vs a Semi" planning. */}
+      {data.availableTemplates && data.availableTemplates.length > 0 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-sm">
+              <Briefcase className="size-4 text-blue-600" />
+              Template Budgets ({data.availableTemplates.length})
+            </CardTitle>
+            <p className="text-xs text-muted-foreground">Average expected cost per template — use for pricing and comparison.</p>
+          </CardHeader>
+          <CardContent>
+            <div className="divide-y rounded-lg border">
+              {data.availableTemplates.map((t) => (
+                <div key={t.key} className="flex items-center justify-between px-3 py-2 text-sm">
+                  <p className="font-medium">{t.templateName}</p>
+                  <span className="font-mono text-xs font-medium">
+                    {formatCurrency(t.totalBudget)}
                   </span>
                 </div>
               ))}
