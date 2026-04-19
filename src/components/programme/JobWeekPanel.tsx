@@ -47,6 +47,7 @@ import { OrderDetailSheet } from "@/components/orders/OrderDetailSheet";
 import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 import { useDelayJob } from "@/hooks/useDelayJob";
 import { usePullForwardDecision } from "@/hooks/usePullForwardDecision";
+import { useOrderStatus, type OrderStatus } from "@/hooks/useOrderStatus";
 
 // ---------- Types ----------
 
@@ -263,7 +264,21 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
   const [actions, setActions] = useState<JobAction[]>([]);
   const [orders, setOrders] = useState<PanelOrder[]>([]);
   const [loading, setLoading] = useState(false);
-  const [actioningIds, setActioningIds] = useState<Set<string>>(new Set());
+
+  const { setOrderStatus, setManyOrderStatus, isPending: isOrderPending } = useOrderStatus({
+    onChange: (orderId, newStatus) => {
+      const now = new Date().toISOString();
+      setOrders((prev) =>
+        prev.map((o) => {
+          if (o.id !== orderId) return o;
+          const next = { ...o, status: newStatus };
+          if (newStatus === "ORDERED") next.dateOfOrder = now;
+          return next;
+        })
+      );
+      onOrderUpdated?.();
+    },
+  });
   const [noteText, setNoteText] = useState("");
   const [submittingNote, setSubmittingNote] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -859,23 +874,8 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
         onJobUpdated?.();
       }
       if (markDelivered && undeliveredOrders.length > 0) {
-        const results = await Promise.all(
-          undeliveredOrders.map((o) =>
-            fetch(`/api/orders/${o.id}`, {
-              method: "PUT",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ status: "DELIVERED" }),
-            })
-          )
-        );
-        const failed = results.find((r) => !r.ok);
-        if (failed) {
-          toast.error(await fetchErrorMessage(failed, "Failed to mark orders delivered"));
-          return;
-        }
-        setOrders((prev) =>
-          prev.map((o) => (undeliveredOrders.find((u) => u.id === o.id) ? { ...o, status: "DELIVERED" } : o))
-        );
+        const { failed } = await setManyOrderStatus(undeliveredOrders.map((o) => o.id), "DELIVERED", { silent: true });
+        if (failed.length > 0) return;
       }
       // Check for early start (working days — matches cascade engine)
       const today = new Date(); today.setHours(0, 0, 0, 0);
@@ -1045,35 +1045,12 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
     }
   }, []);
 
-  // Update order status (Mark Sent / Confirm Delivery)
+  // Update order status (Mark Sent / Confirm Delivery) — delegated to useOrderStatus
   const handleOrderAction = useCallback(
-    async (orderId: string, newStatus: string) => {
-      setActioningIds((prev) => new Set(prev).add(orderId));
-      try {
-        const res = await fetch(`/api/orders/${orderId}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ status: newStatus }),
-        });
-        if (!res.ok) {
-          toast.error(await fetchErrorMessage(res, "Failed to update order"));
-          return;
-        }
-        setOrders((prev) =>
-          prev.map((o) => (o.id === orderId ? { ...o, status: newStatus } : o))
-        );
-        onOrderUpdated?.();
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Failed to update order");
-      } finally {
-        setActioningIds((prev) => {
-          const next = new Set(prev);
-          next.delete(orderId);
-          return next;
-        });
-      }
+    (orderId: string, newStatus: OrderStatus) => {
+      void setOrderStatus(orderId, newStatus);
     },
-    [onOrderUpdated, toast]
+    [setOrderStatus]
   );
 
   // Delete photo
@@ -1499,7 +1476,7 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
                   </div>
                   <div className="space-y-2">
                     {orders.map((order) => {
-                      const isActioning = actioningIds.has(order.id);
+                      const isActioning = isOrderPending(order.id);
                       const statusColors: Record<string, string> = {
                         PENDING: "bg-slate-100 text-slate-600",
                         ORDERED: "bg-blue-100 text-blue-700",
