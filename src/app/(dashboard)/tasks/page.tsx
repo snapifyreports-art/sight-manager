@@ -1,16 +1,12 @@
-import { auth } from "@/lib/auth";
 import { redirect } from "next/navigation";
-import { TasksClient } from "@/components/tasks/TasksClient";
 
 export const dynamic = "force-dynamic";
 
-export const metadata = {
-  title: "Tasks | Sight Manager",
-};
-
-export default async function TasksPage() {
-  const session = await auth();
-  if (!session) redirect("/login");
-
-  return <TasksClient />;
+/**
+ * `/tasks` retired — merged into `/daily-brief` as the "All Sites" mode.
+ * Keith Apr 2026 Q1=b. This redirect keeps any old bookmarks + email
+ * links working.
+ */
+export default function TasksPage() {
+  redirect("/daily-brief");
 }

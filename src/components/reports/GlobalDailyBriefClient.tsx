@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter, useSearchParams } from "next/navigation";
-import { CalendarDays, Building2 } from "lucide-react";
+import { Building2 } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -42,26 +42,19 @@ export function GlobalDailyBriefClient({ sites }: GlobalDailyBriefClientProps) {
 
   return (
     <div className="space-y-4 p-4 sm:p-6">
-      {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <CalendarDays className="size-5 text-blue-600" />
-          <h1 className="text-xl font-semibold">
-            {selectedSite ? `Daily Brief — ${selectedSite.name}` : "Tasks & Daily Brief"}
-          </h1>
-        </div>
-
+      {/* Header — note: the child components render their own <h1> + context.
+          This wrapper just provides the site picker at the top. */}
+      <div className="flex flex-wrap items-center justify-end gap-3">
         {/* Site picker */}
-        <Select value={selectedSiteId} onValueChange={(v) => handleSiteChange(v ?? "")}>
+        <Select value={selectedSiteId || "all"} onValueChange={(v) => handleSiteChange(v === "all" ? "" : (v ?? ""))}>
           <SelectTrigger className="h-9 w-auto min-w-[200px] text-sm">
             <Building2 className="mr-2 size-4 shrink-0 text-muted-foreground" />
             <span className="flex-1 text-left">
-              {selectedSite
-                ? selectedSite.name
-                : <span className="text-muted-foreground">Select a site…</span>}
+              {selectedSite ? selectedSite.name : "All Sites"}
             </span>
           </SelectTrigger>
           <SelectContent>
+            <SelectItem value="all">All Sites</SelectItem>
             {sites.map((s) => (
               <SelectItem key={s.id} value={s.id}>
                 {s.name}

@@ -397,14 +397,15 @@ export function TasksClient() {
     <div className="space-y-6">
       <Breadcrumbs items={[
         { label: "Dashboard", href: "/dashboard" },
-        { label: "Tasks" },
+        { label: "Daily Brief", href: "/daily-brief" },
+        { label: "All Sites" },
       ]} />
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Tasks</h1>
+        <h1 className="text-2xl font-bold tracking-tight">Daily Brief — All Sites</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           {totalActions > 0
-            ? `${totalActions} action${totalActions !== 1 ? "s" : ""} require your attention`
-            : "All caught up! No pending actions."}
+            ? `${totalActions} action${totalActions !== 1 ? "s" : ""} need your attention across every site you can see. Use the site picker above to focus on one.`
+            : "All caught up across every site. Use the site picker above to dig into one."}
         </p>
       </div>
 

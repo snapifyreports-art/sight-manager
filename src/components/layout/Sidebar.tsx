@@ -87,7 +87,7 @@ const SITE_TAB_GROUPS = [
 // deep-links but aren't in the sidebar.
 const navItems = [
   { label: "Dashboard",     href: "/dashboard",   icon: LayoutDashboard },
-  { label: "Tasks",         href: "/tasks",       icon: ClipboardList },
+  { label: "Daily Brief",   href: "/daily-brief", icon: ClipboardList },
   { label: "Suppliers",     href: "/suppliers?tab=suppliers",   icon: FileBox },
   { label: "Contractors",   href: "/suppliers?tab=contractors", icon: HardHat },
   { label: "Templates",     href: "/settings?tab=templates", icon: Layers },
