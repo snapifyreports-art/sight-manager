@@ -81,12 +81,15 @@ export async function GET(
     //
     // If we find a parent with children overlapping this job's window,
     // skip it and take the prior leaf instead.
+    // Explicit where — avoid `{ not: undefined }` which Prisma treats as
+    // "no constraint" (matches everything). When parentId is null, don't
+    // apply the parent exclusion at all; when set, exclude that exact id.
     const siblings = await prisma.job.findMany({
       where: {
         plotId: job.plotId,
         sortOrder: { lt: job.sortOrder },
         status: { not: "ON_HOLD" },
-        id: { not: job.parentId ?? undefined },
+        ...(job.parentId ? { id: { not: job.parentId } } : {}),
       },
       orderBy: { sortOrder: "desc" },
       select: {
