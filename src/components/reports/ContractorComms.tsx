@@ -539,16 +539,21 @@ function SnagCard({ snag, siteId }: { snag: Snag; siteId: string }) {
 function useLastShareSent(siteId: string, contactId: string) {
   const key = `share-sent:${siteId}:${contactId}`;
   const logKey = `share-log:${siteId}:${contactId}`;
-  const [lastSent, setLastSent] = useState<string | null>(null);
-  const [log, setLog] = useState<string[]>([]);
-
-  useEffect(() => {
+  // Lazy initializers read from localStorage on mount — avoids an effect
+  // + setState cascade (which React's compiler now lints against, even
+  // though syncing from an external store is the legit use case for that
+  // pattern). We still guard for SSR where window is undefined.
+  const [lastSent, setLastSent] = useState<string | null>(() => {
+    if (typeof window === "undefined") return null;
+    try { return localStorage.getItem(key); } catch { return null; }
+  });
+  const [log, setLog] = useState<string[]>(() => {
+    if (typeof window === "undefined") return [];
     try {
-      setLastSent(localStorage.getItem(key));
       const raw = localStorage.getItem(logKey);
-      setLog(raw ? JSON.parse(raw) : []);
-    } catch { /* SSR / private mode */ }
-  }, [key, logKey]);
+      return raw ? JSON.parse(raw) : [];
+    } catch { return []; }
+  });
 
   const markSent = useCallback(() => {
     const now = new Date().toISOString();
