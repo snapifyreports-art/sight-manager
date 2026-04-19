@@ -8,7 +8,7 @@ import { PostCompletionDialog } from "@/components/PostCompletionDialog";
 import { useToast } from "@/components/ui/toast";
 import { getCurrentDate } from "@/lib/dev-date";
 import { useDevDate } from "@/lib/dev-date-context";
-import { buildOrderMailto } from "@/lib/order-email";
+import { useOrderEmail } from "@/hooks/useOrderEmail";
 import { useJobAction } from "@/hooks/useJobAction";
 import { useAddNote } from "@/hooks/useAddNote";
 import { useDelayJob } from "@/hooks/useDelayJob";
@@ -443,6 +443,11 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
 
   // Centralised delay-job flow (shared across Daily Brief, Programme, Walkthrough, Tasks, Jobs)
   const { openDelayDialog, dialogs: delayDialogs } = useDelayJob(
+    () => setRefreshKey((k) => k + 1)
+  );
+
+  // Centralised supplier email flow — rich template, marks ORDERED on send.
+  const { openSendOrderEmail, dialogs: orderEmailDialogs } = useOrderEmail(
     () => setRefreshKey((k) => k + 1)
   );
 
@@ -2057,22 +2062,41 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                     const o = group[0];
                     const groupIds = group.map((g) => g.id);
                     const anyPending = groupIds.some((id) => isOrderPending(id));
-                    const mailto = o.supplier.contactEmail
-                      ? buildOrderMailto(o.supplier.contactEmail, {
-                          supplierName: o.supplier.name,
-                          supplierContactName: o.supplier.contactName,
-                          supplierAccountNumber: o.supplier.accountNumber,
-                          jobName: o.job.name,
-                          siteName: data.site.name,
-                          siteAddress: data.site.address,
-                          sitePostcode: data.site.postcode,
-                          plotNumbers: group.map((g) => g.job.plot.plotNumber ? `Plot ${g.job.plot.plotNumber}` : g.job.plot.name),
-                          items: (o.orderItems || []).map((i) => ({ name: i.name, quantity: i.quantity, unit: i.unit, unitCost: i.unitCost })),
-                          itemsDescriptionFallback: o.itemsDescription,
-                          expectedDeliveryDate: o.expectedDeliveryDate,
-                          orderDate: o.dateOfOrder,
-                        })
-                      : null;
+                    const hasEmail = !!o.supplier.contactEmail;
+                    const sendGroup = () => openSendOrderEmail({
+                      supplierId: o.supplier.id,
+                      supplierName: o.supplier.name,
+                      contactName: o.supplier.contactName,
+                      contactEmail: o.supplier.contactEmail,
+                      accountNumber: o.supplier.accountNumber,
+                      siteNames: [data.site.name],
+                      orders: group.map((g) => ({
+                        id: g.id,
+                        job: {
+                          id: g.job.id,
+                          name: g.job.name,
+                          plot: {
+                            name: g.job.plot.name,
+                            plotNumber: g.job.plot.plotNumber,
+                            site: {
+                              id: siteId,
+                              name: data.site.name,
+                              address: data.site.address,
+                              postcode: data.site.postcode,
+                            },
+                          },
+                        },
+                        expectedDeliveryDate: g.expectedDeliveryDate,
+                        dateOfOrder: g.dateOfOrder,
+                        itemsDescription: g.itemsDescription,
+                        items: (g.orderItems || []).map((i) => ({
+                          name: i.name,
+                          quantity: i.quantity,
+                          unit: i.unit,
+                          unitCost: i.unitCost,
+                        })),
+                      })),
+                    });
                     return (
                       <div key={`${o.supplier.id}__${o.job.name}`} className="rounded border p-2 text-sm">
                         <div className="flex flex-wrap items-center gap-1.5">
@@ -2107,15 +2131,15 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                             <Loader2 className="size-4 animate-spin text-muted-foreground" />
                           ) : (
                             <>
-                              {mailto && (
+                              {hasEmail && (
                                 <Button variant="outline" size="sm" className="h-6 border-violet-200 px-2 text-[10px] text-violet-700 hover:bg-violet-50"
-                                  onClick={() => { window.open(mailto, "_blank"); handleGroupOrderAction(groupIds, "ORDERED"); }}>
+                                  onClick={sendGroup}>
                                   <Mail className="mr-1 size-2.5" />{group.length > 1 ? `Send (${group.length})` : "Send Order"}
                                 </Button>
                               )}
                               <Button variant="outline" size="sm" className="h-6 border-blue-200 px-2 text-[10px] text-blue-700 hover:bg-blue-50"
                                 onClick={() => handleGroupOrderAction(groupIds, "ORDERED")}>
-                                <Package className="mr-1 size-2.5" />{mailto ? "Mark Sent" : "Place Order"}
+                                <Package className="mr-1 size-2.5" />{hasEmail ? "Mark Sent" : "Place Order"}
                               </Button>
                             </>
                           )}
@@ -2765,22 +2789,41 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                 const o = group[0];
                 const groupIds = group.map((g) => g.id);
                 const anyPending = groupIds.some((id) => isOrderPending(id));
-                const mailto = o.supplier.contactEmail
-                  ? buildOrderMailto(o.supplier.contactEmail, {
-                      supplierName: o.supplier.name,
-                      supplierContactName: o.supplier.contactName,
-                      supplierAccountNumber: o.supplier.accountNumber,
-                      jobName: o.job.name,
-                      siteName: data.site.name,
-                      siteAddress: data.site.address,
-                      sitePostcode: data.site.postcode,
-                      plotNumbers: group.map((g) => g.job.plot.plotNumber ? `Plot ${g.job.plot.plotNumber}` : g.job.plot.name),
-                      items: (o.orderItems || []).map((i) => ({ name: i.name, quantity: i.quantity, unit: i.unit, unitCost: i.unitCost })),
-                      itemsDescriptionFallback: o.itemsDescription,
-                      expectedDeliveryDate: o.expectedDeliveryDate,
-                      orderDate: o.dateOfOrder,
-                    })
-                  : null;
+                const hasEmail = !!o.supplier.contactEmail;
+                const sendGroup = () => openSendOrderEmail({
+                  supplierId: o.supplier.id,
+                  supplierName: o.supplier.name,
+                  contactName: o.supplier.contactName,
+                  contactEmail: o.supplier.contactEmail,
+                  accountNumber: o.supplier.accountNumber,
+                  siteNames: [data.site.name],
+                  orders: group.map((g) => ({
+                    id: g.id,
+                    job: {
+                      id: g.job.id,
+                      name: g.job.name,
+                      plot: {
+                        name: g.job.plot.name,
+                        plotNumber: g.job.plot.plotNumber,
+                        site: {
+                          id: siteId,
+                          name: data.site.name,
+                          address: data.site.address,
+                          postcode: data.site.postcode,
+                        },
+                      },
+                    },
+                    expectedDeliveryDate: g.expectedDeliveryDate,
+                    dateOfOrder: g.dateOfOrder,
+                    itemsDescription: g.itemsDescription,
+                    items: (g.orderItems || []).map((i) => ({
+                      name: i.name,
+                      quantity: i.quantity,
+                      unit: i.unit,
+                      unitCost: i.unitCost,
+                    })),
+                  })),
+                });
                 return (
                   <div key={`${o.supplier.id}__${o.job.name}`} className="rounded border p-2 text-sm">
                     <div className="flex flex-wrap items-center gap-1.5">
@@ -2815,15 +2858,15 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                         <Loader2 className="size-4 animate-spin text-muted-foreground" />
                       ) : (
                         <>
-                          {mailto && (
+                          {hasEmail && (
                             <Button variant="outline" size="sm" className="h-6 border-violet-200 px-2 text-[10px] text-violet-700 hover:bg-violet-50"
-                              onClick={() => { window.open(mailto, "_blank"); handleGroupOrderAction(groupIds, "ORDERED"); }}>
+                              onClick={sendGroup}>
                               <Mail className="mr-1 size-2.5" />{group.length > 1 ? `Send (${group.length})` : "Send Order"}
                             </Button>
                           )}
                           <Button variant="outline" size="sm" className="h-6 border-blue-200 px-2 text-[10px] text-blue-700 hover:bg-blue-50"
                             onClick={() => handleGroupOrderAction(groupIds, "ORDERED")}>
-                            <Package className="mr-1 size-2.5" />{mailto ? "Mark Sent" : "Place Order"}
+                            <Package className="mr-1 size-2.5" />{hasEmail ? "Mark Sent" : "Place Order"}
                           </Button>
                         </>
                       )}
@@ -2873,6 +2916,9 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
 
       {/* Delay dialog — delegated to useDelayJob hook (rendered via {delayDialogs} below). */}
       {delayDialogs}
+
+      {/* Supplier email dialog — delegated to useOrderEmail hook. */}
+      {orderEmailDialogs}
 
       {/* Rained Off Dialog (UX #4) */}
       <Dialog open={rainedOffDialogOpen} onOpenChange={setRainedOffDialogOpen}>
