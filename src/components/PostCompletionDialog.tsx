@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useOrderStatus } from "@/hooks/useOrderStatus";
+import { HelpTip } from "@/components/shared/HelpTip";
 
 interface NextJobOrder {
   id: string;
@@ -169,7 +170,13 @@ export function PostCompletionDialog({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl max-h-[90vh] overflow-y-auto">
+      <div className="relative w-full max-w-md rounded-2xl bg-white shadow-2xl max-h-[90vh] overflow-y-auto">
+        <HelpTip title="What this dialog does" anchor="below-left">
+          <p><strong>Purpose:</strong> after sign-off, this is your chance to kick off the next job, settle any outstanding orders, and confirm the contractor for whatever comes next.</p>
+          <p><strong>Three steps:</strong> Orders (mark delivered or chase), Contractor (confirm next contractor is ready), then a Decision (start today / start Monday / push / leave).</p>
+          <p><strong>Why not automatic?</strong> Site reality — weather, contractors, deliveries — changes. Manual sign-off lets you match the programme to what&apos;s actually happening on site.</p>
+          <p><strong>Tip:</strong> you can close this and come back later — the signed-off job stays on your Daily Brief until you decide.</p>
+        </HelpTip>
         {/* Header — always shown */}
         <div className="border-b border-border/40 px-6 py-5">
           <div className="mb-3 flex items-center gap-2">

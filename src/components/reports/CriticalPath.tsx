@@ -218,6 +218,36 @@ export function CriticalPath({ siteId }: CriticalPathProps) {
         </div>
       )}
 
+      {/* Top-level legend — always visible so Keith can read the colours
+          without expanding a plot card first. */}
+      <div className="flex flex-wrap gap-3 rounded-md border bg-slate-50 px-3 py-2 text-[11px] text-slate-600">
+        <span className="font-medium text-slate-700">Legend:</span>
+        <span className="flex items-center gap-1">
+          <span className="inline-block size-2.5 rounded bg-red-400 ring-1 ring-red-500" />
+          Critical path
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="inline-block size-2.5 rounded bg-blue-400" />
+          In progress
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="inline-block size-2.5 rounded bg-green-400" />
+          Completed
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="inline-block size-2.5 rounded bg-yellow-400" />
+          On hold
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="inline-block size-2.5 rounded bg-slate-200" />
+          Not started
+        </span>
+        <span className="flex items-center gap-1">
+          <CloudRain className="size-3 text-sky-500" />
+          Weather-affected
+        </span>
+      </div>
+
       {/* Per-plot critical paths */}
       {filteredPlots.map((plot) => {
         const isExpanded = expandedPlots.has(plot.plotId);
@@ -353,25 +383,6 @@ export function CriticalPath({ siteId }: CriticalPathProps) {
                   ))}
                 </div>
 
-                {/* Legend */}
-                <div className="mt-3 flex flex-wrap gap-3 border-t pt-2 text-[10px] text-muted-foreground">
-                  <span className="flex items-center gap-1">
-                    <span className="inline-block size-2.5 rounded bg-red-400 ring-1 ring-red-500" />
-                    Critical path
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <span className="inline-block size-2.5 rounded bg-blue-400" />
-                    In progress
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <span className="inline-block size-2.5 rounded bg-green-400" />
-                    Completed
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <span className="inline-block size-2.5 rounded bg-slate-200" />
-                    Not started
-                  </span>
-                </div>
               </CardContent>
             )}
           </Card>

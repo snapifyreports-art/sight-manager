@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { format, addDays } from "date-fns";
-import { buildOrderMailto } from "@/lib/order-email";
 import {
   Package,
   Loader2,
@@ -45,6 +44,7 @@ import {
 import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 import { OrderStatusBadge } from "@/components/shared/StatusBadge";
 import { useOrderStatus, type OrderStatus } from "@/hooks/useOrderStatus";
+import { useOrderEmail } from "@/hooks/useOrderEmail";
 
 // ---------- Types ----------
 
@@ -180,6 +180,11 @@ export function SiteOrders({ siteId }: SiteOrdersProps) {
       );
     },
   });
+
+  // Shared supplier-email flow — "one source of truth" with Daily Brief,
+  // Tasks, OrderDetailSheet and PlotTodoList. User edits in the dialog,
+  // opens their mail client, and the orders auto-flip to ORDERED.
+  const { openSendOrderEmail, dialogs: orderEmailDialogs } = useOrderEmail();
 
   // Wizard state
   const [wizardOpen, setWizardOpen] = useState(false);
@@ -601,22 +606,43 @@ export function SiteOrders({ siteId }: SiteOrdersProps) {
             const items = order.orderItems;
             const itemTotal = items.reduce((s, i) => s + i.quantity * i.unitCost, 0);
             const groupTotal = itemTotal * group.length;
-            const mailto = order.supplier.contactEmail
-              ? buildOrderMailto(order.supplier.contactEmail, {
-                  supplierName: order.supplier.name,
-                  supplierContactName: order.supplier.contactName,
-                  supplierAccountNumber: order.supplier.accountNumber,
-                  jobName: order.job.name,
-                  siteName: siteInfo?.name || "",
-                  siteAddress: siteInfo?.address,
-                  sitePostcode: siteInfo?.postcode,
-                  plotNumbers: group.map((g) => g.job.plot.plotNumber ? `Plot ${g.job.plot.plotNumber}` : g.job.plot.name),
-                  items: items.map((i) => ({ name: i.name, quantity: i.quantity, unit: i.unit, unitCost: i.unitCost })),
-                  itemsDescriptionFallback: order.itemsDescription,
-                  expectedDeliveryDate: order.expectedDeliveryDate,
-                  orderDate: order.dateOfOrder,
-                })
-              : null;
+            const hasSupplierEmail = !!order.supplier.contactEmail;
+            // Invoke the shared order-email dialog for this supplier group.
+            // Same rich template as the four other surfaces that send orders.
+            const sendGroupEmail = () => openSendOrderEmail({
+              supplierId: order.supplier.id,
+              supplierName: order.supplier.name,
+              contactName: order.supplier.contactName,
+              contactEmail: order.supplier.contactEmail,
+              accountNumber: order.supplier.accountNumber,
+              siteNames: [siteInfo?.name || ""],
+              orders: group.map((g) => ({
+                id: g.id,
+                job: {
+                  id: g.job.id,
+                  name: g.job.name,
+                  plot: {
+                    name: g.job.plot.name,
+                    plotNumber: g.job.plot.plotNumber,
+                    site: {
+                      id: siteId,
+                      name: siteInfo?.name || "",
+                      address: siteInfo?.address ?? null,
+                      postcode: siteInfo?.postcode ?? null,
+                    },
+                  },
+                },
+                expectedDeliveryDate: g.expectedDeliveryDate,
+                dateOfOrder: g.dateOfOrder,
+                itemsDescription: g.itemsDescription,
+                items: g.orderItems.map((i) => ({
+                  name: i.name,
+                  quantity: i.quantity,
+                  unit: i.unit,
+                  unitCost: i.unitCost,
+                })),
+              })),
+            });
 
             return (
               <Card
@@ -701,17 +727,17 @@ export function SiteOrders({ siteId }: SiteOrdersProps) {
                       <>
                         {dominantStatus === "PENDING" && (
                           <>
-                            {mailto && (
+                            {hasSupplierEmail && (
                               <Button variant="outline" size="sm"
                                 className="h-6 flex-1 gap-1 border-violet-200 text-[11px] text-violet-700 hover:bg-violet-50"
-                                onClick={() => { window.open(mailto, "_blank"); handleGroupStatus(groupIds, "ORDERED"); }}>
+                                onClick={sendGroupEmail}>
                                 <Mail className="size-2.5" />{group.length > 1 ? `Send (${group.length})` : "Send Order"}
                               </Button>
                             )}
                             <Button variant="outline" size="sm"
                               className="h-6 flex-1 gap-1 border-blue-200 text-[11px] text-blue-700 hover:bg-blue-50"
                               onClick={() => handleGroupStatus(groupIds, "ORDERED")}>
-                              <Package className="size-2.5" />{mailto ? "Mark Sent" : "Place Order"}
+                              <Package className="size-2.5" />{hasSupplierEmail ? "Mark Sent" : "Place Order"}
                             </Button>
                           </>
                         )}
@@ -1199,6 +1225,8 @@ export function SiteOrders({ siteId }: SiteOrdersProps) {
           )}
         </DialogContent>
       </Dialog>
+
+      {orderEmailDialogs}
     </div>
   );
 }

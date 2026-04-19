@@ -303,7 +303,8 @@ Every action flows through one of these — never duplicate. Before adding any b
 - **One template** now — `buildOrderEmailBody` in `src/lib/order-email.ts` (rich: account number, site address, items table with unit costs, subtotals, per-plot totals).
 - `useOrderEmail` refactored to call `buildOrderEmailBody` internally. Subject: `Material Order — {job} — {site}{(N plots)}`. Chase mode adds "URGENT" banner and overdue-days context.
 - `/api/tasks` response enriched with `supplier.accountNumber`, `site.address/postcode`, `plot.plotNumber`, `orderItems.unitCost` so TasksClient passes rich data.
-- **All callers migrated** — DailyBrief, OrderDetailSheet, PlotTodoList, TasksClient all use `useOrderEmail` hook. No remaining direct `buildOrderMailto` call sites in UI. The function still exists in `src/lib/order-email.ts` as the low-level builder the hook delegates to.
+- **All UI callers migrated** — DailyBrief, OrderDetailSheet, PlotTodoList, TasksClient, **SiteOrders** all use `useOrderEmail` hook. No remaining direct `buildOrderMailto` call sites in UI.
+- One non-UI remnant: `useJobAction.tsx` still calls `buildOrderMailto` directly inside its internal "Send order" button (the pre-start order-warning dialog). This is inside the canonical job-action hook, not a duplicated UI template, so it's defensible — but worth revisiting if `useOrderEmail` ever gains a state-less "build mailto only" export.
 
 ### Interaction rules banked to memory
 
@@ -368,7 +369,7 @@ These are the items that came up during the Apr 2026 session and were explicitly
 | 12 | **Walkthrough Modal → BottomSheetDialog unification** | `SiteWalkthrough.tsx` still has a bespoke mobile-first Modal component. Decision pending: share it as a reusable `BottomSheetDialog` in `src/components/ui/` OR migrate it to the existing `Dialog` with a `variant="bottom-sheet"` prop. | Ask Keith multiple-choice: (a) extract as its own shared BottomSheetDialog, (b) merge into existing Dialog with variant ⭐, (c) leave alone for now. | S-M |
 | 13 | **Supplier vs Contractor data-model dedup check** | Both are `Contact` rows with a `type` field (`SUPPLIER` / `CONTRACTOR`). Works fine but Keith flagged "is there a record where something can be both?" | Query `SELECT contactIds FROM contacts GROUP BY email HAVING COUNT(*) > 1` on the prod DB. Check if duplicates exist. Then either de-dupe via merge UI or enforce unique-email constraint. Read-only audit first. | S |
 | 14 | **Template orders anchor UI polish** | Anchor fields (`anchorWeek`, `anchorJobId`) work functionally in TemplateEditor but the UI is "power-user level" — hard to understand without domain knowledge. | Add `<HelpTip>` explaining what "anchor" means (e.g., "orders are scheduled relative to this point"). Then consider a visual affordance like "Orders will arrive 2 weeks before brickwork starts". | S |
-| 15 | **`/api/orders/bulk-status` orphan endpoint** | Endpoint exists but no user-facing caller definitively uses it. TasksClient's `handleMarkGroupSent` might POST to it — worth double-checking vs. per-order `PUT /api/orders/:id`. | Grep the codebase for `bulk-status` callers. If still zero, delete the endpoint. If TasksClient does use it and it's atomic-different-semantics, document that in a comment. | S |
+| 15 | ~~**`/api/orders/bulk-status` orphan endpoint**~~ | **RESOLVED** after handover audit: grep found `TasksClient:320` (`handleMarkGroupSent` POSTs to it for atomic-bulk-ORDERED) and `DailySiteBrief` uses the sibling `/api/sites/[id]/bulk-status` for bulk start/complete. Both endpoints are live and used. Keep. | N/A — resolved. Keep a comment in each endpoint naming its caller for future clarity. | — |
 | 16 | **HelpTip rollout — remaining dialogs** | SnagDialog, JobDetailClient sign-off, OrderDetailSheet, ContactsClient done. Next candidates: AddPlotDialog, CreateSiteWizard steps, TemplateEditor's Split dialog, PostCompletionDialog. | Add `<HelpTip>` to each with a 1-2 sentence explanation of the dialog's purpose. Use the `anchor="below-right"` pattern. | S each |
 
 ### Intentional Non-Migrations (keep these as-is unless Keith says otherwise)
@@ -399,7 +400,7 @@ Nothing is in flight. All background agents have completed their runs as of comm
 1. **Critical Path Report legend** (row 8 in deferred table) — pure UI add, probably <30 min.
 2. **Template orders anchor HelpTip** (row 14) — adds clarity to an existing feature. Use the already-built HelpTip component.
 3. **HelpTip rollout to remaining dialogs** (row 16) — same pattern, mechanical.
-4. **`bulk-status` endpoint decision** (row 15) — grep, then either delete or document. 10 min.
+4. ~~`bulk-status` endpoint decision~~ — resolved; it IS used. (See row 15.)
 
 ### Priority 2 — Keith explicitly named
 
