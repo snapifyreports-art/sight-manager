@@ -39,6 +39,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { HelpTip } from "@/components/shared/HelpTip";
 import { useOrderStatus } from "@/hooks/useOrderStatus";
+import { buildOrderEmailBody } from "@/lib/order-email";
 
 // ── Input shapes ────────────────────────────────────────────────────────
 
@@ -46,6 +47,9 @@ export interface OrderEmailItem {
   name: string;
   quantity: number;
   unit: string;
+  /** Optional — only included if we know it. Rich template uses it
+   *  for per-line totals. Missing = rendered as "-" in the table. */
+  unitCost?: number;
 }
 
 export interface ChaseOrderInput {
@@ -53,11 +57,15 @@ export interface ChaseOrderInput {
   supplierName: string;
   supplierContactName: string | null;
   supplierContactEmail: string | null;
+  supplierAccountNumber?: string | null;
   jobId: string;
   jobName: string;
   plotName: string;
+  plotNumber?: string | null;
   siteId: string;
   siteName: string;
+  siteAddress?: string | null;
+  sitePostcode?: string | null;
   itemsDescription: string | null;
   items: OrderEmailItem[];
   expectedDeliveryDate: string | null;
@@ -69,10 +77,21 @@ export interface SendOrderGroupInput {
   supplierName: string;
   contactName: string | null;
   contactEmail: string | null;
+  accountNumber?: string | null;
   orders: Array<{
     id: string;
-    job: { id: string; name: string; plot: { name: string; site: { id: string; name: string } } };
+    job: {
+      id: string;
+      name: string;
+      plot: {
+        name: string;
+        plotNumber?: string | null;
+        site: { id: string; name: string; address?: string | null; postcode?: string | null };
+      };
+    };
     expectedDeliveryDate: string | null;
+    dateOfOrder?: string | null;
+    itemsDescription?: string | null;
     items: OrderEmailItem[];
   }>;
   /** Unique site names covered by the orders in this group. */
@@ -109,27 +128,47 @@ export function useOrderEmail(onSent?: (mode: Mode) => void): Result {
   const { setManyOrderStatus } = useOrderStatus({ silent: true });
 
   // ─── Chase (overdue delivery) ────────────────────────────────────────
+  // Uses the same rich body builder as send-order so suppliers see a
+  // consistent format; the `urgentDelivery` flag adds the ASAP banner at
+  // the top plus the "overdue" context.
   const openChaseOrderEmail = useCallback((o: ChaseOrderInput) => {
-    const contactName = o.supplierContactName || o.supplierName;
-    const itemsList = o.items.length > 0
-      ? o.items.map((i) => `${i.quantity} ${i.unit} ${i.name}`).join(", ")
-      : o.itemsDescription || "materials";
+    const plotLabel = o.plotNumber ? `Plot ${o.plotNumber}` : o.plotName;
+    const days = o.daysOverdue;
     const expectedDate = o.expectedDeliveryDate
       ? format(new Date(o.expectedDeliveryDate), "dd MMM yyyy")
       : "N/A";
-    const days = o.daysOverdue;
+
+    // Build the shared rich body then prepend the chase context.
+    const richBody = buildOrderEmailBody({
+      supplierName: o.supplierName,
+      supplierContactName: o.supplierContactName,
+      supplierAccountNumber: o.supplierAccountNumber ?? null,
+      jobName: o.jobName,
+      siteName: o.siteName,
+      siteAddress: o.siteAddress ?? null,
+      sitePostcode: o.sitePostcode ?? null,
+      plotNumbers: [plotLabel],
+      items: o.items.map((i) => ({
+        name: i.name,
+        quantity: i.quantity,
+        unit: i.unit,
+        unitCost: i.unitCost ?? 0,
+      })),
+      itemsDescriptionFallback: o.itemsDescription,
+      expectedDeliveryDate: o.expectedDeliveryDate,
+      urgentDelivery: true,
+    });
+    // Inject the overdue context just after the greeting (first blank line).
+    const chaseNote = `This order was due on ${expectedDate} and is now ${days} day${days !== 1 ? "s" : ""} overdue. Please confirm the updated delivery date at your earliest convenience.`;
+    const lines = richBody.split("\n");
+    // Insert after the greeting (line 0) and its blank line (line 1)
+    const body = [...lines.slice(0, 2), chaseNote, ...lines.slice(2)].join("\n");
 
     setDraft({
       mode: "chase",
       recipient: o.supplierContactEmail ?? "",
-      subject: `Overdue Delivery — Order for ${o.jobName} at ${o.siteName}`,
-      body:
-        `Hi ${contactName},\n\n` +
-        `We are chasing delivery of the following order for ${o.jobName} at ${o.siteName}, ${o.plotName}:\n\n` +
-        `Items: ${itemsList}\n\n` +
-        `The expected delivery date was ${expectedDate} and the order is now ${days} day${days !== 1 ? "s" : ""} overdue.\n\n` +
-        `Please confirm the updated delivery date at your earliest convenience.\n\n` +
-        `Regards`,
+      subject: `Overdue Delivery — ${o.jobName} — ${o.siteName}`,
+      body,
       eventDescription: `Chased ${o.supplierName} for overdue delivery — ${o.jobName}`,
       eventSiteId: o.siteId,
       eventJobId: o.jobId,
@@ -137,52 +176,76 @@ export function useOrderEmail(onSent?: (mode: Mode) => void): Result {
   }, []);
 
   // ─── Send order (grouped by supplier) ────────────────────────────────
+  // Delegates to the shared buildOrderEmailBody in src/lib/order-email.ts
+  // — same rich format as Daily Brief and OrderDetailSheet, so suppliers
+  // see one consistent professional template no matter which screen
+  // Keith sends from.
   const openSendOrderEmail = useCallback((group: SendOrderGroupInput) => {
-    const contactName = group.contactName || group.supplierName;
-    const siteNames = group.siteNames.join(", ");
-    const plotNames = [...new Set(group.orders.map((o) => o.job.plot.name))].join(", ");
-
-    // Aggregate items across all orders in the group (sum quantities per name+unit).
+    // Aggregate items across all orders in the group.
     const itemMap = new Map<string, OrderEmailItem>();
     for (const order of group.orders) {
       for (const item of order.items) {
         const key = `${item.name}|||${item.unit}`;
         const existing = itemMap.get(key);
-        if (existing) existing.quantity += item.quantity;
-        else itemMap.set(key, { ...item });
+        if (existing) {
+          existing.quantity += item.quantity;
+        } else {
+          itemMap.set(key, { ...item });
+        }
       }
     }
     const aggregated = Array.from(itemMap.values());
-    const itemsList = aggregated.length > 0
-      ? aggregated.map((i) => `- ${i.quantity} ${i.unit} ${i.name}`).join("\n")
-      : "Materials as discussed";
 
-    // Delivery dates — single, range, or ASAP.
+    const firstOrder = group.orders[0];
+    const firstJob = firstOrder.job;
+    const firstSite = firstJob.plot.site;
+    const plotLabels = [...new Set(
+      group.orders.map((o) => o.job.plot.plotNumber
+        ? `Plot ${o.job.plot.plotNumber}`
+        : o.job.plot.name)
+    )];
+
+    // Pick the earliest delivery date across the group (or null).
     const deliveryTimes = group.orders
       .filter((o) => o.expectedDeliveryDate)
       .map((o) => new Date(o.expectedDeliveryDate!).getTime());
-    const uniqueTimes = [...new Set(deliveryTimes)];
-    const deliveryLine = uniqueTimes.length === 0
-      ? "Required delivery date: ASAP"
-      : uniqueTimes.length === 1
-        ? `Required delivery date: ${format(new Date(uniqueTimes[0]), "dd MMM yyyy")}`
-        : `Required delivery dates: ${format(new Date(Math.min(...uniqueTimes)), "dd MMM yyyy")} — ${format(new Date(Math.max(...uniqueTimes)), "dd MMM yyyy")}`;
+    const earliestDelivery = deliveryTimes.length > 0
+      ? new Date(Math.min(...deliveryTimes)).toISOString()
+      : null;
+    // Items-description fallback — use the first order's description when
+    // there are no structured items but a description exists.
+    const firstWithDescription = group.orders.find((o) => !!o.itemsDescription);
 
-    const firstJob = group.orders[0].job;
+    const body = buildOrderEmailBody({
+      supplierName: group.supplierName,
+      supplierContactName: group.contactName,
+      supplierAccountNumber: group.accountNumber ?? null,
+      jobName: firstJob.name,
+      siteName: firstSite.name,
+      siteAddress: firstSite.address ?? null,
+      sitePostcode: firstSite.postcode ?? null,
+      plotNumbers: plotLabels,
+      items: aggregated.map((i) => ({
+        name: i.name,
+        quantity: i.quantity,
+        unit: i.unit,
+        unitCost: i.unitCost ?? 0,
+      })),
+      itemsDescriptionFallback: firstWithDescription?.itemsDescription ?? null,
+      expectedDeliveryDate: earliestDelivery,
+      orderDate: firstOrder.dateOfOrder ?? null,
+    });
+
+    const plotCount = plotLabels.length;
+    const subject = `Material Order — ${firstJob.name} — ${firstSite.name}${plotCount > 1 ? ` (${plotCount} plots)` : ""}`;
 
     setDraft({
       mode: "send",
       recipient: group.contactEmail ?? "",
-      subject: `Material Order — ${siteNames}`,
-      body:
-        `Hi ${contactName},\n\n` +
-        `Please find below our material order covering plots: ${plotNames}.\n\n` +
-        `${itemsList}\n\n` +
-        `${deliveryLine}\n\n` +
-        `Please confirm receipt and expected delivery.\n\n` +
-        `Regards`,
+      subject,
+      body,
       eventDescription: `Sent bulk order to ${group.supplierName} — ${group.orders.length} order(s)`,
-      eventSiteId: firstJob.plot.site.id,
+      eventSiteId: firstSite.id,
       eventJobId: firstJob.id,
       orderIdsToMark: group.orders.map((o) => o.id),
     });

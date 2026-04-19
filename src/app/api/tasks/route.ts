@@ -31,12 +31,18 @@ export async function GET(req: NextRequest) {
       expectedDeliveryDate: { gte: now, lte: in7Days },
     },
     include: {
-      supplier: { select: { id: true, name: true, contactEmail: true, contactName: true } },
+      // Rich email template fields: accountNumber for supplier, address +
+      // postcode for site, plotNumber for plot. Keeps email template
+      // consistent across Tasks / Daily Brief / OrderDetailSheet.
+      supplier: { select: { id: true, name: true, contactEmail: true, contactName: true, accountNumber: true } },
       job: {
         include: {
           plot: {
-            include: {
-              site: { select: { id: true, name: true } },
+            select: {
+              id: true,
+              name: true,
+              plotNumber: true,
+              site: { select: { id: true, name: true, address: true, postcode: true } },
             },
           },
         },
@@ -55,12 +61,18 @@ export async function GET(req: NextRequest) {
       dateOfOrder: { lte: sendOrderCutoff },
     },
     include: {
-      supplier: { select: { id: true, name: true, contactEmail: true, contactName: true } },
+      // Rich email template fields: accountNumber for supplier, address +
+      // postcode for site, plotNumber for plot. Keeps email template
+      // consistent across Tasks / Daily Brief / OrderDetailSheet.
+      supplier: { select: { id: true, name: true, contactEmail: true, contactName: true, accountNumber: true } },
       job: {
         include: {
           plot: {
-            include: {
-              site: { select: { id: true, name: true } },
+            select: {
+              id: true,
+              name: true,
+              plotNumber: true,
+              site: { select: { id: true, name: true, address: true, postcode: true } },
             },
           },
         },
@@ -135,12 +147,18 @@ export async function GET(req: NextRequest) {
       expectedDeliveryDate: { lt: now },
     },
     include: {
-      supplier: { select: { id: true, name: true, contactEmail: true, contactName: true } },
+      // Rich email template fields: accountNumber for supplier, address +
+      // postcode for site, plotNumber for plot. Keeps email template
+      // consistent across Tasks / Daily Brief / OrderDetailSheet.
+      supplier: { select: { id: true, name: true, contactEmail: true, contactName: true, accountNumber: true } },
       job: {
         include: {
           plot: {
-            include: {
-              site: { select: { id: true, name: true } },
+            select: {
+              id: true,
+              name: true,
+              plotNumber: true,
+              site: { select: { id: true, name: true, address: true, postcode: true } },
             },
           },
         },
@@ -158,12 +176,18 @@ export async function GET(req: NextRequest) {
       expectedDeliveryDate: { gt: in7Days },
     },
     include: {
-      supplier: { select: { id: true, name: true, contactEmail: true, contactName: true } },
+      // Rich email template fields: accountNumber for supplier, address +
+      // postcode for site, plotNumber for plot. Keeps email template
+      // consistent across Tasks / Daily Brief / OrderDetailSheet.
+      supplier: { select: { id: true, name: true, contactEmail: true, contactName: true, accountNumber: true } },
       job: {
         include: {
           plot: {
-            include: {
-              site: { select: { id: true, name: true } },
+            select: {
+              id: true,
+              name: true,
+              plotNumber: true,
+              site: { select: { id: true, name: true, address: true, postcode: true } },
             },
           },
         },

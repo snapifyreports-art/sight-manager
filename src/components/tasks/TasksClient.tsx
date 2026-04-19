@@ -43,14 +43,26 @@ interface OrderTask {
   expectedDeliveryDate: string | null;
   dateOfOrder: string;
   itemsDescription: string | null;
-  supplier: { id: string; name: string; contactEmail?: string | null; contactName?: string | null };
+  supplier: {
+    id: string;
+    name: string;
+    contactEmail?: string | null;
+    contactName?: string | null;
+    accountNumber?: string | null;
+  };
   job: {
     id: string;
     name: string;
     plot: {
       id: string;
       name: string;
-      site: { id: string; name: string };
+      plotNumber?: string | null;
+      site: {
+        id: string;
+        name: string;
+        address?: string | null;
+        postcode?: string | null;
+      };
     };
   };
   orderItems: Array<{
@@ -58,6 +70,7 @@ interface OrderTask {
     name: string;
     quantity: number;
     unit: string;
+    unitCost?: number;
   }>;
 }
 
@@ -249,13 +262,17 @@ export function TasksClient() {
       supplierName: order.supplier.name,
       supplierContactName: order.supplier.contactName ?? null,
       supplierContactEmail: order.supplier.contactEmail ?? null,
+      supplierAccountNumber: order.supplier.accountNumber ?? null,
       jobId: order.job.id,
       jobName: order.job.name,
       plotName: order.job.plot.name,
+      plotNumber: order.job.plot.plotNumber ?? null,
       siteId: order.job.plot.site.id,
       siteName: order.job.plot.site.name,
+      siteAddress: order.job.plot.site.address ?? null,
+      sitePostcode: order.job.plot.site.postcode ?? null,
       itemsDescription: order.itemsDescription ?? null,
-      items: order.orderItems.map((i) => ({ name: i.name, quantity: i.quantity, unit: i.unit })),
+      items: order.orderItems.map((i) => ({ name: i.name, quantity: i.quantity, unit: i.unit, unitCost: i.unitCost })),
       expectedDeliveryDate: order.expectedDeliveryDate,
       daysOverdue: daysOverdue(order.expectedDeliveryDate),
     });
@@ -267,6 +284,8 @@ export function TasksClient() {
       supplierName: group.supplierName,
       contactName: group.contactName,
       contactEmail: group.contactEmail,
+      // Pick account number off the first order's supplier (all share the same supplier in a group)
+      accountNumber: group.orders[0]?.supplier.accountNumber ?? null,
       orders: group.orders.map((o) => ({
         id: o.id,
         job: {
@@ -274,11 +293,19 @@ export function TasksClient() {
           name: o.job.name,
           plot: {
             name: o.job.plot.name,
-            site: { id: o.job.plot.site.id, name: o.job.plot.site.name },
+            plotNumber: o.job.plot.plotNumber ?? null,
+            site: {
+              id: o.job.plot.site.id,
+              name: o.job.plot.site.name,
+              address: o.job.plot.site.address ?? null,
+              postcode: o.job.plot.site.postcode ?? null,
+            },
           },
         },
         expectedDeliveryDate: o.expectedDeliveryDate,
-        items: o.orderItems.map((i) => ({ name: i.name, quantity: i.quantity, unit: i.unit })),
+        dateOfOrder: o.dateOfOrder,
+        itemsDescription: o.itemsDescription ?? null,
+        items: o.orderItems.map((i) => ({ name: i.name, quantity: i.quantity, unit: i.unit, unitCost: i.unitCost })),
       })),
       siteNames: group.sites,
     });
