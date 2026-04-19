@@ -38,6 +38,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { PERMISSION_META, ALL_PERMISSIONS } from "@/lib/permissions";
 import { useToast, fetchErrorMessage } from "@/components/ui/toast";
+import { useConfirmAction } from "@/hooks/useConfirmAction";
 
 // ---------- Types ----------
 
@@ -342,14 +343,14 @@ export function UsersClient({
 
   // Dialog state
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [permissionsDialogOpen, setPermissionsDialogOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<UserData | null>(null);
-  const [deletingUser, setDeletingUser] = useState<UserData | null>(null);
   const [permissionsUser, setPermissionsUser] = useState<UserData | null>(null);
   const [form, setForm] = useState<UserFormData>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
-  const [deleting, setDeleting] = useState(false);
+
+  // Confirm-delete flow shared via useConfirmAction.
+  const { confirmAction, dialogs: confirmDialogs } = useConfirmAction();
 
   // Filtered users
   const filteredUsers = useMemo(() => {
@@ -386,10 +387,29 @@ export function UsersClient({
     setDialogOpen(true);
   }
 
-  // Open delete confirmation
+  // Open delete confirmation via the shared hook.
   function handleOpenDelete(user: UserData) {
-    setDeletingUser(user);
-    setDeleteDialogOpen(true);
+    confirmAction({
+      title: "Delete User",
+      description: (
+        <>
+          Are you sure you want to delete{" "}
+          <span className="font-medium text-foreground">{user.name}</span>?
+          This will remove their account and all associated data. This action
+          cannot be undone.
+        </>
+      ),
+      confirmLabel: "Delete User",
+      onConfirm: async () => {
+        const res = await fetch(`/api/users/${user.id}`, { method: "DELETE" });
+        if (!res.ok) {
+          throw new Error(await fetchErrorMessage(res, "Failed to delete user"));
+        }
+        setUsers((prev) => prev.filter((u) => u.id !== user.id));
+        toast.success(`${user.name} deleted`);
+        router.refresh();
+      },
+    });
   }
 
   // Open permissions dialog
@@ -462,31 +482,7 @@ export function UsersClient({
     }
   }
 
-  // Delete
-  async function handleDelete() {
-    if (!deletingUser) return;
-
-    setDeleting(true);
-    try {
-      const res = await fetch(`/api/users/${deletingUser.id}`, {
-        method: "DELETE",
-      });
-
-      if (!res.ok) {
-        toast.error(await fetchErrorMessage(res, "Failed to delete user"));
-        return;
-      }
-
-      setUsers((prev) => prev.filter((u) => u.id !== deletingUser.id));
-      setDeleteDialogOpen(false);
-      setDeletingUser(null);
-      router.refresh();
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to delete user");
-    } finally {
-      setDeleting(false);
-    }
-  }
+  // handleDelete lives inside handleOpenDelete's onConfirm closure now.
 
   return (
     <div className="space-y-6">
@@ -773,34 +769,8 @@ export function UsersClient({
         </DialogContent>
       </Dialog>
 
-      {/* Delete Confirmation Dialog */}
-      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Delete User</DialogTitle>
-            <DialogDescription>
-              Are you sure you want to delete{" "}
-              <span className="font-medium text-foreground">
-                {deletingUser?.name}
-              </span>
-              ? This will remove their account and all associated data. This
-              action cannot be undone.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <DialogClose render={<Button variant="outline" />}>
-              Cancel
-            </DialogClose>
-            <Button
-              variant="destructive"
-              onClick={handleDelete}
-              disabled={deleting}
-            >
-              {deleting ? "Deleting..." : "Delete User"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* Shared confirm-delete dialog (useConfirmAction) */}
+      {confirmDialogs}
 
       {/* Permissions Dialog */}
       <PermissionsDialog
