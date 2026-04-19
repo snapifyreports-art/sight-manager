@@ -15,6 +15,7 @@ import {
   Check,
   Layers,
   GitBranch,
+  AlertTriangle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -110,7 +111,8 @@ export function TemplateEditor({
     Array<{ name: string; code: string; duration: number }>
   >([]);
 
-  // Add Sub-Job dialog
+  // Add Sub-Job dialog — subJobDurationUnit toggle lets user pick days
+  // or weeks. Days wins at apply time (see apply-template-helpers).
   const [subJobDialogOpen, setSubJobDialogOpen] = useState(false);
   const [subJobParentId, setSubJobParentId] = useState<string | null>(null);
   const [subJobParentChildren, setSubJobParentChildren] = useState(0);
@@ -119,6 +121,7 @@ export function TemplateEditor({
   const [subJobName, setSubJobName] = useState("");
   const [subJobCode, setSubJobCode] = useState("");
   const [subJobDuration, setSubJobDuration] = useState(1);
+  const [subJobDurationUnit, setSubJobDurationUnit] = useState<"weeks" | "days">("weeks");
   const [subJobContractorId, setSubJobContractorId] = useState("");
   const [savingSubJob, setSavingSubJob] = useState(false);
 
@@ -641,7 +644,11 @@ export function TemplateEditor({
     setSavingSubJob(true);
     try {
       const startWeek = subJobParentEndWeek + 1;
-      const endWeek = startWeek + subJobDuration - 1;
+      // End week: for days-granularity, still occupy one week slot in the
+      // legacy model (endWeek === startWeek). durationDays will override
+      // at apply time.
+      const isDays = subJobDurationUnit === "days";
+      const endWeek = isDays ? startWeek : startWeek + subJobDuration - 1;
 
       const res = await fetch(`/api/plot-templates/${template.id}/jobs`, {
         method: "POST",
@@ -649,7 +656,10 @@ export function TemplateEditor({
         body: JSON.stringify({
           name: subJobName,
           stageCode: subJobCode,
-          durationWeeks: subJobDuration,
+          // Send only the relevant unit — keeps old templates clean.
+          ...(isDays
+            ? { durationDays: subJobDuration, durationWeeks: 1 }
+            : { durationWeeks: subJobDuration, durationDays: null }),
           parentId: subJobParentId,
           contactId: subJobContractorId && subJobContractorId !== "__none__" ? subJobContractorId : null,
           startWeek,
@@ -997,6 +1007,8 @@ export function TemplateEditor({
 
   // ---------- Render ----------
 
+  const sourcedPlotsCount = template._count?.sourcedPlots ?? 0;
+
   return (
     <div className="space-y-6">
       {/* Back button + Header */}
@@ -1005,6 +1017,24 @@ export function TemplateEditor({
           <ArrowLeft className="size-4" />
           Back to Templates
         </Button>
+
+        {/* Snapshot-model banner — appears when live plots use this
+            template. Keith's rule: templates are for new plots only,
+            edits here don't propagate. The banner makes that explicit. */}
+        {sourcedPlotsCount > 0 && (
+          <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+            <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-600" />
+            <div className="flex-1">
+              <p className="font-medium">
+                {sourcedPlotsCount} plot{sourcedPlotsCount !== 1 ? "s are" : " is"} using this template
+              </p>
+              <p className="mt-0.5 text-amber-800">
+                Changes here won&apos;t affect {sourcedPlotsCount === 1 ? "that plot" : "those plots"} —
+                templates are a snapshot at apply time. Edits only apply to NEW plots created after saving.
+              </p>
+            </div>
+          </div>
+        )}
 
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0 flex-1">
@@ -1973,16 +2003,50 @@ export function TemplateEditor({
               </p>
             </div>
             <div className="space-y-2">
-              <Label>Duration (weeks)</Label>
-              <Input
-                type="number"
-                min={1}
-                value={subJobDuration}
-                onChange={(e) =>
-                  setSubJobDuration(parseInt(e.target.value) || 1)
-                }
-                className="w-28"
-              />
+              <Label>Duration</Label>
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  min={1}
+                  value={subJobDuration}
+                  onChange={(e) =>
+                    setSubJobDuration(parseInt(e.target.value) || 1)
+                  }
+                  className="w-24"
+                />
+                {/* Unit toggle — Keith's "sometimes needs to be days" feedback.
+                    Days path overrides weeks at apply time. Default weeks so
+                    existing muscle memory still works. */}
+                <div className="inline-flex rounded-md border p-0.5 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setSubJobDurationUnit("weeks")}
+                    className={`rounded px-2.5 py-1 font-medium transition-colors ${
+                      subJobDurationUnit === "weeks"
+                        ? "bg-slate-900 text-white"
+                        : "text-muted-foreground hover:bg-slate-50"
+                    }`}
+                  >
+                    Weeks
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSubJobDurationUnit("days")}
+                    className={`rounded px-2.5 py-1 font-medium transition-colors ${
+                      subJobDurationUnit === "days"
+                        ? "bg-slate-900 text-white"
+                        : "text-muted-foreground hover:bg-slate-50"
+                    }`}
+                  >
+                    Days
+                  </button>
+                </div>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                {subJobDurationUnit === "days"
+                  ? `${subJobDuration} working day${subJobDuration !== 1 ? "s" : ""} — spans less than a week.`
+                  : `${subJobDuration} week${subJobDuration !== 1 ? "s" : ""} (${subJobDuration * 5} working days).`}
+              </p>
             </div>
             {contractors.length > 0 && (
               <div className="space-y-2">

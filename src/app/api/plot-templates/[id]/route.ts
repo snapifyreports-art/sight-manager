@@ -22,6 +22,10 @@ export async function GET(
     where: { id },
     include: {
       jobs: templateJobsInclude,
+      // Count plots that were created from this template — banner on
+      // the editor warns the user that changes are snapshot-only and
+      // won't propagate to those live plots.
+      _count: { select: { sourcedPlots: true } },
     },
   });
 
@@ -32,8 +36,6 @@ export async function GET(
     );
   }
 
-  // Normalise parent startWeek/endWeek from children — stored parent
-  // values drift from the source of truth (children) over time.
   return NextResponse.json(normaliseTemplateParentDates(template));
 }
 

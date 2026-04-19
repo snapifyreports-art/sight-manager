@@ -51,6 +51,9 @@ export interface TemplateJobData {
   startWeek: number;
   endWeek: number;
   durationWeeks: number | null;
+  /** Optional days-granularity override. When set, takes precedence over
+   *  durationWeeks at apply-template time. Null on legacy weeks-only templates. */
+  durationDays: number | null;
   weatherAffected: boolean;
   weatherAffectedType: "RAIN" | "TEMPERATURE" | "BOTH" | null;
   parentId: string | null;
@@ -68,4 +71,7 @@ export interface TemplateData {
   createdAt: string;
   updatedAt: string;
   jobs: TemplateJobData[];
+  /** Populated by the detail endpoint — count of Plots that were
+   *  created from this template (snapshot link, no auto-sync). */
+  _count?: { sourcedPlots: number };
 }
