@@ -37,6 +37,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Breadcrumbs } from "@/components/ui/breadcrumbs";
 import { useJobAction } from "@/hooks/useJobAction";
+import { useOrderStatus, type OrderStatus } from "@/hooks/useOrderStatus";
 import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 import { PostCompletionDialog } from "@/components/PostCompletionDialog";
 import {
@@ -271,9 +272,7 @@ function PlotOverview({
   // Midnight-snap so SSR + hydration agree on today's date (prevents React #418).
   const today = getCurrentDateAtMidnight();
   const router = useRouter();
-  const [pendingOrderActions, setPendingOrderActions] = useState<Set<string>>(new Set());
   const [pendingJobActions, setPendingJobActions] = useState<Set<string>>(new Set());
-  const [actionError, setActionError] = useState<string | null>(null);
 
   // Post-completion dialog state
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -289,26 +288,12 @@ function PlotOverview({
     (_action, _jobId) => { forceRefresh(); }
   );
 
-  async function handleOrderStatus(orderId: string, status: string) {
-    setPendingOrderActions((prev) => new Set(prev).add(orderId));
-    try {
-      const res = await fetch(`/api/orders/${orderId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status }),
-      });
-      if (res.ok) {
-        forceRefresh();
-      } else {
-        setActionError("Failed to update order status. Please try again.");
-        setTimeout(() => setActionError(null), 4000);
-      }
-    } catch {
-      setActionError("Network error. Please check your connection.");
-      setTimeout(() => setActionError(null), 4000);
-    } finally {
-      setPendingOrderActions((prev) => { const n = new Set(prev); n.delete(orderId); return n; });
-    }
+  const { setOrderStatus, isPending: isOrderPending } = useOrderStatus({
+    onChange: () => forceRefresh(),
+  });
+
+  function handleOrderStatus(orderId: string, status: OrderStatus) {
+    void setOrderStatus(orderId, status);
   }
 
   async function handleJobAction(jobId: string, action: "start" | "complete") {
@@ -450,11 +435,6 @@ function PlotOverview({
 
   return (
     <div className="space-y-6">
-      {actionError && (
-        <div className="fixed bottom-4 right-4 z-50 flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2.5 text-sm font-medium text-white shadow-lg">
-          ✕ {actionError}
-        </div>
-      )}
       {/* Current Status Strip */}
       {(activeJobs.length > 0 || currentStage) && (
         <div className="flex flex-wrap items-center gap-3 rounded-xl border bg-muted/30 px-4 py-3">
@@ -733,7 +713,7 @@ function PlotOverview({
                         {format(new Date(order.expectedDeliveryDate!), "d MMM")}
                       </p>
                     </div>
-                    {pendingOrderActions.has(order.id) ? (
+                    {isOrderPending(order.id) ? (
                       <Loader2 className="size-4 shrink-0 animate-spin text-muted-foreground" />
                     ) : (
                       <Button variant="outline" size="sm"
@@ -758,7 +738,7 @@ function PlotOverview({
                         {format(new Date(order.expectedDeliveryDate!), "d MMM")}
                       </p>
                     </div>
-                    {pendingOrderActions.has(order.id) ? (
+                    {isOrderPending(order.id) ? (
                       <Loader2 className="size-4 shrink-0 animate-spin text-muted-foreground" />
                     ) : (
                       <Button variant="outline" size="sm"

@@ -4,7 +4,7 @@ import { useState, useMemo } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useJobAction } from "@/hooks/useJobAction";
-import { useToast, fetchErrorMessage } from "@/components/ui/toast";
+import { useOrderStatus, type OrderStatus } from "@/hooks/useOrderStatus";
 import { PostCompletionDialog } from "@/components/PostCompletionDialog";
 import { differenceInCalendarDays, isSameDay, format } from "date-fns";
 import { getCurrentDateAtMidnight } from "@/lib/dev-date";
@@ -74,21 +74,10 @@ interface PlotTodoListProps {
   plotId: string;
 }
 
-// ---------- Helpers ----------
-
-async function updateOrderStatus(orderId: string, status: string): Promise<Response> {
-  return fetch(`/api/orders/${orderId}`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ status }),
-  });
-}
-
 // ---------- Component ----------
 
 export function PlotTodoList({ jobs, snagSummary, siteId, plotId }: PlotTodoListProps) {
   const router = useRouter();
-  const toast = useToast();
   // Snap to midnight so SSR and initial client render produce the same
   // date-comparisons (avoids React hydration mismatch #418).
   const now = getCurrentDateAtMidnight();
@@ -97,7 +86,10 @@ export function PlotTodoList({ jobs, snagSummary, siteId, plotId }: PlotTodoList
     new Set(["jobs", "materials", "snags"])
   );
   const [pendingJobActions, setPendingJobActions] = useState<Set<string>>(new Set());
-  const [pendingOrderActions, setPendingOrderActions] = useState<Set<string>>(new Set());
+
+  const { setOrderStatus, isPending: isOrderPending } = useOrderStatus({
+    onChange: () => router.refresh(),
+  });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [completionContext, setCompletionContext] = useState<any>(null);
 
@@ -153,18 +145,8 @@ export function PlotTodoList({ jobs, snagSummary, siteId, plotId }: PlotTodoList
     }
   }
 
-  async function handleOrderStatus(orderId: string, status: string) {
-    setPendingOrderActions((prev) => new Set(prev).add(orderId));
-    try {
-      const res = await updateOrderStatus(orderId, status);
-      if (!res.ok) {
-        toast.error(await fetchErrorMessage(res, "Failed to update order"));
-        return;
-      }
-      router.refresh();
-    } finally {
-      setPendingOrderActions((prev) => { const n = new Set(prev); n.delete(orderId); return n; });
-    }
+  function handleOrderStatus(orderId: string, status: OrderStatus) {
+    void setOrderStatus(orderId, status);
   }
 
   // ---------- Derive sections ----------
@@ -322,7 +304,7 @@ export function PlotTodoList({ jobs, snagSummary, siteId, plotId }: PlotTodoList
                     key={o.id}
                     order={o}
                     variant="delivery"
-                    isPending={pendingOrderActions.has(o.id)}
+                    isPending={isOrderPending(o.id)}
                     onAction={handleOrderStatus}
                   />
                 ))}
@@ -338,7 +320,7 @@ export function PlotTodoList({ jobs, snagSummary, siteId, plotId }: PlotTodoList
                     key={o.id}
                     order={o}
                     variant="place"
-                    isPending={pendingOrderActions.has(o.id)}
+                    isPending={isOrderPending(o.id)}
                     onAction={handleOrderStatus}
                   />
                 ))}
@@ -544,7 +526,7 @@ function OrderRow({
   order: OrderData & { jobId: string; jobName: string };
   variant: "delivery" | "place";
   isPending: boolean;
-  onAction: (orderId: string, status: string) => void;
+  onAction: (orderId: string, status: OrderStatus) => void;
 }) {
   const mailto = variant === "place" && order.supplier.contactEmail
     ? `mailto:${encodeURIComponent(order.supplier.contactEmail)}?subject=${encodeURIComponent(`Material Order — ${order.jobName}`)}&body=${encodeURIComponent(`Hi ${order.supplier.contactName || order.supplier.name},\n\nPlease supply the following for ${order.jobName}:\n\n${order.itemsDescription || "Materials as discussed"}${order.expectedDeliveryDate ? `\n\nRequired by: ${format(new Date(order.expectedDeliveryDate), "dd MMM yyyy")}` : ""}\n\nPlease confirm receipt.\n\nRegards`)}`
