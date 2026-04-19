@@ -179,6 +179,11 @@ export default function SiteWalkthrough({
   // Modal state
   const [noteText, setNoteText] = useState("");
   const [noteJobId, setNoteJobId] = useState<string | null>(null); // null = current job
+  const [ordersPopupOpen, setOrdersPopupOpen] = useState(false);
+  // Cache the pull-forward availability per current job so the button hides
+  // when the server says no valid earlier date is possible (Keith Apr 2026:
+  // "no need to display pull forward if all the selections are greyed out").
+  const [pullForwardAvailable, setPullForwardAvailable] = useState<boolean | null>(null);
   const [snagDesc, setSnagDesc] = useState("");
   const [snagPriority, setSnagPriority] = useState("MEDIUM");
   const [snagLocation, setSnagLocation] = useState("");
@@ -264,6 +269,28 @@ export default function SiteWalkthrough({
 
   const plots = data?.plots ?? [];
   const plot = plots[currentIndex] ?? null;
+
+  // Check pull-forward availability whenever the current job changes so we
+  // can hide the Pull Forward button when the server says no valid earlier
+  // date is possible. Uses the same /api/jobs/:id/pull-forward endpoint that
+  // usePullForwardDecision calls internally.
+  useEffect(() => {
+    const currentId = plot?.currentJob?.id;
+    if (!currentId) {
+      setPullForwardAvailable(null);
+      return;
+    }
+    let cancelled = false;
+    setPullForwardAvailable(null);
+    fetch(`/api/jobs/${currentId}/pull-forward`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (cancelled) return;
+        setPullForwardAvailable(d?.canBePulledForward ?? false);
+      })
+      .catch(() => { if (!cancelled) setPullForwardAvailable(false); });
+    return () => { cancelled = true; };
+  }, [plot?.currentJob?.id]);
 
   const goNext = () => {
     if (currentIndex < plots.length - 1) { setCurrentIndex((i) => i + 1); setSnagsExpanded(false); }
@@ -580,7 +607,11 @@ export default function SiteWalkthrough({
   const job = plot?.currentJob ?? null;
   const canFinish = job?.status === "IN_PROGRESS";
   const canStart = job?.status === "NOT_STARTED";
-  const canStartNext = !!plot?.nextJob && job?.status === "IN_PROGRESS";
+  // Only surface "Start Next Job" when there's literally no current job to
+  // sign off or start — i.e. this slot is empty. If the current job is
+  // IN_PROGRESS (Keith's Apr 2026 ask), sign-off is the natural next action,
+  // so don't compete with it by also offering Start Next.
+  const canStartNext = !!plot?.nextJob && !job;
 
   return (
     <div className="flex h-full flex-col bg-slate-50">
@@ -794,10 +825,14 @@ export default function SiteWalkthrough({
 
                     <div className="grid grid-cols-2 gap-2 text-sm">
                       {job.contractorName && (
-                        <div className="flex items-center gap-1.5 text-muted-foreground">
+                        <Link
+                          href={`/sites/${siteId}?tab=contractor-comms`}
+                          className="flex items-center gap-1.5 text-muted-foreground hover:text-blue-600"
+                          title="Open Contractor Comms"
+                        >
                           <HardHat className="size-3.5 shrink-0" />
-                          <span className="truncate text-xs">{job.contractorName}</span>
-                        </div>
+                          <span className="truncate text-xs hover:underline">{job.contractorName}</span>
+                        </Link>
                       )}
                       {job.assignedToName && (
                         <div className="flex items-center gap-1.5 text-muted-foreground">
@@ -843,20 +878,27 @@ export default function SiteWalkthrough({
                       if (pending > 0) parts.push(`${pending} pending`);
                       if (ordered > 0) parts.push(`${ordered} ordered`);
                       return (
-                        <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                        <button
+                          type="button"
+                          onClick={() => setOrdersPopupOpen(true)}
+                          className="flex items-center gap-3 text-xs text-muted-foreground hover:text-blue-600 transition-colors"
+                          title="View orders &amp; deliveries for this job"
+                        >
                           {parts.length > 0 && (
                             <span className="flex items-center gap-1">
                               <Package className="size-3.5 shrink-0" />
-                              {parts.join(" \u00B7 ")}
+                              <span className="hover:underline">{parts.join(" \u00B7 ")}</span>
                             </span>
                           )}
                           {nextDelivery && (
                             <span className="flex items-center gap-1">
                               <Truck className="size-3.5 shrink-0" />
-                              {upcoming.length} due {format(parseISO(nextDelivery.expectedDeliveryDate!), "d MMM")}
+                              <span className="hover:underline">
+                                {upcoming.length} due {format(parseISO(nextDelivery.expectedDeliveryDate!), "d MMM")}
+                              </span>
                             </span>
                           )}
-                        </div>
+                        </button>
                       );
                     })()}
 
@@ -1020,16 +1062,20 @@ export default function SiteWalkthrough({
               {/* Delay + Pull Forward — both available for IN_PROGRESS and NOT_STARTED.
                   Delay pushes job + downstream back. Pull Forward moves just this
                   job earlier (4 options with constraint-aware date picker). Same
-                  UX as Programme panel / Daily Brief. */}
+                  UX as Programme panel / Daily Brief.
+                  Pull Forward is hidden if the server says no valid earlier date
+                  is possible — Keith Apr 2026: "no need to show if all greyed". */}
               {(canFinish || canStart) && job && (
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    onClick={() => openPullForwardDialog(job)}
-                    className="flex items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700 hover:bg-emerald-100 active:scale-95 transition-all"
-                  >
-                    <Zap className="size-4" />
-                    Pull Forward
-                  </button>
+                <div className={`grid gap-2 ${pullForwardAvailable === false ? "grid-cols-1" : "grid-cols-2"}`}>
+                  {pullForwardAvailable !== false && (
+                    <button
+                      onClick={() => openPullForwardDialog(job)}
+                      className="flex items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700 hover:bg-emerald-100 active:scale-95 transition-all"
+                    >
+                      <Zap className="size-4" />
+                      Pull Forward
+                    </button>
+                  )}
                   <button
                     onClick={() => openDelayDialog(job)}
                     className="flex items-center justify-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700 hover:bg-red-100 active:scale-95 transition-all"
@@ -1133,6 +1179,37 @@ export default function SiteWalkthrough({
               autoFocus
               className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
+            {/* Quick-note presets — common things a site manager spots on a
+                walkthrough. Clicking appends the preset to whatever's in the
+                box so you can combine multiple. */}
+            <div className="space-y-2">
+              <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Quick notes</p>
+              <div className="flex flex-wrap gap-1.5">
+                {[
+                  "Could delay",
+                  "Looking ahead",
+                  "Looking behind",
+                  "Materials OK",
+                  "Waiting on delivery",
+                  "Contractor on site",
+                  "Weather holding us back",
+                  "Safety concern",
+                  "Quality check passed",
+                  "Needs follow-up",
+                ].map((preset) => (
+                  <button
+                    key={preset}
+                    type="button"
+                    onClick={() =>
+                      setNoteText((prev) => prev.trim() ? `${prev.trim()}. ${preset}` : preset)
+                    }
+                    className="rounded-full border border-border bg-white px-3 py-1 text-[11px] font-medium text-slate-700 hover:bg-blue-50 hover:border-blue-300 hover:text-blue-700 transition-colors"
+                  >
+                    + {preset}
+                  </button>
+                ))}
+              </div>
+            </div>
             {/* Job assignment */}
             <div className="text-xs text-muted-foreground">
               For: <span className="font-medium text-foreground">
@@ -1379,6 +1456,62 @@ export default function SiteWalkthrough({
 
       {/* Unified pull-forward dialog (usePullForwardDecision) */}
       {pullForwardDialogs}
+
+      {/* Orders & deliveries popup — triggered by tapping the order summary
+          chips on the current job. Shows each order with status, expected
+          delivery, and a "View order" link into the full order detail. */}
+      {ordersPopupOpen && job && (() => {
+        const orders = job.orders ?? [];
+        return (
+          <Modal title="Orders &amp; Deliveries" onClose={() => setOrdersPopupOpen(false)}>
+            <div className="space-y-2">
+              {orders.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No orders attached to this job.</p>
+              ) : (
+                orders.map((o) => {
+                  const statusColor =
+                    o.status === "DELIVERED" ? "bg-emerald-100 text-emerald-700" :
+                    o.status === "ORDERED" ? "bg-blue-100 text-blue-700" :
+                    o.status === "PENDING" ? "bg-amber-100 text-amber-700" :
+                    "bg-slate-100 text-slate-700";
+                  return (
+                    <Link
+                      key={o.id}
+                      href={`/orders?orderId=${o.id}`}
+                      className="flex items-start justify-between gap-3 rounded-lg border border-border bg-white p-3 hover:bg-blue-50/50 hover:border-blue-200 transition-colors"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium text-foreground truncate">
+                          {o.supplier?.name ? `${o.supplier.name} — ${o.status === "DELIVERED" ? "Delivered" : o.status === "ORDERED" ? "On order" : "Pending"}` : "Material Order"}
+                        </p>
+                        {o.supplier && (
+                          <p className="text-xs text-muted-foreground">{o.supplier.name}</p>
+                        )}
+                        {o.expectedDeliveryDate && (
+                          <p className="text-[11px] text-muted-foreground mt-0.5">
+                            {o.status === "DELIVERED" ? "Delivered" : "Expected"}{" "}
+                            {format(parseISO(o.expectedDeliveryDate), "d MMM yyyy")}
+                          </p>
+                        )}
+                      </div>
+                      <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${statusColor}`}>
+                        {o.status}
+                      </span>
+                    </Link>
+                  );
+                })
+              )}
+              <button
+                type="button"
+                onClick={() => setOrdersPopupOpen(false)}
+                className="mt-2 w-full rounded-xl border border-border py-2.5 text-sm font-medium hover:bg-accent"
+              >
+                Close
+              </button>
+            </div>
+          </Modal>
+        );
+      })()}
 
       {/* Toast now rendered by the global <Toaster> — no local instance here. */}
 
