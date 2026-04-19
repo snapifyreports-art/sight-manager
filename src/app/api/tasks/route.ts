@@ -22,221 +22,112 @@ export async function GET(req: NextRequest) {
   const now = getServerCurrentDate(req);
   const in7Days = addDays(now, 7);
   const in3Days = addDays(now, 3);
-
-  // 1. Confirm Delivery — orders ORDERED with delivery within 7 days (not overdue)
-  const confirmDelivery = await prisma.materialOrder.findMany({
-    where: {
-      ...siteAccessForOrder,
-      status: "ORDERED",
-      expectedDeliveryDate: { gte: now, lte: in7Days },
-    },
-    include: {
-      // Rich email template fields: accountNumber for supplier, address +
-      // postcode for site, plotNumber for plot. Keeps email template
-      // consistent across Tasks / Daily Brief / OrderDetailSheet.
-      supplier: { select: { id: true, name: true, contactEmail: true, contactName: true, accountNumber: true } },
-      job: {
-        include: {
-          plot: {
-            select: {
-              id: true,
-              name: true,
-              plotNumber: true,
-              site: { select: { id: true, name: true, address: true, postcode: true } },
-            },
-          },
-        },
-      },
-      orderItems: true,
-    },
-    orderBy: { expectedDeliveryDate: "asc" },
-  });
-
-  // 2. Send Order — orders still PENDING whose dateOfOrder is within 14 days
   const sendOrderCutoff = addDays(now, 14);
-  const sendOrder = await prisma.materialOrder.findMany({
-    where: {
-      ...siteAccessForOrder,
-      status: "PENDING",
-      dateOfOrder: { lte: sendOrderCutoff },
-    },
-    include: {
-      // Rich email template fields: accountNumber for supplier, address +
-      // postcode for site, plotNumber for plot. Keeps email template
-      // consistent across Tasks / Daily Brief / OrderDetailSheet.
-      supplier: { select: { id: true, name: true, contactEmail: true, contactName: true, accountNumber: true } },
-      job: {
-        include: {
-          plot: {
-            select: {
-              id: true,
-              name: true,
-              plotNumber: true,
-              site: { select: { id: true, name: true, address: true, postcode: true } },
-            },
-          },
-        },
-      },
-      orderItems: true,
-    },
-    orderBy: { dateOfOrder: "asc" },
-  });
 
-  // 3. Sign Off Jobs — IN_PROGRESS leaf jobs with endDate within 3 days (not overdue)
-  const signOffJobs = await prisma.job.findMany({
-    where: {
-      ...siteAccess,
-      ...leafOnly,
-      status: "IN_PROGRESS",
-      endDate: { gte: now, lte: in3Days },
-    },
-    include: {
-      plot: {
-        include: {
-          site: { select: { id: true, name: true } },
-        },
-      },
-      assignedTo: { select: { id: true, name: true } },
-    },
-    orderBy: { endDate: "asc" },
-  });
-
-  // 4. Overdue Jobs — IN_PROGRESS leaf jobs past their end date
-  const overdueJobs = await prisma.job.findMany({
-    where: {
-      ...siteAccess,
-      ...leafOnly,
-      status: "IN_PROGRESS",
-      endDate: { lt: now },
-    },
-    include: {
-      plot: {
-        include: {
-          site: { select: { id: true, name: true } },
-        },
-      },
-      assignedTo: { select: { id: true, name: true } },
-    },
-    orderBy: { endDate: "asc" },
-  });
-
-  // 4b. Late Start — NOT_STARTED leaf jobs whose start date has passed
-  const lateStartJobs = await prisma.job.findMany({
-    where: {
-      ...siteAccess,
-      ...leafOnly,
-      status: "NOT_STARTED",
-      startDate: { lt: now },
-    },
-    include: {
-      plot: {
-        include: {
-          site: { select: { id: true, name: true } },
-        },
-      },
-      assignedTo: { select: { id: true, name: true } },
-    },
-    orderBy: { startDate: "asc" },
-  });
-
-  // 5. Overdue Materials — ORDERED orders past expected delivery date
-  const overdueOrders = await prisma.materialOrder.findMany({
-    where: {
-      ...siteAccessForOrder,
-      status: "ORDERED",
-      expectedDeliveryDate: { lt: now },
-    },
-    include: {
-      // Rich email template fields: accountNumber for supplier, address +
-      // postcode for site, plotNumber for plot. Keeps email template
-      // consistent across Tasks / Daily Brief / OrderDetailSheet.
-      supplier: { select: { id: true, name: true, contactEmail: true, contactName: true, accountNumber: true } },
-      job: {
-        include: {
-          plot: {
-            select: {
-              id: true,
-              name: true,
-              plotNumber: true,
-              site: { select: { id: true, name: true, address: true, postcode: true } },
-            },
-          },
-        },
-      },
-      orderItems: true,
-    },
-    orderBy: { expectedDeliveryDate: "asc" },
-  });
-
-  // 5b. Waiting on Delivery — ORDERED orders with delivery date in the future (beyond 7-day confirm window)
-  const awaitingDelivery = await prisma.materialOrder.findMany({
-    where: {
-      ...siteAccessForOrder,
-      status: "ORDERED",
-      expectedDeliveryDate: { gt: in7Days },
-    },
-    include: {
-      // Rich email template fields: accountNumber for supplier, address +
-      // postcode for site, plotNumber for plot. Keeps email template
-      // consistent across Tasks / Daily Brief / OrderDetailSheet.
-      supplier: { select: { id: true, name: true, contactEmail: true, contactName: true, accountNumber: true } },
-      job: {
-        include: {
-          plot: {
-            select: {
-              id: true,
-              name: true,
-              plotNumber: true,
-              site: { select: { id: true, name: true, address: true, postcode: true } },
-            },
-          },
-        },
-      },
-      orderItems: true,
-    },
-    orderBy: { expectedDeliveryDate: "asc" },
-  });
-
-  // 6. Upcoming — next 7 days of leaf job starts + deliveries
-  const upcomingJobs = await prisma.job.findMany({
-    where: {
-      ...siteAccess,
-      ...leafOnly,
-      status: { in: ["NOT_STARTED", "IN_PROGRESS"] },
-      startDate: { gte: now, lte: in7Days },
-    },
-    include: {
-      plot: {
-        include: {
-          site: { select: { id: true, name: true } },
-        },
-      },
-    },
-    orderBy: { startDate: "asc" },
-    take: 20,
-  });
-
-  const upcomingDeliveries = await prisma.materialOrder.findMany({
-    where: {
-      ...siteAccessForOrder,
-      status: "ORDERED",
-      expectedDeliveryDate: { gte: now, lte: in7Days },
-    },
-    include: {
-      supplier: { select: { id: true, name: true } },
-      job: {
-        include: {
-          plot: {
-            include: {
-              site: { select: { id: true, name: true } },
-            },
+  // Shared include shape for "rich" order responses — supplier + site
+  // address/postcode + plot number so the email template has everything
+  // it needs without a second round-trip.
+  const richOrderInclude = {
+    supplier: { select: { id: true, name: true, contactEmail: true, contactName: true, accountNumber: true } },
+    job: {
+      include: {
+        plot: {
+          select: {
+            id: true,
+            name: true,
+            plotNumber: true,
+            site: { select: { id: true, name: true, address: true, postcode: true } },
           },
         },
       },
     },
-    orderBy: { expectedDeliveryDate: "asc" },
-    take: 20,
-  });
+    orderItems: true,
+  } as const;
+
+  const slimJobInclude = {
+    plot: {
+      include: {
+        site: { select: { id: true, name: true } },
+      },
+    },
+    assignedTo: { select: { id: true, name: true } },
+  } as const;
+
+  // Run all 9 queries in parallel — they're all independent reads.
+  // Previously sequential (~5.7s HTTP time); parallel should drop to the
+  // longest single query (~700ms) since Prisma's pool + Supabase pgbouncer
+  // handle the concurrency fine for reads of this shape.
+  const [
+    confirmDelivery,
+    sendOrder,
+    signOffJobs,
+    overdueJobs,
+    lateStartJobs,
+    overdueOrders,
+    awaitingDelivery,
+    upcomingJobs,
+    upcomingDeliveries,
+  ] = await Promise.all([
+    // 1. Confirm Delivery — orders ORDERED with delivery within 7 days (not overdue)
+    prisma.materialOrder.findMany({
+      where: { ...siteAccessForOrder, status: "ORDERED", expectedDeliveryDate: { gte: now, lte: in7Days } },
+      include: richOrderInclude,
+      orderBy: { expectedDeliveryDate: "asc" },
+    }),
+    // 2. Send Order — orders still PENDING whose dateOfOrder is within 14 days
+    prisma.materialOrder.findMany({
+      where: { ...siteAccessForOrder, status: "PENDING", dateOfOrder: { lte: sendOrderCutoff } },
+      include: richOrderInclude,
+      orderBy: { dateOfOrder: "asc" },
+    }),
+    // 3. Sign Off Jobs — IN_PROGRESS leaf jobs with endDate within 3 days
+    prisma.job.findMany({
+      where: { ...siteAccess, ...leafOnly, status: "IN_PROGRESS", endDate: { gte: now, lte: in3Days } },
+      include: slimJobInclude,
+      orderBy: { endDate: "asc" },
+    }),
+    // 4. Overdue Jobs — IN_PROGRESS leaf jobs past their end date
+    prisma.job.findMany({
+      where: { ...siteAccess, ...leafOnly, status: "IN_PROGRESS", endDate: { lt: now } },
+      include: slimJobInclude,
+      orderBy: { endDate: "asc" },
+    }),
+    // 4b. Late Start — NOT_STARTED leaf jobs whose start date has passed
+    prisma.job.findMany({
+      where: { ...siteAccess, ...leafOnly, status: "NOT_STARTED", startDate: { lt: now } },
+      include: slimJobInclude,
+      orderBy: { startDate: "asc" },
+    }),
+    // 5. Overdue Materials — ORDERED orders past expected delivery date
+    prisma.materialOrder.findMany({
+      where: { ...siteAccessForOrder, status: "ORDERED", expectedDeliveryDate: { lt: now } },
+      include: richOrderInclude,
+      orderBy: { expectedDeliveryDate: "asc" },
+    }),
+    // 5b. Waiting on Delivery — ORDERED orders beyond 7-day confirm window
+    prisma.materialOrder.findMany({
+      where: { ...siteAccessForOrder, status: "ORDERED", expectedDeliveryDate: { gt: in7Days } },
+      include: richOrderInclude,
+      orderBy: { expectedDeliveryDate: "asc" },
+    }),
+    // 6. Upcoming — next 7 days of leaf job starts
+    prisma.job.findMany({
+      where: { ...siteAccess, ...leafOnly, status: { in: ["NOT_STARTED", "IN_PROGRESS"] }, startDate: { gte: now, lte: in7Days } },
+      include: { plot: { include: { site: { select: { id: true, name: true } } } } },
+      orderBy: { startDate: "asc" },
+      take: 20,
+    }),
+    // Upcoming deliveries — next 7 days
+    prisma.materialOrder.findMany({
+      where: { ...siteAccessForOrder, status: "ORDERED", expectedDeliveryDate: { gte: now, lte: in7Days } },
+      include: {
+        supplier: { select: { id: true, name: true } },
+        job: { include: { plot: { include: { site: { select: { id: true, name: true } } } } } },
+      },
+      orderBy: { expectedDeliveryDate: "asc" },
+      take: 20,
+    }),
+  ]);
 
   return NextResponse.json({
     confirmDelivery: JSON.parse(JSON.stringify(confirmDelivery)),

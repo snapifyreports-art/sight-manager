@@ -21,9 +21,13 @@ export async function GET(req: NextRequest) {
     ? { plot: { siteId } }
     : {};
 
-  // Run queries in small batches to avoid exhausting Supabase connection pool.
+  // Run ALL queries in parallel — all independent reads, no write
+  // ordering. Previously split into 3 sequential Promise.all batches
+  // (4s HTTP); now a single 10-way parallel fan-out drops HTTP time
+  // to the longest single query (~600ms) since Prisma + pgbouncer
+  // handle the concurrency fine for reads.
   // All job-level analytics use LEAF jobs only (parents are derived rollups).
-  const [sites, plots, jobs] = await Promise.all([
+  const [sites, plots, jobs, orders, orderItems, contractors, events, rainedOffDays, weatherNotes] = await Promise.all([
     prisma.site.findMany({
       where: siteId ? { id: siteId } : {},
       select: {
@@ -71,9 +75,6 @@ export async function GET(req: NextRequest) {
         },
       },
     }),
-  ]);
-
-  const [orders, orderItems] = await Promise.all([
     prisma.materialOrder.findMany({
       where: plotFilter.plot ? { job: plotFilter } : {},
       select: {
@@ -83,43 +84,24 @@ export async function GET(req: NextRequest) {
         expectedDeliveryDate: true,
         deliveredDate: true,
         leadTimeDays: true,
-        orderItems: {
-          select: {
-            totalCost: true,
-          },
-        },
-        supplier: {
-          select: { id: true, name: true },
-        },
+        orderItems: { select: { totalCost: true } },
+        supplier: { select: { id: true, name: true } },
         job: {
           select: {
             name: true,
-            plot: {
-              select: {
-                site: { select: { name: true } },
-              },
-            },
+            plot: { select: { site: { select: { name: true } } } },
           },
         },
       },
     }),
     prisma.orderItem.findMany({
-      where: plotFilter.plot
-        ? { order: { job: plotFilter } }
-        : {},
-      select: {
-        totalCost: true,
-      },
+      where: plotFilter.plot ? { order: { job: plotFilter } } : {},
+      select: { totalCost: true },
     }),
-  ]);
-
-  const [contractors, events] = await Promise.all([
     prisma.jobContractor.findMany({
       where: plotFilter.plot ? { job: plotFilter } : {},
       select: {
-        contact: {
-          select: { id: true, name: true },
-        },
+        contact: { select: { id: true, name: true } },
         job: {
           select: {
             id: true,
@@ -137,26 +119,20 @@ export async function GET(req: NextRequest) {
       where: siteId ? { siteId } : {},
       orderBy: { createdAt: "desc" },
       take: 100,
-      select: {
-        type: true,
-        createdAt: true,
+      select: { type: true, createdAt: true },
+    }),
+    prisma.rainedOffDay.findMany({
+      where: siteId ? { siteId } : {},
+      select: { siteId: true, date: true, type: true },
+    }),
+    prisma.jobAction.count({
+      where: {
+        action: "note",
+        notes: { startsWith: "\u2614" },
+        ...(plotFilter.plot ? { job: plotFilter } : {}),
       },
     }),
   ]);
-
-  // Rained-off days + weather impact (separate small queries)
-  const rainedOffDays = await prisma.rainedOffDay.findMany({
-    where: siteId ? { siteId } : {},
-    select: { siteId: true, date: true, type: true },
-  });
-
-  const weatherNotes = await prisma.jobAction.count({
-    where: {
-      action: "note",
-      notes: { startsWith: "\u2614" },
-      ...(plotFilter.plot ? { job: plotFilter } : {}),
-    },
-  });
 
   // ── Site Progress ──
   const siteProgress = sites.map((site) => {
