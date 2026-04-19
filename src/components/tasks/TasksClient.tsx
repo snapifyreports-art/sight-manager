@@ -44,6 +44,7 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useDelayJob } from "@/hooks/useDelayJob";
+import { useOrderStatus } from "@/hooks/useOrderStatus";
 
 // ---------- Types ----------
 
@@ -153,7 +154,6 @@ export function TasksClient() {
   const [data, setData] = useState<TaskData | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshKey, setRefreshKey] = useState(0);
-  const [confirmingIds, setConfirmingIds] = useState<Set<string>>(new Set());
   const [stoppingIds, setStoppingIds] = useState<Set<string>>(new Set());
   const [chaseDialogOpen, setChaseDialogOpen] = useState(false);
   const [chaseOrder, setChaseOrder] = useState<OrderTask | null>(null);
@@ -204,32 +204,19 @@ export function TasksClient() {
     );
   }, [data]);
 
-  // ── Quick confirm delivery ──
+  // ── Quick confirm delivery — delegated to useOrderStatus hook ──
+  const { setOrderStatus, isPending: isOrderPending } = useOrderStatus();
+
   async function handleQuickConfirm(orderId: string, listKey: "confirmDelivery" | "overdueOrders" | "awaitingDelivery") {
-    setConfirmingIds((prev) => new Set(prev).add(orderId));
-    try {
-      const res = await fetch(`/api/orders/${orderId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "DELIVERED" }),
-      });
-      if (res.ok && data) {
-        setData({
-          ...data,
-          [listKey]: (data[listKey] as OrderTask[]).filter((o) => o.id !== orderId),
-          counts: {
-            ...data.counts,
-            [listKey]: (data.counts[listKey as keyof typeof data.counts] as number) - 1,
-          },
-        });
-      }
-    } catch (err) {
-      console.error("Failed to confirm delivery:", err);
-    } finally {
-      setConfirmingIds((prev) => {
-        const next = new Set(prev);
-        next.delete(orderId);
-        return next;
+    const result = await setOrderStatus(orderId, "DELIVERED");
+    if (result.ok && data) {
+      setData({
+        ...data,
+        [listKey]: (data[listKey] as OrderTask[]).filter((o) => o.id !== orderId),
+        counts: {
+          ...data.counts,
+          [listKey]: (data.counts[listKey as keyof typeof data.counts] as number) - 1,
+        },
       });
     }
   }
@@ -536,7 +523,7 @@ export function TasksClient() {
             <div className="space-y-2">
               {data.overdueOrders.map((order) => {
                 const days = daysOverdue(order.expectedDeliveryDate);
-                const isConfirming = confirmingIds.has(order.id);
+                const isConfirming = isOrderPending(order.id);
                 return (
                   <div
                     key={order.id}
@@ -750,7 +737,7 @@ export function TasksClient() {
             <div className="space-y-2">
               {data.confirmDelivery.map((order) => {
                 const urgency = getUrgency(order.expectedDeliveryDate);
-                const isConfirming = confirmingIds.has(order.id);
+                const isConfirming = isOrderPending(order.id);
                 return (
                   <div
                     key={order.id}
@@ -938,7 +925,7 @@ export function TasksClient() {
           <CardContent>
             <div className="space-y-2">
               {data.awaitingDelivery.map((order) => {
-                const isConfirming = confirmingIds.has(order.id);
+                const isConfirming = isOrderPending(order.id);
                 return (
                   <div
                     key={order.id}

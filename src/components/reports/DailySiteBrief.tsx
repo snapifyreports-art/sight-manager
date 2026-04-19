@@ -11,6 +11,8 @@ import { buildOrderMailto } from "@/lib/order-email";
 import { useJobAction } from "@/hooks/useJobAction";
 import { useAddNote } from "@/hooks/useAddNote";
 import { useDelayJob } from "@/hooks/useDelayJob";
+import { useOrderStatus, type OrderStatus } from "@/hooks/useOrderStatus";
+import { useSnagAction, type SnagStatus } from "@/hooks/useSnagAction";
 import {
   Cloud,
   CloudRain,
@@ -477,9 +479,13 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
 
   // Delay dialog state — delegated to useDelayJob hook (see above).
 
-  // Snag & order inline actions
-  const [pendingSnagActions, setPendingSnagActions] = useState<Set<string>>(new Set());
-  const [pendingOrderActions, setPendingOrderActions] = useState<Set<string>>(new Set());
+  // Snag & order inline actions — delegated to shared hooks
+  const { setSnagStatus, isPending: isSnagPending } = useSnagAction({
+    onChange: () => setRefreshKey((k) => k + 1),
+  });
+  const { setOrderStatus, setManyOrderStatus, isPending: isOrderPending } = useOrderStatus({
+    onChange: () => setRefreshKey((k) => k + 1),
+  });
 
   // Snag resolve dialog state (P5)
   const [snagResolveTarget, setSnagResolveTarget] = useState<{
@@ -890,50 +896,18 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
     }
   };
 
-  const handleSnagAction = async (snagId: string, status: string) => {
-    setPendingSnagActions((prev) => new Set(prev).add(snagId));
-    try {
-      const res = await fetch(`/api/snags/${snagId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status }),
-      });
-      if (res.ok) {
-        setRefreshKey((k) => k + 1);
-      } else {
-        showToast("Failed to update snag — please try again");
-      }
-    } catch {
-      showToast("Network error — please try again");
-    } finally {
-      setPendingSnagActions((prev) => { const n = new Set(prev); n.delete(snagId); return n; });
-    }
+  const handleSnagAction = (snagId: string, status: SnagStatus) => {
+    void setSnagStatus(snagId, status);
   };
 
   // Delay handler delegated to useDelayJob hook — see hook for implementation.
 
-  const handleOrderAction = async (orderId: string, status: string) => {
-    setPendingOrderActions((prev) => new Set(prev).add(orderId));
-    try {
-      const res = await fetch(`/api/orders/${orderId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status }),
-      });
-      if (res.ok) {
-        setRefreshKey((k) => k + 1);
-      } else {
-        showToast("Failed to update order — please try again");
-      }
-    } catch {
-      showToast("Network error — please try again");
-    } finally {
-      setPendingOrderActions((prev) => { const n = new Set(prev); n.delete(orderId); return n; });
-    }
+  const handleOrderAction = (orderId: string, status: OrderStatus) => {
+    void setOrderStatus(orderId, status);
   };
 
-  const handleGroupOrderAction = (ids: string[], status: string) => {
-    ids.forEach((id) => handleOrderAction(id, status));
+  const handleGroupOrderAction = (ids: string[], status: OrderStatus) => {
+    void setManyOrderStatus(ids, status);
   };
 
   const groupedOrdersToPlace = useMemo(() => {
@@ -1931,10 +1905,10 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                             variant="outline"
                             size="sm"
                             className="h-7 shrink-0 border-green-200 px-2 text-[10px] text-green-700 hover:bg-green-50"
-                            disabled={pendingOrderActions.has(d.id)}
+                            disabled={isOrderPending(d.id)}
                             onClick={() => handleOrderAction(d.id, "DELIVERED")}
                           >
-                            {pendingOrderActions.has(d.id) ? <Loader2 className="size-3 animate-spin" /> : <CheckCircle2 className="size-3" />}
+                            {isOrderPending(d.id) ? <Loader2 className="size-3 animate-spin" /> : <CheckCircle2 className="size-3" />}
                             <span className="ml-1">Received</span>
                           </Button>
                         </div>
@@ -2030,10 +2004,10 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                           variant="outline"
                           size="sm"
                           className="h-6 border-green-200 px-2 text-[10px] text-green-700 hover:bg-green-50"
-                          disabled={pendingOrderActions.has(d.id)}
+                          disabled={isOrderPending(d.id)}
                           onClick={() => handleOrderAction(d.id, "DELIVERED")}
                         >
-                          {pendingOrderActions.has(d.id) ? <Loader2 className="size-3 animate-spin" /> : <CheckCircle2 className="size-3" />}
+                          {isOrderPending(d.id) ? <Loader2 className="size-3 animate-spin" /> : <CheckCircle2 className="size-3" />}
                           <span className="ml-1">Received</span>
                         </Button>
                       </div>
@@ -2051,7 +2025,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                   groupedOrdersToPlace.map((group) => {
                     const o = group[0];
                     const groupIds = group.map((g) => g.id);
-                    const anyPending = groupIds.some((id) => pendingOrderActions.has(id));
+                    const anyPending = groupIds.some((id) => isOrderPending(id));
                     const mailto = o.supplier.contactEmail
                       ? buildOrderMailto(o.supplier.contactEmail, {
                           supplierName: o.supplier.name,
@@ -2389,7 +2363,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                 </p>
               )}
               {data.openSnagsList.map((snag) => {
-                const isPendingSnag = pendingSnagActions.has(snag.id);
+                const isPendingSnag = isSnagPending(snag.id);
                 return (
                   <div
                     key={snag.id}
@@ -2693,7 +2667,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                       const first = group[0];
                       const plotLabels = group.map((d) => d.job.plot.plotNumber ? `P${d.job.plot.plotNumber}` : d.job.plot.name);
                       const allIds = group.map((d) => d.id);
-                      const anyPending = allIds.some((id) => pendingOrderActions.has(id));
+                      const anyPending = allIds.some((id) => isOrderPending(id));
                       return (
                         <div key={`${first.supplier.id}__${first.job.name}`} className="rounded border p-2 text-sm">
                           <div className="flex items-center gap-2">
@@ -2759,7 +2733,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
               {groupedUpcomingOrders.map((group) => {
                 const o = group[0];
                 const groupIds = group.map((g) => g.id);
-                const anyPending = groupIds.some((id) => pendingOrderActions.has(id));
+                const anyPending = groupIds.some((id) => isOrderPending(id));
                 const mailto = o.supplier.contactEmail
                   ? buildOrderMailto(o.supplier.contactEmail, {
                       supplierName: o.supplier.name,
