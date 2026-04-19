@@ -8,14 +8,12 @@ import {
   HardHat,
   LayoutDashboard,
   Building2,
-  Package,
   BarChart3,
   Settings,
   LogOut,
   ChevronLeft,
   ChevronDown,
   Menu,
-  CalendarDays,
   FolderOpen,
   Footprints,
   ClipboardList,
@@ -81,12 +79,15 @@ const SITE_TAB_GROUPS = [
   },
 ];
 
-// Main nav items (global, not site-contextual)
+// Main nav items (global — per-site views live under "Manage Site" up top).
+// Keith Apr 2026: "daily brief and orders is repeated — they should live
+// under manage site". Removed the duplicate global entries: per-site
+// Daily Brief + Orders are already reachable via the Manage Site section
+// above. The underlying pages (/daily-brief, /orders) still exist for
+// deep-links but aren't in the sidebar.
 const navItems = [
   { label: "Dashboard",     href: "/dashboard",   icon: LayoutDashboard },
-  { label: "Daily Brief",   href: "/daily-brief", icon: CalendarDays },
   { label: "Tasks",         href: "/tasks",       icon: ClipboardList },
-  { label: "Orders",        href: "/orders",      icon: Package },
   { label: "Suppliers",     href: "/suppliers",   icon: FileBox },
   { label: "Contacts",      href: "/contacts",    icon: HardHat },
   { label: "Templates",     href: "/settings?tab=templates", icon: Layers },
