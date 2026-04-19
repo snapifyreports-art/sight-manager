@@ -199,7 +199,10 @@ export default function SiteWalkthrough({
   } | null>(null);
 
   // Centralised job action hook — handles full pre-start flow for any job
-  const { triggerAction: triggerJobAction, isLoading: jobActionLoading, dialogs: jobActionDialogs } = useJobAction(
+  // + `runSimpleAction` for plain mutations (sign-off with notes, add note)
+  // so complete/note flows use the same logic as the rest of the app rather
+  // than bespoke direct-fetch POSTs.
+  const { triggerAction: triggerJobAction, runSimpleAction, isLoading: jobActionLoading, dialogs: jobActionDialogs } = useJobAction(
     async (_action, _jobId) => {
       showToast("Done", "success");
       // Small delay to let server-side cascade finish writing before re-fetch
@@ -376,23 +379,25 @@ export default function SiteWalkthrough({
           return;
         }
       }
-      const res = await fetch(`/api/jobs/${plot.currentJob.id}/actions`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "complete",
-          signOffNotes: signOffNotes.trim() || undefined,
-        }),
+      // Route through the central hook — same code path as Daily Brief
+      // and every other completion surface.
+      const res = await runSimpleAction(plot.currentJob.id, "complete", {
+        signOffNotes: signOffNotes.trim() || undefined,
+        silent: true, // walkthrough shows its own richer toast below
       });
       if (res.ok) {
-        const result = await res.json();
+        const result = res.data as { _completionContext?: {
+          daysDeviation: number;
+          nextJob: { id: string; name: string; contractorName: string | null; assignedToName: string | null } | null;
+          plotId: string;
+        } } | undefined;
         const completedName = plot.currentJob.name;
         closeModal();
         await refresh();
         // Post-completion decision: toast with action button instead of
         // auto-opening the dialog. Matches Keith's "manual trigger only"
         // rule — user chooses to engage with next-steps guidance.
-        if (result._completionContext) {
+        if (result?._completionContext) {
           const ctx = result._completionContext;
           const dev = ctx.daysDeviation;
           const summary = dev === 0
@@ -421,8 +426,7 @@ export default function SiteWalkthrough({
           showToast(`Signed off: ${completedName}`, "success");
         }
       } else {
-        const err = await res.json().catch(() => ({}));
-        showToast(err.error || "Failed to sign off job", "error");
+        showToast(res.error || "Failed to sign off job", "error");
       }
     } finally {
       setActionLoading(false);
@@ -434,17 +438,18 @@ export default function SiteWalkthrough({
     setActionLoading(true);
     try {
       const targetJobId = noteJobId || plot.currentJob.id;
-      const res = await fetch(`/api/jobs/${targetJobId}/actions`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "note", notes: noteText.trim() }),
+      // Route through the central hook — same code path as Daily Brief
+      // so audit trail + event log stays consistent.
+      const res = await runSimpleAction(targetJobId, "note", {
+        notes: noteText.trim(),
+        silent: true, // walkthrough shows its own toast below
       });
       if (res.ok) {
         closeModal();
         showToast("Note added", "success");
         await refresh();
       } else {
-        showToast("Failed to add note", "error");
+        showToast(res.error || "Failed to add note", "error");
       }
     } finally {
       setActionLoading(false);

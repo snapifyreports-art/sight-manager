@@ -15,6 +15,12 @@ const ACTION_STATUS_MAP: Record<string, JobStatus> = {
 };
 
 // POST /api/sites/[id]/bulk-status — bulk start/complete jobs
+// Callers: DailySiteBrief.handleQuickBulk + handleBulkAction — one-click
+// "Start All" / "Complete All" from programme select mode. Bypasses the
+// pre-start dialog flow intentionally — used for trusted batch operations
+// where the user has already confirmed. Individual starts still go through
+// useJobAction.
+// Keep. Consumer audit last run: Apr 2026 session handover spot-check.
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }

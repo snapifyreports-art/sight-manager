@@ -6,6 +6,9 @@ import { getServerCurrentDate } from "@/lib/dev-date";
 export const dynamic = "force-dynamic";
 
 // POST /api/orders/bulk-status — bulk update order statuses
+// Caller: TasksClient.handleMarkGroupSent — marks all orders in a supplier
+// group as ORDERED atomically (more efficient than N per-order PUTs).
+// Keep. Consumer audit last run: Apr 2026 session handover spot-check.
 export async function POST(req: NextRequest) {
   const session = await auth();
   if (!session) {

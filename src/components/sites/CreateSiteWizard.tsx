@@ -36,6 +36,7 @@ import {
 } from "@/components/ui/dialog";
 import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 import { usePlotCreation } from "@/hooks/usePlotCreation";
+import { HelpTip } from "@/components/shared/HelpTip";
 
 // ---------- Types ----------
 
@@ -513,6 +514,13 @@ export function CreateSiteWizard({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className={dialogWidth}>
+        <HelpTip title="About the Create Site wizard" anchor="below-left">
+          <p><strong>Three steps:</strong> Site details → Plot batches → (if templates are used) Supplier mapping.</p>
+          <p><strong>Step 1 — Site:</strong> name, address, postcode. These populate order emails, the header, and contractor-facing pages.</p>
+          <p><strong>Step 2 — Plots:</strong> add one or more <em>batches</em> of plots. A batch = several plots that share the same template and start week. You can skip this if you&apos;d rather add plots one-by-one later.</p>
+          <p><strong>Step 3 — Suppliers:</strong> only shown if a template you picked has orders with supplier placeholders. Assign real suppliers so orders are ready from day one.</p>
+          <p><strong>You can close and come back:</strong> site creation isn&apos;t final until you hit Create on the last step. Nothing is saved until then.</p>
+        </HelpTip>
         {/* Step indicator */}
         <div className="flex items-center gap-2 pb-1">
           <StepDot

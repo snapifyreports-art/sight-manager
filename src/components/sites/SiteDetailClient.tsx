@@ -83,6 +83,7 @@ import { usePlotCreation } from "@/hooks/usePlotCreation";
 import { SnagAgeingReport } from "@/components/snags/SnagAgeingReport";
 import { CashFlowReport } from "@/components/reports/CashFlowReport";
 import { Badge } from "@/components/ui/badge";
+import { HelpTip } from "@/components/shared/HelpTip";
 
 // ---------- Types ----------
 
@@ -879,6 +880,12 @@ export function SiteDetailClient({
               }}
             >
               <DialogContent className="sm:max-w-lg">
+                <HelpTip title="How to add a plot" anchor="below-left">
+                  <p><strong>Three ways in:</strong> Blank (just a name — you add jobs later), From Template (copy a saved stage list with dates), or Bulk (several plots from the same template in one go).</p>
+                  <p><strong>Template snapshot:</strong> creating from a template <em>copies</em> the jobs to this plot at that point in time. Later edits to the template don&apos;t cascade back to plots already created — you&apos;d edit the jobs on the plot itself.</p>
+                  <p><strong>Suppliers step (template / bulk):</strong> the template may have orders with supplier placeholders. Assign real suppliers before creating so orders are ready to go.</p>
+                  <p><strong>Start date:</strong> the date the plot&apos;s first job begins. All other job dates are calculated from this.</p>
+                </HelpTip>
                 <DialogHeader>
                   <DialogTitle>
                     {plotMode === "choose"

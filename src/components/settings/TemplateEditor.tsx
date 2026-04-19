@@ -2736,6 +2736,12 @@ export function TemplateEditor({
       {/* Split Job into Sub-Jobs Dialog */}
       <Dialog open={splitDialogOpen} onOpenChange={setSplitDialogOpen}>
         <DialogContent className="sm:max-w-lg">
+          <HelpTip title="About splitting jobs" anchor="below-left">
+            <p><strong>What this does:</strong> converts a single job (e.g. &quot;Brickwork&quot;) into a <em>stage</em> with named sub-jobs (e.g. &quot;Brickwork to DPC&quot;, &quot;Ground Floor Blockwork&quot;). Each sub-job is individually scheduled and started.</p>
+            <p><strong>Order placement:</strong> if the original job had orders attached, you&apos;ll be asked which sub-job should own them. Orders can&apos;t float — they need exactly one job.</p>
+            <p><strong>Dates:</strong> sub-jobs inherit the parent&apos;s date range by default; you can edit them afterwards. The stage&apos;s overall start/end is always the min/max of its children.</p>
+            <p><strong>Irreversible:</strong> once split, un-splitting isn&apos;t a one-click undo — you&apos;d manually delete sub-jobs and re-add order links.</p>
+          </HelpTip>
           <DialogHeader>
             <DialogTitle>Split into Sub-Jobs</DialogTitle>
             <DialogDescription>
