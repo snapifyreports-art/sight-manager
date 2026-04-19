@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { canAccessSite } from "@/lib/site-access";
 import { isWorkingDay, differenceInWorkingDays, addWorkingDays } from "@/lib/working-days";
 import { apiError } from "@/lib/api-errors";
+import { getServerCurrentDate } from "@/lib/dev-date";
 
 export const dynamic = "force-dynamic";
 
@@ -29,7 +30,7 @@ export const dynamic = "force-dynamic";
  * Same auth + site-access pattern as the delay suggestion endpoint.
  */
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
@@ -143,7 +144,7 @@ export async function GET(
       },
     });
 
-    const today = new Date();
+    const today = getServerCurrentDate(req);
     today.setHours(0, 0, 0, 0);
 
     const orderConstraints = orders.map((o) => {
