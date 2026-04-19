@@ -36,6 +36,7 @@ import { format, parseISO } from "date-fns";
 import { PostCompletionDialog } from "@/components/PostCompletionDialog";
 import { useJobAction } from "@/hooks/useJobAction";
 import { useDelayJob } from "@/hooks/useDelayJob";
+import { useToast } from "@/components/ui/toast";
 import { Breadcrumbs } from "@/components/ui/breadcrumbs";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -119,35 +120,14 @@ function ScheduleBadge({
   );
 }
 
-// ─── Toast ────────────────────────────────────────────────────────────────────
-
-function Toast({
-  message,
-  type,
-  onDismiss,
-}: {
-  message: string;
-  type: "success" | "error";
-  onDismiss: () => void;
-}) {
-  useEffect(() => {
-    const t = setTimeout(onDismiss, 3500);
-    return () => clearTimeout(t);
-  }, [onDismiss]);
-
-  return (
-    <div
-      className={cn(
-        "fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-xl px-5 py-3 text-sm font-medium text-white shadow-xl",
-        type === "success" ? "bg-emerald-600" : "bg-red-600"
-      )}
-    >
-      {message}
-    </div>
-  );
-}
+// Toast removed — uses the global useToast (same as every other screen in
+// the app) so Keith only sees one toast style when moving between views.
 
 // ─── Modal shell ─────────────────────────────────────────────────────────────
+// Kept bespoke: this is a mobile-first bottom-sheet pattern used throughout
+// the walkthrough. It's NOT a duplicate of Dialog — Dialog centers on mobile
+// which blocks thumb reach. If we ever unify, extract this as a shared
+// BottomSheetDialog component; until then it's walkthrough-specific UX.
 
 function Modal({
   title,
@@ -192,7 +172,7 @@ export default function SiteWalkthrough({
   const [snagsExpanded, setSnagsExpanded] = useState(false);
   const [activeModal, setActiveModal] = useState<ModalType>(null);
   const [actionLoading, setActionLoading] = useState(false);
-  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
+  const toast = useToast();
 
   // Modal state
   const [noteText, setNoteText] = useState("");
@@ -281,8 +261,11 @@ export default function SiteWalkthrough({
     if (currentIndex > 0) { setCurrentIndex((i) => i - 1); setSnagsExpanded(false); }
   };
 
+  // Thin wrapper so the rest of this component can keep its `showToast`
+  // call sites — all routed to the global toast system now.
   const showToast = (message: string, type: "success" | "error") => {
-    setToast({ message, type });
+    if (type === "success") toast.success(message);
+    else toast.error(message);
   };
 
   const closeModal = () => {
@@ -1354,14 +1337,7 @@ export default function SiteWalkthrough({
           "rained 2 days" into "so that's April 22nd". */}
       {delayDialogs}
 
-      {/* Toast */}
-      {toast && (
-        <Toast
-          message={toast.message}
-          type={toast.type}
-          onDismiss={() => setToast(null)}
-        />
-      )}
+      {/* Toast now rendered by the global <Toaster> — no local instance here. */}
 
       {/* Post-completion decision dialog */}
       {completionContext && (

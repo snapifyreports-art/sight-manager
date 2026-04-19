@@ -9,6 +9,7 @@ import { getCurrentDate } from "@/lib/dev-date";
 import { useDevDate } from "@/lib/dev-date-context";
 import { buildOrderMailto } from "@/lib/order-email";
 import { useJobAction } from "@/hooks/useJobAction";
+import { useAddNote } from "@/hooks/useAddNote";
 import { useDelayJob } from "@/hooks/useDelayJob";
 import {
   Cloud,
@@ -499,10 +500,12 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
   // Inline snag dialog state
   const [inlineSnagTarget, setInlineSnagTarget] = useState<{ jobId: string; plotId: string; contactId?: string } | null>(null);
 
-  // Inline note dialog state
-  const [noteTarget, setNoteTarget] = useState<{ jobId: string; jobName: string } | null>(null);
-  const [noteText, setNoteText] = useState("");
-  const [noteSubmitting, setNoteSubmitting] = useState(false);
+  // Note dialog — unified via useAddNote so every "Add Note" button in the
+  // app (Daily Brief, Walkthrough, future screens) shares the same dialog,
+  // validation, and submit behaviour.
+  const { openNoteDialog, dialogs: noteDialogs } = useAddNote(() => {
+    setRefreshKey((k) => k + 1);
+  });
 
   // Inline photo upload state
   const [photoTarget, setPhotoTarget] = useState<{ jobId: string; jobName: string } | null>(null);
@@ -751,19 +754,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
 
   // Inline note handler — uses runSimpleAction (fixes the `note` vs `notes` bug
   // that silently dropped the note content).
-  const handleAddNote = async () => {
-    if (!noteTarget || !noteText.trim()) return;
-    setNoteSubmitting(true);
-    try {
-      const res = await runSimpleAction(noteTarget.jobId, "note", { notes: noteText.trim() });
-      if (res.ok) {
-        setNoteTarget(null);
-        setNoteText("");
-      }
-    } finally {
-      setNoteSubmitting(false);
-    }
-  };
+  // handleAddNote removed — useAddNote handles POST, validation, and toast.
 
   // Inline photo handler
   const handleUploadPhotos = async () => {
@@ -1753,7 +1744,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                               }}>
                                 <CalendarClock className="size-2.5" /> Delay
                               </Button>
-                              <Button variant="outline" size="sm" className="h-6 gap-1 px-2 text-[10px]" onClick={() => setNoteTarget({ jobId: j.id, jobName: j.name })}>
+                              <Button variant="outline" size="sm" className="h-6 gap-1 px-2 text-[10px]" onClick={() => openNoteDialog({ id: j.id, name: j.name })}>
                                 <StickyNote className="size-2.5" /> Note
                               </Button>
                             </>
@@ -1812,7 +1803,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                             <Button variant="outline" size="sm" className="h-6 gap-1 px-2 text-[10px]" onClick={() => setInlineSnagTarget({ jobId: j.id, plotId: j.plotId, contactId: (j as { contractors?: Array<{ contactId: string }> }).contractors?.[0]?.contactId })}>
                               <AlertTriangle className="size-2.5" /> Snag
                             </Button>
-                            <Button variant="outline" size="sm" className="h-6 gap-1 px-2 text-[10px]" onClick={() => setNoteTarget({ jobId: j.id, jobName: j.name })}>
+                            <Button variant="outline" size="sm" className="h-6 gap-1 px-2 text-[10px]" onClick={() => openNoteDialog({ id: j.id, name: j.name })}>
                               <StickyNote className="size-2.5" /> Note
                             </Button>
                             <Button variant="outline" size="sm" className="h-6 gap-1 px-2 text-[10px]" onClick={() => setPhotoTarget({ jobId: j.id, jobName: j.name })}>
@@ -1981,7 +1972,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                               <Button variant="outline" size="sm" className="h-6 gap-1 px-2 text-[10px]" onClick={() => setInlineSnagTarget({ jobId: j.id, plotId: j.plotId, contactId: (j.contractors as Array<{ contactId?: string }>)?.[0]?.contactId })}>
                                 <AlertTriangle className="size-2.5" /> Snag
                               </Button>
-                              <Button variant="outline" size="sm" className="h-6 gap-1 px-2 text-[10px]" onClick={() => setNoteTarget({ jobId: j.id, jobName: j.name })}>
+                              <Button variant="outline" size="sm" className="h-6 gap-1 px-2 text-[10px]" onClick={() => openNoteDialog({ id: j.id, name: j.name })}>
                                 <StickyNote className="size-2.5" /> Note
                               </Button>
                               <Button variant="outline" size="sm" className="h-6 gap-1 px-2 text-[10px]" onClick={() => setPhotoTarget({ jobId: j.id, jobName: j.name })}>
@@ -2177,7 +2168,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                           <Button variant="outline" size="sm" className="h-6 gap-1 px-2 text-[10px]" onClick={() => setInlineSnagTarget({ jobId: j.id, plotId: (j as { plotId?: string }).plotId || "", contactId: (j as { contractors?: Array<{ contactId?: string }> }).contractors?.[0]?.contactId })}>
                             <AlertTriangle className="size-2.5" /> Snag
                           </Button>
-                          <Button variant="outline" size="sm" className="h-6 gap-1 px-2 text-[10px]" onClick={() => setNoteTarget({ jobId: j.id, jobName: j.name })}>
+                          <Button variant="outline" size="sm" className="h-6 gap-1 px-2 text-[10px]" onClick={() => openNoteDialog({ id: j.id, name: j.name })}>
                             <StickyNote className="size-2.5" /> Note
                           </Button>
                         </>
@@ -3234,35 +3225,8 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
         />
       )}
 
-      {/* Inline Note Dialog */}
-      <Dialog open={!!noteTarget} onOpenChange={(o) => { if (!o) { setNoteTarget(null); setNoteText(""); } }}>
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <StickyNote className="size-4" />
-              Add Note
-            </DialogTitle>
-            <DialogDescription>
-              Note for <span className="font-medium">{noteTarget?.jobName}</span>
-            </DialogDescription>
-          </DialogHeader>
-          <Textarea
-            placeholder="Enter note..."
-            value={noteText}
-            onChange={(e) => setNoteText(e.target.value)}
-            rows={3}
-            className="resize-none text-sm"
-            autoFocus
-          />
-          <DialogFooter>
-            <DialogClose render={<Button variant="outline" size="sm" />}>Cancel</DialogClose>
-            <Button size="sm" disabled={noteSubmitting || !noteText.trim()} onClick={handleAddNote}>
-              {noteSubmitting ? <Loader2 className="size-3.5 animate-spin mr-1" /> : <StickyNote className="size-3.5 mr-1" />}
-              Save Note
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* Unified note dialog (useAddNote) */}
+      {noteDialogs}
 
       {/* Inline Photo Upload Dialog */}
       <Dialog open={!!photoTarget} onOpenChange={(o) => { if (!o) { setPhotoTarget(null); setPhotoFiles([]); } }}>

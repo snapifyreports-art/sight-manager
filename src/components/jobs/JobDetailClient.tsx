@@ -60,6 +60,7 @@ import { PhotoUpload } from "./PhotoUpload";
 import { useJobAction } from "@/hooks/useJobAction";
 import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 import { JobStatusBadge, OrderStatusBadge } from "@/components/shared/StatusBadge";
+import { useJobContractorPicker } from "@/hooks/useJobContractorPicker";
 
 // ---------- Types ----------
 
@@ -324,67 +325,15 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
     return () => { cancelled = true; };
   }, [initialJob.plotId, initialJob.id, toast]);
 
-  // Contractor dialog state
-  const [contractorDialogOpen, setContractorDialogOpen] = useState(false);
-  const [allContractors, setAllContractors] = useState<ContractorContact[]>([]);
-  const [selectedContractorIds, setSelectedContractorIds] = useState<Set<string>>(new Set());
-  const [loadingContractors, setLoadingContractors] = useState(false);
-  const [savingContractors, setSavingContractors] = useState(false);
-
-  // Fetch contractor contacts when dialog opens
-  useEffect(() => {
-    if (contractorDialogOpen && allContractors.length === 0) {
-      setLoadingContractors(true);
-      (async () => {
-        try {
-          const res = await fetch("/api/contacts?type=CONTRACTOR");
-          if (!res.ok) {
-            toast.error(await fetchErrorMessage(res, "Failed to load contractors"));
-            return;
-          }
-          const data = await res.json();
-          setAllContractors(data);
-        } catch (e) {
-          toast.error(e instanceof Error ? e.message : "Failed to load contractors");
-        } finally {
-          setLoadingContractors(false);
-        }
-      })();
-    }
-    if (contractorDialogOpen) {
-      setSelectedContractorIds(
-        new Set(job.contractors.map((c) => c.contactId))
-      );
-    }
-  }, [contractorDialogOpen, allContractors.length, job.contractors, toast]);
-
-  const handleSaveContractors = useCallback(async () => {
-    setSavingContractors(true);
-    try {
-      const res = await fetch(`/api/jobs/${job.id}/contractors`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contactIds: Array.from(selectedContractorIds),
-        }),
-      });
-      if (!res.ok) {
-        toast.error(await fetchErrorMessage(res, "Failed to save contractors"));
-        return;
-      }
-      const updated = await res.json();
-      setJob((prev) => ({
-        ...prev,
-        contractors: updated,
-      }));
-      setContractorDialogOpen(false);
+  // Contractor picker — unified via useJobContractorPicker.
+  // Replaces ~65 lines of bespoke state + fetch + PUT logic that was
+  // duplicated across JobWeekPanel. Single dialog, single flow.
+  // router.refresh re-fetches server props so job.contractors stays in
+  // the exact JobContractor shape the rest of the page expects.
+  const { openPicker: openContractorPicker, dialogs: contractorPickerDialogs } =
+    useJobContractorPicker(() => {
       router.refresh();
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to save contractors");
-    } finally {
-      setSavingContractors(false);
-    }
-  }, [job.id, selectedContractorIds, router, toast]);
+    });
 
   // Sign-off dialog state
   const [signOffDialogOpen, setSignOffDialogOpen] = useState(false);
@@ -851,7 +800,10 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
                 variant="ghost"
                 size="sm"
                 className="h-6 px-1.5 text-xs"
-                onClick={() => setContractorDialogOpen(true)}
+                onClick={() => openContractorPicker(
+                  { id: job.id, name: job.name },
+                  { currentContactIds: job.contractors.map((c) => c.contactId), mode: "multi" }
+                )}
               >
                 <UserPlus className="size-3" />
                 Manage
@@ -1238,93 +1190,8 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
         </CardContent>
       </Card>
 
-      {/* Manage Contractors Dialog */}
-      <Dialog
-        open={contractorDialogOpen}
-        onOpenChange={setContractorDialogOpen}
-      >
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Manage Contractors</DialogTitle>
-            <DialogDescription>
-              Assign contractors to this job.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="max-h-[50vh] space-y-1 overflow-y-auto py-2">
-            {loadingContractors ? (
-              <div className="flex items-center justify-center py-8">
-                <Loader2 className="size-5 animate-spin text-muted-foreground" />
-              </div>
-            ) : allContractors.length === 0 ? (
-              <p className="py-4 text-center text-sm text-muted-foreground">
-                No contractors found. Add contractors in the Contacts page first.
-              </p>
-            ) : (
-              allContractors.map((contractor) => {
-                const checked = selectedContractorIds.has(contractor.id);
-                return (
-                  <label
-                    key={contractor.id}
-                    className={`flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 transition-colors ${
-                      checked
-                        ? "bg-blue-50 ring-1 ring-blue-200"
-                        : "hover:bg-muted/50"
-                    }`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={() => {
-                        setSelectedContractorIds((prev) => {
-                          const next = new Set(prev);
-                          if (next.has(contractor.id)) {
-                            next.delete(contractor.id);
-                          } else {
-                            next.add(contractor.id);
-                          }
-                          return next;
-                        });
-                      }}
-                      className="size-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                    />
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium">{contractor.name}</p>
-                      {contractor.company && (
-                        <p className="text-xs text-muted-foreground">
-                          {contractor.company}
-                        </p>
-                      )}
-                    </div>
-                    {contractor.phone && (
-                      <span className="text-xs text-muted-foreground">
-                        {contractor.phone}
-                      </span>
-                    )}
-                  </label>
-                );
-              })
-            )}
-          </div>
-          <DialogFooter>
-            <DialogClose render={<Button variant="outline" />}>
-              Cancel
-            </DialogClose>
-            <Button
-              onClick={handleSaveContractors}
-              disabled={savingContractors}
-            >
-              {savingContractors ? (
-                <>
-                  <Loader2 className="size-4 animate-spin" />
-                  Saving...
-                </>
-              ) : (
-                `Save (${selectedContractorIds.size} selected)`
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* Unified contractor picker (useJobContractorPicker) */}
+      {contractorPickerDialogs}
 
       {/* Sign-Off Dialog */}
       <Dialog open={signOffDialogOpen} onOpenChange={setSignOffDialogOpen}>
