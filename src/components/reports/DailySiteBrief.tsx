@@ -1212,7 +1212,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
         {j.endDate && <span> · Due {format(new Date(j.endDate), "dd MMM")}</span>}
       </p>
       {showAction && !bulkMode && (
-        <div className="mt-1.5 flex flex-wrap items-center gap-1 border-t pt-1.5">
+        <div className="mt-1.5 flex flex-wrap items-center gap-1 border-t pt-1.5 print:hidden">
           <span className="mr-auto text-[10px] font-medium text-muted-foreground">Actions</span>
           {pendingActions.has(j.id) ? (
             <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
@@ -1251,7 +1251,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
         <p className="text-sm font-semibold sm:text-lg">
           {format(date, "EEEE, d MMMM yyyy")}
         </p>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 print:hidden">
           {data.isRainedOff ? (
             <Button
               variant="outline"
@@ -1288,7 +1288,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
 
       {/* Bulk action floating bar (UX #3) */}
       {bulkMode && selectedJobIds.size > 0 && (
-        <div className="flex items-center gap-2 rounded-lg border bg-slate-50 px-4 py-2">
+        <div className="flex items-center gap-2 rounded-lg border bg-slate-50 px-4 py-2 print:hidden">
           <span className="text-sm font-medium">
             {selectedJobIds.size} selected
           </span>
@@ -1785,7 +1785,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                             )}
                           </div>
                         )}
-                        <div className="mt-1.5 flex flex-wrap items-center gap-1 border-t pt-1.5">
+                        <div className="mt-1.5 flex flex-wrap items-center gap-1 border-t pt-1.5 print:hidden">
                           <span className="mr-auto text-[10px] font-medium text-muted-foreground">Actions</span>
                           {pendingActions.has(j.id) ? (
                             <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
@@ -1847,7 +1847,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                         <Link href={`/sites/${siteId}/plots/${j.plotId}`} className="hover:underline hover:text-blue-600">{j.plot.plotNumber ? `Plot ${j.plot.plotNumber}` : j.plot.name}</Link>
                         {j.assignedTo && <span> · {j.assignedTo.name}</span>}
                       </p>
-                      <div className="mt-1.5 flex flex-wrap items-center gap-1 border-t pt-1.5">
+                      <div className="mt-1.5 flex flex-wrap items-center gap-1 border-t pt-1.5 print:hidden">
                         <span className="mr-auto text-[10px] font-medium text-muted-foreground">Actions</span>
                         {j.status === "COMPLETED" ? (
                           <span className="flex items-center gap-0.5 text-[10px] text-emerald-600">
@@ -1942,7 +1942,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                             <p className="mt-0.5 flex items-center gap-1 text-xs text-slate-500">
                               <Lock className="size-3" /> Blocked by: {j.blockedBy}
                             </p>
-                            <div className="mt-1.5 flex flex-wrap items-center gap-1 border-t pt-1.5">
+                            <div className="mt-1.5 flex flex-wrap items-center gap-1 border-t pt-1.5 print:hidden">
                               <span className="mr-auto text-[10px] font-medium text-muted-foreground">Actions</span>
                               <Link href={`/jobs/${j.id}`} className="inline-flex h-6 items-center gap-1 rounded-md border px-2 text-[10px] text-slate-600 hover:bg-slate-100">
                                 <Briefcase className="size-2.5" /> View Job
@@ -2095,7 +2095,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                         <Link href={`/jobs/${d.job.id}`} className="hover:underline hover:text-blue-600">{d.job.name}</Link>
                         {" · "}{d.job.plot.plotNumber ? `Plot ${d.job.plot.plotNumber}` : d.job.plot.name}
                       </p>
-                      <div className="mt-1.5 flex items-center gap-1 border-t pt-1.5">
+                      <div className="mt-1.5 flex items-center gap-1 border-t pt-1.5 print:hidden">
                         <span className="mr-auto text-[10px] font-medium text-muted-foreground">Actions</span>
                         <Button
                           variant="outline"
@@ -2186,7 +2186,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                             <span className="text-[10px] text-muted-foreground">+{group.length - 5} more</span>
                           )}
                         </div>
-                        <div className="mt-1.5 flex flex-wrap items-center gap-1 border-t pt-1.5">
+                        <div className="mt-1.5 flex flex-wrap items-center gap-1 border-t pt-1.5 print:hidden">
                           <span className="mr-auto text-[10px] font-medium text-muted-foreground">Actions</span>
                           {anyPending ? (
                             <Loader2 className="size-4 animate-spin text-muted-foreground" />
@@ -2259,7 +2259,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                       })()}
                       {j.endDate && <span> · Due {format(new Date(j.endDate), "dd MMM")}</span>}
                     </p>
-                    <div className="mt-1.5 flex flex-wrap items-center gap-1 border-t pt-1.5">
+                    <div className="mt-1.5 flex flex-wrap items-center gap-1 border-t pt-1.5 print:hidden">
                       <span className="mr-auto text-[10px] font-medium text-muted-foreground">Actions</span>
                       {pendingActions.has(j.id) ? (
                         <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
@@ -2852,7 +2852,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                           <p className="text-[11px] text-muted-foreground">
                             {first.job.name} · {plotLabels.join(", ")}{group.length > 1 ? ` (${group.length} plots)` : ""}
                           </p>
-                          <div className="mt-1.5 flex flex-wrap items-center gap-1 border-t pt-1.5">
+                          <div className="mt-1.5 flex flex-wrap items-center gap-1 border-t pt-1.5 print:hidden">
                             <span className="mr-auto text-[10px] font-medium text-muted-foreground">Actions</span>
                             <input
                               type="date"
@@ -2972,7 +2972,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                         <span className="text-[10px] text-muted-foreground">+{group.length - 5} more</span>
                       )}
                     </div>
-                    <div className="mt-1.5 flex flex-wrap items-center gap-1 border-t pt-1.5">
+                    <div className="mt-1.5 flex flex-wrap items-center gap-1 border-t pt-1.5 print:hidden">
                       <span className="mr-auto text-[10px] font-medium text-muted-foreground">Actions</span>
                       {anyPending ? (
                         <Loader2 className="size-4 animate-spin text-muted-foreground" />

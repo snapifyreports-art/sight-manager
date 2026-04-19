@@ -352,7 +352,9 @@ export function BudgetReport({ siteId }: BudgetReportProps) {
                 </div>
               </button>
 
-              {isExpanded && (
+              {/* Details always in DOM with `print:!block` so print output
+                  includes every plot's breakdown even when collapsed on screen. */}
+              <div className={isExpanded ? "" : "hidden print:block"}>
                 <CardContent className="border-t pt-3">
                   {plot.jobs.length === 0 ? (
                     <p className="text-sm text-muted-foreground">No jobs</p>
@@ -382,7 +384,7 @@ export function BudgetReport({ siteId }: BudgetReportProps) {
                     </div>
                   )}
                 </CardContent>
-              )}
+              </div>
             </Card>
           );
         })}
