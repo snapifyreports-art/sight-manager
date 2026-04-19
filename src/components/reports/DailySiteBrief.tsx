@@ -2746,21 +2746,55 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
               {(!data.upcomingDeliveries || data.upcomingDeliveries.length === 0) ? (
                 <p className="text-sm text-muted-foreground">No upcoming deliveries</p>
               ) : (
-                <div className="space-y-1.5">
+                <div className="space-y-3">
                   {(() => {
-                    // Group by supplier + job name
-                    const grouped = new Map<string, typeof data.upcomingDeliveries>();
+                    // Keith Apr 2026: "all orders for the same day are
+                    // stacked into one". Outer grouping by expected delivery
+                    // date, then inner grouping by supplier + job (same
+                    // supplier for same stage across plots = one email).
+                    type DeliveryRow = NonNullable<typeof data.upcomingDeliveries>[number];
+                    const byDate = new Map<string, DeliveryRow[]>();
                     for (const d of data.upcomingDeliveries!) {
-                      const key = `${d.supplier.id}__${d.job.name}`;
-                      const existing = grouped.get(key) ?? [];
+                      const key = d.expectedDeliveryDate
+                        ? format(new Date(d.expectedDeliveryDate), "yyyy-MM-dd")
+                        : "unscheduled";
+                      const existing = byDate.get(key) ?? [];
                       existing.push(d);
-                      grouped.set(key, existing);
+                      byDate.set(key, existing);
                     }
-                    return Array.from(grouped.values()).map((group) => {
-                      const first = group[0];
-                      const plotLabels = group.map((d) => d.job.plot.plotNumber ? `P${d.job.plot.plotNumber}` : d.job.plot.name);
-                      const allIds = group.map((d) => d.id);
-                      const anyPending = allIds.some((id) => isOrderPending(id));
+                    const sortedDates = Array.from(byDate.keys()).sort();
+                    return sortedDates.map((dateKey) => {
+                      const deliveries = byDate.get(dateKey)!;
+                      // Label for the day header
+                      const dayLabel = dateKey === "unscheduled"
+                        ? "No date set"
+                        : format(new Date(dateKey), "EEE d MMM");
+                      // Inner: group by supplier + job
+                      const subGrouped = new Map<string, DeliveryRow[]>();
+                      for (const d of deliveries) {
+                        const key = `${d.supplier.id}__${d.job.name}`;
+                        const existing = subGrouped.get(key) ?? [];
+                        existing.push(d);
+                        subGrouped.set(key, existing);
+                      }
+                      const subGroups = Array.from(subGrouped.values());
+                      return (
+                        <details key={dateKey} className="group rounded-lg border bg-slate-50/50" open>
+                          <summary className="flex cursor-pointer items-center justify-between gap-2 px-3 py-2 text-sm font-semibold text-blue-700 [&::-webkit-details-marker]:hidden">
+                            <span className="flex items-center gap-2">
+                              <Truck className="size-4" />
+                              {dayLabel}
+                            </span>
+                            <span className="text-xs font-normal text-muted-foreground">
+                              {deliveries.length} deliver{deliveries.length === 1 ? "y" : "ies"} · {subGroups.length} supplier{subGroups.length === 1 ? "" : "s"}
+                            </span>
+                          </summary>
+                          <div className="space-y-1.5 border-t bg-white px-2 py-2">
+                          {subGroups.map((group) => {
+                    const first = group[0];
+                    const plotLabels = group.map((d) => d.job.plot.plotNumber ? `P${d.job.plot.plotNumber}` : d.job.plot.name);
+                    const allIds = group.map((d) => d.id);
+                    const anyPending = allIds.some((id) => isOrderPending(id));
                       return (
                         <div key={`${first.supplier.id}__${first.job.name}`} className="rounded border p-2 text-sm">
                           <div className="flex items-center gap-2">
@@ -2800,6 +2834,10 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                             </Button>
                           </div>
                         </div>
+                      );
+                          })}
+                          </div>
+                        </details>
                       );
                     });
                   })()}

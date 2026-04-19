@@ -88,8 +88,8 @@ const SITE_TAB_GROUPS = [
 const navItems = [
   { label: "Dashboard",     href: "/dashboard",   icon: LayoutDashboard },
   { label: "Tasks",         href: "/tasks",       icon: ClipboardList },
-  { label: "Suppliers",     href: "/suppliers",   icon: FileBox },
-  { label: "Contacts",      href: "/contacts",    icon: HardHat },
+  { label: "Suppliers",     href: "/suppliers?tab=suppliers",   icon: FileBox },
+  { label: "Contractors",   href: "/suppliers?tab=contractors", icon: HardHat },
   { label: "Templates",     href: "/settings?tab=templates", icon: Layers },
   { label: "Analytics",     href: "/analytics",   icon: BarChart3 },
   { label: "Events Log",    href: "/events-log",  icon: Scroll },
