@@ -1420,22 +1420,33 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                         />
                       </div>
                     )}
-                    <div className="w-[52px] flex items-center gap-1 truncate px-1.5 font-semibold">
-                      {scheduleStatuses[plot.id] && (() => {
-                        const s = scheduleStatuses[plot.id];
-                        if (s.awaitingRestart) return <span className="size-2 shrink-0 rounded-full bg-amber-400" title="Deferred" />;
-                        if (s.status === "ahead") return <span className="size-2 shrink-0 rounded-full bg-emerald-500" title={`${s.daysDeviation}d ahead`} />;
-                        if (s.status === "behind") return <span className="size-2 shrink-0 rounded-full bg-red-500" title={`${Math.abs(s.daysDeviation)}d behind`} />;
-                        if (s.status === "on_track") return <span className="size-2 shrink-0 rounded-full bg-blue-400" title="On programme" />;
-                        if (s.status === "idle") return <span className="size-2 shrink-0 rounded-full bg-orange-400" title="Idle — waiting for next stage" />;
-                        return null;
-                      })()}
-                      <Link
-                        href={`/sites/${site.id}/plots/${plot.id}`}
-                        className="text-blue-600 hover:text-blue-800 hover:underline truncate"
-                      >
-                        {plot.plotNumber || plot.name}
-                      </Link>
+                    <div className="w-[52px] flex flex-col items-start justify-center gap-0.5 truncate px-1.5 font-semibold">
+                      <div className="flex items-center gap-1">
+                        {scheduleStatuses[plot.id] && (() => {
+                          const s = scheduleStatuses[plot.id];
+                          if (s.awaitingRestart) return <span className="size-2 shrink-0 rounded-full bg-amber-400" title="Deferred" />;
+                          if (s.status === "ahead") return <span className="size-2 shrink-0 rounded-full bg-emerald-500" title={`${s.daysDeviation}d ahead`} />;
+                          if (s.status === "behind") return <span className="size-2 shrink-0 rounded-full bg-red-500" title={`${Math.abs(s.daysDeviation)}d behind`} />;
+                          if (s.status === "on_track") return <span className="size-2 shrink-0 rounded-full bg-blue-400" title="On programme" />;
+                          if (s.status === "idle") return <span className="size-2 shrink-0 rounded-full bg-orange-400" title="Idle — waiting for next stage" />;
+                          return null;
+                        })()}
+                        <Link
+                          href={`/sites/${site.id}/plots/${plot.id}`}
+                          className="text-blue-600 hover:text-blue-800 hover:underline truncate"
+                        >
+                          {plot.plotNumber || plot.name}
+                        </Link>
+                      </div>
+                      {/* Overlay mode: mini labels identifying which sub-row is
+                          Current vs Original. Sits in the plot-metadata column
+                          so it never overlaps the timeline bars. */}
+                      {ganttMode === "overlay" && (
+                        <div className="flex flex-col text-[7px] font-medium text-slate-400 leading-[9px]">
+                          <span>now</span>
+                          <span>was</span>
+                        </div>
+                      )}
                     </div>
                     {expanded && (
                       <>
@@ -1616,28 +1627,15 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                       height: effectiveRowHeight,
                     }}
                   >
-                    {/* Overlay mode: visual divider + labels between Current
-                        (top half) and Original (bottom half). Dashed line +
-                        small "Original plan" tag in the left margin. */}
+                    {/* Overlay mode: dashed divider between Current (top half)
+                        and Original (bottom half). Labels are shown in the
+                        left plot-metadata column (not here in the timeline,
+                        where they'd be covered by the first cell's bar). */}
                     {ganttMode === "overlay" && (
-                      <>
-                        <div
-                          className="absolute left-0 right-0 border-t border-dashed border-slate-300 pointer-events-none"
-                          style={{ top: ROW_HEIGHT - 1 }}
-                        />
-                        <div
-                          className="absolute left-1 text-[8px] font-medium text-slate-400 pointer-events-none"
-                          style={{ top: 1 }}
-                        >
-                          Current
-                        </div>
-                        <div
-                          className="absolute left-1 text-[8px] font-medium text-slate-400 pointer-events-none"
-                          style={{ top: ROW_HEIGHT + 1 }}
-                        >
-                          Original
-                        </div>
-                      </>
+                      <div
+                        className="absolute left-0 right-0 border-t border-dashed border-slate-300 pointer-events-none z-10"
+                        style={{ top: ROW_HEIGHT - 1 }}
+                      />
                     )}
                     {plot.jobs.map((job) => {
                       // Resolve dates for the CURRENT bar row.

@@ -45,6 +45,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { getCurrentDateAtMidnight } from "@/lib/dev-date";
+import { HelpTip } from "@/components/shared/HelpTip";
 
 export interface PullableJob {
   id: string;
@@ -204,6 +205,18 @@ export function usePullForwardDecision(onApplied?: () => void): Result {
   const dialogs = (
     <Dialog open={!!target} onOpenChange={(o) => { if (!o) close(); }}>
       <DialogContent className="sm:max-w-md">
+        <HelpTip title="About Pull Forward" anchor="below-left">
+          <p><strong>What it does:</strong> starts this job earlier than currently planned. Only moves THIS job — downstream jobs keep their dates (they just get more slack).</p>
+          <p><strong>Three quick options + custom:</strong></p>
+          <ul>
+            <li><strong>Start today</strong> — best when resource is ready and someone&apos;s on site.</li>
+            <li><strong>Start next Monday</strong> — clean week start, gives the contractor notice.</li>
+            <li><strong>Keep original</strong> — don&apos;t burn the buffer.</li>
+            <li><strong>Pick a date</strong> — greyed dates are impossible (predecessor not done, or order lead-time not met).</li>
+          </ul>
+          <p><strong>Orders:</strong> PENDING orders for this job shift by the same amount so they still get placed in time. ORDERED / DELIVERED orders stay put.</p>
+          <p><strong>Not auto-fired:</strong> you always decide. A predecessor finishing early doesn&apos;t automatically pull this forward — you might have reasons to leave the plot dormant.</p>
+        </HelpTip>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Zap className="size-5 text-emerald-600" />

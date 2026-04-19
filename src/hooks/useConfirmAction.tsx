@@ -30,6 +30,7 @@ import {
   DialogClose,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { HelpTip } from "@/components/shared/HelpTip";
 
 interface ConfirmOptions {
   /** Short dialog title, e.g. "Delete Contractor". */
@@ -84,6 +85,13 @@ export function useConfirmAction(): Result {
   const dialogs = (
     <Dialog open={!!opts} onOpenChange={(o) => { if (!o) close(); }}>
       <DialogContent className="sm:max-w-sm">
+        {variant === "destructive" && (
+          <HelpTip title="Why confirm?" anchor="below-left">
+            <p><strong>This action cannot be undone.</strong></p>
+            <p>Destructive confirms exist for actions that permanently remove data (delete a contractor, cancel an order, etc.) or change other people&apos;s view (unassign, publish).</p>
+            <p>If you clicked this by accident, just press <strong>Cancel</strong> or the X.</p>
+          </HelpTip>
+        )}
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <AlertTriangle className={variant === "destructive" ? "size-4 text-red-600" : "size-4 text-amber-600"} />

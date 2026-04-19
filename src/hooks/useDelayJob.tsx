@@ -35,6 +35,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
+import { HelpTip } from "@/components/shared/HelpTip";
 
 type DelayReasonType = "WEATHER_RAIN" | "WEATHER_TEMPERATURE" | "OTHER";
 
@@ -182,6 +183,16 @@ export function useDelayJob(onSuccess?: () => void): DelayHookResult {
   const dialogs = (
     <Dialog open={!!target} onOpenChange={(o) => { if (!o) close(); }}>
       <DialogContent className="sm:max-w-md">
+        <HelpTip title="About Delay Job" anchor="below-left">
+          <p><strong>What it does:</strong> pushes this job and every downstream job on the same plot forward by the same number of working days.</p>
+          <p><strong>Reason:</strong> categorises the delay on the Delay Report. Rain and Temperature are auto-suggested from weather logs for this period.</p>
+          <p><strong>Two input modes:</strong></p>
+          <ul>
+            <li><strong>By working days</strong> — type a number (default 1). Best when you think &quot;rain pushed us 2 days&quot;.</li>
+            <li><strong>By new end date</strong> — pick the date the job will now finish. App computes the working-day shift.</li>
+          </ul>
+          <p><strong>What it doesn&apos;t do:</strong> move already-DELIVERED orders. Those dates are locked with the supplier.</p>
+        </HelpTip>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <CalendarClock className="size-5 text-amber-600" />
