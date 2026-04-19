@@ -5,6 +5,7 @@ import Link from "next/link";
 import { format, addDays, differenceInCalendarDays } from "date-fns";
 import { differenceInWorkingDays } from "@/lib/working-days";
 import { PostCompletionDialog } from "@/components/PostCompletionDialog";
+import { useToast } from "@/components/ui/toast";
 import { getCurrentDate } from "@/lib/dev-date";
 import { useDevDate } from "@/lib/dev-date-context";
 import { buildOrderMailto } from "@/lib/order-email";
@@ -518,11 +519,17 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
   const [photoFiles, setPhotoFiles] = useState<File[]>([]);
   const [photoSubmitting, setPhotoSubmitting] = useState(false);
 
-  // Toast notifications
-  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
+  // Global toast (supports action buttons — used by sign-off to offer
+  // "Review next steps" as a manual-trigger replacement for the old
+  // auto-opening PostCompletionDialog).
+  const toast = useToast();
+  // Local inline toast banner at bottom of page — legacy, kept for the
+  // many pre-existing showToast call sites. New code should prefer the
+  // global toast above.
+  const [localToast, setLocalToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const showToast = (message: string, type: "success" | "error" = "error") => {
-    setToast({ message, type });
-    setTimeout(() => setToast(null), 4000);
+    setLocalToast({ message, type });
+    setTimeout(() => setLocalToast(null), 4000);
   };
 
 
@@ -989,15 +996,39 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
           };
         } | undefined;
         signOffPreviews.forEach((url) => URL.revokeObjectURL(url));
+        const signedOffJobName = signOffTarget.name;
+        const signedOffNotesCopy = signOffNotes.trim() || undefined;
         setSignOffTarget(null);
         setRefreshKey((k) => k + 1);
-        // Show post-completion decision dialog
+        // Post-completion decision: previously auto-opened a multi-step
+        // dialog. Now shows a toast with an action button so the site
+        // manager chooses to engage — matches Keith's "never auto-fire,
+        // always manual trigger" rule. Clicking the toast opens the
+        // same 4-step dialog the auto-flow used to show.
         if (result?._completionContext) {
-          setCompletionContext({
-            completedJobName: signOffTarget.name,
-            signOffNotes: signOffNotes.trim() || undefined,
-            ...result._completionContext,
-          });
+          const ctx = result._completionContext;
+          const dev = ctx.daysDeviation;
+          const summary = dev === 0
+            ? `${signedOffJobName} signed off on time`
+            : dev > 0
+              ? `${signedOffJobName} finished ${dev} day${dev !== 1 ? "s" : ""} early`
+              : `${signedOffJobName} finished ${Math.abs(dev)} day${Math.abs(dev) !== 1 ? "s" : ""} late`;
+          if (dev !== 0 || ctx.nextJob) {
+            toast.success(summary, {
+              action: {
+                label: "Review next steps",
+                onClick: () => {
+                  setCompletionContext({
+                    completedJobName: signedOffJobName,
+                    signOffNotes: signedOffNotesCopy,
+                    ...ctx,
+                  });
+                },
+              },
+            });
+          } else {
+            toast.success(summary);
+          }
         }
       }
     } catch {
@@ -3164,22 +3195,23 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
         </DialogContent>
       </Dialog>
 
-      {/* Toast notification */}
-      {toast && (
+      {/* Legacy inline toast banner — still rendered for existing showToast
+          callsites. New sign-off flow uses the global useToast system. */}
+      {localToast && (
         <div
           className={cn(
             "fixed bottom-4 right-4 z-50 flex items-center gap-2 rounded-lg px-4 py-3 text-sm font-medium shadow-lg",
-            toast.type === "success"
+            localToast.type === "success"
               ? "bg-green-600 text-white"
               : "bg-red-600 text-white"
           )}
         >
-          {toast.type === "success" ? (
+          {localToast.type === "success" ? (
             <CheckCircle2 className="size-4 shrink-0" />
           ) : (
             <AlertTriangle className="size-4 shrink-0" />
           )}
-          {toast.message}
+          {localToast.message}
         </div>
       )}
       {jobActionDialogs}

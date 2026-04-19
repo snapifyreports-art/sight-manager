@@ -388,16 +388,37 @@ export default function SiteWalkthrough({
         const result = await res.json();
         const completedName = plot.currentJob.name;
         closeModal();
-        showToast(`Signed off: ${completedName}`, "success");
         await refresh();
-        // Show post-completion decision dialog
+        // Post-completion decision: toast with action button instead of
+        // auto-opening the dialog. Matches Keith's "manual trigger only"
+        // rule — user chooses to engage with next-steps guidance.
         if (result._completionContext) {
-          setCompletionContext({
-            completedJobName: completedName,
-            daysDeviation: result._completionContext.daysDeviation,
-            nextJob: result._completionContext.nextJob,
-            plotId: result._completionContext.plotId,
-          });
+          const ctx = result._completionContext;
+          const dev = ctx.daysDeviation;
+          const summary = dev === 0
+            ? `${completedName} signed off on time`
+            : dev > 0
+              ? `${completedName} finished ${dev} day${dev !== 1 ? "s" : ""} early`
+              : `${completedName} finished ${Math.abs(dev)} day${Math.abs(dev) !== 1 ? "s" : ""} late`;
+          if (dev !== 0 || ctx.nextJob) {
+            toast.success(summary, {
+              action: {
+                label: "Review next steps",
+                onClick: () => {
+                  setCompletionContext({
+                    completedJobName: completedName,
+                    daysDeviation: ctx.daysDeviation,
+                    nextJob: ctx.nextJob,
+                    plotId: ctx.plotId,
+                  });
+                },
+              },
+            });
+          } else {
+            toast.success(summary);
+          }
+        } else {
+          showToast(`Signed off: ${completedName}`, "success");
         }
       } else {
         const err = await res.json().catch(() => ({}));

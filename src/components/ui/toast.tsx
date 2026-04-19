@@ -20,16 +20,31 @@ import { AlertTriangle, CheckCircle2, X } from "lucide-react";
 
 type ToastType = "error" | "success" | "info";
 
+interface ToastAction {
+  /** Button label shown on the toast, e.g. "Review next steps". */
+  label: string;
+  /** Fired when the user clicks the button. Toast auto-dismisses after. */
+  onClick: () => void;
+}
+
+interface ToastOptions {
+  /** Optional action button. Keep the label short (2-3 words). */
+  action?: ToastAction;
+  /** Override the default auto-dismiss timeout (ms). */
+  ttlMs?: number;
+}
+
 interface ToastMessage {
   id: number;
   type: ToastType;
   message: string;
+  action?: ToastAction;
 }
 
 interface ToastApi {
-  error: (message: string) => void;
-  success: (message: string) => void;
-  info: (message: string) => void;
+  error: (message: string, opts?: ToastOptions) => void;
+  success: (message: string, opts?: ToastOptions) => void;
+  info: (message: string, opts?: ToastOptions) => void;
 }
 
 const ToastContext = createContext<ToastApi | null>(null);
@@ -38,11 +53,13 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const nextId = useRef(1);
 
-  const push = useCallback((type: ToastType, message: string) => {
+  const push = useCallback((type: ToastType, message: string, opts?: ToastOptions) => {
     const id = nextId.current++;
-    setToasts((prev) => [...prev, { id, type, message }]);
-    // Auto-dismiss after 5s for success/info, 8s for errors (more to read)
-    const ttl = type === "error" ? 8000 : 5000;
+    setToasts((prev) => [...prev, { id, type, message, action: opts?.action }]);
+    // Auto-dismiss: 5s for success/info, 8s for errors, 10s if there's an
+    // action (user needs time to read + decide). Overridable via opts.ttlMs.
+    const baseTtl = type === "error" ? 8000 : opts?.action ? 10000 : 5000;
+    const ttl = opts?.ttlMs ?? baseTtl;
     setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
     }, ttl);
@@ -53,9 +70,9 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const api: ToastApi = {
-    error: (message) => push("error", message),
-    success: (message) => push("success", message),
-    info: (message) => push("info", message),
+    error: (message, opts) => push("error", message, opts),
+    success: (message, opts) => push("success", message, opts),
+    info: (message, opts) => push("info", message, opts),
   };
 
   return (
@@ -92,13 +109,34 @@ function ToastItem({
         ? CheckCircle2
         : AlertTriangle;
 
+  const buttonColor =
+    toast.type === "error"
+      ? "border-red-400 bg-white text-red-700 hover:bg-red-100"
+      : toast.type === "success"
+        ? "border-green-400 bg-white text-green-700 hover:bg-green-100"
+        : "border-blue-400 bg-white text-blue-700 hover:bg-blue-100";
+
   return (
     <div
       className={`pointer-events-auto flex items-start gap-2 rounded-lg border px-3 py-2.5 text-sm shadow-lg ${styles}`}
       role={toast.type === "error" ? "alert" : "status"}
     >
       <Icon className="mt-0.5 size-4 shrink-0" />
-      <p className="flex-1 break-words">{toast.message}</p>
+      <div className="flex-1 min-w-0">
+        <p className="break-words">{toast.message}</p>
+        {toast.action && (
+          <button
+            type="button"
+            onClick={() => {
+              toast.action?.onClick();
+              onDismiss(toast.id);
+            }}
+            className={`mt-1.5 rounded-md border px-2.5 py-1 text-xs font-medium transition-colors ${buttonColor}`}
+          >
+            {toast.action.label}
+          </button>
+        )}
+      </div>
       <button
         type="button"
         onClick={() => onDismiss(toast.id)}
@@ -121,9 +159,9 @@ export function useToast(): ToastApi {
     // Graceful fallback — log to console if provider missing (shouldn't
     // happen inside the app, but protects unit tests / storybook).
     return {
-      error: (m) => console.error("[toast.error]", m),
-      success: (m) => console.log("[toast.success]", m),
-      info: (m) => console.log("[toast.info]", m),
+      error: (m, _opts) => { console.error("[toast.error]", m); void _opts; },
+      success: (m, _opts) => { console.log("[toast.success]", m); void _opts; },
+      info: (m, _opts) => { console.log("[toast.info]", m); void _opts; },
     };
   }
   return ctx;
