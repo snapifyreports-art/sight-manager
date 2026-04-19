@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { format, parseISO } from "date-fns";
-import { HardHat, PlayCircle, Clock, AlertTriangle, CheckCircle2, Phone, Mail, Building2, Package, Truck } from "lucide-react";
+import { HardHat, PlayCircle, Clock, AlertTriangle, CheckCircle2, Phone, Mail, Building2, Package, Truck, FileText, Download, ExternalLink } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { verifyContractorToken } from "@/lib/share-token";
 import { SnagSignOffCard } from "./SnagSignOffCard";
@@ -88,6 +88,18 @@ export default async function ContractorSharePage({
       photos: { select: { id: true, url: true, tag: true }, orderBy: { createdAt: "asc" } },
     },
     orderBy: [{ priority: "desc" }, { createdAt: "asc" }],
+  });
+
+  // Contractor-scoped documents (RAMS, method statements) — visible here
+  // so contractors can download their own paperwork without asking.
+  // Keith Apr 2026 Q2=a.
+  const contractorDocuments = await prisma.siteDocument.findMany({
+    where: { contactId },
+    select: {
+      id: true, name: true, url: true, fileName: true,
+      fileSize: true, mimeType: true, category: true, createdAt: true,
+    },
+    orderBy: { createdAt: "desc" },
   });
 
   const jobIds = jobs.map((j) => j.id);
@@ -306,6 +318,45 @@ export default async function ContractorSharePage({
               {openSnags.map((snag) => (
                 <SnagSignOffCard key={snag.id} snag={snag} />
               ))}
+            </div>
+          </details>
+        )}
+
+        {contractorDocuments.length > 0 && (
+          <details className="group rounded-lg border bg-white shadow-sm">
+            <summary className="flex cursor-pointer items-center gap-2 px-4 py-3 font-semibold text-purple-700 [&::-webkit-details-marker]:hidden">
+              <FileText className="size-5 text-purple-500" />
+              Your Documents ({contractorDocuments.length})
+              <svg className="ml-auto size-4 shrink-0 transition-transform group-open:rotate-180" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clipRule="evenodd" /></svg>
+            </summary>
+            <div className="border-t px-4 py-3 space-y-1.5">
+              <p className="mb-2 text-[11px] text-muted-foreground">
+                RAMS, method statements and anything else shared with you.
+              </p>
+              {contractorDocuments.map((d) => {
+                const sizeKb = d.fileSize ? Math.round(d.fileSize / 1024) : null;
+                return (
+                  <div key={d.id} className="flex items-center justify-between gap-2 rounded-lg bg-purple-50/50 px-3 py-2">
+                    <div className="flex min-w-0 flex-1 items-center gap-2">
+                      <FileText className="size-4 shrink-0 text-purple-600" />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium">{d.name}</p>
+                        <p className="truncate text-[11px] text-muted-foreground">
+                          {d.category || "Document"}{sizeKb !== null ? ` · ${sizeKb} KB` : ""} · {format(d.createdAt, "dd MMM yyyy")}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-1">
+                      <a href={d.url} target="_blank" rel="noopener noreferrer" className="rounded p-1 text-muted-foreground hover:bg-white hover:text-foreground" title="Open">
+                        <ExternalLink className="size-3.5" />
+                      </a>
+                      <a href={d.url} download={d.fileName} className="rounded p-1 text-muted-foreground hover:bg-white hover:text-foreground" title="Download">
+                        <Download className="size-3.5" />
+                      </a>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </details>
         )}

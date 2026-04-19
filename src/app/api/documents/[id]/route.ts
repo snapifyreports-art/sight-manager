@@ -24,9 +24,15 @@ export async function DELETE(
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  // Site-access check
-  if (!(await canAccessSite(session.user.id, (session.user as { role: string }).role, doc.siteId))) {
-    return NextResponse.json({ error: "You do not have access to this site" }, { status: 403 });
+  // Access check:
+  //   - Site-scoped docs: caller must have access to the site
+  //   - Contact-scoped docs (RAMS — siteId null, contactId set): any
+  //     authenticated user (no site to scope against). Admins + managers
+  //     both reach the Contractor Comms view where delete is triggered.
+  if (doc.siteId) {
+    if (!(await canAccessSite(session.user.id, (session.user as { role: string }).role, doc.siteId))) {
+      return NextResponse.json({ error: "You do not have access to this site" }, { status: 403 });
+    }
   }
 
   try {

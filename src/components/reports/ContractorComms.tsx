@@ -583,6 +583,18 @@ function formatRelativeDate(iso: string): string {
   return format(sent, "dd MMM");
 }
 
+interface ContactDoc {
+  id: string;
+  name: string;
+  url: string;
+  fileName: string;
+  fileSize: number | null;
+  mimeType: string | null;
+  category: string | null;
+  createdAt: string;
+  uploadedBy?: { id: string; name: string } | null;
+}
+
 function ContractorCard({
   contractor,
   siteId,
@@ -596,6 +608,55 @@ function ContractorCard({
   const [requestedSignOff, setRequestedSignOff] = useState<Set<string>>(
     new Set(contractor.liveJobs.filter((j) => j.signOffRequested).map((j) => j.id))
   );
+
+  // RAMS / method-statement documents — lazy-loaded per-contractor.
+  // Keith Apr 2026 Q3: reuse Document model with contactId scope.
+  const [ramsDocs, setRamsDocs] = useState<ContactDoc[] | null>(null);
+  const [ramsLoading, setRamsLoading] = useState(false);
+  const [ramsUploading, setRamsUploading] = useState(false);
+  const ramsInputRef = useRef<HTMLInputElement>(null);
+
+  const loadRams = useCallback(async () => {
+    setRamsLoading(true);
+    try {
+      const res = await fetch(`/api/contacts/${contractor.id}/documents`);
+      if (res.ok) setRamsDocs(await res.json());
+    } finally {
+      setRamsLoading(false);
+    }
+  }, [contractor.id]);
+
+  const handleRamsUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setRamsUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("name", file.name);
+      fd.append("category", "RAMS");
+      const res = await fetch(`/api/contacts/${contractor.id}/documents`, {
+        method: "POST",
+        body: fd,
+      });
+      if (res.ok) {
+        const doc = await res.json();
+        setRamsDocs((prev) => (prev ? [doc, ...prev] : [doc]));
+      }
+    } finally {
+      setRamsUploading(false);
+      if (ramsInputRef.current) ramsInputRef.current.value = "";
+    }
+  };
+
+  const handleRamsDelete = async (docId: string) => {
+    const ok = confirm("Delete this document? This cannot be undone.");
+    if (!ok) return;
+    const res = await fetch(`/api/documents/${docId}`, { method: "DELETE" });
+    if (res.ok) {
+      setRamsDocs((prev) => (prev ? prev.filter((d) => d.id !== docId) : prev));
+    }
+  };
 
   const handleRequestSignOff = async (jobId: string) => {
     setRequestingSignOff((prev) => new Set(prev).add(jobId));
@@ -885,6 +946,106 @@ function ContractorCard({
             </div>
           </details>
         )}
+
+        {/* RAMS / Method Statements — contractor-scoped documents.
+            Lazy-loaded on first expand. Keith Apr 2026 Q3: any file type,
+            any size, visible on contractor share link. Uploaded files are
+            stored as SiteDocument rows with contactId set + siteId null. */}
+        <details
+          className="group"
+          onToggle={(e) => {
+            if (e.currentTarget.open && ramsDocs === null) loadRams();
+          }}
+        >
+          <summary className="flex cursor-pointer items-center gap-2 px-4 py-3 sm:px-5 [&::-webkit-details-marker]:hidden">
+            <FileText className="size-4 text-purple-500" />
+            <span className="text-xs font-semibold uppercase tracking-wider text-purple-700">
+              RAMS / Method Statements{ramsDocs !== null ? ` (${ramsDocs.length})` : ""}
+            </span>
+            <ChevronRight className="ml-auto size-3.5 text-muted-foreground transition-transform group-open:rotate-90" />
+          </summary>
+          <div className="px-4 pb-3 sm:px-5">
+            <div className="mb-2 flex items-center justify-between print:hidden">
+              <p className="text-[11px] text-muted-foreground">
+                Uploads here are visible to {contractor.name} on their share link.
+              </p>
+              <input
+                ref={ramsInputRef}
+                type="file"
+                onChange={handleRamsUpload}
+                className="hidden"
+              />
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 gap-1 text-[11px]"
+                disabled={ramsUploading}
+                onClick={() => ramsInputRef.current?.click()}
+              >
+                {ramsUploading ? <Loader2 className="size-3 animate-spin" /> : <Copy className="size-3" />}
+                {ramsUploading ? "Uploading..." : "Upload"}
+              </Button>
+            </div>
+            {ramsLoading && ramsDocs === null ? (
+              <p className="text-xs text-muted-foreground">Loading...</p>
+            ) : ramsDocs === null || ramsDocs.length === 0 ? (
+              <p className="text-xs text-muted-foreground">
+                No RAMS or method statements uploaded yet.
+              </p>
+            ) : (
+              <div className="space-y-1.5">
+                {ramsDocs.map((d) => {
+                  const sizeKb = d.fileSize ? Math.round(d.fileSize / 1024) : null;
+                  return (
+                    <div
+                      key={d.id}
+                      className="flex items-center justify-between gap-2 rounded-lg bg-purple-50/50 px-3 py-2"
+                    >
+                      <div className="flex min-w-0 flex-1 items-center gap-2">
+                        <FileText className="size-4 shrink-0 text-purple-600" />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium">{d.name}</p>
+                          <p className="truncate text-[11px] text-muted-foreground">
+                            Uploaded {formatRelativeDate(d.createdAt)}
+                            {sizeKb !== null ? ` · ${sizeKb} KB` : ""}
+                            {d.uploadedBy ? ` · by ${d.uploadedBy.name}` : ""}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-1 print:hidden">
+                        <a
+                          href={d.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="rounded p-1 text-muted-foreground hover:bg-white hover:text-foreground"
+                          title="Open"
+                        >
+                          <ExternalLink className="size-3.5" />
+                        </a>
+                        <a
+                          href={d.url}
+                          download={d.fileName}
+                          className="rounded p-1 text-muted-foreground hover:bg-white hover:text-foreground"
+                          title="Download"
+                        >
+                          <Download className="size-3.5" />
+                        </a>
+                        <button
+                          type="button"
+                          onClick={() => handleRamsDelete(d.id)}
+                          className="rounded p-1 text-muted-foreground hover:bg-red-50 hover:text-red-600"
+                          title="Delete"
+                        >
+                          <X className="size-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </details>
 
         {/* Messages Log — history of contractor-facing comms events.
             Keith Apr 2026 Q2=b: reuse existing logging rather than a new

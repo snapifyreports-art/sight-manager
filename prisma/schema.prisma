@@ -201,6 +201,7 @@ model Plot {
   oneOffOrders      MaterialOrder[] // back-relation for MaterialOrder.plotId (plot-level one-off)
 
   @@unique([siteId, plotNumber])
+  @@index([siteId]) // hot path: every site page loads plots
 }
 
 model Job {
@@ -242,6 +243,10 @@ model Job {
   photos      JobPhoto[]
   documents   SiteDocument[]
   snags       Snag[]
+
+  @@index([plotId])       // hot: programme, daily-brief, reports join on plot
+  @@index([status])       // hot: "NOT_STARTED where startDate < today" etc.
+  @@index([parentId])     // hot: children / rollup checks
 }
 
 model JobAction {
@@ -254,6 +259,8 @@ model JobAction {
 
   job  Job  @relation(fields: [jobId], references: [id], onDelete: Cascade)
   user User @relation(fields: [userId], references: [id])
+
+  @@index([jobId])        // hot: weekly report / analytics aggregates
 }
 
 model JobContractor {
@@ -266,6 +273,7 @@ model JobContractor {
   contact Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
 
   @@unique([jobId, contactId])
+  @@index([contactId])    // hot: contractor comms group-by contactId
 }
 
 model JobPhoto {
@@ -344,6 +352,11 @@ model MaterialOrder {
   plot       Plot?       @relation(fields: [plotId], references: [id], onDelete: Cascade)
   contact    Contact?    @relation(fields: [contactId], references: [id], onDelete: SetNull)
   orderItems OrderItem[]
+
+  @@index([jobId])                 // hot: job → orders on every programme / daily-brief / panel
+  @@index([status])                // hot: Tasks filters status=PENDING globally
+  @@index([expectedDeliveryDate])  // hot: deliveries-today / upcoming-deliveries range queries
+  @@index([supplierId])            // hot: Supplier Performance report groups orders by supplier
 }
 
 model OrderItem {
@@ -357,6 +370,8 @@ model OrderItem {
   createdAt DateTime @default(now())
 
   order MaterialOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])  // hot: every order detail fetches its items
 }
 
 model Contact {
@@ -374,6 +389,7 @@ model Contact {
   jobContractors JobContractor[]
   templateJobs   TemplateJob[]
   snags          Snag[]
+  documents      SiteDocument[]
 }
 
 // ---------- Plot Templates ----------
@@ -588,6 +604,10 @@ model Snag {
   raisedBy   User        @relation("SnagRaised", fields: [raisedById], references: [id])
   resolvedBy User?       @relation("SnagResolved", fields: [resolvedById], references: [id])
   photos     SnagPhoto[]
+
+  @@index([plotId])      // hot: snag lists per plot
+  @@index([status])      // hot: "OPEN / IN_PROGRESS" filter on every snag view
+  @@index([contactId])   // hot: contractor comms "Snags Assigned" filter
 }
 
 model SnagPhoto {
@@ -599,6 +619,8 @@ model SnagPhoto {
   createdAt DateTime @default(now())
 
   snag Snag @relation(fields: [snagId], references: [id], onDelete: Cascade)
+
+  @@index([snagId])      // hot: every snag fetches its photos
 }
 
 // ---------- Document Storage ----------
@@ -611,19 +633,30 @@ model SiteDocument {
   fileSize     Int?
   mimeType     String?
   // Category lets us distinguish drawings from handover certs etc.
-  // "DRAWING" | "SPEC" | "CERT" | "HANDOVER" | "OTHER"
+  // "DRAWING" | "SPEC" | "CERT" | "HANDOVER" | "OTHER" | "RAMS"
   category     String?
-  siteId       String
+  // Exactly one of siteId / contactId should be set. Site-scoped documents
+  // (drawings, specs, handover certs) go through siteId. Contractor-scoped
+  // documents (RAMS, method statements) go through contactId — they
+  // apply across every site the contractor works on.
+  siteId       String?
   plotId       String?
   jobId        String?
+  contactId    String?
   uploadedById String
   createdAt    DateTime @default(now())
 
-  site          Site                @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  site          Site?               @relation(fields: [siteId], references: [id], onDelete: Cascade)
   plot          Plot?               @relation(fields: [plotId], references: [id], onDelete: SetNull)
   job           Job?                @relation(fields: [jobId], references: [id], onDelete: SetNull)
+  contact       Contact?            @relation(fields: [contactId], references: [id], onDelete: Cascade)
   uploadedBy    User                @relation("UploadedDocuments", fields: [uploadedById], references: [id])
   handoverItems HandoverChecklist[]
+
+  @@index([contactId])
+  @@index([siteId])        // hot: site-docs list
+  @@index([plotId])        // hot: plot-docs drawer
+  @@index([jobId])         // hot: job-docs tab
 }
 
 // ---------- Handover Pack ----------
@@ -664,4 +697,9 @@ model EventLog {
   plot Plot? @relation(fields: [plotId], references: [id], onDelete: SetNull)
   job  Job?  @relation(fields: [jobId], references: [id], onDelete: SetNull)
   user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([siteId, createdAt])  // hot: events-log paginated by site
+  @@index([jobId])              // hot: job history panel
+  @@index([plotId])              // hot: plot activity timeline
+  @@index([type])                // hot: filter by event type in events-log
 }
