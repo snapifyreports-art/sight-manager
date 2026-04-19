@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { format, addDays, differenceInCalendarDays } from "date-fns";
-import { addWorkingDays, differenceInWorkingDays } from "@/lib/working-days";
+import { differenceInWorkingDays } from "@/lib/working-days";
 import { PostCompletionDialog } from "@/components/PostCompletionDialog";
 import { getCurrentDate } from "@/lib/dev-date";
 import { useDevDate } from "@/lib/dev-date-context";
@@ -1016,7 +1016,13 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
         signOffNotes: signOffNotes.trim() || undefined,
       });
       if (res.ok) {
-        const result = res.data as { _completionContext?: unknown } | undefined;
+        const result = res.data as {
+          _completionContext?: {
+            daysDeviation: number;
+            nextJob: { id: string; name: string; contractorName: string | null; assignedToName: string | null } | null;
+            plotId: string;
+          };
+        } | undefined;
         signOffPreviews.forEach((url) => URL.revokeObjectURL(url));
         setSignOffTarget(null);
         setRefreshKey((k) => k + 1);
@@ -1025,7 +1031,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
           setCompletionContext({
             completedJobName: signOffTarget.name,
             signOffNotes: signOffNotes.trim() || undefined,
-            ...(result._completionContext as object),
+            ...result._completionContext,
           });
         }
       }

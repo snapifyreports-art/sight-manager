@@ -43,6 +43,7 @@ import {
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { useDelayJob } from "@/hooks/useDelayJob";
 
 // ---------- Types ----------
 
@@ -257,46 +258,16 @@ export function TasksClient() {
   }
 
   // ── Delay job ──
-  const [delayJobId, setDelayJobId] = useState<string | null>(null);
-  const [delayDays, setDelayDays] = useState(1);
-  const [delayReasonType, setDelayReasonType] = useState<"WEATHER_RAIN" | "WEATHER_TEMPERATURE" | "OTHER">("OTHER");
-  const [delayReasonText, setDelayReasonText] = useState("");
-  const [delaySubmitting, setDelaySubmitting] = useState(false);
-  const [delaySuggestion, setDelaySuggestion] = useState<{ rainDays: number; temperatureDays: number; suggestedReason: string | null } | null>(null);
-
-  async function openDelayDialog(jobId: string) {
-    setDelayJobId(jobId);
-    setDelayDays(1);
-    setDelayReasonType("OTHER");
-    setDelayReasonText("");
-    setDelaySuggestion(null);
-    try {
-      const res = await fetch(`/api/jobs/${jobId}/delay`);
-      if (res.ok) {
-        const data = await res.json();
-        setDelaySuggestion(data);
-        if (data.suggestedReason) setDelayReasonType(data.suggestedReason);
-      }
-    } catch { /* non-critical */ }
-  }
-
-  async function handleDelay() {
-    if (!delayJobId) return;
-    setDelaySubmitting(true);
-    try {
-      const res = await fetch(`/api/jobs/${delayJobId}/delay`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ days: delayDays, delayReasonType, reason: delayReasonText.trim() || undefined }),
-      });
-      if (res.ok) {
-        setDelayJobId(null);
-        setRefreshKey((k) => k + 1);
-      }
-    } finally {
-      setDelaySubmitting(false);
-    }
-  }
+  // Unified via useDelayJob — replaces the prior ~80 lines of bespoke
+  // dialog state + Dialog JSX. Keeps the Tasks page consistent with
+  // Daily Brief / Walkthrough / JobWeekPanel: both input modes (days
+  // OR new end date) and rain/temperature/other reason picker.
+  // NOTE: the prior impl prefetched weather-suggestion days from
+  // GET /api/jobs/:id/delay and pre-selected the reason — that's
+  // tracked as a follow-up; unification takes priority.
+  const { openDelayDialog, dialogs: delayDialogs } = useDelayJob(() => {
+    setRefreshKey((k) => k + 1);
+  });
 
   // ── Chase supplier email ──
   function openChaseDialog(order: OrderTask) {
@@ -692,7 +663,7 @@ export function TasksClient() {
                       className="h-7 shrink-0 border-amber-300 text-amber-700 hover:bg-amber-50"
                       onClick={(e) => {
                         e.stopPropagation();
-                        openDelayDialog(job.id);
+                        openDelayDialog(job);
                       }}
                       title="Delay this job"
                     >
@@ -1259,67 +1230,9 @@ export function TasksClient() {
         </DialogContent>
       </Dialog>
 
-      {/* ── Delay Job Dialog ── */}
-      <Dialog open={!!delayJobId} onOpenChange={(open) => { if (!open) setDelayJobId(null); }}>
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Clock className="size-4 text-amber-500" />
-              Delay Job
-            </DialogTitle>
-            <DialogDescription>
-              Cascades to all downstream jobs on this plot.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3 py-2">
-            {delaySuggestion && (delaySuggestion.rainDays > 0 || delaySuggestion.temperatureDays > 0) && (
-              <div className="rounded bg-orange-50 px-3 py-2 text-xs text-orange-700 border border-orange-200">
-                {delaySuggestion.rainDays > 0 && <span>☔ {delaySuggestion.rainDays} rain day{delaySuggestion.rainDays !== 1 ? "s" : ""}</span>}
-                {delaySuggestion.rainDays > 0 && delaySuggestion.temperatureDays > 0 && <span> · </span>}
-                {delaySuggestion.temperatureDays > 0 && <span>🌡️ {delaySuggestion.temperatureDays} temperature day{delaySuggestion.temperatureDays !== 1 ? "s" : ""}</span>}
-                <span> logged on this job&apos;s period</span>
-              </div>
-            )}
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-slate-600 shrink-0">Days to delay:</span>
-              <input type="number" min={1} max={365} value={delayDays}
-                onChange={(e) => setDelayDays(Math.max(1, parseInt(e.target.value) || 1))}
-                className="w-16 rounded border px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-amber-400" />
-            </div>
-            <div>
-              <p className="mb-1 text-xs font-medium text-slate-700">Delay reason</p>
-              <div className="flex gap-1">
-                {(["WEATHER_RAIN", "WEATHER_TEMPERATURE", "OTHER"] as const).map((r) => (
-                  <button key={r} onClick={() => setDelayReasonType(r)}
-                    className={`flex-1 rounded px-1.5 py-1 text-xs font-medium transition-colors ${
-                      delayReasonType === r
-                        ? r === "WEATHER_RAIN" ? "bg-orange-500 text-white"
-                          : r === "WEATHER_TEMPERATURE" ? "bg-cyan-500 text-white"
-                          : "bg-slate-700 text-white"
-                        : "border text-slate-600 hover:bg-slate-50"
-                    }`}>
-                    {r === "WEATHER_RAIN" ? "☔ Rain" : r === "WEATHER_TEMPERATURE" ? "🌡️ Temp" : "⏳ Other"}
-                  </button>
-                ))}
-              </div>
-            </div>
-            {delayReasonType === "OTHER" && (
-              <input type="text" value={delayReasonText}
-                onChange={(e) => setDelayReasonText(e.target.value)}
-                placeholder="Reason (optional)..."
-                className="w-full rounded border px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-amber-400" />
-            )}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDelayJobId(null)}>Cancel</Button>
-            <Button onClick={handleDelay} disabled={delaySubmitting}
-              className="bg-amber-500 hover:bg-amber-600 text-white">
-              {delaySubmitting ? <Loader2 className="size-4 animate-spin mr-1" /> : <Clock className="size-4 mr-1" />}
-              Delay {delayDays} day{delayDays !== 1 ? "s" : ""}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* Unified delay dialog (useDelayJob) — same UX as Daily Brief, Walkthrough,
+          and JobWeekPanel. Both input modes + reason picker live in one place. */}
+      {delayDialogs}
     </div>
   );
 }

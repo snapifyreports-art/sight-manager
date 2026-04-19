@@ -109,7 +109,7 @@ export function PlotTodoList({ jobs, snagSummary, siteId, plotId }: PlotTodoList
     });
 
   // Centralised pre-start flow
-  const { triggerAction: triggerJobAction, dialogs: jobActionDialogs } = useJobAction(
+  const { triggerAction: triggerJobAction, runSimpleAction, dialogs: jobActionDialogs } = useJobAction(
     (_action, _jobId) => { router.refresh(); }
   );
 
@@ -132,20 +132,12 @@ export function PlotTodoList({ jobs, snagSummary, siteId, plotId }: PlotTodoList
     // Complete action
     setPendingJobActions((prev) => new Set(prev).add(jobId));
     try {
-      const res = await fetch(`/api/jobs/${jobId}/actions`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action }),
-      });
-      if (!res.ok) {
-        toast.error(await fetchErrorMessage(res, `Failed to ${action} job`));
-        return;
-      }
-      const result = await res.json();
-      router.refresh();
-      if (result._completionContext) {
+      const res = await runSimpleAction(jobId, action);
+      if (!res.ok) return;
+      const result = res.data as { _completionContext?: unknown } | undefined;
+      if (result?._completionContext) {
         const jobName = jobs.find((j) => j.id === jobId)?.name || "";
-        setCompletionContext({ completedJobName: jobName, ...result._completionContext });
+        setCompletionContext({ completedJobName: jobName, ...(result._completionContext as object) });
       }
     } finally {
       setPendingJobActions((prev) => { const n = new Set(prev); n.delete(jobId); return n; });
@@ -155,16 +147,7 @@ export function PlotTodoList({ jobs, snagSummary, siteId, plotId }: PlotTodoList
   async function handleSignOff(jobId: string) {
     setPendingJobActions((prev) => new Set(prev).add(jobId));
     try {
-      const res = await fetch(`/api/jobs/${jobId}/actions`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "signoff" }),
-      });
-      if (!res.ok) {
-        toast.error(await fetchErrorMessage(res, "Failed to sign off job"));
-        return;
-      }
-      router.refresh();
+      await runSimpleAction(jobId, "signoff");
     } finally {
       setPendingJobActions((prev) => { const n = new Set(prev); n.delete(jobId); return n; });
     }

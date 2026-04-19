@@ -318,7 +318,7 @@ function PlotOverview({
   }, [router]);
 
   // Centralised pre-start / early-start flow
-  const { triggerAction: triggerJobAction, isLoading: jobActionLoading, dialogs: jobActionDialogs } = useJobAction(
+  const { triggerAction: triggerJobAction, runSimpleAction, isLoading: jobActionLoading, dialogs: jobActionDialogs } = useJobAction(
     (_action, _jobId) => { forceRefresh(); }
   );
 
@@ -362,26 +362,16 @@ function PlotOverview({
     }
     setPendingJobActions((prev) => new Set(prev).add(jobId));
     try {
-      const res = await fetch(`/api/jobs/${jobId}/actions`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action }),
-      });
+      const res = await runSimpleAction(jobId, action);
       if (res.ok) {
-        const result = await res.json();
+        const result = res.data as { _completionContext?: unknown } | undefined;
         forceRefresh();
         // Show post-completion dialog if context returned
-        if (result._completionContext) {
+        if (result?._completionContext) {
           const jobName = plot.jobs.find((j) => j.id === jobId)?.name || "";
-          setCompletionContext({ completedJobName: jobName, ...result._completionContext });
+          setCompletionContext({ completedJobName: jobName, ...(result._completionContext as object) });
         }
-      } else {
-        setActionError("Failed to update job status. Please try again.");
-        setTimeout(() => setActionError(null), 4000);
       }
-    } catch {
-      setActionError("Network error. Please check your connection.");
-      setTimeout(() => setActionError(null), 4000);
     } finally {
       setPendingJobActions((prev) => { const n = new Set(prev); n.delete(jobId); return n; });
     }

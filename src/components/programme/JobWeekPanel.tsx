@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { format, differenceInCalendarDays, addDays } from "date-fns";
+import { format } from "date-fns";
 import { addWorkingDays, differenceInWorkingDays, isWorkingDay, snapToWorkingDay } from "@/lib/working-days";
 import { useJobAction } from "@/hooks/useJobAction";
 import Link from "next/link";
@@ -44,6 +44,7 @@ import { getStageCode, getStageColor } from "@/lib/stage-codes";
 import { SnagDialog } from "@/components/snags/SnagDialog";
 import { OrderDetailSheet } from "@/components/orders/OrderDetailSheet";
 import { useToast, fetchErrorMessage } from "@/components/ui/toast";
+import { useDelayJob } from "@/hooks/useDelayJob";
 
 // ---------- Types ----------
 
@@ -307,13 +308,13 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
   const [showSignOffForm, setShowSignOffForm] = useState(false);
   const [signOffNotesInput, setSignOffNotesInput] = useState("");
 
-  // Delay form state
-  const [showDelayForm, setShowDelayForm] = useState(false);
-  const [delayDays, setDelayDays] = useState(1);
-  const [delayReasonType, setDelayReasonType] = useState<"WEATHER_RAIN" | "WEATHER_TEMPERATURE" | "OTHER">("OTHER");
-  const [delayReasonText, setDelayReasonText] = useState("");
-  const [delayLoading, setDelayLoading] = useState(false);
-  const [delaySuggestion, setDelaySuggestion] = useState<{ rainDays: number; temperatureDays: number; suggestedReason: string | null } | null>(null);
+  // Unified delay dialog — same UX as Daily Brief / Walkthrough / Tasks.
+  // Replaces a prior inline days-only form. NOTE: the prior impl prefetched
+  // weather-suggestion days from GET /api/jobs/:id/delay and pre-selected
+  // the reason — tracked as a follow-up to add to useDelayJob.
+  const { openDelayDialog, dialogs: delayDialogs } = useDelayJob(() => {
+    onJobUpdated?.();
+  });
 
   // Early-start programme impact dialog
   const [earlyStartDialog, setEarlyStartDialog] = useState<{
@@ -959,48 +960,11 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
     }
   }, [completionShiftDialog, onJobUpdated, toast]);
 
-  // Open delay form — fetch weather suggestion at the same time
-  const openDelayForm = useCallback(async () => {
+  // Open the unified delay dialog. Guard: no delay on synthetic stage rows.
+  const handleOpenDelay = useCallback(() => {
     if (!context || isSynthetic) return;
-    setShowDelayForm(true);
-    setDelayDays(1);
-    setDelayReasonType("OTHER");
-    setDelayReasonText("");
-    try {
-      const res = await fetch(`/api/jobs/${context.job.id}/delay`);
-      if (res.ok) {
-        const data = await res.json();
-        setDelaySuggestion(data);
-        if (data.suggestedReason) setDelayReasonType(data.suggestedReason);
-      }
-    } catch { /* non-critical */ }
-  }, [context, isSynthetic]);
-
-  const handleDelay = useCallback(async () => {
-    if (!context || isSynthetic) return;
-    setDelayLoading(true);
-    try {
-      const res = await fetch(`/api/jobs/${context.job.id}/delay`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          days: delayDays,
-          delayReasonType,
-          reason: delayReasonText.trim() || undefined,
-        }),
-      });
-      if (!res.ok) {
-        toast.error(await fetchErrorMessage(res, "Failed to delay job"));
-        return;
-      }
-      setShowDelayForm(false);
-      onJobUpdated?.();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Delay failed");
-    } finally {
-      setDelayLoading(false);
-    }
-  }, [context, isSynthetic, delayDays, delayReasonType, delayReasonText, onJobUpdated, toast]);
+    openDelayDialog(context.job);
+  }, [context, isSynthetic, openDelayDialog]);
 
   // Stage files for upload (shows caption input)
   const handleFileSelect = useCallback((files: FileList | null) => {
@@ -1453,91 +1417,21 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
                     </div>
                   )}
 
-                  {/* Delay button — available for any non-completed job */}
-                  {effectiveStatus !== "COMPLETED" && !showDelayForm && (
+                  {/* Delay button — available for any non-completed job.
+                      Opens the unified dialog (by days OR by new end date +
+                      reason picker). Prior inline-form version was days-only
+                      and inconsistent with Daily Brief / Walkthrough. */}
+                  {effectiveStatus !== "COMPLETED" && (
                     <Button
                       variant="outline"
                       size="sm"
                       className="w-full border-amber-300 text-amber-700 hover:bg-amber-50"
-                      onClick={openDelayForm}
+                      onClick={handleOpenDelay}
+                      disabled={isSynthetic}
                     >
                       <Clock className="size-3.5 mr-1.5" />
                       Delay Job
                     </Button>
-                  )}
-
-                  {/* Inline delay form */}
-                  {showDelayForm && (
-                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 space-y-2.5">
-                      <p className="text-xs font-semibold text-amber-800">Delay this job</p>
-
-                      {/* Weather suggestion */}
-                      {delaySuggestion && (delaySuggestion.rainDays > 0 || delaySuggestion.temperatureDays > 0) && (
-                        <div className="rounded bg-white px-2 py-1.5 text-[11px] text-amber-700 border border-amber-200">
-                          {delaySuggestion.rainDays > 0 && <span>☔ {delaySuggestion.rainDays} rain day{delaySuggestion.rainDays !== 1 ? "s" : ""}</span>}
-                          {delaySuggestion.rainDays > 0 && delaySuggestion.temperatureDays > 0 && <span> · </span>}
-                          {delaySuggestion.temperatureDays > 0 && <span>🌡️ {delaySuggestion.temperatureDays} temperature day{delaySuggestion.temperatureDays !== 1 ? "s" : ""}</span>}
-                          <span className="ml-1 text-amber-600">logged on this job&apos;s period</span>
-                        </div>
-                      )}
-
-                      {/* Days */}
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs text-slate-600 shrink-0">Working days (Mon-Fri):</span>
-                        <input
-                          type="number"
-                          min={0}
-                          max={365}
-                          value={delayDays || ""}
-                          onChange={(e) => setDelayDays(parseInt(e.target.value) || 0)}
-                          className="w-16 rounded border px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-amber-400"
-                        />
-                      </div>
-
-                      {/* Reason type */}
-                      <div className="flex gap-1">
-                        {(["WEATHER_RAIN", "WEATHER_TEMPERATURE", "OTHER"] as const).map((r) => (
-                          <button
-                            key={r}
-                            onClick={() => setDelayReasonType(r)}
-                            className={`flex-1 rounded px-1 py-1 text-[10px] font-medium transition-colors ${
-                              delayReasonType === r
-                                ? r === "WEATHER_RAIN" ? "bg-orange-500 text-white"
-                                  : r === "WEATHER_TEMPERATURE" ? "bg-cyan-500 text-white"
-                                  : "bg-slate-700 text-white"
-                                : "border bg-white text-slate-600 hover:bg-slate-50"
-                            }`}
-                          >
-                            {r === "WEATHER_RAIN" ? "☔ Rain" : r === "WEATHER_TEMPERATURE" ? "🌡️ Temp" : "⏳ Other"}
-                          </button>
-                        ))}
-                      </div>
-
-                      {delayReasonType === "OTHER" && (
-                        <input
-                          type="text"
-                          value={delayReasonText}
-                          onChange={(e) => setDelayReasonText(e.target.value)}
-                          placeholder="Reason (optional)..."
-                          className="w-full rounded border px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-amber-400"
-                        />
-                      )}
-
-                      <div className="flex gap-2">
-                        <Button variant="outline" size="sm" className="flex-1" onClick={() => setShowDelayForm(false)}>
-                          Cancel
-                        </Button>
-                        <Button
-                          size="sm"
-                          className="flex-1 bg-amber-500 hover:bg-amber-600 text-white"
-                          disabled={delayLoading || !delayDays || delayDays < 1}
-                          onClick={handleDelay}
-                        >
-                          {delayLoading ? <Loader2 className="size-3 animate-spin mr-1" /> : <Clock className="size-3 mr-1" />}
-                          Delay {delayDays || 0} working day{delayDays !== 1 ? "s" : ""}
-                        </Button>
-                      </div>
-                    </div>
                   )}
                 </div>
               )}
@@ -2073,6 +1967,9 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
           initialContactId={jobContractorContactId || undefined}
         />
       )}
+
+      {/* Unified delay dialog (useDelayJob) */}
+      {delayDialogs}
 
       {/* Contractor Picker Dialog */}
       <Dialog open={contractorPickerOpen} onOpenChange={(o) => { if (!o) { setContractorPickerOpen(false); setContractorPickerTargetJobId(null); } }}>
