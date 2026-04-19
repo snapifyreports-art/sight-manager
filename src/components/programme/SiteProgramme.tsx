@@ -1057,7 +1057,13 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
     );
   }
 
-  const totalHeight = processedPlots.length * ROW_HEIGHT;
+  // Overlay mode doubles row height: top half shows Current plan, bottom half
+  // shows Original plan greyed out. Keith's feedback (Apr 2026): the old
+  // 4px ghost strip at the bottom of a cell was illegible — you could see
+  // "something shifted" but not what/from where. Two full-height labelled
+  // rows make the before/after comparison obvious.
+  const effectiveRowHeight = ganttMode === "overlay" ? ROW_HEIGHT * 2 : ROW_HEIGHT;
+  const totalHeight = processedPlots.length * effectiveRowHeight;
   const timelineWidth = columns.length * cellWidth;
 
   return (
@@ -1402,7 +1408,7 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                         ? "bg-blue-50"
                         : index % 2 === 0 ? "bg-white" : "bg-slate-50/50"
                     }`}
-                    style={{ height: ROW_HEIGHT }}
+                    style={{ height: effectiveRowHeight }}
                   >
                     {selectMode && (
                       <div className="flex w-[28px] items-center justify-center px-1">
@@ -1606,43 +1612,47 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                       plotIndex % 2 === 0 ? "bg-white" : "bg-slate-50/30"
                     }`}
                     style={{
-                      top: plotIndex * ROW_HEIGHT,
-                      height: ROW_HEIGHT,
+                      top: plotIndex * effectiveRowHeight,
+                      height: effectiveRowHeight,
                     }}
                   >
+                    {/* Overlay mode: visual divider + labels between Current
+                        (top half) and Original (bottom half). Dashed line +
+                        small "Original plan" tag in the left margin. */}
+                    {ganttMode === "overlay" && (
+                      <>
+                        <div
+                          className="absolute left-0 right-0 border-t border-dashed border-slate-300 pointer-events-none"
+                          style={{ top: ROW_HEIGHT - 1 }}
+                        />
+                        <div
+                          className="absolute left-1 text-[8px] font-medium text-slate-400 pointer-events-none"
+                          style={{ top: 1 }}
+                        >
+                          Current
+                        </div>
+                        <div
+                          className="absolute left-1 text-[8px] font-medium text-slate-400 pointer-events-none"
+                          style={{ top: ROW_HEIGHT + 1 }}
+                        >
+                          Original
+                        </div>
+                      </>
+                    )}
                     {plot.jobs.map((job) => {
-                      // Resolve bar dates based on gantt mode
+                      // Resolve dates for the CURRENT bar row.
                       // "original": show original planned dates (before any shifts)
-                      // "current": show actual dates for completed jobs, planned for rest
-                      // "overlay": show current dates for main bar, original as ghost
-                      const resolveBarDates = () => {
-                        if (ganttMode === "original") {
-                          const s = job.originalStartDate || job.startDate;
-                          const e = job.originalEndDate || job.endDate;
-                          return { barStart: s, barEnd: e, ghostStart: null as string | null, ghostEnd: null as string | null };
-                        }
-                        if (ganttMode === "current") {
-                          const s = job.actualStartDate ?? job.startDate;
-                          const e = job.actualEndDate ?? job.endDate;
-                          return { barStart: s, barEnd: e, ghostStart: null as string | null, ghostEnd: null as string | null };
-                        }
-                        // overlay: current bar + ghost original
-                        // Use actualStart if available, otherwise current planned start
-                        const s = job.actualStartDate ?? job.startDate;
-                        const e = job.actualEndDate ?? job.endDate;
-                        // Ghost = original planned dates; fall back to current planned if
-                        // no original recorded (job never shifted — ghost == current, hides naturally)
-                        const gs = job.originalStartDate ?? job.startDate ?? null;
-                        const ge = job.originalEndDate ?? job.endDate ?? null;
-                        return { barStart: s, barEnd: e, ghostStart: gs, ghostEnd: ge };
-                      };
-                      const { barStart, barEnd, ghostStart, ghostEnd } = resolveBarDates();
-                      if (!barStart || !barEnd) return null;
+                      // "current" / "overlay": show actual dates for completed jobs, planned for rest
+                      const currentStart = ganttMode === "original"
+                        ? (job.originalStartDate || job.startDate)
+                        : (job.actualStartDate ?? job.startDate);
+                      const currentEnd = ganttMode === "original"
+                        ? (job.originalEndDate || job.endDate)
+                        : (job.actualEndDate ?? job.endDate);
+                      if (!currentStart || !currentEnd) return null;
 
-                      const jobStart = new Date(barStart);
-                      const jobEnd = new Date(barEnd);
-                      const ghostJobStart = ghostStart ? new Date(ghostStart) : null;
-                      const ghostJobEnd = ghostEnd ? new Date(ghostEnd) : null;
+                      const jobStart = new Date(currentStart);
+                      const jobEnd = new Date(currentEnd);
                       const code = getStageCode(job);
                       const colors = ganttMode === "original"
                         ? { bg: "#e2e8f0", text: "#475569" }  // grey for original mode
@@ -1650,27 +1660,32 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                       const hasPhotos = (job._count?.photos ?? 0) > 0;
                       const hasNotes = (job._count?.actions ?? 0) > 0;
 
-                      // Check which columns have order/delivery dates
-                      const orders = job.orders ?? [];
+                      // Original dates for the second row in overlay mode.
+                      // Fall back to current dates if no original was ever recorded
+                      // (job never shifted) — in that case the original row shows
+                      // the same position, giving a visual "didn't move" signal.
+                      const origStart = job.originalStartDate ?? currentStart;
+                      const origEnd = job.originalEndDate ?? currentEnd;
+                      const origJobStart = new Date(origStart);
+                      const origJobEnd = new Date(origEnd);
+                      const hasShifted = ganttMode === "overlay" && (
+                        (job.originalStartDate && job.originalStartDate !== currentStart) ||
+                        (job.originalEndDate && job.originalEndDate !== currentEnd)
+                      );
 
-                      // Find the first column index where job bar starts
+                      // Current bar sits at top=0. In non-overlay it fills the row;
+                      // in overlay it occupies the top half (ROW_HEIGHT). Original
+                      // (if overlay) is rendered in a second pass below at top=ROW_HEIGHT.
+                      const orders = job.orders ?? [];
                       const jobFirstColIdx = columns.findIndex(
                         (c) => jobStart < c.endDate && jobEnd >= c.date
                       );
 
-                      return columns.map((col, colIdx) => {
+                      const currentCells = columns.map((col, colIdx) => {
                         const overlaps = jobStart < col.endDate && jobEnd >= col.date;
-                        const ghostOverlaps = ghostJobStart && ghostJobEnd
-                          ? ghostJobStart < col.endDate && ghostJobEnd >= col.date
-                          : false;
-                        if (!overlaps && !ghostOverlaps) return null;
+                        if (!overlaps) return null;
 
                         const isFirstJobCell = colIdx === jobFirstColIdx;
-
-                        // Dots: for synthetic parents check each child's dot date;
-                        // for individual jobs use the job's own first column.
-                        // Use string comparison (YYYY-MM-DD) to avoid UTC vs local timezone
-                        // mismatch that can shift dots by one week.
                         const colDateStr = format(col.date, "yyyy-MM-dd");
                         const colEndStr = format(col.endDate, "yyyy-MM-dd");
                         const isDotCol = job._dotStartDates
@@ -1680,39 +1695,19 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                             })
                           : isFirstJobCell;
 
-                        // Check if any order dates fall in this cell
-                        // Use string comparison (YYYY-MM-DD) to avoid UTC vs local timezone
-                        // mismatch (e.g. UTC midnight stored dates shift by 1 day in BST).
-                        // If order date is before job starts, show on first job cell.
-                        const barStartStr = barStart ? barStart.slice(0, 10) : null;
+                        const barStartStr = currentStart.slice(0, 10);
                         const hasOrderInCell = orders.some((o) => {
                           const ds = o.dateOfOrder.slice(0, 10);
-                          if (barStartStr && ds < barStartStr && isFirstJobCell) return true;
+                          if (ds < barStartStr && isFirstJobCell) return true;
                           return ds >= colDateStr && ds < colEndStr;
                         });
                         const hasDeliveryInCell = orders.some((o) => {
                           if (!o.expectedDeliveryDate) return false;
                           const ds = o.expectedDeliveryDate.slice(0, 10);
-                          if (barStartStr && ds < barStartStr && isFirstJobCell) return true;
+                          if (ds < barStartStr && isFirstJobCell) return true;
                           return ds >= colDateStr && ds < colEndStr;
                         });
-
-                        // Ghost-only cell (overlay mode: original dates but not current)
-                        if (!overlaps && ghostOverlaps) {
-                          return (
-                            <div
-                              key={`${job.id}-ghost-${col.key}`}
-                              className="absolute pointer-events-none"
-                              style={{ left: colIdx * cellWidth, top: 0, width: cellWidth, height: ROW_HEIGHT }}
-                            >
-                              <div
-                                className="absolute bottom-1 left-px right-px rounded-sm"
-                                style={{ height: 8, backgroundColor: "#94a3b8", opacity: 0.5, border: "1px dashed #64748b" }}
-                                title={`${job.name} — original planned period`}
-                              />
-                            </div>
-                          );
-                        }
+                        void hasOrderInCell; void hasDeliveryInCell; // rendered in separate layer
 
                         return (
                           <div
@@ -1726,7 +1721,6 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                             }}
                             title={`${job.name} (${job.status}) — Click for details`}
                             onClick={() => {
-                              // For synthetic parents, find child job IDs from original site data
                               let childJobIds: string[] | undefined;
                               if (job.id.startsWith("synth-")) {
                                 const origPlot = site.plots.find((p) => p.id === plot.id);
@@ -1794,10 +1788,6 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                                 if (types.includes("RAIN")) return "☔";
                                 return code;
                               })()}
-                              {/* Photo/note indicators (week view only — too small for day).
-                                  isDotCol is true for every column where a child job (or this
-                                  job itself) has photos/notes, keeping dots identical between
-                                  Jobs and Sub-Jobs views. */}
                               {isDotCol && viewMode === "week" && (hasPhotos || hasNotes) && (
                                 <div className="absolute -right-0.5 -top-0.5 flex gap-px">
                                   {hasPhotos && (
@@ -1808,19 +1798,55 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                                   )}
                                 </div>
                               )}
-                              {/* Overlay mode: ghost strip showing original plan */}
-                              {ganttMode === "overlay" && ghostOverlaps && (
-                                <div
-                                  className="absolute bottom-0 left-0 right-0 rounded-b"
-                                  style={{ height: 4, backgroundColor: "#475569", opacity: 0.5, borderBottom: "1px dashed #334155" }}
-                                  title="Original planned period"
-                                />
-                              )}
-                              {/* Order/delivery dots rendered separately below */}
                             </div>
                           </div>
                         );
                       });
+
+                      // Overlay mode: render the ORIGINAL planned bar in the bottom
+                      // half (top: ROW_HEIGHT). Greyed, dashed border, no onClick —
+                      // it's informational. Shows WHERE the job was originally
+                      // scheduled so Keith can see at a glance "it used to be here,
+                      // now it's there". If the job never shifted, origStart/origEnd
+                      // equal current, so the bottom row mirrors the top — still
+                      // useful because the absence of a shift IS information.
+                      const originalCells = ganttMode === "overlay"
+                        ? columns.map((col, colIdx) => {
+                            const overlaps = origJobStart < col.endDate && origJobEnd >= col.date;
+                            if (!overlaps) return null;
+                            return (
+                              <div
+                                key={`${job.id}-orig-${col.key}`}
+                                className="absolute flex items-center justify-center pointer-events-none"
+                                style={{
+                                  left: colIdx * cellWidth,
+                                  top: ROW_HEIGHT,
+                                  width: cellWidth,
+                                  height: ROW_HEIGHT,
+                                }}
+                                title={`${job.name} — originally planned ${origStart.slice(0, 10)} to ${origEnd.slice(0, 10)}${hasShifted ? " (since shifted)" : ""}`}
+                              >
+                                <div
+                                  className={`relative flex items-center justify-center rounded font-medium ${
+                                    viewMode === "day" ? "text-[7px]" : "text-[8px]"
+                                  }`}
+                                  style={{
+                                    width: cellWidth - 2,
+                                    height: ROW_HEIGHT - 6,
+                                    backgroundColor: hasShifted ? "#f1f5f9" : "#e2e8f0",
+                                    color: "#64748b",
+                                    border: hasShifted ? "1px dashed #94a3b8" : "1px solid #cbd5e1",
+                                    opacity: hasShifted ? 0.8 : 0.55,
+                                  }}
+                                >
+                                  {code}
+                                </div>
+                              </div>
+                            );
+                          })
+                        : null;
+
+                      return <>{currentCells}{originalCells}</>;
                     })}
                   </div>
                 ))}
@@ -1851,7 +1877,7 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                       <div
                         key={`dots-${plot.id}-${col.key}`}
                         className="absolute pointer-events-none"
-                        style={{ left: colIdx * cellWidth, top: plotIndex * ROW_HEIGHT, width: cellWidth, height: ROW_HEIGHT }}
+                        style={{ left: colIdx * cellWidth, top: plotIndex * effectiveRowHeight, width: cellWidth, height: ROW_HEIGHT }}
                       >
                         <div className="absolute bottom-0.5 left-1/2 -translate-x-1/2 flex gap-0.5">
                           {hasOrder && <div className="size-[5px] rounded-full bg-purple-500" />}
