@@ -1019,7 +1019,15 @@ export function PlotDetailClient({
 
         {/* To-Do List Tab */}
         <TabsContent value="todo">
-          <PlotTodoList jobs={plot.jobs} snagSummary={snagSummary} siteId={plot.site.id} plotId={plot.id} />
+          <PlotTodoList
+            jobs={plot.jobs}
+            snagSummary={snagSummary}
+            siteId={plot.site.id}
+            siteName={plot.site.name}
+            plotId={plot.id}
+            plotName={plot.name}
+            plotNumber={plot.plotNumber}
+          />
         </TabsContent>
 
         {/* Jobs List Tab */}

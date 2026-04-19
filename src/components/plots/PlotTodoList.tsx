@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useJobAction } from "@/hooks/useJobAction";
 import { useOrderStatus, type OrderStatus } from "@/hooks/useOrderStatus";
+import { useOrderEmail } from "@/hooks/useOrderEmail";
 import { PostCompletionDialog } from "@/components/PostCompletionDialog";
 import { differenceInCalendarDays, isSameDay, format } from "date-fns";
 import { getCurrentDateAtMidnight } from "@/lib/dev-date";
@@ -71,12 +72,15 @@ interface PlotTodoListProps {
   jobs: JobData[];
   snagSummary: Record<string, number>;
   siteId: string;
+  siteName: string;
   plotId: string;
+  plotName: string;
+  plotNumber: string | null;
 }
 
 // ---------- Component ----------
 
-export function PlotTodoList({ jobs, snagSummary, siteId, plotId }: PlotTodoListProps) {
+export function PlotTodoList({ jobs, snagSummary, siteId, siteName, plotId, plotName, plotNumber }: PlotTodoListProps) {
   const router = useRouter();
   // Snap to midnight so SSR and initial client render produce the same
   // date-comparisons (avoids React hydration mismatch #418).
@@ -90,6 +94,13 @@ export function PlotTodoList({ jobs, snagSummary, siteId, plotId }: PlotTodoList
   const { setOrderStatus, isPending: isOrderPending } = useOrderStatus({
     onChange: () => router.refresh(),
   });
+
+  // Shared supplier-email flow — upgrades this screen from the minimal
+  // inline mailto to the same rich template used elsewhere.
+  const { openSendOrderEmail, dialogs: orderEmailDialogs } = useOrderEmail(
+    () => router.refresh()
+  );
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [completionContext, setCompletionContext] = useState<any>(null);
 
@@ -149,6 +160,47 @@ export function PlotTodoList({ jobs, snagSummary, siteId, plotId }: PlotTodoList
     void setOrderStatus(orderId, status);
   }
 
+  // Build a SendOrderGroupInput (group of one) for a single order row and
+  // hand it to the shared email dialog. Optional supplier / site fields
+  // (accountNumber, address, postcode) are not on PlotData so we pass null
+  // and the rich template handles their absence.
+  function handleSendOrder(order: OrderData & { jobId: string; jobName: string }) {
+    openSendOrderEmail({
+      supplierId: order.supplier.id,
+      supplierName: order.supplier.name,
+      contactName: order.supplier.contactName,
+      contactEmail: order.supplier.contactEmail,
+      accountNumber: null,
+      siteNames: [siteName],
+      orders: [{
+        id: order.id,
+        job: {
+          id: order.jobId,
+          name: order.jobName,
+          plot: {
+            name: plotName,
+            plotNumber,
+            site: {
+              id: siteId,
+              name: siteName,
+              address: null,
+              postcode: null,
+            },
+          },
+        },
+        expectedDeliveryDate: order.expectedDeliveryDate,
+        dateOfOrder: order.dateOfOrder,
+        itemsDescription: order.itemsDescription,
+        items: (order.orderItems ?? []).map((i) => ({
+          name: i.name,
+          quantity: i.quantity,
+          unit: i.unit,
+          unitCost: i.unitCost,
+        })),
+      }],
+    });
+  }
+
   // ---------- Derive sections ----------
 
   const sections = useMemo(() => {
@@ -198,6 +250,7 @@ export function PlotTodoList({ jobs, snagSummary, siteId, plotId }: PlotTodoList
   return (
     <div className="space-y-4">
       {jobActionDialogs}
+      {orderEmailDialogs}
       <PostCompletionDialog
         open={!!completionContext}
         completedJobName={completionContext?.completedJobName ?? ""}
@@ -306,6 +359,7 @@ export function PlotTodoList({ jobs, snagSummary, siteId, plotId }: PlotTodoList
                     variant="delivery"
                     isPending={isOrderPending(o.id)}
                     onAction={handleOrderStatus}
+                    onSend={handleSendOrder}
                   />
                 ))}
 
@@ -322,6 +376,7 @@ export function PlotTodoList({ jobs, snagSummary, siteId, plotId }: PlotTodoList
                     variant="place"
                     isPending={isOrderPending(o.id)}
                     onAction={handleOrderStatus}
+                    onSend={handleSendOrder}
                   />
                 ))}
               </div>
@@ -522,15 +577,15 @@ function OrderRow({
   variant,
   isPending,
   onAction,
+  onSend,
 }: {
   order: OrderData & { jobId: string; jobName: string };
   variant: "delivery" | "place";
   isPending: boolean;
   onAction: (orderId: string, status: OrderStatus) => void;
+  onSend: (order: OrderData & { jobId: string; jobName: string }) => void;
 }) {
-  const mailto = variant === "place" && order.supplier.contactEmail
-    ? `mailto:${encodeURIComponent(order.supplier.contactEmail)}?subject=${encodeURIComponent(`Material Order — ${order.jobName}`)}&body=${encodeURIComponent(`Hi ${order.supplier.contactName || order.supplier.name},\n\nPlease supply the following for ${order.jobName}:\n\n${order.itemsDescription || "Materials as discussed"}${order.expectedDeliveryDate ? `\n\nRequired by: ${format(new Date(order.expectedDeliveryDate), "dd MMM yyyy")}` : ""}\n\nPlease confirm receipt.\n\nRegards`)}`
-    : null;
+  const hasEmail = variant === "place" && !!order.supplier.contactEmail;
 
   return (
     <div className={cn("rounded border p-2 text-sm", variant === "delivery" && "border-amber-100 bg-amber-50/30")}>
@@ -559,15 +614,15 @@ function OrderRow({
           </Button>
         ) : (
           <>
-            {mailto && (
+            {hasEmail && (
               <Button size="sm" variant="outline" className="h-6 gap-1 border-violet-200 px-2 text-[10px] text-violet-700 hover:bg-violet-50"
-                onClick={() => { window.open(mailto, "_blank"); onAction(order.id, "ORDERED"); }}>
+                onClick={() => onSend(order)}>
                 <Mail className="size-2.5" /> Send Order
               </Button>
             )}
             <Button size="sm" variant="outline" className="h-6 gap-1 border-blue-200 px-2 text-[10px] text-blue-700 hover:bg-blue-50"
               onClick={() => onAction(order.id, "ORDERED")}>
-              <Package className="size-2.5" /> {mailto ? "Mark Sent" : "Place Order"}
+              <Package className="size-2.5" /> {hasEmail ? "Mark Sent" : "Place Order"}
             </Button>
           </>
         )}
