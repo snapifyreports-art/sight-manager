@@ -1,11 +1,12 @@
 import { notFound } from "next/navigation";
-import { format, parseISO } from "date-fns";
-import { HardHat, PlayCircle, Clock, AlertTriangle, CheckCircle2, Phone, Mail, Building2, Package, Truck, FileText, Download, ExternalLink } from "lucide-react";
+import { format, parseISO, addDays, startOfWeek, isWithinInterval } from "date-fns";
+import { HardHat, PlayCircle, Clock, AlertTriangle, CheckCircle2, Phone, Mail, Building2, Package, Truck, FileText, Download, ExternalLink, CalendarDays, Briefcase } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { verifyContractorToken } from "@/lib/share-token";
 import { SnagSignOffCard } from "./SnagSignOffCard";
 import { PrintButton } from "./PrintButton";
 import { RequestSignOffButton } from "./RequestSignOffButton";
+import { MiniGantt } from "@/components/shared/MiniGantt";
 
 export const dynamic = "force-dynamic";
 
@@ -103,6 +104,29 @@ export default async function ContractorSharePage({
     },
     orderBy: { createdAt: "desc" },
   });
+
+  // Drawings for plots this contractor is working on — parity with
+  // Contractor Comms on the internal side (Apr 2026: "share link doesn't
+  // feature all the info Contractor Comms does").
+  const plotIdsForContractor = [...new Set(jobs.map((j) => j.plot.id))];
+  const drawings = plotIdsForContractor.length > 0
+    ? await prisma.siteDocument.findMany({
+        where: {
+          siteId,
+          OR: [
+            { plotId: { in: plotIdsForContractor } },
+            { plotId: null }, // site-wide drawings
+          ],
+          category: "DRAWING",
+        },
+        select: {
+          id: true, name: true, url: true, fileName: true,
+          mimeType: true, fileSize: true, createdAt: true,
+          plot: { select: { id: true, plotNumber: true, name: true } },
+        },
+        orderBy: { createdAt: "desc" },
+      })
+    : [];
 
   // Which live jobs already have a sign-off request logged? Used by the
   // RequestSignOffButton to show "already requested" state without another
@@ -233,6 +257,144 @@ export default async function ContractorSharePage({
       </div>
 
       <div className="mx-auto max-w-2xl space-y-3 px-4 py-6">
+        {/* Mini Programme — 12-week rows=plots Gantt. Same visual Keith
+            uses on the internal Contractor Comms page. Apr 2026 UX audit
+            follow-up: "shareable links don't feature all the info". */}
+        {(liveJobs.length > 0 || nextJobs.length > 0) && (
+          <details className="group rounded-lg border bg-white shadow-sm">
+            <summary className="flex cursor-pointer items-center gap-2 px-4 py-3 font-semibold text-blue-700 [&::-webkit-details-marker]:hidden">
+              <Briefcase className="size-5 text-blue-600" />
+              Mini Programme (next 12 weeks)
+              <svg className="ml-auto size-4 shrink-0 transition-transform group-open:rotate-180" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clipRule="evenodd" /></svg>
+            </summary>
+            <div className="border-t px-4 py-3">
+              <MiniGantt
+                siteId={siteId}
+                linkJobs={false}
+                linkPlots={false}
+                jobs={[
+                  ...liveJobs.map((j) => ({
+                    id: j.id,
+                    name: j.name,
+                    status: j.status,
+                    startDate: j.startDate?.toISOString() ?? null,
+                    endDate: j.endDate?.toISOString() ?? null,
+                    plot: j.plot,
+                    live: true,
+                  })),
+                  ...nextJobs.map((j) => ({
+                    id: j.id,
+                    name: j.name,
+                    status: j.status,
+                    startDate: j.startDate?.toISOString() ?? null,
+                    endDate: j.endDate?.toISOString() ?? null,
+                    plot: j.plot,
+                    live: false,
+                  })),
+                ]}
+              />
+            </div>
+          </details>
+        )}
+
+        {/* Day Sheets — Mon-Sun, jobs active each day this week. */}
+        {(() => {
+          const weekStart = startOfWeek(new Date(), { weekStartsOn: 1 });
+          const days = Array.from({ length: 7 }).map((_, i) => addDays(weekStart, i));
+          const allJobs = [...liveJobs, ...nextJobs];
+          const jobsForDay = (day: Date) =>
+            allJobs.filter((j) => {
+              if (!j.startDate || !j.endDate) return false;
+              return isWithinInterval(day, { start: j.startDate, end: j.endDate });
+            });
+          const hasAnything = days.some((d) => jobsForDay(d).length > 0);
+          if (!hasAnything) return null;
+          return (
+            <details className="group rounded-lg border bg-white shadow-sm">
+              <summary className="flex cursor-pointer items-center gap-2 px-4 py-3 font-semibold text-indigo-700 [&::-webkit-details-marker]:hidden">
+                <CalendarDays className="size-5 text-indigo-500" />
+                Day Sheets (this week)
+                <svg className="ml-auto size-4 shrink-0 transition-transform group-open:rotate-180" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clipRule="evenodd" /></svg>
+              </summary>
+              <div className="border-t px-4 py-3">
+                <div className="space-y-1.5">
+                  {days.map((day) => {
+                    const jobsToday = jobsForDay(day);
+                    const isWeekend = day.getDay() === 0 || day.getDay() === 6;
+                    return (
+                      <div
+                        key={day.toISOString()}
+                        className={`rounded-lg border px-3 py-2 ${isWeekend ? "bg-slate-50 border-slate-100" : "bg-white border-border"}`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <p className="text-xs font-semibold">
+                            {format(day, "EEE d MMM")}
+                            {isWeekend && <span className="ml-1.5 text-[10px] font-normal text-muted-foreground">(weekend)</span>}
+                          </p>
+                          <span className="text-[10px] text-muted-foreground">
+                            {jobsToday.length === 0 ? "No work" : `${jobsToday.length} job${jobsToday.length === 1 ? "" : "s"}`}
+                          </span>
+                        </div>
+                        {jobsToday.length > 0 && (
+                          <ul className="mt-1 space-y-0.5">
+                            {jobsToday.map((j) => (
+                              <li key={j.id} className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                                <span className="inline-block size-1.5 shrink-0 rounded-full bg-green-500" />
+                                <span className="truncate">{j.name}</span>
+                                <span className="text-slate-400">·</span>
+                                <span className="shrink-0">{plotLabel(j.plot)}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </details>
+          );
+        })()}
+
+        {/* Drawings — plot-scoped + site-wide. Parity with Contractor
+            Comms internal view. */}
+        {drawings.length > 0 && (
+          <details className="group rounded-lg border bg-white shadow-sm">
+            <summary className="flex cursor-pointer items-center gap-2 px-4 py-3 font-semibold text-blue-700 [&::-webkit-details-marker]:hidden">
+              <FileText className="size-5 text-blue-500" />
+              Drawings ({drawings.length})
+              <svg className="ml-auto size-4 shrink-0 transition-transform group-open:rotate-180" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clipRule="evenodd" /></svg>
+            </summary>
+            <div className="border-t px-4 py-3 space-y-1.5">
+              {drawings.map((d) => {
+                const sizeKb = d.fileSize ? Math.round(d.fileSize / 1024) : null;
+                return (
+                  <div key={d.id} className="flex items-center justify-between gap-2 rounded-lg bg-blue-50/50 px-3 py-2">
+                    <div className="flex min-w-0 flex-1 items-center gap-2">
+                      <FileText className="size-4 shrink-0 text-blue-600" />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium">{d.name}</p>
+                        <p className="truncate text-[11px] text-muted-foreground">
+                          {d.plot ? (d.plot.plotNumber ? `Plot ${d.plot.plotNumber}` : d.plot.name) : "Site-wide"}
+                          {sizeKb !== null ? ` · ${sizeKb} KB` : ""}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-1">
+                      <a href={d.url} target="_blank" rel="noopener noreferrer" className="rounded p-1 text-muted-foreground hover:bg-white hover:text-foreground" title="Open">
+                        <ExternalLink className="size-3.5" />
+                      </a>
+                      <a href={d.url} download={d.fileName} className="rounded p-1 text-muted-foreground hover:bg-white hover:text-foreground" title="Download">
+                        <Download className="size-3.5" />
+                      </a>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </details>
+        )}
+
         <details className="group rounded-lg border bg-white shadow-sm">
           <summary className="flex cursor-pointer items-center gap-2 px-4 py-3 font-semibold text-green-700 [&::-webkit-details-marker]:hidden">
             <PlayCircle className="size-5 text-green-600" />
