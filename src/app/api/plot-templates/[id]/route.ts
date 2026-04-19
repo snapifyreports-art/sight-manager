@@ -22,9 +22,6 @@ export async function GET(
     where: { id },
     include: {
       jobs: templateJobsInclude,
-      // Count plots that were created from this template — banner on
-      // the editor warns the user that changes are snapshot-only and
-      // won't propagate to those live plots.
       _count: { select: { sourcedPlots: true } },
     },
   });

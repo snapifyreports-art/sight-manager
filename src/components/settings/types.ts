@@ -51,8 +51,8 @@ export interface TemplateJobData {
   startWeek: number;
   endWeek: number;
   durationWeeks: number | null;
-  /** Optional days-granularity override. When set, takes precedence over
-   *  durationWeeks at apply-template time. Null on legacy weeks-only templates. */
+  /** Optional days-granularity override — takes precedence over durationWeeks
+   *  at apply-template time. Null on legacy weeks-only templates. */
   durationDays: number | null;
   weatherAffected: boolean;
   weatherAffectedType: "RAIN" | "TEMPERATURE" | "BOTH" | null;

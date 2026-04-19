@@ -81,9 +81,7 @@ export async function POST(request: NextRequest) {
         plotNumber: plotNumber?.toString().trim() || null,
         reservationType: reservationType || null,
         houseType: template.typeLabel || null,
-        // Informational link — lets reports answer "which plots came
-        // from Standard Detached 4-bed" and lets the template edit
-        // page warn when changes won't propagate to existing plots.
+        // Snapshot link back to the template — informational, no auto-sync.
         sourceTemplateId: template.id,
       },
     });

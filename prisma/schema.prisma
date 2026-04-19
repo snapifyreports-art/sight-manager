@@ -183,10 +183,9 @@ model Plot {
   buildCompletePercent           Float     @default(0)
   awaitingRestart                Boolean   @default(false)
   awaitingContractorConfirmation Boolean   @default(false)
-  // Purely informational — records which PlotTemplate the plot was
-  // originally created from. No auto-sync: plots are a snapshot at
-  // apply time. Nullable so pre-existing plots and manually-created
-  // plots are unaffected. See Q1 Apr 2026 template audit.
+  // Informational link to the PlotTemplate this plot was created from.
+  // No auto-sync: plots snapshot the template at apply time. Nullable
+  // so pre-existing and manually-created plots are unaffected.
   sourceTemplateId               String?
   createdAt                      DateTime  @default(now())
   updatedAt                      DateTime  @updatedAt
@@ -461,10 +460,10 @@ model TemplateJob {
   startWeek           Int
   endWeek             Int
   durationWeeks       Int?
-  // Optional days-granularity override. When set, it takes precedence
-  // over durationWeeks at apply-template time. Allows sub-jobs shorter
-  // than a week (e.g. a 3-day paint touch-up) without forcing every
-  // existing weeks-based template to migrate. See Q2 Apr 2026.
+  // Optional days-granularity override. When set, takes precedence over
+  // durationWeeks at apply-template time. Allows sub-jobs shorter than
+  // a week (e.g. a 3-day paint touch-up) without forcing every existing
+  // weeks-based template to migrate.
   durationDays        Int?
   weatherAffected     Boolean  @default(false)
   weatherAffectedType String? // "RAIN" | "TEMPERATURE" | "BOTH"

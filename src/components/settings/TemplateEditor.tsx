@@ -644,10 +644,9 @@ export function TemplateEditor({
     setSavingSubJob(true);
     try {
       const startWeek = subJobParentEndWeek + 1;
-      // End week: for days-granularity, still occupy one week slot in the
-      // legacy model (endWeek === startWeek). durationDays will override
-      // at apply time.
       const isDays = subJobDurationUnit === "days";
+      // For days-granularity, keep endWeek === startWeek in the legacy
+      // model (occupies one week slot). durationDays overrides at apply.
       const endWeek = isDays ? startWeek : startWeek + subJobDuration - 1;
 
       const res = await fetch(`/api/plot-templates/${template.id}/jobs`, {
@@ -656,7 +655,6 @@ export function TemplateEditor({
         body: JSON.stringify({
           name: subJobName,
           stageCode: subJobCode,
-          // Send only the relevant unit — keeps old templates clean.
           ...(isDays
             ? { durationDays: subJobDuration, durationWeeks: 1 }
             : { durationWeeks: subJobDuration, durationDays: null }),
@@ -1018,9 +1016,9 @@ export function TemplateEditor({
           Back to Templates
         </Button>
 
-        {/* Snapshot-model banner — appears when live plots use this
-            template. Keith's rule: templates are for new plots only,
-            edits here don't propagate. The banner makes that explicit. */}
+        {/* Snapshot-model banner — Keith's rule: templates are for new
+            plots only, edits here don't propagate. Banner makes that
+            explicit when the template has been used before. */}
         {sourcedPlotsCount > 0 && (
           <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
             <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-600" />
@@ -2009,14 +2007,9 @@ export function TemplateEditor({
                   type="number"
                   min={1}
                   value={subJobDuration}
-                  onChange={(e) =>
-                    setSubJobDuration(parseInt(e.target.value) || 1)
-                  }
+                  onChange={(e) => setSubJobDuration(parseInt(e.target.value) || 1)}
                   className="w-24"
                 />
-                {/* Unit toggle — Keith's "sometimes needs to be days" feedback.
-                    Days path overrides weeks at apply time. Default weeks so
-                    existing muscle memory still works. */}
                 <div className="inline-flex rounded-md border p-0.5 text-xs">
                   <button
                     type="button"

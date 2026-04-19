@@ -27,8 +27,6 @@ interface TemplateJobWithChildren {
   sortOrder: number;
   startWeek: number;
   endWeek: number;
-  // durationDays, when set, overrides the week-based endWeek at apply
-  // time — lets a sub-job span fewer than 5 working days.
   durationDays?: number | null;
   weatherAffected?: boolean;
   weatherAffectedType?: string | null;
@@ -52,14 +50,9 @@ interface TemplateJobWithChildren {
 }
 
 /**
- * Compute a job's end date from its template fields.
- *
- * If `durationDays` is set, it wins — the job spans that many working
- * days starting at `startWeek`. Otherwise fall back to the classic
- * week-based calculation (endWeek inclusive = startWeek + durationWeeks - 1).
- *
- * Days-precedence makes the "add days option" (Q2 Apr 2026) a pure
- * addition — existing weeks-only templates are unchanged.
+ * Compute a job's end date from its template fields. durationDays wins
+ * if set (days-granularity override). Otherwise falls back to the
+ * week-based calculation that's been in place since v1.
  */
 function computeJobEndDate(
   plotStartDate: Date,
@@ -69,11 +62,8 @@ function computeJobEndDate(
 ): Date {
   const startDate = snapToWorkingDay(addWeeks(plotStartDate, startWeek - 1), "forward");
   if (durationDays && durationDays > 0) {
-    // -1 because day 1 IS the start day, so a 3-day job ends on start+2WD.
     return snapToWorkingDay(addWorkingDays(startDate, durationDays - 1), "forward");
   }
-  // Legacy weeks path — endWeek is inclusive, so the week runs from
-  // startWeek Monday to endWeek Sunday. Add 6 calendar days then snap.
   return snapToWorkingDay(addDays(addWeeks(plotStartDate, endWeek - 1), 6), "forward");
 }
 
