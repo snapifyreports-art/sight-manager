@@ -29,6 +29,7 @@ import {
   Mail,
   Package,
   Truck,
+  Zap,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useRefreshOnFocus } from "@/hooks/useRefreshOnFocus";
@@ -36,6 +37,7 @@ import { format, parseISO } from "date-fns";
 import { PostCompletionDialog } from "@/components/PostCompletionDialog";
 import { useJobAction } from "@/hooks/useJobAction";
 import { useDelayJob } from "@/hooks/useDelayJob";
+import { usePullForwardDecision } from "@/hooks/usePullForwardDecision";
 import { useToast } from "@/components/ui/toast";
 import { Breadcrumbs } from "@/components/ui/breadcrumbs";
 
@@ -211,6 +213,12 @@ export default function SiteWalkthrough({
   // picker. The old walkthrough modal only accepted new-end-date which was
   // confusing mid-walk — site managers think in days ("rain pushed us 2 days").
   const { openDelayDialog, dialogs: delayDialogs } = useDelayJob(async () => {
+    await fetchData(true);
+  });
+
+  // Unified pull-forward decision — manual choice from 4 options with
+  // constraint-aware date picker (predecessor + order lead times).
+  const { openPullForwardDialog, dialogs: pullForwardDialogs } = usePullForwardDecision(async () => {
     await fetchData(true);
   });
 
@@ -983,18 +991,27 @@ export default function SiteWalkthrough({
                 </button>
               )}
 
-              {/* Delay row — available for both IN_PROGRESS and NOT_STARTED.
-                  Label stays consistent across walkthrough and Daily Brief so
-                  users learn one concept: "Delay" shifts the job + downstream
-                  forward by N working days (see docs/cascade-spec.md A8). */}
+              {/* Delay + Pull Forward — both available for IN_PROGRESS and NOT_STARTED.
+                  Delay pushes job + downstream back. Pull Forward moves just this
+                  job earlier (4 options with constraint-aware date picker). Same
+                  UX as Programme panel / Daily Brief. */}
               {(canFinish || canStart) && job && (
-                <button
-                  onClick={() => openDelayDialog(job)}
-                  className="flex w-full items-center justify-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700 hover:bg-red-100 active:scale-95 transition-all"
-                >
-                  <Clock className="size-4" />
-                  Delay Job
-                </button>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => openPullForwardDialog(job)}
+                    className="flex items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700 hover:bg-emerald-100 active:scale-95 transition-all"
+                  >
+                    <Zap className="size-4" />
+                    Pull Forward
+                  </button>
+                  <button
+                    onClick={() => openDelayDialog(job)}
+                    className="flex items-center justify-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700 hover:bg-red-100 active:scale-95 transition-all"
+                  >
+                    <Clock className="size-4" />
+                    Delay Job
+                  </button>
+                </div>
               )}
 
               {/* Quick plot navigation */}
@@ -1331,11 +1348,11 @@ export default function SiteWalkthrough({
         </Modal>
       )}
 
-      {/* Delay dialog — rendered from useDelayJob. Provides BOTH input modes
-          (by days + by new end date) + reason picker. Replaces a prior
-          date-only modal that forced site managers to mentally convert
-          "rained 2 days" into "so that's April 22nd". */}
+      {/* Unified delay dialog (useDelayJob) — both input modes + reason */}
       {delayDialogs}
+
+      {/* Unified pull-forward dialog (usePullForwardDecision) */}
+      {pullForwardDialogs}
 
       {/* Toast now rendered by the global <Toaster> — no local instance here. */}
 

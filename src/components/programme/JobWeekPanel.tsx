@@ -29,6 +29,7 @@ import {
   Pause,
   ShieldCheck,
   Clock,
+  Zap,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -45,6 +46,7 @@ import { SnagDialog } from "@/components/snags/SnagDialog";
 import { OrderDetailSheet } from "@/components/orders/OrderDetailSheet";
 import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 import { useDelayJob } from "@/hooks/useDelayJob";
+import { usePullForwardDecision } from "@/hooks/usePullForwardDecision";
 
 // ---------- Types ----------
 
@@ -312,6 +314,14 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
   // Replaces a prior inline days-only form. Weather auto-suggestion lives
   // inside useDelayJob now — same behaviour the inline form had.
   const { openDelayDialog, dialogs: delayDialogs } = useDelayJob(() => {
+    onJobUpdated?.();
+  });
+
+  // Unified pull-forward decision — manual-trigger only (Keith's rule).
+  // 4 options: today / next Monday / keep original / pick a date. The
+  // picker greys out dates blocked by predecessor completion or order
+  // lead times, with the reason shown inline.
+  const { openPullForwardDialog, dialogs: pullForwardDialogs } = usePullForwardDecision(() => {
     onJobUpdated?.();
   });
 
@@ -1416,21 +1426,39 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
                     </div>
                   )}
 
-                  {/* Delay button — available for any non-completed job.
-                      Opens the unified dialog (by days OR by new end date +
-                      reason picker). Prior inline-form version was days-only
-                      and inconsistent with Daily Brief / Walkthrough. */}
-                  {effectiveStatus !== "COMPLETED" && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="w-full border-amber-300 text-amber-700 hover:bg-amber-50"
-                      onClick={handleOpenDelay}
-                      disabled={isSynthetic}
-                    >
-                      <Clock className="size-3.5 mr-1.5" />
-                      Delay Job
-                    </Button>
+                  {/* Delay + Pull Forward buttons — available for any non-completed
+                      job. Delay pushes the job (and downstream) back; Pull Forward
+                      moves just this job earlier with today/Monday/keep/pick options
+                      and blocks impossible dates with reasons. Keith's principle:
+                      site manager always decides, never auto-shift. */}
+                  {effectiveStatus !== "COMPLETED" && !isSynthetic && context && (
+                    <div className="grid grid-cols-2 gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="w-full border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+                        onClick={() =>
+                          openPullForwardDialog({
+                            id: context.job.id,
+                            name: context.job.name,
+                            startDate: context.job.startDate ?? null,
+                            endDate: context.job.endDate ?? null,
+                          })
+                        }
+                      >
+                        <Zap className="size-3.5 mr-1.5" />
+                        Pull Forward
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="w-full border-amber-300 text-amber-700 hover:bg-amber-50"
+                        onClick={handleOpenDelay}
+                      >
+                        <Clock className="size-3.5 mr-1.5" />
+                        Delay Job
+                      </Button>
+                    </div>
                   )}
                 </div>
               )}
@@ -1969,6 +1997,9 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
 
       {/* Unified delay dialog (useDelayJob) */}
       {delayDialogs}
+
+      {/* Unified pull-forward dialog (usePullForwardDecision) */}
+      {pullForwardDialogs}
 
       {/* Contractor Picker Dialog */}
       <Dialog open={contractorPickerOpen} onOpenChange={(o) => { if (!o) { setContractorPickerOpen(false); setContractorPickerTargetJobId(null); } }}>
