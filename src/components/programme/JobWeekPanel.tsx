@@ -47,6 +47,7 @@ import { OrderDetailSheet } from "@/components/orders/OrderDetailSheet";
 import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 import { useDelayJob } from "@/hooks/useDelayJob";
 import { usePullForwardDecision } from "@/hooks/usePullForwardDecision";
+import { useJobContractorPicker } from "@/hooks/useJobContractorPicker";
 import { useOrderStatus, type OrderStatus } from "@/hooks/useOrderStatus";
 
 // ---------- Types ----------
@@ -306,11 +307,10 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
 
   // Contractor state
   const [panelContractors, setPanelContractors] = useState<Array<{ id: string; name: string; company: string | null }>>([]);
-  const [allContractors, setAllContractors] = useState<Array<{ id: string; name: string; company: string | null }>>([]);
-  const [contractorPickerOpen, setContractorPickerOpen] = useState(false);
-  const [contractorPickerTargetJobId, setContractorPickerTargetJobId] = useState<string | null>(null);
-  const [selectedContractorIds, setSelectedContractorIds] = useState<Set<string>>(new Set());
-  const [savingContractors, setSavingContractors] = useState(false);
+  // Contractor picker — unified via useJobContractorPicker (same UX as
+  // JobDetailClient). Hook handles fetching contacts, dialog, save PUT.
+  // The onSaved callback distinguishes parent vs child jobs by comparing
+  // savedJob.id to the panel's context.job.id.
   // Per-child-job contractors (for synthetic parent panels)
   const [childJobContractors, setChildJobContractors] = useState<Map<string, { id: string; name: string; company: string | null } | null>>(new Map());
 
@@ -552,53 +552,38 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
     return () => window.removeEventListener("keydown", handler);
   }, [lightboxIndex, photos.length]);
 
-  // Open contractor picker — optionally targeting a specific child job
-  const openContractorPicker = useCallback(async (childJobId?: string) => {
-    const res = await fetch("/api/contacts?type=CONTRACTOR");
-    const data = await res.json();
-    setAllContractors(Array.isArray(data) ? data.map((c: { id: string; name: string; company: string | null }) => ({ id: c.id, name: c.name, company: c.company })) : []);
+  // Unified contractor picker — hook handles fetch, dialog UI, PUT save.
+  // The onSaved callback distinguishes parent (the panel's focus job) from
+  // per-child-job assignment by comparing savedJob.id to context.job.id.
+  const { openPicker: openContractorPickerHook, dialogs: contractorPickerDialogs } =
+    useJobContractorPicker((savedJob, contractors) => {
+      if (context && savedJob.id === context.job.id) {
+        setPanelContractors(contractors);
+        setJobContractorContactId(contractors[0]?.id || null);
+      } else {
+        // Child-job path — record the single assigned contractor (or null if
+        // they removed them) in the per-child map.
+        setChildJobContractors((prev) => new Map(prev).set(savedJob.id, contractors[0] ?? null));
+      }
+    });
+
+  // Wrapper keeps the call signature used throughout the file.
+  const openContractorPicker = useCallback((childJobId?: string) => {
+    if (!context) return;
     if (childJobId) {
       const existing = childJobContractors.get(childJobId);
-      setSelectedContractorIds(existing ? new Set([existing.id]) : new Set());
-      setContractorPickerTargetJobId(childJobId);
-    } else {
-      setSelectedContractorIds(new Set(panelContractors.map((c) => c.id)));
-      setContractorPickerTargetJobId(null);
+      const child = childJobs.find((c) => c.id === childJobId);
+      openContractorPickerHook(
+        { id: childJobId, name: child?.name ?? "" },
+        { mode: "single", currentContactIds: existing ? [existing.id] : [] },
+      );
+    } else if (!isSynthetic) {
+      openContractorPickerHook(
+        { id: context.job.id, name: context.job.name },
+        { mode: "multi", currentContactIds: panelContractors.map((c) => c.id) },
+      );
     }
-    setContractorPickerOpen(true);
-  }, [panelContractors, childJobContractors]);
-
-  const saveContractors = useCallback(async () => {
-    if (!context) return;
-    const targetJobId = contractorPickerTargetJobId ?? (isSynthetic ? null : context.job.id);
-    if (!targetJobId) return;
-    setSavingContractors(true);
-    try {
-      const res = await fetch(`/api/jobs/${targetJobId}/contractors`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ contactIds: Array.from(selectedContractorIds) }),
-      });
-      if (!res.ok) {
-        toast.error(await fetchErrorMessage(res, "Failed to save contractors"));
-        return;
-      }
-      const updated = await res.json();
-      const contacts = updated.map((jc: { contact: { id: string; name: string; company: string | null } | null }) => jc.contact).filter(Boolean);
-      if (contractorPickerTargetJobId) {
-        // Update per-child contractor map
-        const contractor = contacts[0] ?? null;
-        setChildJobContractors((prev) => new Map(prev).set(contractorPickerTargetJobId, contractor));
-      } else {
-        setPanelContractors(contacts);
-        setJobContractorContactId(contacts[0]?.id || null);
-      }
-    } finally {
-      setSavingContractors(false);
-      setContractorPickerOpen(false);
-      setContractorPickerTargetJobId(null);
-    }
-  }, [context, isSynthetic, contractorPickerTargetJobId, selectedContractorIds, toast]);
+  }, [context, isSynthetic, panelContractors, childJobContractors, childJobs, openContractorPickerHook]);
 
   const handleAddNote = useCallback(async () => {
     if (!context || !noteText.trim()) return;
@@ -1978,54 +1963,8 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
       {/* Unified pull-forward dialog (usePullForwardDecision) */}
       {pullForwardDialogs}
 
-      {/* Contractor Picker Dialog */}
-      <Dialog open={contractorPickerOpen} onOpenChange={(o) => { if (!o) { setContractorPickerOpen(false); setContractorPickerTargetJobId(null); } }}>
-        <DialogContent className="w-[calc(100vw-2rem)] max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Assign Contractor</DialogTitle>
-            {contractorPickerTargetJobId && (
-              <DialogDescription>{childJobs.find((c) => c.id === contractorPickerTargetJobId)?.name}</DialogDescription>
-            )}
-          </DialogHeader>
-          <div className="max-h-64 overflow-y-auto">
-            {allContractors.length === 0 ? (
-              <p className="py-4 text-center text-sm text-muted-foreground">No contractors found</p>
-            ) : (
-              <div className="space-y-1">
-                {allContractors.map((c) => {
-                  const selected = selectedContractorIds.has(c.id);
-                  return (
-                    <button
-                      key={c.id}
-                      onClick={() => setSelectedContractorIds((prev) => {
-                        const next = new Set(prev);
-                        if (selected) next.delete(c.id); else next.add(c.id);
-                        return next;
-                      })}
-                      className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left hover:bg-slate-50"
-                    >
-                      <div className={`flex size-5 shrink-0 items-center justify-center rounded border ${selected ? "border-blue-600 bg-blue-600" : "border-slate-300"}`}>
-                        {selected && <Check className="size-3 text-white" />}
-                      </div>
-                      <div>
-                        <p className="text-sm font-medium">{c.name}</p>
-                        {c.company && <p className="text-xs text-muted-foreground">{c.company}</p>}
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-          <div className="flex justify-end gap-2 border-t pt-3">
-            <Button variant="outline" size="sm" onClick={() => { setContractorPickerOpen(false); setContractorPickerTargetJobId(null); }}>Cancel</Button>
-            <Button size="sm" disabled={savingContractors} onClick={saveContractors}>
-              {savingContractors && <Loader2 className="mr-1.5 size-3.5 animate-spin" />}
-              Save ({selectedContractorIds.size})
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+      {/* Unified contractor picker (useJobContractorPicker) */}
+      {contractorPickerDialogs}
 
       {/* Order Detail Sheet */}
       <OrderDetailSheet
