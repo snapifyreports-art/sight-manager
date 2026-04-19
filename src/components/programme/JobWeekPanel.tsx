@@ -906,7 +906,7 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
     } finally {
       setPreStartLoading(false);
     }
-  }, [preStartChecks, context, childJobs, fireJobAction, onJobUpdated, toast]);
+  }, [preStartChecks, context, childJobs, fireJobAction, onJobUpdated, toast, setManyOrderStatus]);
 
   // Post-completion: shift entire programme from the actual end date
   const handleShiftProgramme = useCallback(async () => {

@@ -3,7 +3,6 @@
 import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
 import {
-  AlertTriangle,
   Camera,
   CheckCircle,
   CheckCircle2,
@@ -16,7 +15,6 @@ import {
   Loader2,
   Search,
   X,
-  XCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
