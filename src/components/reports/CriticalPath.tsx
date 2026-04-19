@@ -151,7 +151,14 @@ export function CriticalPath({ siteId }: CriticalPathProps) {
         <h3 className="text-lg font-semibold">Critical Path Analysis</h3>
         <Select value={selectedPlotId} onValueChange={(v) => v !== null && setSelectedPlotId(v)}>
           <SelectTrigger className="w-48">
-            <SelectValue placeholder="All Plots" />
+            <SelectValue placeholder="All Plots">
+              {selectedPlotId === "all"
+                ? "All Plots"
+                : (() => {
+                    const p = data.plots.find((p) => p.plotId === selectedPlotId);
+                    return p ? (p.plotNumber ? `Plot ${p.plotNumber}` : p.plotName) : "Loading...";
+                  })()}
+            </SelectValue>
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Plots</SelectItem>

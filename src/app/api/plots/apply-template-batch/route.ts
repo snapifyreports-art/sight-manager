@@ -55,6 +55,14 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // Guard: empty templates produce empty plots — reject explicitly.
+  if (template.jobs.length === 0) {
+    return NextResponse.json(
+      { error: `Template "${template.name}" has no jobs — nothing to apply.` },
+      { status: 400 }
+    );
+  }
+
   // Validate all plot numbers are unique within the batch
   const plotNumbers = plots
     .map((p) => p.plotNumber?.trim())

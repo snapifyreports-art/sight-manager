@@ -1662,7 +1662,11 @@ export function SiteDetailClient({
                       onValueChange={(v) => setEditAssignedToId(!v || v === "none" ? "" : v)}
                     >
                       <SelectTrigger className="w-full">
-                        <SelectValue placeholder="Unassigned" />
+                        <SelectValue placeholder="Unassigned">
+                          {editAssignedToId && editAssignedToId !== "none"
+                            ? siteUsers.find((u) => u.id === editAssignedToId)?.name ?? "Loading..."
+                            : undefined}
+                        </SelectValue>
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="none">Unassigned</SelectItem>

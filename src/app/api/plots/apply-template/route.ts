@@ -55,6 +55,16 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // Guard: an empty template would create an empty plot, which is almost
+  // always a sign of a broken template or user error. Reject explicitly
+  // rather than silently succeeding.
+  if (template.jobs.length === 0) {
+    return NextResponse.json(
+      { error: `Template "${template.name}" has no jobs — nothing to apply. Add at least one stage to the template first.` },
+      { status: 400 }
+    );
+  }
+
   const plotStartDate = new Date(startDate);
 
   // Create everything in a transaction — complex templates can have 20+ jobs + many orders,

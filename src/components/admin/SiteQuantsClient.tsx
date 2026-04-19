@@ -471,7 +471,16 @@ export function SiteQuantsClient({
             <div className="col-span-2">
               <Label>Plot</Label>
               <Select value={mPlotId} onValueChange={(v) => setMPlotId(v ?? "")}>
-                <SelectTrigger><SelectValue placeholder="Select a plot…" /></SelectTrigger>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select a plot…">
+                    {mPlotId
+                      ? (() => {
+                          const p = plots.find((p) => p.id === mPlotId);
+                          return p ? (p.plotNumber ? `Plot ${p.plotNumber}` : p.name) : "Loading...";
+                        })()
+                      : undefined}
+                  </SelectValue>
+                </SelectTrigger>
                 <SelectContent>
                   {plots.map((p) => <SelectItem key={p.id} value={p.id}>{p.plotNumber ? `Plot ${p.plotNumber}` : p.name}</SelectItem>)}
                 </SelectContent>
@@ -517,7 +526,11 @@ export function SiteQuantsClient({
               <div>
                 <Label>Supplier</Label>
                 <Select value={oSupplierId} onValueChange={(v) => setOSupplierId(v ?? "")}>
-                  <SelectTrigger><SelectValue placeholder="Select…" /></SelectTrigger>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select…">
+                      {oSupplierId ? suppliers.find((s) => s.id === oSupplierId)?.name ?? "Loading..." : undefined}
+                    </SelectValue>
+                  </SelectTrigger>
                   <SelectContent>
                     {suppliers.map((s) => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
                   </SelectContent>

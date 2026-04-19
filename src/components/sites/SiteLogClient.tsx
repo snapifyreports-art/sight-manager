@@ -247,7 +247,14 @@ export function SiteLogClient({ siteId, plots }: SiteLogClientProps) {
         {/* Plot filter */}
         <Select value={plotFilter} onValueChange={(v) => setPlotFilter(v ?? "all")}>
           <SelectTrigger className="h-8 w-auto min-w-[120px] text-xs">
-            <SelectValue placeholder="All Plots" />
+            <SelectValue placeholder="All Plots">
+              {plotFilter === "all"
+                ? "All Plots"
+                : (() => {
+                    const p = plots.find((p) => p.id === plotFilter);
+                    return p ? plotLabel(p) : "Loading...";
+                  })()}
+            </SelectValue>
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Plots</SelectItem>
@@ -395,7 +402,14 @@ export function SiteLogClient({ siteId, plots }: SiteLogClientProps) {
               <Label>Plot (optional)</Label>
               <Select value={notePlot} onValueChange={(v) => setNotePlot(v ?? "none")}>
                 <SelectTrigger className="text-sm">
-                  <SelectValue placeholder="Site-wide" />
+                  <SelectValue placeholder="Site-wide">
+                    {notePlot === "none"
+                      ? "Site-wide"
+                      : (() => {
+                          const p = plots.find((p) => p.id === notePlot);
+                          return p ? plotLabel(p) : "Loading...";
+                        })()}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">Site-wide</SelectItem>
