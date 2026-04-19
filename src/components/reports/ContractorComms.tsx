@@ -104,6 +104,180 @@ function fmtDate(d: string | null) {
   return format(parseISO(d), "dd MMM");
 }
 
+// ── Mini-Gantt for contractor's jobs ────────────────────────────────────
+//
+// Keith's Apr 2026 idea: "their own little mini ghannt of their jobs with
+// the rows being plots". Grouped by plot, each job a coloured bar
+// positioned across a 12-week window from today. Live jobs are green,
+// upcoming blue. "Today" column highlighted. One quick glance tells a
+// contractor/manager "what do I have across the whole site this quarter".
+//
+// Kept inline in this file (rather than a shared Gantt component) because
+// the scope is deliberately narrow: one contractor, fixed 12-week window,
+// no zoom/filter. Nothing to reuse.
+
+interface MiniGanttJob {
+  id: string;
+  name: string;
+  status: string;
+  startDate: string | null;
+  endDate: string | null;
+  plot: { id: string; plotNumber: string | null; name: string };
+  live: boolean; // true = currently IN_PROGRESS, false = upcoming
+}
+
+function MiniGantt({ jobs, siteId }: { jobs: MiniGanttJob[]; siteId: string }) {
+  // Anchor to Monday of current week so column boundaries feel clean.
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const startMonday = new Date(today);
+  const day = startMonday.getDay(); // 0 = Sun, 1 = Mon, ...
+  const diffToMon = day === 0 ? -6 : 1 - day;
+  startMonday.setDate(startMonday.getDate() + diffToMon);
+  const WEEKS_TO_SHOW = 12;
+  const CELL_W = 44; // px per week column
+
+  // Build week columns (start-of-week Dates).
+  const weekCols: Date[] = [];
+  for (let i = 0; i < WEEKS_TO_SHOW; i++) {
+    const d = new Date(startMonday);
+    d.setDate(d.getDate() + i * 7);
+    weekCols.push(d);
+  }
+  const rangeEnd = new Date(weekCols[weekCols.length - 1]);
+  rangeEnd.setDate(rangeEnd.getDate() + 7); // exclusive end of last week
+
+  // Group jobs by plot, drop jobs that fall entirely outside the window.
+  const byPlot = new Map<string, { plot: MiniGanttJob["plot"]; jobs: MiniGanttJob[] }>();
+  for (const job of jobs) {
+    if (!job.startDate || !job.endDate) continue;
+    const js = new Date(job.startDate);
+    const je = new Date(job.endDate);
+    if (je < startMonday || js >= rangeEnd) continue;
+    const entry = byPlot.get(job.plot.id) ?? { plot: job.plot, jobs: [] };
+    entry.jobs.push(job);
+    byPlot.set(job.plot.id, entry);
+  }
+  const plotRows = Array.from(byPlot.values()).sort((a, b) => {
+    const an = a.plot.plotNumber ?? a.plot.name;
+    const bn = b.plot.plotNumber ?? b.plot.name;
+    return an.localeCompare(bn, undefined, { numeric: true });
+  });
+
+  if (plotRows.length === 0) {
+    return (
+      <p className="text-xs text-muted-foreground">
+        No jobs scheduled in the next {WEEKS_TO_SHOW} weeks.
+      </p>
+    );
+  }
+
+  // Compute x-offset + width of a job bar within the timeline.
+  function barRect(job: MiniGanttJob) {
+    const js = new Date(job.startDate!);
+    const je = new Date(job.endDate!);
+    const clampStart = js < startMonday ? startMonday : js;
+    const clampEnd = je >= rangeEnd ? new Date(rangeEnd.getTime() - 1) : je;
+    const dayMs = 86400000;
+    const startDays = Math.max(0, (clampStart.getTime() - startMonday.getTime()) / dayMs);
+    const endDays = Math.max(startDays + 1, (clampEnd.getTime() - startMonday.getTime()) / dayMs + 1);
+    const widthDays = endDays - startDays;
+    const left = (startDays / 7) * CELL_W;
+    const width = Math.max(8, (widthDays / 7) * CELL_W - 2);
+    return { left, width };
+  }
+
+  const todayOffset = ((today.getTime() - startMonday.getTime()) / 86400000 / 7) * CELL_W;
+
+  return (
+    <div className="overflow-x-auto rounded-md border bg-white">
+      {/* Header — week dates */}
+      <div className="flex sticky top-0 border-b bg-slate-50 text-[10px] font-medium text-muted-foreground">
+        <div className="shrink-0 border-r px-2 py-1.5" style={{ width: 90 }}>
+          Plot
+        </div>
+        <div className="relative flex-1" style={{ minWidth: WEEKS_TO_SHOW * CELL_W }}>
+          <div className="flex">
+            {weekCols.map((d, i) => (
+              <div
+                key={i}
+                className="shrink-0 border-r text-center py-1.5 last:border-r-0"
+                style={{ width: CELL_W }}
+              >
+                {format(d, "dd/MM")}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Rows */}
+      <div className="divide-y">
+        {plotRows.map(({ plot, jobs: plotJobs }) => (
+          <div key={plot.id} className="flex items-stretch">
+            <div
+              className="shrink-0 border-r px-2 py-2 text-[11px] font-medium"
+              style={{ width: 90 }}
+            >
+              <Link
+                href={`/sites/${siteId}/plots/${plot.id}`}
+                className="text-blue-600 hover:underline"
+              >
+                {plotLabel(plot)}
+              </Link>
+            </div>
+            <div
+              className="relative flex-1"
+              style={{ minWidth: WEEKS_TO_SHOW * CELL_W, height: 28 }}
+            >
+              {/* Today indicator */}
+              {todayOffset >= 0 && todayOffset <= WEEKS_TO_SHOW * CELL_W && (
+                <div
+                  className="absolute top-0 bottom-0 w-px bg-red-400 z-10"
+                  style={{ left: todayOffset }}
+                  title="Today"
+                />
+              )}
+              {/* Job bars */}
+              {plotJobs.map((job) => {
+                const { left, width } = barRect(job);
+                return (
+                  <Link
+                    key={job.id}
+                    href={`/jobs/${job.id}`}
+                    className={cn(
+                      "absolute top-1 bottom-1 flex items-center rounded px-1.5 text-[10px] font-medium truncate transition-all hover:brightness-95",
+                      job.live
+                        ? "bg-emerald-200 text-emerald-900 hover:bg-emerald-300"
+                        : "bg-blue-100 text-blue-800 hover:bg-blue-200"
+                    )}
+                    style={{ left, width }}
+                    title={`${job.name} · ${fmtDate(job.startDate)} – ${fmtDate(job.endDate)}`}
+                  >
+                    <span className="truncate">{job.name}</span>
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="flex items-center gap-3 border-t bg-slate-50 px-2 py-1 text-[10px] text-muted-foreground">
+        <span className="flex items-center gap-1">
+          <span className="size-2.5 rounded bg-emerald-200" /> Live
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="size-2.5 rounded bg-blue-100" /> Upcoming
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="block h-3 w-px bg-red-400" /> Today
+        </span>
+      </div>
+    </div>
+  );
+}
+
 const PRIORITY_COLORS: Record<string, string> = {
   CRITICAL: "bg-red-100 text-red-700",
   HIGH: "bg-orange-100 text-orange-700",
@@ -465,6 +639,46 @@ function ContractorCard({
       </div>
 
       <div className="divide-y">
+        {/* Mini Programme — rows=plots, cols=weeks. Keith's Apr 2026 idea.
+            Open by default because it's the quickest one-glance view of
+            where the contractor's workload sits over the next 12 weeks. */}
+        {(contractor.liveJobs.length > 0 || contractor.nextJobs.length > 0) && (
+          <details className="group" open>
+            <summary className="flex cursor-pointer items-center gap-2 px-4 py-3 sm:px-5 [&::-webkit-details-marker]:hidden">
+              <Briefcase className="size-4 text-blue-600" />
+              <span className="text-xs font-semibold uppercase tracking-wider text-blue-700">
+                Mini Programme
+              </span>
+              <ChevronRight className="ml-auto size-3.5 text-muted-foreground transition-transform group-open:rotate-90" />
+            </summary>
+            <div className="px-4 pb-3 sm:px-5">
+              <MiniGantt
+                siteId={siteId}
+                jobs={[
+                  ...contractor.liveJobs.map((j) => ({
+                    id: j.id,
+                    name: j.name,
+                    status: j.status,
+                    startDate: j.startDate,
+                    endDate: j.endDate,
+                    plot: j.plot,
+                    live: true,
+                  })),
+                  ...contractor.nextJobs.map((j) => ({
+                    id: j.id,
+                    name: j.name,
+                    status: j.status,
+                    startDate: j.startDate,
+                    endDate: j.endDate,
+                    plot: j.plot,
+                    live: false,
+                  })),
+                ]}
+              />
+            </div>
+          </details>
+        )}
+
         {/* Live Jobs */}
         <details className="group">
           <summary className="flex cursor-pointer items-center gap-2 px-4 py-3 sm:px-5 [&::-webkit-details-marker]:hidden">
