@@ -1171,13 +1171,28 @@ export function TemplateEditor({
                       </div>
 
                       <div className="flex shrink-0 items-center gap-1">
+                        {/* Add Sub-Job — converts this flat job into a stage
+                            with a single child. Sits alongside the split
+                            button (which is for defining multiple sub-jobs
+                            at once). Keith's feedback: the split icon alone
+                            wasn't obvious as an "add sub-job" affordance. */}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openAddSubJob(job);
+                          }}
+                          className="rounded p-1.5 text-muted-foreground hover:bg-emerald-50 hover:text-emerald-700"
+                          title="Add a sub-job"
+                        >
+                          <Plus className="size-3.5" />
+                        </button>
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
                             openSplitDialog(job);
                           }}
                           className="rounded p-1.5 text-muted-foreground hover:bg-blue-50 hover:text-blue-600"
-                          title="Split into sub-jobs"
+                          title="Split into multiple sub-jobs at once"
                         >
                           <GitBranch className="size-3.5" />
                         </button>
@@ -1974,7 +1989,17 @@ export function TemplateEditor({
                 <Label>Contractor</Label>
                 <Select value={subJobContractorId} onValueChange={(v) => setSubJobContractorId(v ?? "")}>
                   <SelectTrigger className="w-full">
-                    <SelectValue placeholder="No contractor assigned" />
+                    {/* Explicit label resolution — some Base UI builds fall
+                        back to the raw value (ID) when SelectValue is empty.
+                        Keith flagged this as "showing IDs not names". */}
+                    <SelectValue placeholder="No contractor assigned">
+                      {subJobContractorId && subJobContractorId !== "__none__"
+                        ? (() => {
+                            const c = contractors.find((c) => c.id === subJobContractorId);
+                            return c ? (c.company ? `${c.company} (${c.name})` : c.name) : "Loading...";
+                          })()
+                        : subJobContractorId === "__none__" ? "No contractor" : undefined}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="__none__">No contractor</SelectItem>
@@ -2097,7 +2122,14 @@ export function TemplateEditor({
                 <Label>Contractor</Label>
                 <Select value={jobContractorId} onValueChange={(v) => setJobContractorId(v ?? "")}>
                   <SelectTrigger className="w-full">
-                    <SelectValue placeholder="No contractor assigned" />
+                    <SelectValue placeholder="No contractor assigned">
+                      {jobContractorId && jobContractorId !== "__none__"
+                        ? (() => {
+                            const c = contractors.find((c) => c.id === jobContractorId);
+                            return c ? (c.company ? `${c.company} (${c.name})` : c.name) : "Loading...";
+                          })()
+                        : jobContractorId === "__none__" ? "No contractor" : undefined}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="__none__">No contractor</SelectItem>

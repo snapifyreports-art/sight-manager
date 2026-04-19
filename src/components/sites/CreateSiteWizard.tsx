@@ -605,7 +605,11 @@ export function CreateSiteWizard({
                 <Label>Site Manager</Label>
                 <Select value={siteManagerId || "none"} onValueChange={(v) => setSiteManagerId(!v || v === "none" ? "" : v)}>
                   <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Unassigned" />
+                    <SelectValue placeholder="Unassigned">
+                      {siteManagerId && siteManagerId !== "none"
+                        ? users.find((u) => u.id === siteManagerId)?.name ?? "Loading..."
+                        : undefined}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">Unassigned</SelectItem>

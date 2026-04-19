@@ -688,7 +688,14 @@ function JobForm({
             }}
           >
             <SelectTrigger className="w-full">
-              <SelectValue placeholder="Unassigned" />
+              {/* Explicit label resolution — Base UI SelectValue doesn't
+                  always show the SelectItem's display text when value is
+                  an ID. Keith flagged "IDs shown not names" app-wide. */}
+              <SelectValue placeholder="Unassigned">
+                {form.assignedToId && form.assignedToId !== "unassigned"
+                  ? users.find((u) => u.id === form.assignedToId)?.name ?? "Loading..."
+                  : undefined}
+              </SelectValue>
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="unassigned">Unassigned</SelectItem>
