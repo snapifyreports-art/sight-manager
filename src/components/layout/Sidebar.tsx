@@ -59,6 +59,7 @@ const SITE_TAB_GROUPS = [
     tabs: [
       { label: "Heatmap",        tab: "heatmap" },
       { label: "Weekly Report",  tab: "weekly-report" },
+      { label: "Day Sheets",     tab: "day-sheets" },
       { label: "Budget",         tab: "budget" },
       { label: "Cash Flow",      tab: "cash-flow" },
       { label: "Delays",         tab: "delays" },
