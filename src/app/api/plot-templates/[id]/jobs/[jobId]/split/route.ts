@@ -18,8 +18,13 @@ export async function POST(
 
   const { id, jobId } = await params;
   const body = await request.json();
-  const { subJobs } = body as {
+  const { subJobs, orderTarget } = body as {
     subJobs: Array<{ name: string; code: string; duration: number }>;
+    // "keep" — leave on parent stage (default)
+    // "first" — move to first newly-created sub-job
+    // "index:N" — move to the Nth sub-job (0-based)
+    // undefined — treated as "keep"
+    orderTarget?: "keep" | "first" | `index:${number}`;
   };
 
   if (!subJobs || !Array.isArray(subJobs) || subJobs.length === 0) {
@@ -73,9 +78,11 @@ export async function POST(
         },
       });
 
-      // Create sub-jobs
+      // Create sub-jobs and capture their IDs so we can route orders to
+      // the requested target.
+      const createdSubJobs: Array<{ id: string; sortOrder: number }> = [];
       for (const sj of subJobsWithWeeks) {
-        await tx.templateJob.create({
+        const created = await tx.templateJob.create({
           data: {
             templateId: id,
             parentId: jobId,
@@ -87,6 +94,27 @@ export async function POST(
             durationWeeks: sj.duration,
           },
         });
+        createdSubJobs.push({ id: created.id, sortOrder: sj.sortOrder });
+      }
+
+      // Handle existing orders on the parent. Keith's rule (Q5 Apr 2026):
+      // ask the user where they go — keep on stage (default), or move to
+      // a specific sub-job. Orders never become orphaned; they land
+      // SOMEWHERE sensible.
+      if (orderTarget && orderTarget !== "keep") {
+        let targetSubJobId: string | null = null;
+        if (orderTarget === "first") {
+          targetSubJobId = createdSubJobs[0]?.id ?? null;
+        } else if (orderTarget.startsWith("index:")) {
+          const idx = parseInt(orderTarget.slice("index:".length), 10);
+          targetSubJobId = createdSubJobs[idx]?.id ?? null;
+        }
+        if (targetSubJobId) {
+          await tx.templateOrder.updateMany({
+            where: { templateJobId: jobId },
+            data: { templateJobId: targetSubJobId },
+          });
+        }
       }
 
       // Return updated template

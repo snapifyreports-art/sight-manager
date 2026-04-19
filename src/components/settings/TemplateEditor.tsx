@@ -174,6 +174,13 @@ export function TemplateEditor({
 
   // Split flat job into sub-jobs
   const [splitDialogOpen, setSplitDialogOpen] = useState(false);
+  // Q5 Apr 2026: when splitting a flat job that has orders, ask where
+  // those orders should go. "keep" leaves them on the new parent stage
+  // (default, no disruption). "index:N" moves them to the Nth new sub-job.
+  const [splitOrderTarget, setSplitOrderTarget] = useState<string>("keep");
+  // Count of orders that currently live on the job being split — used
+  // to decide whether the "orders-go-where" picker is worth showing.
+  const [splitOrderCount, setSplitOrderCount] = useState(0);
   const [splitJobId, setSplitJobId] = useState<string | null>(null);
   const [splitJobName, setSplitJobName] = useState("");
   const [splitSubJobs, setSplitSubJobs] = useState<
@@ -237,6 +244,11 @@ export function TemplateEditor({
   function openSplitDialog(job: TemplateJobData) {
     setSplitJobId(job.id);
     setSplitJobName(job.name);
+    // Reset order-routing to default ("keep") and remember how many
+    // orders exist so the picker only appears when there's something
+    // to route.
+    setSplitOrderTarget("keep");
+    setSplitOrderCount(job.orders?.length ?? 0);
 
     // Check if job matches a library stage by name or code
     const libraryMatch = UK_HOUSEBUILDING_STAGES.find(
@@ -281,6 +293,7 @@ export function TemplateEditor({
                 sj.name.trim().substring(0, 3).toUpperCase(),
               duration: sj.duration || 1,
             })),
+            orderTarget: splitOrderCount > 0 ? splitOrderTarget : undefined,
           }),
         }
       );
@@ -2682,6 +2695,50 @@ export function TemplateEditor({
               <Plus className="size-3" />
               Add Sub-Job
             </Button>
+
+            {/* Orders placement picker — only shown when the job being
+                split has existing orders. Keith's rule (Q5 Apr 2026):
+                orders never become orphaned. Default keeps them on the
+                new parent stage; user can redirect to a specific sub-job. */}
+            {splitOrderCount > 0 && (
+              <div className="space-y-2 rounded-md border border-amber-200 bg-amber-50/50 p-3">
+                <Label className="text-xs font-medium">
+                  This job has {splitOrderCount} order{splitOrderCount !== 1 ? "s" : ""}. Where should {splitOrderCount === 1 ? "it" : "they"} go?
+                </Label>
+                <div className="space-y-1.5">
+                  <label className="flex items-start gap-2 text-xs cursor-pointer">
+                    <input
+                      type="radio"
+                      name="split-order-target"
+                      value="keep"
+                      checked={splitOrderTarget === "keep"}
+                      onChange={(e) => setSplitOrderTarget(e.target.value)}
+                      className="mt-0.5"
+                    />
+                    <span>
+                      <span className="font-medium">Keep on the stage</span>
+                      <span className="block text-muted-foreground text-[11px]">Orders belong to the stage as a whole (e.g. &quot;bricks for the whole stage&quot;).</span>
+                    </span>
+                  </label>
+                  {splitSubJobs.map((sj, i) => (
+                    <label key={i} className="flex items-start gap-2 text-xs cursor-pointer">
+                      <input
+                        type="radio"
+                        name="split-order-target"
+                        value={`index:${i}`}
+                        checked={splitOrderTarget === `index:${i}`}
+                        onChange={(e) => setSplitOrderTarget(e.target.value)}
+                        className="mt-0.5"
+                        disabled={!sj.name.trim()}
+                      />
+                      <span>
+                        <span className="font-medium">Move to: {sj.name.trim() || <em className="text-muted-foreground">unnamed sub-job</em>}</span>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           <DialogFooter>
