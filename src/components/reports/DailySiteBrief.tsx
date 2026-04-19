@@ -1335,18 +1335,32 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
         </div>
       )}
 
-      {/* Summary stats — grouped by section */}
+      {/* Summary stats — grouped by section.
+          Keith Apr 2026: "this needs to hold ALL information this is core
+          issue as the daily brief is so important". Changed semantics:
+          pills are now always rendered, 0-values show dimmed. This keeps
+          the full picture on-screen at a glance so empty counts aren't
+          invisible (they used to be hidden, leaving orphan row labels). */}
       {(() => {
         const pill = (label: string, value: number | string, anchor: string | null, activeColor: string) => {
           const num = typeof value === "number" ? value : parseInt(value) || 0;
-          if (num === 0 && label !== "Progress") return null;
+          const isZero = num === 0 && label !== "Progress";
           const inner = (
-            <div className="flex items-center gap-1.5 rounded border border-slate-200 bg-white px-2 py-1 text-xs shadow-sm">
-              <span className={cn("text-sm font-bold leading-none", activeColor)}>{value}</span>
-              <span className="leading-tight text-foreground">{label}</span>
+            <div className={cn(
+              "flex items-center gap-1.5 rounded border px-2 py-1 text-xs shadow-sm",
+              isZero ? "border-slate-100 bg-slate-50/50" : "border-slate-200 bg-white"
+            )}>
+              <span className={cn(
+                "text-sm font-bold leading-none",
+                isZero ? "text-slate-300" : activeColor
+              )}>{value}</span>
+              <span className={cn(
+                "leading-tight",
+                isZero ? "text-muted-foreground" : "text-foreground"
+              )}>{label}</span>
             </div>
           );
-          return anchor ? (
+          return anchor && !isZero ? (
             <a key={label} href={`#${anchor}`} className="no-underline hover:opacity-80 transition-opacity">{inner}</a>
           ) : (
             <div key={label}>{inner}</div>
@@ -1365,32 +1379,41 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
               </div>
             </div>
 
-            {/* Jobs */}
+            {/* Jobs — Active + Delayed + Tomorrow added so every job
+                state with data loaded has a pill. */}
             <div className="flex flex-wrap items-center gap-1.5">
               <span className="mr-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Jobs</span>
               {pill("Starting", data.jobsStartingToday.filter((j) => j.status === "NOT_STARTED").length, "section-starting-today", "text-green-600")}
               {pill("Finishing", data.jobsDueToday.length, "section-starting-today", "text-emerald-600")}
+              {pill("Active", s.activeJobCount, "section-active", "text-blue-600")}
               {pill("Late", s.lateStartCount, "section-late-starts", "text-red-600")}
               {pill("Blocked", s.blockedCount, "section-blocked", "text-slate-500")}
               {pill("Overdue", s.overdueJobCount, "section-overdue", "text-red-600")}
+              {pill("Delayed", data.delayedJobs?.length || 0, "section-delayed", "text-amber-600")}
+              {pill("Tomorrow", data.jobsStartingTomorrow?.length || 0, "section-tomorrow", "text-slate-600")}
               {pill("Sign Off", data.awaitingSignOff?.length || 0, "section-awaiting-signoff", "text-amber-600")}
             </div>
 
-            {/* Materials */}
+            {/* Materials — full pipeline: send-now, scheduled-to-send,
+                arriving-today, awaiting, overdue. Was missing Overdue
+                entirely + Scheduled (future orders waiting to go out). */}
             <div className="flex flex-wrap items-center gap-1.5">
               <span className="mr-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Materials</span>
-              {pill("Deliveries", data.deliveriesToday.length, "section-deliveries", "text-blue-600")}
-              {pill("To Order", data.ordersToPlace.length, "section-orders", "text-violet-600")}
-              {pill("Awaiting", data.upcomingDeliveries?.length || 0, "section-upcoming-deliveries", "text-blue-600")}
+              {pill("To Send", data.ordersToPlace.length, "section-orders", "text-violet-600")}
+              {pill("Scheduled", data.upcomingOrders?.length || 0, "section-upcoming-orders", "text-violet-500")}
+              {pill("Due Today", data.deliveriesToday.length, "section-deliveries", "text-blue-600")}
+              {pill("Upcoming", data.upcomingDeliveries?.length || 0, "section-upcoming-deliveries", "text-blue-500")}
+              {pill("Overdue", data.overdueDeliveries?.length || 0, "section-overdue-deliveries", "text-red-600")}
             </div>
 
-            {/* Issues */}
+            {/* Issues — Rained Off added when weather impact today. */}
             <div className="flex flex-wrap items-center gap-1.5">
               <span className="mr-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Issues</span>
               {pill("Snags", s.openSnagCount, "section-snags", "text-orange-600")}
               {pill("Attention", data.needsAttention?.length || 0, "section-needs-attention", "text-amber-600")}
               {pill("Contractors", (data.inactivePlots ?? []).filter((p) => p.inactivityType === "awaiting_contractor").length, "section-contractor-confirmations", "text-amber-600")}
               {pill("Inactive", data.inactivePlots?.length || 0, "section-inactive-plots", "text-orange-600")}
+              {pill("Rained Off", data.isRainedOff ? 1 : 0, null, "text-blue-600")}
             </div>
           </div>
         );
