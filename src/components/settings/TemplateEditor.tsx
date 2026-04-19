@@ -1595,6 +1595,18 @@ export function TemplateEditor({
                                     </span>
                                   </div>
                                   <div className="flex shrink-0 items-center gap-0.5">
+                                    {/* Add nested sub-job — enables 3+ level
+                                        hierarchies (Q7 Apr 2026: "so deep
+                                        it's unreal"). The model already
+                                        supports recursive parentId; this
+                                        surfaces it in the UI. */}
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); openAddSubJob(child); }}
+                                      className="rounded p-1 text-muted-foreground hover:bg-emerald-50 hover:text-emerald-700"
+                                      title="Add a nested sub-job under this one"
+                                    >
+                                      <Plus className="size-3" />
+                                    </button>
                                     <button
                                       onClick={(e) => { e.stopPropagation(); openEditJob(child); }}
                                       className="rounded p-1 text-muted-foreground hover:bg-slate-100 hover:text-slate-700"
