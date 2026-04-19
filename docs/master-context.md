@@ -320,10 +320,16 @@ Every action flows through one of these — never duplicate. Before adding any b
 ### Repo state
 
 - Latest commits (most recent first):
+  - `754076a` RAMS + perf audit (27-41% speedup via indexes) + photo test plan
+  - `cd874ad` Contractor Comms tabs (Day Sheets + Messages + Snags rename) + report exports + handover update
+  - `2c88bfa` walkthrough UX sharpening (6 items: hide Pull Forward when greyed, contractor→comms link, orders popup, quick-note presets, etc.)
+  - `e7d0cd8` clearing batch 2: unlimited hierarchy render + report drill-throughs
+  - `f2349e4` clearing batch: HelpTips + Walkthrough unification + 2 audits resolved
+  - `cd35409` spot-check sweep: fix handover inaccuracies + clear Priority 1 items
+  - `fbdee5f` docs: triple-check handover — add Quick Start + Workflow + complete Deferred table
   - `4284152` HelpTip on ContactsClient Add/Edit dialog
   - `d7611f8` HelpTip on OrderDetailSheet explaining order lifecycle
   - `513d1f9` HelpTip on JobDetailClient sign-off dialog
-  - `1a195ab` docs: refresh master-context with Apr 2026 session work
   - `e206661` HelpTip on SnagDialog explaining snag lifecycle
   - `d8ab7ec` Migrate PlotTodoList.tsx to useOrderEmail hook
   - `39fc911` Gantt partial-week fills for day-granularity jobs
@@ -331,12 +337,6 @@ Every action flows through one of these — never duplicate. Before adding any b
   - `80751a3` Migrate DailySiteBrief.tsx to useOrderEmail hook
   - `9311ca1` Contractor Comms mini-Gantt (Keith's idea)
   - `94576ea` Option A: email templates unified on rich `buildOrderEmailBody`
-  - `2bc1427` Add Sub-Job on child rows (3+ level hierarchy)
-  - `559ac1e` Days override on Edit-Job dialog
-  - `5e7ecf2` Drag-to-reorder stages (HTML5 native)
-  - `1f897b9` JobWeekPanel completion toast + PostCompletion explicit dates
-  - `8a90d02` Split dialog order placement
-  - `13c2dd1` Schema live: `sourceTemplateId` + `durationDays`
   - (Many more — see `git log --oneline`)
 
 - **No in-flight background agents.** The email-migrations + HelpTip rollout agent completed its run (last commit `4284152`). If a new session sees a similar "bg agent running" note, verify via `git log` before assuming anything is still live.
@@ -357,15 +357,15 @@ These are the items that came up during the Apr 2026 session and were explicitly
 |---|---|---|---|---|
 | 1 | ~~**Unlimited hierarchy depth — render**~~ | **RESOLVED Apr 2026** — extracted the inline child-row JSX into a recursive `renderSubJobNode(child, depth)` helper inside `TemplateEditor.tsx`. Each node checks `child.children?.length` and recursively renders grandchildren with left-padding + border rule. Level labels ("level 3", "level 4") appear for depth > 1 so the tree is visually obvious. | — | — |
 | 2 | ~~**Analytics reconciliation audit**~~ | **RESOLVED Apr 2026** — `scripts/audit-analytics-vs-brief.ts` compared Brief-style where-counts vs Analytics-style findMany+filter counts for 6 metrics across 12 sites. All 72 comparisons matched exactly. Any user-visible drift is UI-layer rendering, not query-layer. Script kept for re-run on demand. | — | — |
-| 3 | **Batch 2 photo-coupled flows (6 surfaces)** | The Batch 2 migration agent correctly skipped any flow that combined a status mutation with a photo upload (SnagDialog close-with-photo, DailyBrief snag photo close, SnagList `handleConfirmClose`, ContractorComms snag close, Walkthrough snag close, SnagSignOffCard). These need live photo-upload testing in a browser to verify the migration doesn't break the file upload. | Open each of the 6 surfaces in Claude_in_Chrome with a real image ready. For each: trigger the flow, confirm the photo uploads to Supabase storage, confirm the status flip happens atomically. Then migrate them to `useSnagAction` + `InlinePhotoCapture` one at a time with browser-verify between each. | M |
+| 3 | **Batch 2 photo-coupled flows (6 surfaces)** | Awaiting Keith's hands-on test. Test plan shipped as `docs/batch2-photo-flows-test-plan.md` — step-by-step instructions, DevTools observation points, red flags. Once Keith runs through it with real photo files and flags any issues, the migration to unified `useSnagAction` + `InlinePhotoCapture` can proceed with confidence. | Keith runs the test plan → Claude migrates based on findings. | M |
 | 4 | ~~**Contractor Comms — day-sheets tab**~~ | **RESOLVED Apr 2026** — Keith answered Q1=c (inline view + printable PDF). Shipped as new "Day Sheets (this week)" collapsible section on every ContractorCard: Mon-Sun rows with jobs active each day, weekend marked, "Print / PDF" button uses `window.print()` with existing `print:*` classes. | — | — |
 | 5 | ~~**Contractor Comms — messages log tab**~~ | **RESOLVED Apr 2026** — Keith answered Q2=b (reuse EventLog / existing logging). Shipped as "Messages Log" section with localStorage-backed rolling 20-entry timeline. Currently logs the Send-Link action; future contractor-comms actions should append to the same log via the `useLastShareSent.markSent` hook or similar. | — | — |
-| 6 | **Contractor Comms — RAMS / method-statement upload per contractor** | **Still deferred** — session had context budget for Day Sheets + Messages Log but RAMS needs (a) schema migration adding `contactId?: String` to `Document` model with relation, (b) upload endpoint scoped to contactId, (c) per-contractor drawings-style list UI. That's a full schema push + new endpoint + new UI panel. Too much for current session. | Schema: add `contactId String?` to `Document` model in `prisma/schema.prisma` with `@@index([contactId])` and `Contact documents: Document[]` back-relation. Push via session pooler. Endpoint: new `POST /api/contacts/[id]/documents` accepting multipart upload, pattern-match from `src/app/api/plots/[id]/documents/route.ts`. UI: add new collapsible "RAMS & Method Statements" section in `ContractorCard` (`src/components/reports/ContractorComms.tsx`), pattern-match the existing "Drawings" section. | M |
+| 6 | ~~**Contractor Comms — RAMS / method-statement upload per contractor**~~ | **RESOLVED Apr 2026** — shipped end-to-end. Schema: added `contactId` + back-relation to SiteDocument, made siteId optional so the same model handles site-scoped AND contractor-scoped docs. Endpoint: `POST/GET /api/contacts/[id]/documents` (any file type, any size per Keith Q3=b). UI: new collapsible "RAMS / Method Statements" section per ContractorCard with lazy-load + upload + delete. Visible on contractor share link via a new "Your Documents" section on `/contractor/:token`. | — | — |
 | 7 | ~~**Contractor Comms — snags-assigned-to-me tab**~~ | **RESOLVED Apr 2026** — on inspection, the existing "Open Snags" section on each ContractorCard already filters snags by contractor (the API's `openSnags` field is per-contractor). Renamed to "Snags Assigned ({count})" for clarity. No new code needed. | — | — |
 | 8 | ~~**Critical Path Report legend**~~ | **RESOLVED Apr 2026** — top-level legend added above the plot cards: 6 entries (Critical path, In progress, Completed, On hold, Not started, Weather-affected). Replaces the old per-plot-card inline legend that was hidden until expansion. | — | — |
 | 9 | ~~**Export buttons standardisation**~~ | **RESOLVED Apr 2026** — Keith answered Q4=c (PDF + Excel on every report). Shipped shared `ReportExportButtons` component in `src/components/shared/ReportExportButtons.tsx` — uses `window.print()` for PDF (respects `print:*` classes) and SheetJS `xlsx` for Excel. Wired into BudgetReport, DelayReport, CashFlowReport, CriticalPath, WeeklySiteReport. Other surfaces (Analytics, Daily Brief) can drop in the same component when reviewed. | — | — |
 | 10 | ~~**Report → Job drill-through navigation**~~ | **RESOLVED Apr 2026** — CriticalPath, BudgetReport, DelayReport all now wrap job rows in `<Link href="/jobs/:id">`. WeeklySiteReport already had it. CashFlowReport is intentionally not drilled-through (aggregated by month, no per-job target). | — | — |
-| 11 | **Performance audit** | No profiler run has been done since the N+1 fixes landed. Earlier batching helped but we don't have hard numbers. | Start with `curl -w "%{time_total}"` over the 10 slowest-feeling endpoints (Programme load, Daily Brief, Analytics). Then profile with `next build --profile` + Chrome DevTools Performance panel. Identify top 3 slow endpoints, fix one at a time. | M |
+| 11 | ~~**Performance audit**~~ | **RESOLVED Apr 2026** — `scripts/audit-performance.ts` times 12 representative Prisma queries against the prod DB, 3x median. Root cause found: schema had ONLY ONE `@@index` declaration, so every FK lookup (`plot.siteId`, `job.plotId`, `order.jobId`, etc.) was a sequential scan. Added 19 hot-path indexes and pushed via session pooler. Result: all 12 queries now under 500ms median. Biggest wins — Programme 728→476ms (-35%), Daily Brief upcoming 559→332ms (-41%), Analytics 608→374ms (-38%), Site Orders 541→346ms (-36%), Tasks 605→443ms (-27%). Script + `scripts/list-db-indexes.ts` kept for periodic re-run as DB grows. | — | — |
 | 12 | ~~**Walkthrough Modal → BottomSheetDialog unification**~~ | **RESOLVED Apr 2026** — Keith answered: Walkthrough UX is intentionally different ("app within an app") and the visual shell should stay. What mattered was whether it's *linked up* to the rest of the data/flow. Audit + fix: migrated the last two drift points (handleSignOff and handleAddNote's direct `/api/jobs/:id/actions` POSTs) to `runSimpleAction` on `useJobAction`. Walkthrough now uses the same hooks as Daily Brief / Tasks / JobsClient for every mutation. Modal visual shell kept as-is. | — | — |
 | 13 | ~~**Supplier vs Contractor data-model dedup check**~~ | **RESOLVED Apr 2026** — read-only audit (`scripts/audit-contact-dedup.ts`) ran against prod: 26 contacts, zero duplicate emails, zero duplicate phones, zero cross-type name collisions. DB `type: ContactType` enum enforces one-of at insert. No action needed. Keep the script for periodic re-checks. | — | — |
 | 14 | ~~**Template orders anchor UI polish**~~ | **RESOLVED Apr 2026** — `<HelpTip>` added to the Timing row in the Add/Edit Order dialog (`TemplateEditor.tsx`). Explains Order-vs-Arrive semantics, anchor-relative scheduling, and which job to pick for which material. | — | — |
@@ -395,41 +395,27 @@ These look like "deferred migrations" but are actually deliberate design decisio
 
 Nothing is in flight. All background agents have completed their runs as of commit `4284152`. Pick from this backlog based on what Keith prioritises next, but default order reflects value × readiness.
 
-### Priority 1 — low effort, high value (grab these first)
+### Backlog snapshot after Apr 2026 clearing session
 
-1. **Critical Path Report legend** (row 8 in deferred table) — pure UI add, probably <30 min.
-2. **Template orders anchor HelpTip** (row 14) — adds clarity to an existing feature. Use the already-built HelpTip component.
-3. **HelpTip rollout to remaining dialogs** (row 16) — same pattern, mechanical.
-4. ~~`bulk-status` endpoint decision~~ — resolved; it IS used. (See row 15.)
+**All Priority 1 and Priority 2 items resolved.** Sixteen of seventeen deferred-table items now show as RESOLVED. The only remaining open item is:
 
-### Priority 2 — Keith explicitly named
+- **Row 3 — Batch 2 photo-coupled flows** (6 surfaces). Unblocked only by Keith running the test plan at `docs/batch2-photo-flows-test-plan.md`. Once findings are captured, migration to unified hooks proceeds. No code work until then.
 
-5. **Analytics reconciliation audit** (row 2) — read-only, high-trust value.
-6. **Contractor Comms expansion** (rows 4–7) — he was excited about this direction. Day-sheets tab is the most obviously useful next step.
-7. **Report → Job drill-through** (row 10) — fixes a real "dead end" UX pain.
-8. **Export buttons standardisation** (row 9) — consistency work.
+### What Keith could pick up next (new work, not in deferred table)
 
-### Priority 3 — quality/robustness
+These aren't deferred items — they're opportunities surfaced during the April session that might be worth raising:
 
-9. **Batch 2 photo-coupled flows** (row 3) — needs live browser + photo files.
-10. **Unlimited hierarchy depth render** (row 1) — not urgent until a 3+ level template exists.
-11. **Performance audit** (row 11) — good to do before the user base grows.
-12. **Supplier vs Contractor dedup check** (row 13) — read-only audit first.
-13. **Walkthrough Modal unification** (row 12) — low-urgency, ask-first.
+- **Performance follow-up**: the audit script identified 9 queries in the 200-500ms range (the "watch" zone). All under target, but if the DB grows 5-10x, the Programme (476ms) and Tasks (443ms) routes will breach. Could proactively split the deeply-nested includes via the fetch-then-stitch pattern.
+- **Contractor Comms follow-ups**: now that the Day Sheets / RAMS / Messages Log sections exist, Keith may want per-contractor analytics (on-time %, overdue count, typical lead time), or a bulk send-link-to-all-contractors button.
+- **Hierarchy depth — UX polish**: creation + rendering both support unlimited depth now, but there's no "collapse all sub-jobs by default" affordance. Deep templates could become overwhelming without one.
+- **Walkthrough — more Keith ideas**: the April UX sharpening batch (hide-pull-forward-when-greyed etc.) resolved his named items, but plot-card-level info density could still drop further (e.g. relative "2 days ahead/behind" for every sub-job).
 
-### Not on the backlog — product direction questions to raise proactively
+### Working method on new work
 
-When Keith next opens a session, offer:
-
-- "Want me to start the Analytics reconciliation audit today?" (since it's read-only, safe, and addresses a concern he's voiced)
-- "Day sheets next on Contractor Comms — want me to draft the format options first?"
-- "Is there anything from last session's simulation that still bugs you?" (pointer to `feedback_note_improvements.md`)
-
-### Working method on backlog items
-
+- **Offer before acting.** Ask Keith multiple-choice for any non-obvious product decision.
 - **One item at a time.** Each to completion with browser-test + commit + push + live-verify, then next.
-- **Update this section** as items complete (move from backlog → repo state commit list).
-- **If an item grows beyond expectations**, stop and ask Keith multiple-choice before continuing.
+- **If an item grows beyond expectations**, stop and ask multiple-choice before continuing.
+- **Keep section 6 commits list + section 7 deferred table in sync** as you go — Keith will check them next session.
 
 ---
 
