@@ -50,6 +50,7 @@ export async function GET(
         status: true,
         plotId: true,
         sortOrder: true,
+        parentId: true,
         plot: { select: { siteId: true } },
       },
     });
@@ -69,15 +70,23 @@ export async function GET(
     }
 
     // ── Predecessor ────────────────────────────────────────────────────
-    // The previous job on the same plot by sortOrder. If it's completed,
-    // use actualEndDate (falls back to endDate). If it's still running or
-    // hasn't started, use planned endDate — we can't start this job
-    // before the work it depends on is due to finish.
-    const predecessor = await prisma.job.findFirst({
+    // The previous job on the same plot by sortOrder. Skip:
+    //   - This job's OWN parent (the stage aggregate that contains this job —
+    //     its end date represents the whole stage, so counting it as a
+    //     predecessor creates a false block).
+    //   - Sibling parents whose end dates span their whole group rather
+    //     than sit before THIS job. When siblings exist, prefer the last
+    //     leaf job that ended before this one's sortOrder.
+    //   - ON_HOLD jobs (dormant).
+    //
+    // If we find a parent with children overlapping this job's window,
+    // skip it and take the prior leaf instead.
+    const siblings = await prisma.job.findMany({
       where: {
         plotId: job.plotId,
         sortOrder: { lt: job.sortOrder },
         status: { not: "ON_HOLD" },
+        id: { not: job.parentId ?? undefined },
       },
       orderBy: { sortOrder: "desc" },
       select: {
@@ -87,8 +96,26 @@ export async function GET(
         endDate: true,
         actualEndDate: true,
         signedOffAt: true,
+        parentId: true,
       },
     });
+
+    // Pick the first one that isn't a parent of THIS job's sibling leafs.
+    // Leaf = no child rows. We want a predecessor that finished BEFORE this
+    // job was meant to start, not an aggregate that spans past it.
+    const predecessor = siblings.find((p) => {
+      // If the candidate itself has no parentId and is not THIS job's parent,
+      // it's either a leaf or a peer parent. We accept peer parents only if
+      // their endDate is strictly before this job's startDate (i.e. they
+      // don't overlap). Otherwise skip.
+      if (!job.startDate) return true;
+      if (p.endDate && p.endDate >= job.startDate) {
+        // Overlaps or extends past this job — probably an aggregate parent,
+        // not a true predecessor. Keep scanning earlier siblings.
+        return false;
+      }
+      return true;
+    }) ?? null;
 
     const predecessorEndDate = predecessor
       ? predecessor.status === "COMPLETED" || predecessor.signedOffAt
