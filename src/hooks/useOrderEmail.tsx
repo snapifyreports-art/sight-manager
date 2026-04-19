@@ -299,15 +299,25 @@ export function useOrderEmail(onSent?: (mode: Mode) => void): Result {
   const title = draft?.mode === "chase" ? "Chase Overdue Delivery" : "Send Order to Supplier";
 
   const dialogs = (
+    // Keith Apr 2026: email dialog was too narrow on desktop AND the
+    // body overflowed off-screen on long templates. Fixes:
+    //   - Wider on desktop: sm:max-w-2xl lg:max-w-3xl (was sm:max-w-lg)
+    //   - Constrain overall height to viewport (max-h-[90vh]) so the
+    //     footer stays visible.
+    //   - Make the middle section (To/Subject/Message) scrollable with
+    //     overflow-y-auto + flex layout so the textarea gets the slack
+    //     instead of pushing the footer off.
+    //   - Textarea grows with min-h / max-h so long bodies are readable
+    //     without forcing the dialog off-screen.
     <Dialog open={!!draft} onOpenChange={(o) => { if (!o) close(); }}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="flex max-h-[90vh] flex-col sm:max-w-2xl lg:max-w-3xl">
         <HelpTip title="About supplier email" anchor="below-left">
           <p><strong>How it works:</strong> clicking Send opens your default mail client with the message pre-filled. You review / edit there and hit Send in your mail client.</p>
           <p><strong>Why not send directly?</strong> Your mail client keeps the sent record in your usual Sent folder and uses your signature. Easier to audit later.</p>
           <p><strong>Order status:</strong> when sending a new order, the orders get marked <strong>ORDERED</strong> automatically so they clear from the Tasks list. Chasing doesn&apos;t change status.</p>
           <p><strong>Template:</strong> edit the subject or body before sending if you want — the template is a starting point, not a lock.</p>
         </HelpTip>
-        <DialogHeader>
+        <DialogHeader className="shrink-0">
           <DialogTitle className="flex items-center gap-2">
             <Mail className="size-4" />
             {title}
@@ -316,7 +326,7 @@ export function useOrderEmail(onSent?: (mode: Mode) => void): Result {
             Opens in your mail client for final review before sending.
           </DialogDescription>
         </DialogHeader>
-        <div className="space-y-3">
+        <div className="flex-1 min-h-0 space-y-3 overflow-y-auto pr-1">
           <div>
             <Label className="text-xs">To</Label>
             <Input
@@ -340,12 +350,12 @@ export function useOrderEmail(onSent?: (mode: Mode) => void): Result {
             <Textarea
               value={draft?.body ?? ""}
               onChange={(e) => setDraft((d) => (d ? { ...d, body: e.target.value } : d))}
-              rows={10}
-              className="mt-1 font-mono text-xs"
+              rows={14}
+              className="mt-1 min-h-[200px] resize-y font-mono text-xs"
             />
           </div>
         </div>
-        <DialogFooter>
+        <DialogFooter className="shrink-0">
           <DialogClose render={<Button variant="outline" size="sm" />}>Cancel</DialogClose>
           <Button size="sm" onClick={sendNow} disabled={sending || !draft?.recipient.trim()}>
             {sending ? <Loader2 className="size-3.5 animate-spin mr-1" /> : <Send className="size-3.5 mr-1" />}
