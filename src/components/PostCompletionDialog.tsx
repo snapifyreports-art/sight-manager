@@ -20,6 +20,7 @@ import {
   Truck,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useOrderStatus } from "@/hooks/useOrderStatus";
 
 interface NextJobOrder {
   id: string;
@@ -73,6 +74,7 @@ export function PostCompletionDialog({
 
   // Order resolution state
   const [resolvedOrders, setResolvedOrders] = useState<Set<string>>(new Set());
+  const { setOrderStatus } = useOrderStatus({ silent: true });
   // Contractor confirmation state
   const [contractorConfirmed, setContractorConfirmed] = useState(false);
   const [contractorEmailed, setContractorEmailed] = useState(false);
@@ -134,12 +136,8 @@ export function PostCompletionDialog({
   }
 
   function markOrderDelivered(orderId: string) {
-    // Auto-mark as delivered via API
-    fetch(`/api/orders/${orderId}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status: "DELIVERED" }),
-    });
+    // Auto-mark as delivered via shared hook (silent — dialog tracks its own state)
+    void setOrderStatus(orderId, "DELIVERED");
     setResolvedOrders((prev) => new Set(prev).add(orderId));
   }
 

@@ -20,6 +20,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useToast, fetchErrorMessage } from "@/components/ui/toast";
+import { useOrderStatus } from "@/hooks/useOrderStatus";
 
 interface ManualByMaterial {
   name: string;
@@ -148,21 +149,13 @@ export function SiteQuantsClient({
     } catch {}
   }
 
-  // One-off order status transitions
-  const [pendingStatusIds, setPendingStatusIds] = useState<Set<string>>(new Set());
+  // One-off order status transitions — delegated to shared hook
+  const { setOrderStatus, isPending: isOrderStatusPending } = useOrderStatus({
+    onChange: () => refresh(),
+  });
   async function updateOneOffStatus(orderId: string, status: "ORDERED" | "DELIVERED" | "CANCELLED") {
     if (status === "CANCELLED" && !confirm("Cancel this one-off order? Line-item costs will no longer count toward totals.")) return;
-    setPendingStatusIds((prev) => new Set(prev).add(orderId));
-    try {
-      await fetch(`/api/orders/${orderId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status }),
-      });
-      await refresh();
-    } finally {
-      setPendingStatusIds((prev) => { const n = new Set(prev); n.delete(orderId); return n; });
-    }
+    await setOrderStatus(orderId, status);
   }
   async function deletePerPlot(m: ManualPerPlot) {
     if (!confirm(`Delete "${m.name}" from ${m.plotNumber ? `Plot ${m.plotNumber}` : m.plotName}?`)) return;
@@ -411,7 +404,7 @@ export function SiteQuantsClient({
           ) : (
             <div className="divide-y">
               {data.oneOff.map((o) => {
-                const isPending = pendingStatusIds.has(o.id);
+                const isPending = isOrderStatusPending(o.id);
                 const statusColour =
                   o.status === "DELIVERED" ? "bg-green-100 text-green-700"
                   : o.status === "ORDERED" ? "bg-blue-100 text-blue-700"

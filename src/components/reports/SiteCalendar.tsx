@@ -38,6 +38,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { useJobAction } from "@/hooks/useJobAction";
+import { useOrderStatus, type OrderStatus } from "@/hooks/useOrderStatus";
 
 interface SiteCalendarProps {
   siteId: string;
@@ -236,19 +237,12 @@ export function SiteCalendar({ siteId }: SiteCalendarProps) {
     }
   }, [refreshData, triggerJobAction, data]);
 
-  const handleOrderAction = useCallback(async (orderId: string, status: string) => {
-    setPendingActions((prev) => new Set(prev).add(orderId));
-    try {
-      const res = await fetch(`/api/orders/${orderId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status }),
-      });
-      if (res.ok) refreshData();
-    } finally {
-      setPendingActions((prev) => { const n = new Set(prev); n.delete(orderId); return n; });
-    }
-  }, [refreshData]);
+  const { setOrderStatus, isPending: isOrderPending } = useOrderStatus({
+    onChange: () => refreshData(),
+  });
+  const handleOrderAction = useCallback((orderId: string, status: OrderStatus) => {
+    void setOrderStatus(orderId, status);
+  }, [setOrderStatus]);
 
   if (loading && !data) {
     return (
@@ -473,7 +467,7 @@ export function SiteCalendar({ siteId }: SiteCalendarProps) {
                               </span>
                             </div>
                             <div className="ml-2 flex shrink-0 items-center gap-1">
-                              {pendingActions.has(o.id) ? (
+                              {isOrderPending(o.id) ? (
                                 <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
                               ) : (
                                 <>
@@ -561,7 +555,7 @@ export function SiteCalendar({ siteId }: SiteCalendarProps) {
                               </span>
                             </div>
                             <div className="ml-2 shrink-0">
-                              {pendingActions.has(d.id) ? (
+                              {isOrderPending(d.id) ? (
                                 <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
                               ) : (
                                 <Button
