@@ -882,12 +882,12 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
               <span className="text-xs font-medium">Start Date</span>
             </div>
             {editingStartDate ? (
-              <div className="mt-1 flex items-center gap-2">
+              <div className="mt-1 flex flex-wrap items-center gap-2">
                 <input
                   type="date"
                   value={editDateValue}
                   onChange={(e) => setEditDateValue(e.target.value)}
-                  className="rounded border px-2 py-1 text-sm"
+                  className="min-w-0 flex-1 rounded border px-2 py-1 text-sm sm:flex-none"
                 />
                 <Button size="sm" variant="ghost" className="h-7 px-2" onClick={handleStartDateSave} disabled={savingDate}>
                   {savingDate ? <Loader2 className="size-3 animate-spin" /> : <Check className="size-3" />}
@@ -915,12 +915,12 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
               <span className="text-xs font-medium">End Date</span>
             </div>
             {editingEndDate ? (
-              <div className="mt-1 flex items-center gap-2">
+              <div className="mt-1 flex flex-wrap items-center gap-2">
                 <input
                   type="date"
                   value={editDateValue}
                   onChange={(e) => setEditDateValue(e.target.value)}
-                  className="rounded border px-2 py-1 text-sm"
+                  className="min-w-0 flex-1 rounded border px-2 py-1 text-sm sm:flex-none"
                 />
                 <Button size="sm" variant="ghost" className="h-7 px-2" onClick={handleEndDateChange} disabled={savingDate}>
                   {savingDate ? <Loader2 className="size-3 animate-spin" /> : <Check className="size-3" />}

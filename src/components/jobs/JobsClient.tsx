@@ -404,6 +404,11 @@ export function JobsClient({ initialJobs, workflows, users }: JobsClientProps) {
           </Button>
         </div>
       ) : (
+        // Horizontal scroll wrapper — the 9-column table can't fit on a 375px
+        // phone otherwise. Overflow-x-auto preserves all columns for desktop
+        // and lets the user pan horizontally on mobile (better than truncation
+        // for a data-heavy admin view).
+        <div className="overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow>
@@ -577,6 +582,7 @@ export function JobsClient({ initialJobs, workflows, users }: JobsClientProps) {
             ))}
           </TableBody>
         </Table>
+        </div>
       )}
 
       {/* Create Dialog */}
@@ -691,7 +697,7 @@ function JobForm({
           rows={2}
         />
       </div>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div className="grid gap-2">
           <Label>Workflow *</Label>
           <Select
@@ -744,7 +750,7 @@ function JobForm({
           </Select>
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div className="grid gap-2">
           <Label htmlFor="job-site">Site Name</Label>
           <Input
@@ -782,7 +788,7 @@ function JobForm({
           placeholder="Full address"
         />
       </div>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div className="grid gap-2">
           <Label htmlFor="job-start">Start Date</Label>
           <Input

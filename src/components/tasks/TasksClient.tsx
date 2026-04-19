@@ -495,13 +495,13 @@ export function TasksClient() {
                 return (
                   <div
                     key={order.id}
-                    className="flex w-full items-center gap-2 rounded-lg border border-red-200 bg-red-50 p-3"
+                    className="flex w-full flex-wrap items-center gap-2 rounded-lg border border-red-200 bg-red-50 p-3"
                   >
                     <div
                       className="min-w-0 flex-1 cursor-pointer"
                       onClick={() => router.push(`/jobs/${order.job.id}`)}
                     >
-                      <p className="text-sm font-medium text-red-800">
+                      <p className="truncate text-sm font-medium text-red-800">
                         <Link
                           href={`/suppliers/${order.supplier.id}`}
                           onClick={(e) => e.stopPropagation()}
@@ -510,7 +510,7 @@ export function TasksClient() {
                           {order.supplier.name}
                         </Link>
                       </p>
-                      <p className="text-xs text-red-600">
+                      <p className="truncate text-xs text-red-600">
                         {order.job.plot.site.name} &bull; {order.job.plot.name} &bull; {order.job.name}
                       </p>
                       {order.itemsDescription && (
@@ -581,7 +581,7 @@ export function TasksClient() {
                 return (
                   <div
                     key={job.id}
-                    className="flex w-full items-center gap-2 rounded-lg border border-red-200 bg-red-50 p-3"
+                    className="flex w-full flex-wrap items-center gap-2 rounded-lg border border-red-200 bg-red-50 p-3"
                   >
                     <div
                       className="min-w-0 flex-1 cursor-pointer"
@@ -946,7 +946,7 @@ export function TasksClient() {
                 return (
                   <div
                     key={order.id}
-                    className="flex w-full items-center gap-2 rounded-lg border bg-purple-50/50 border-purple-200/50 p-3"
+                    className="flex w-full flex-wrap items-center gap-2 rounded-lg border bg-purple-50/50 border-purple-200/50 p-3"
                   >
                     <div
                       className="min-w-0 flex-1 cursor-pointer"

@@ -979,7 +979,7 @@ export default function SiteWalkthrough({
                                     e.stopPropagation();
                                     setSnagStatus(snag.id, "IN_PROGRESS");
                                   }}
-                                  className="flex items-center gap-1 rounded-md border border-blue-200 bg-blue-50 px-2 py-0.5 text-[10px] font-medium text-blue-700 hover:bg-blue-100 disabled:opacity-50"
+                                  className="flex min-h-[32px] items-center gap-1 rounded-md border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-100 disabled:opacity-50"
                                 >
                                   {pending ? <Loader2 className="size-2.5 animate-spin" /> : null}
                                   In progress
@@ -992,7 +992,7 @@ export default function SiteWalkthrough({
                                     e.stopPropagation();
                                     setSnagStatus(snag.id, "RESOLVED");
                                   }}
-                                  className="flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700 hover:bg-emerald-100 disabled:opacity-50"
+                                  className="flex min-h-[32px] items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-100 disabled:opacity-50"
                                 >
                                   {pending ? <Loader2 className="size-2.5 animate-spin" /> : null}
                                   Resolved
@@ -1565,7 +1565,7 @@ export default function SiteWalkthrough({
                                 e.stopPropagation();
                                 setOrderStatus(o.id, "ORDERED");
                               }}
-                              className="flex items-center gap-1 rounded-md border border-blue-200 bg-blue-50 px-2 py-0.5 text-[10px] font-medium text-blue-700 hover:bg-blue-100 disabled:opacity-50"
+                              className="flex min-h-[32px] items-center gap-1 rounded-md border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-100 disabled:opacity-50"
                             >
                               {pending ? <Loader2 className="size-2.5 animate-spin" /> : null}
                               Mark Ordered
@@ -1579,7 +1579,7 @@ export default function SiteWalkthrough({
                               e.stopPropagation();
                               setOrderStatus(o.id, "DELIVERED");
                             }}
-                            className="flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700 hover:bg-emerald-100 disabled:opacity-50"
+                            className="flex min-h-[32px] items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700 hover:bg-emerald-100 disabled:opacity-50"
                           >
                             {pending ? <Loader2 className="size-2.5 animate-spin" /> : null}
                             Mark Delivered

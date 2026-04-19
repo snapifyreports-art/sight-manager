@@ -495,7 +495,7 @@ function JobRow({
           <>{isOverdue ? "Due" : "Due"} {format(new Date(job.endDate), "d MMM")}</>
         )}
         {job.assignedTo && <span> &middot; {job.assignedTo.name}</span>}
-        {contractor && <span className="hidden sm:inline"> &middot; {contractor.company || contractor.name}</span>}
+        {contractor && <span> &middot; {contractor.company || contractor.name}</span>}
       </p>
 
       {/* Readiness checklist */}
