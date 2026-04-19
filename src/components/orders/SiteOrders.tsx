@@ -20,7 +20,6 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
-import { Badge } from "@/components/ui/badge";
 import {
   Card,
   CardContent,
@@ -44,6 +43,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useToast, fetchErrorMessage } from "@/components/ui/toast";
+import { OrderStatusBadge } from "@/components/shared/StatusBadge";
+import { useOrderStatus, type OrderStatus } from "@/hooks/useOrderStatus";
 
 // ---------- Types ----------
 
@@ -111,25 +112,6 @@ interface SiteOrdersProps {
 
 // ---------- Constants ----------
 
-const STATUS_CONFIG: Record<string, { label: string; className: string }> = {
-  PENDING: {
-    label: "Pending",
-    className: "bg-yellow-500/15 text-yellow-700 dark:text-yellow-400",
-  },
-  ORDERED: {
-    label: "Ordered",
-    className: "bg-blue-500/15 text-blue-700 dark:text-blue-400",
-  },
-  DELIVERED: {
-    label: "Delivered",
-    className: "bg-green-500/15 text-green-700 dark:text-green-400",
-  },
-  CANCELLED: {
-    label: "Cancelled",
-    className: "bg-red-500/15 text-red-700 dark:text-red-400",
-  },
-};
-
 const FILTER_TABS = [
   { value: "all", label: "All" },
   { value: "PENDING", label: "Pending" },
@@ -183,7 +165,21 @@ export function SiteOrders({ siteId }: SiteOrdersProps) {
   const [siteInfo, setSiteInfo] = useState<{ name: string; address: string | null; postcode: string | null } | null>(null);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("all");
-  const [pendingActions, setPendingActions] = useState<Set<string>>(new Set());
+
+  const { setManyOrderStatus, isPending: isStatusPending } = useOrderStatus({
+    onChange: (orderId, newStatus) => {
+      const now = new Date().toISOString();
+      setOrders((prev) =>
+        prev.map((o) => {
+          if (o.id !== orderId) return o;
+          const next = { ...o, status: newStatus };
+          if (newStatus === "ORDERED") next.dateOfOrder = now;
+          if (newStatus === "DELIVERED") next.deliveredDate = now;
+          return next;
+        })
+      );
+    },
+  });
 
   // Wizard state
   const [wizardOpen, setWizardOpen] = useState(false);
@@ -201,62 +197,8 @@ export function SiteOrders({ siteId }: SiteOrdersProps) {
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState("");
 
-  const handleOrderStatus = async (orderId: string, status: string) => {
-    setPendingActions((prev) => new Set(prev).add(orderId));
-    try {
-      const res = await fetch(`/api/orders/${orderId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status }),
-      });
-      if (res.ok) {
-        setOrders((prev) => prev.map((o) => o.id === orderId ? { ...o, status } : o));
-      }
-    } finally {
-      setPendingActions((prev) => { const n = new Set(prev); n.delete(orderId); return n; });
-    }
-  };
-
-  const handleGroupStatus = async (orderIds: string[], status: string) => {
-    orderIds.forEach((id) => setPendingActions((prev) => new Set(prev).add(id)));
-    try {
-      const results = await Promise.all(
-        orderIds.map((id) =>
-          fetch(`/api/orders/${id}`, {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ status }),
-          })
-            .then((r) => ({ id, ok: r.ok, res: r }))
-            .catch(() => ({ id, ok: false, res: null as Response | null }))
-        )
-      );
-      const succeededIds = results.filter((r) => r.ok).map((r) => r.id);
-      const failed = results.filter((r) => !r.ok);
-      // Only mark successful orders as updated (revert unchanged for failures)
-      if (succeededIds.length > 0) {
-        setOrders((prev) =>
-          prev.map((o) => (succeededIds.includes(o.id) ? { ...o, status } : o))
-        );
-      }
-      if (failed.length > 0) {
-        const first = failed[0];
-        const firstMsg = first.res
-          ? await fetchErrorMessage(first.res, "Failed to update")
-          : "Network error";
-        toast.error(
-          failed.length === 1
-            ? firstMsg
-            : `${failed.length} orders failed to update (${firstMsg})`
-        );
-      }
-    } finally {
-      setPendingActions((prev) => {
-        const n = new Set(prev);
-        orderIds.forEach((id) => n.delete(id));
-        return n;
-      });
-    }
+  const handleGroupStatus = (orderIds: string[], status: OrderStatus) => {
+    void setManyOrderStatus(orderIds, status);
   };
 
   const refreshOrders = () => {
@@ -653,9 +595,8 @@ export function SiteOrders({ siteId }: SiteOrdersProps) {
               return group.find((o) => o.status === "ORDERED")?.status
                 ?? group[0].status;
             })();
-            const config = STATUS_CONFIG[dominantStatus] ?? STATUS_CONFIG.PENDING;
             const groupIds = group.map((o) => o.id);
-            const anyPending = groupIds.some((id) => pendingActions.has(id));
+            const anyPending = groupIds.some((id) => isStatusPending(id));
             // Items: use first order's items (same across all plots in group)
             const items = order.orderItems;
             const itemTotal = items.reduce((s, i) => s + i.quantity * i.unitCost, 0);
@@ -689,8 +630,8 @@ export function SiteOrders({ siteId }: SiteOrdersProps) {
                         {order.supplier.name}
                       </Link>
                     </CardTitle>
-                    <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${config.className}`}>
-                      {config.label}
+                    <span className="shrink-0">
+                      <OrderStatusBadge status={dominantStatus} />
                     </span>
                   </div>
                   <p className="text-xs font-medium text-foreground">{order.job.name}</p>
