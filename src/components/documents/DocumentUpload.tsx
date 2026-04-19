@@ -119,7 +119,7 @@ export function DocumentUpload({
             Drop files here or click to browse
           </span>
           <span className="text-[10px] text-muted-foreground/70">
-            PDF, Word, Excel, Images — max 10MB
+            PDF, Word, Excel, Images — max 50MB
           </span>
         </button>
       )}
