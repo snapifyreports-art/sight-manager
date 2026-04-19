@@ -4,6 +4,52 @@
 
 ---
 
+## 0. QUICK START — IF YOU ARE A NEW CLAUDE, READ THIS FIRST
+
+You are taking over Sight Manager from a previous session. Keith (the user) is a UK construction business owner, non-technical but domain-expert. He has stakes — "people's families depend on this working". He expects defensive engineering, not MVP shortcuts.
+
+### First 5 minutes of a new session
+
+1. **Read this whole file top-to-bottom** (~650 lines). Don't skim. Section 4 (system logic) and section 11 (workflow) are critical.
+2. **Read `~/.claude/projects/.../memory/feedback_core_flows.md`** — the "one source of truth" principle + Keith's interaction rules. This is the meta-rule that governs every change.
+3. **Check `git log --oneline -20`** — most-recent commits tell you where we were last. The session log (if pinned) is in `~/.claude/projects/C--Users-keith-OneDrive-Desktop-sight-manager/`.
+4. **Run smoke checks silently**: `npx tsc --noEmit` and `npx tsx scripts/test-cascade.ts` (should be 59/59). Never announce running these — Keith's rule: silent verification.
+5. **Read the Open Backlog (section 8)** and the Deferred Items Table (section 7) — these list everything that's parked and why. Pick up from there unless Keith directs otherwise.
+
+### Cardinal rules (violate at your peril)
+
+- **One source of truth per concept.** Before adding any button/dialog/mutation, find the existing hook (section 6 "Canonical hooks"). If the central hook is missing a feature, add it to the hook — never a bespoke copy.
+- **Ask multiple-choice questions** when the answer isn't obvious. Label the recommended option ⭐. Keith replies "a, a, a, a" — make that format work.
+- **Browser-test every UI change** before pushing. Use `mcp__Claude_in_Chrome` to open `http://localhost:3002` or `https://sight-manager.vercel.app/`, click through, confirm behaviour.
+- **Deploy then verify.** `git push` to `main` triggers Vercel auto-deploy. Check the live site in Keith's browser afterward. Don't announce you're "verifying" — just do it.
+- **Never narrate routine checks.** Silent verification: run the test, report only if it failed. Keith hates "I'm going to now run the tests…" preambles.
+- **Check ALL consuming views** when changing any data model or status rule. Sections 4.2/4.3 list the consuming views for order and job status — miss one and the regression is silent.
+- **Prisma pool: ≤3 concurrent `Promise.all`** over DB queries. Supabase pool is tight.
+- **Cascade tests are the safety net** — run `npx tsx scripts/test-cascade.ts` after any cascade-adjacent change. 59/59 must stay green.
+
+### The workflow in one paragraph
+
+Keith describes a pain point or an idea. You ask multiple-choice questions to pin down exact behaviour. You check if a hook already handles it (collapse, don't duplicate). You implement, typecheck silently, cascade-test if relevant, commit with a descriptive message, push, and browser-verify on the live URL. If you're about to defer anything, you say so explicitly and get Keith's sign-off — silent deferrals are forbidden. See section 11 for full detail.
+
+### Where things live
+
+- **Code:** `C:\Users\keith\OneDrive\Desktop\sight-manager`
+- **Docs:** `docs/` — this file, `cascade-spec.md`, user-facing `.docx`/`.pptx`
+- **Memory (persists across sessions):** `C:\Users\keith\.claude\projects\C--Users-keith-OneDrive-Desktop-sight-manager\memory\*.md` — read these alongside this file
+- **Live app:** https://sight-manager.vercel.app/
+- **Dev server:** `npm run dev` → `http://localhost:3002`
+
+### What you absolutely must NOT do
+
+- Duplicate a flow that already has a hook.
+- Amend commits — always create new ones (Keith wants a clear audit trail).
+- Silently defer work. Every deferral goes in section 7 with Why + Next Action.
+- Touch `src/lib/cascade.ts` without running `scripts/test-cascade.ts` after.
+- Deploy without browser-verifying the change.
+- Invent dates or stats. If you don't know, check the code or DB.
+
+---
+
 ## 1. APP OVERVIEW
 
 **Sight Manager** is a construction site management web app. Site managers use it to plan plot builds, track job lifecycles (start/complete/sign-off), manage material orders, record delays/snags, and communicate with contractors. A programme-wide cascade engine shifts dependent dates when anything changes.
@@ -252,12 +298,12 @@ Every action flows through one of these — never duplicate. Before adding any b
 - Weather auto-suggestion: `useDelayJob` fetches rain/temperature logs for the job's period on open and pre-selects the reason.
 - Four surfaces (DailyBrief, Walkthrough, TasksClient, JobWeekPanel, JobsClient) use the same dialog — two input modes (days or date), reason picker, live preview of new dates.
 
-### Order email (Apr 2026 unified)
+### Order email (Apr 2026 unified — migration complete)
 
 - **One template** now — `buildOrderEmailBody` in `src/lib/order-email.ts` (rich: account number, site address, items table with unit costs, subtotals, per-plot totals).
 - `useOrderEmail` refactored to call `buildOrderEmailBody` internally. Subject: `Material Order — {job} — {site}{(N plots)}`. Chase mode adds "URGENT" banner and overdue-days context.
 - `/api/tasks` response enriched with `supplier.accountNumber`, `site.address/postcode`, `plot.plotNumber`, `orderItems.unitCost` so TasksClient passes rich data.
-- Callers still using `buildOrderMailto` directly (DailyBrief, OrderDetailSheet, PlotTodoList) — migration to the hook is a pure code-aesthetics refactor; templates are already byte-identical. (Background agent is finishing these migrations as of latest commits.)
+- **All callers migrated** — DailyBrief, OrderDetailSheet, PlotTodoList, TasksClient all use `useOrderEmail` hook. No remaining direct `buildOrderMailto` call sites in UI. The function still exists in `src/lib/order-email.ts` as the low-level builder the hook delegates to.
 
 ### Interaction rules banked to memory
 
@@ -273,66 +319,116 @@ Every action flows through one of these — never duplicate. Before adding any b
 ### Repo state
 
 - Latest commits (most recent first):
+  - `4284152` HelpTip on ContactsClient Add/Edit dialog
+  - `d7611f8` HelpTip on OrderDetailSheet explaining order lifecycle
+  - `513d1f9` HelpTip on JobDetailClient sign-off dialog
+  - `1a195ab` docs: refresh master-context with Apr 2026 session work
+  - `e206661` HelpTip on SnagDialog explaining snag lifecycle
+  - `d8ab7ec` Migrate PlotTodoList.tsx to useOrderEmail hook
   - `39fc911` Gantt partial-week fills for day-granularity jobs
-  - `9311ca1` Contractor Comms mini-Gantt
+  - `c7aeadc` Migrate OrderDetailSheet.tsx to useOrderEmail hook
+  - `80751a3` Migrate DailySiteBrief.tsx to useOrderEmail hook
+  - `9311ca1` Contractor Comms mini-Gantt (Keith's idea)
   - `94576ea` Option A: email templates unified on rich `buildOrderEmailBody`
   - `2bc1427` Add Sub-Job on child rows (3+ level hierarchy)
   - `559ac1e` Days override on Edit-Job dialog
-  - `5e7ecf2` Drag-to-reorder stages
+  - `5e7ecf2` Drag-to-reorder stages (HTML5 native)
   - `1f897b9` JobWeekPanel completion toast + PostCompletion explicit dates
   - `8a90d02` Split dialog order placement
   - `13c2dd1` Schema live: `sourceTemplateId` + `durationDays`
-  - `62af91a` Normalise parent TemplateJob dates on every read
-  - `72f62bc` Reject empty template apply + ID→name sweep
   - (Many more — see `git log --oneline`)
+
+- **No in-flight background agents.** The email-migrations + HelpTip rollout agent completed its run (last commit `4284152`). If a new session sees a similar "bg agent running" note, verify via `git log` before assuming anything is still live.
 
 ---
 
-## 7. KNOWN ISSUES / BUGS (Apr 2026 snapshot)
+## 7. KNOWN ISSUES / BUGS / DEFERRED WORK (Apr 2026 snapshot)
 
 ### Active
 
-None blocking. 59/59 cascade tests pass, TypeScript clean. Schema in sync with Supabase.
+None blocking. 59/59 cascade tests pass, TypeScript clean. Schema in sync with Supabase. Live site deploys cleanly on `main`.
 
-### Deferred / cosmetic / non-blocking
+### Deferred Items — Full Table (every parked item, why it's parked, next concrete action)
 
-1. **Templates with >2 hierarchy levels render only 2 levels deep** — creation now supports N levels (recursive `parentId`, Add Sub-Job on child rows); rendering in TemplateEditor is still a 2-deep nested map. Not urgent — no 3+ level templates exist yet.
-2. **JobDetailClient admin date-edit** — kept as a bespoke flow (separate from `useDelayJob`) because it's an admin correction without a reason. Legitimate difference, not a regression.
-3. **PostCompletionDialog body** still has its own decision buttons (not migrated to `usePullForwardDecision`) — the orders + contractor guidance steps add value the shared dialog doesn't have. Decision kept explicit.
-4. **DailyBrief / OrderDetailSheet / PlotTodoList** still call `buildOrderMailto` directly. Migration to `useOrderEmail` hook is in progress (bg agent). Templates are already identical — pure code-aesthetics refactor.
-5. **Batch 2 agent skipped 6 photo-coupled flows** (SnagDialog close-with-photo, DailyBrief snag photo close, SnagList handleConfirmClose, ContractorComms/Walkthrough/SnagSignOffCard photo uploads). Needs a focused session with live photo-upload testing.
-6. **`bulk-status` orphan endpoint** — `/api/orders/bulk-status` still has no user-facing caller (TasksClient's mark-sent POSTs to it via handleMarkGroupSent but the migration note said to keep this path since it's atomic-different-semantics). Either adopt or delete.
+These are the items that came up during the Apr 2026 session and were explicitly deferred rather than done. Order roughly by how much value vs. effort each represents.
 
-### Watch-outs
+| # | Item | Why deferred | Next concrete action | Scope |
+|---|---|---|---|---|
+| 1 | **Unlimited hierarchy depth — render** | Creation supports N levels (recursive `parentId`, Add Sub-Job button on child rows). Render in `TemplateEditor.tsx` is still a 2-deep nested map. No 3+ level template exists in prod yet, so there's no live regression. | Convert the nested `{template.jobs.map(stage => stage.children?.map(child => …))}` block in `TemplateEditor.tsx` into a recursive `<JobRow depth={n} />` that renders children of children. Left-pad each depth by ~12px. | S (~60 LOC) |
+| 2 | **Analytics reconciliation audit** | Read-only audit not started. Keith has mentioned Daily Brief counts sometimes appear out of sync with Analytics dashboard. Risk: low (no mutation); value: high (data trust). | Start by running the dev site with a known small dataset. Record the Daily Brief totals for today's actions. Cross-check each against the Analytics dashboard. Note any discrepancies with component + API route origin. Report findings before touching code. | M |
+| 3 | **Batch 2 photo-coupled flows (6 surfaces)** | The Batch 2 migration agent correctly skipped any flow that combined a status mutation with a photo upload (SnagDialog close-with-photo, DailyBrief snag photo close, SnagList `handleConfirmClose`, ContractorComms snag close, Walkthrough snag close, SnagSignOffCard). These need live photo-upload testing in a browser to verify the migration doesn't break the file upload. | Open each of the 6 surfaces in Claude_in_Chrome with a real image ready. For each: trigger the flow, confirm the photo uploads to Supabase storage, confirm the status flip happens atomically. Then migrate them to `useSnagAction` + `InlinePhotoCapture` one at a time with browser-verify between each. | M |
+| 4 | **Contractor Comms — day-sheets tab** | Mini-Gantt shipped. Keith suggested day-sheets and messages-log as natural companions. Not started; UX needs a quick design pass before code. | Ask Keith multiple-choice: "Per-contractor day sheet format: (a) one row per day this week with jobs listed inline, (b) printable PDF export, (c) both ⭐." Then implement. | M |
+| 5 | **Contractor Comms — messages log tab** | Same as above — Keith flagged it, not started. | Needs a new `ContractorMessage` model? Or just log email sends via existing `EventLog`? Ask multiple-choice before building. Favour reusing EventLog if possible. | M |
+| 6 | **Contractor Comms — RAMS / method-statement upload per contractor** | Same — Keith flagged it, not started. | Likely reuses `Document` model with a new `contactId` scoping field. Schema migration first, then upload UI in the contractor card. | M |
+| 7 | **Contractor Comms — snags-assigned-to-me tab** | Same. Currently snags show under the general Open Snags collapsible but aren't filtered by contractor's assignment. | Filter snags by `assigneeContactId === contractor.id`. Add a count badge to the tab. | S |
+| 8 | **Critical Path Report legend** | Keith flagged the Critical Path Report currently lacks a legend explaining the colour coding. | Add a `<Legend>` component at the top of `/app/critical-path` (check exact path) with coloured swatches + labels. | S |
+| 9 | **Export buttons standardisation** | Some reports have PDF export, some Excel, some missing entirely. Inconsistent across Budget / Cash Flow / Delay / Critical Path / Weekly / Analytics. | Audit each report's current export state first, then ask Keith multiple-choice for the target (PDF-only / Excel-only / both / depends-on-report ⭐). Use `exceljs` (already installed) + `pdf-lib` if choosing both. | M |
+| 10 | **Report → Job drill-through navigation** | Reports currently dead-end browsing. Keith wants clicking a row in e.g. Budget Report to navigate to the underlying plot/job detail. | Audit each report's row-level data. Add an `onClick` handler that navigates via `useRouter().push('/plots/:id')` or `/jobs/:id`. Consistent "view details" affordance on hover. | M |
+| 11 | **Performance audit** | No profiler run has been done since the N+1 fixes landed. Earlier batching helped but we don't have hard numbers. | Start with `curl -w "%{time_total}"` over the 10 slowest-feeling endpoints (Programme load, Daily Brief, Analytics). Then profile with `next build --profile` + Chrome DevTools Performance panel. Identify top 3 slow endpoints, fix one at a time. | M |
+| 12 | **Walkthrough Modal → BottomSheetDialog unification** | `SiteWalkthrough.tsx` still has a bespoke mobile-first Modal component. Decision pending: share it as a reusable `BottomSheetDialog` in `src/components/ui/` OR migrate it to the existing `Dialog` with a `variant="bottom-sheet"` prop. | Ask Keith multiple-choice: (a) extract as its own shared BottomSheetDialog, (b) merge into existing Dialog with variant ⭐, (c) leave alone for now. | S-M |
+| 13 | **Supplier vs Contractor data-model dedup check** | Both are `Contact` rows with a `type` field (`SUPPLIER` / `CONTRACTOR`). Works fine but Keith flagged "is there a record where something can be both?" | Query `SELECT contactIds FROM contacts GROUP BY email HAVING COUNT(*) > 1` on the prod DB. Check if duplicates exist. Then either de-dupe via merge UI or enforce unique-email constraint. Read-only audit first. | S |
+| 14 | **Template orders anchor UI polish** | Anchor fields (`anchorWeek`, `anchorJobId`) work functionally in TemplateEditor but the UI is "power-user level" — hard to understand without domain knowledge. | Add `<HelpTip>` explaining what "anchor" means (e.g., "orders are scheduled relative to this point"). Then consider a visual affordance like "Orders will arrive 2 weeks before brickwork starts". | S |
+| 15 | **`/api/orders/bulk-status` orphan endpoint** | Endpoint exists but no user-facing caller definitively uses it. TasksClient's `handleMarkGroupSent` might POST to it — worth double-checking vs. per-order `PUT /api/orders/:id`. | Grep the codebase for `bulk-status` callers. If still zero, delete the endpoint. If TasksClient does use it and it's atomic-different-semantics, document that in a comment. | S |
+| 16 | **HelpTip rollout — remaining dialogs** | SnagDialog, JobDetailClient sign-off, OrderDetailSheet, ContactsClient done. Next candidates: AddPlotDialog, CreateSiteWizard steps, TemplateEditor's Split dialog, PostCompletionDialog. | Add `<HelpTip>` to each with a 1-2 sentence explanation of the dialog's purpose. Use the `anchor="below-right"` pattern. | S each |
+
+### Intentional Non-Migrations (keep these as-is unless Keith says otherwise)
+
+These look like "deferred migrations" but are actually deliberate design decisions — don't collapse them into the shared hooks just for consistency:
+
+1. **JobDetailClient admin date-edit** — bespoke flow separate from `useDelayJob` because it's an admin correction without a reason (reason is required on delay). Legitimate difference.
+2. **PostCompletionDialog's own decision buttons** — not migrated to `usePullForwardDecision` because the orders + contractor guidance steps add value the shared dialog doesn't have. Kept explicit.
+
+### Watch-outs (things that have bitten us)
 
 1. **Vercel bundle cache** — hard-refresh (Ctrl+Shift+R) after pushing if UI looks stale.
-2. **Prisma pool cap** — keep `Promise.all` over Prisma to ≤3 concurrent.
-3. **DB schema changes need `npm run db:push`** — Vercel's postinstall only runs `prisma generate`, not `migrate deploy`. Use the session-mode pooler URL for connectivity: `aws-1-eu-west-1.pooler.supabase.com:5432`.
+2. **Prisma pool cap** — keep `Promise.all` over Prisma to ≤3 concurrent on reads; writes can be higher.
+3. **DB schema changes need `npm run db:push`** — Vercel's postinstall only runs `prisma generate`, not `migrate deploy`. Use the session-mode pooler URL for connectivity: `aws-1-eu-west-1.pooler.supabase.com:5432` via `DIRECT_DATABASE_URL` override.
+4. **Don't push code that depends on new schema columns before the DB push succeeds** — we hit this once (cascade tests failed with "column does not exist"). Order: push schema first via pooler, verify with `psql`, THEN commit + push code.
+5. **`{ not: undefined }` in Prisma** — matches nothing instead of "everything". Always spread-conditional: `...(job.parentId ? { id: { not: job.parentId } } : {})`.
+6. **Dev-date mismatch between server and client** — client uses `getCurrentDateAtMidnight()`, server must use `getServerCurrentDate(req)`. Never `new Date()` in API routes that need to honour the dev cookie.
+7. **Agent commits bundled with mine** — if a background agent is running and I use `git add -A`, I may pick up its in-progress files. Prefer `git add <specific files>`.
 
 ---
 
-## 8. NEXT PRIORITIES (Apr 2026)
+## 8. OPEN BACKLOG (Apr 2026) — what to pick up next
 
-**In flight right now:**
+Nothing is in flight. All background agents have completed their runs as of commit `4284152`. Pick from this backlog based on what Keith prioritises next, but default order reflects value × readiness.
 
-- Background agent (agentId recorded in session log) migrating DailyBrief + OrderDetailSheet + PlotTodoList to `useOrderEmail` hook, plus HelpTip rollout to SnagDialog / JobDetailClient sign-off / OrderDetailSheet / ContactsClient. Commits landing autonomously.
+### Priority 1 — low effort, high value (grab these first)
 
-**Product priorities Keith named:**
+1. **Critical Path Report legend** (row 8 in deferred table) — pure UI add, probably <30 min.
+2. **Template orders anchor HelpTip** (row 14) — adds clarity to an existing feature. Use the already-built HelpTip component.
+3. **HelpTip rollout to remaining dialogs** (row 16) — same pattern, mechanical.
+4. **`bulk-status` endpoint decision** (row 15) — grep, then either delete or document. 10 min.
 
-1. **Contractor Comms expansion** — Mini Programme shipped. Next: day-sheets tab, messages log, RAMS/method-statements upload per contractor, snags-assigned tab separate from general snags.
-2. **Analytics reconciliation audit** — confirm Daily Brief counts match Analytics dashboard (read-only audit first, fix after).
-3. **Critical Path Report legend** — Keith flagged missing.
-4. **Export buttons standardisation** — some reports have PDF, some Excel, some missing.
-5. **Report → Job drill-through** — reports currently dead-end browsing.
-6. **Performance audit** — profile N+1 and slow endpoints. Earlier fixes (batched findMany + in-memory maps) helped but no profiler run has been done.
+### Priority 2 — Keith explicitly named
 
-**Rollout still to do:**
+5. **Analytics reconciliation audit** (row 2) — read-only, high-trust value.
+6. **Contractor Comms expansion** (rows 4–7) — he was excited about this direction. Day-sheets tab is the most obviously useful next step.
+7. **Report → Job drill-through** (row 10) — fixes a real "dead end" UX pain.
+8. **Export buttons standardisation** (row 9) — consistency work.
 
-- **HelpTip** to more dialogs (snag, order detail, contact edit, add plot, etc.) — partial via bg agent.
-- **Unified Modal vs Dialog** — Walkthrough still has bespoke mobile-first Modal; either share it as BottomSheetDialog or migrate to Dialog.
-- **Supplier vs Contractor data-model** — both are Contacts with a type. Verify no duplicate-record drift.
-- **Template orders anchor UI polish** — anchor fields work but UI is power-user-level.
-- **Unlimited hierarchy depth UI** — creation supports N, render is 2-deep. Recursion needed in TemplateEditor's children map.
+### Priority 3 — quality/robustness
+
+9. **Batch 2 photo-coupled flows** (row 3) — needs live browser + photo files.
+10. **Unlimited hierarchy depth render** (row 1) — not urgent until a 3+ level template exists.
+11. **Performance audit** (row 11) — good to do before the user base grows.
+12. **Supplier vs Contractor dedup check** (row 13) — read-only audit first.
+13. **Walkthrough Modal unification** (row 12) — low-urgency, ask-first.
+
+### Not on the backlog — product direction questions to raise proactively
+
+When Keith next opens a session, offer:
+
+- "Want me to start the Analytics reconciliation audit today?" (since it's read-only, safe, and addresses a concern he's voiced)
+- "Day sheets next on Contractor Comms — want me to draft the format options first?"
+- "Is there anything from last session's simulation that still bugs you?" (pointer to `feedback_note_improvements.md`)
+
+### Working method on backlog items
+
+- **One item at a time.** Each to completion with browser-test + commit + push + live-verify, then next.
+- **Update this section** as items complete (move from backlog → repo state commit list).
+- **If an item grows beyond expectations**, stop and ask Keith multiple-choice before continuing.
 
 ---
 
@@ -422,4 +518,126 @@ None blocking. 59/59 cascade tests pass, TypeScript clean. Schema in sync with S
 
 ---
 
+## 11. SESSION WORKFLOW & HOW KEITH OPERATES (READ ME)
+
+This is the part that makes previous Claude sessions work well vs. badly. Pattern-match on Keith's signals.
+
+### 11.1 How Keith opens a session
+
+Keith typically opens with a short, conversational message — no formal ticket. Examples:
+- "right lets crack on"
+- "okay so what else can we sort"
+- "i've been thinking about the contractor comms…"
+
+He won't restate context. He expects you to read this file + memory + `git log` and know where we are. If you're confused, **ask a multiple-choice question** rather than guess.
+
+### 11.2 How Keith gives direction
+
+- He uses **abbreviated English** with construction vernacular. "Crack on" = proceed. "Fire fire fire" = go. "As you were" = continue what you were doing.
+- He often replies to a numbered question list with "a, a, a, a" — you need to have numbered and lettered your options for this to work.
+- He **trusts you** to make judgement calls on implementation details. He reserves judgement for UX-visible decisions.
+- He gets frustrated by **silent deferrals**. Say if you're going to skip something, and why.
+- He gets frustrated by **long reasoning paragraphs** where a 4-option multiple-choice would do.
+- He expects **"no stone unturned"** robustness. Shortcuts now = career-ending bug later.
+
+### 11.3 The session rhythm
+
+1. **He opens with a pain or an idea.**
+2. **You clarify with multiple-choice questions** (if needed — not always).
+3. **You check for existing hooks/components** before writing new code.
+4. **You implement silently**, running `tsc` and cascade tests as you go.
+5. **You browser-test** via Claude_in_Chrome or Claude_Preview.
+6. **You commit and push** with a descriptive message.
+7. **You verify live on Vercel** (hard-refresh if the bundle looks stale).
+8. **You summarise to Keith** in 3-5 lines. Not an essay.
+
+### 11.4 Multiple-choice question format (critical)
+
+When asking Keith to decide something, format like this:
+
+> **Q: How should the delay reason picker handle weather auto-suggestion when the API is slow?**
+> a) Block the dialog until it resolves
+> b) Open dialog with placeholder, fill in when ready ⭐
+> c) Skip auto-suggestion entirely on slow responses
+> d) Show a spinner next to the field
+
+One ⭐ per question on your recommended default. Keith will reply "b" or "b, a, ⭐, d" across several questions.
+
+### 11.5 Browser testing — Claude_in_Chrome & Claude_Preview
+
+Two MCP tools are available:
+- **`mcp__Claude_in_Chrome__*`** — real Chrome browser, full interaction, for live-site verification.
+- **`mcp__Claude_Preview__*`** — sandbox preview, faster, good for local dev validation.
+
+**Rule:** every UI-visible change gets a browser smoke test before the summary goes back to Keith. The smoke test confirms: (a) the component renders without console errors, (b) the new interaction actually happens on click, (c) no layout regressions.
+
+### 11.6 Silent verification
+
+Keith banked the rule in `feedback_verification_silence.md`: never announce "I'm going to run the tests now" or "let me verify this". Just run the tool. Only speak if it fails or you discover something important.
+
+### 11.7 Deploy-and-test loop
+
+After push:
+- **Vercel auto-deploy** kicks off (check with `curl -sI https://sight-manager.vercel.app | grep -i x-vercel` if unsure).
+- **Ctrl+Shift+R** in browser to bust bundle cache if needed.
+- **Browser-test the exact flow** that just changed.
+- **Report result** in 1-2 lines back to Keith.
+
+### 11.8 Deferring — rules
+
+If you're going to defer something, **announce it**. Keith's direct words: "i want a log of everything youve deffered i dont know how many times i need to say it but i want it complete". Every deferral goes in section 7's table with:
+- Why deferred (genuine blocker / waiting on decision / out of scope now)
+- Next concrete action (so future-you knows exactly what to do)
+- Scope estimate (S / M / L)
+
+### 11.9 Parallel agent dispatch
+
+For large mechanical migrations (e.g. "migrate N call sites to the new hook"), you can spawn a background agent via the `Agent` tool with `run_in_background: true`. Rules:
+- **Only mechanical work.** Agents are bad at UX decisions.
+- **Prime the agent** with everything it needs — it won't see your conversation.
+- **Browser-test the agent's output** before trusting its "complete" claim — it may report success based on typecheck alone.
+- **One agent at a time** unless work is genuinely independent.
+
+### 11.10 Session ending — the handover checklist
+
+Before a session closes (or before context compacts), do ALL of these:
+
+1. **Git state clean** — `git status` shows nothing. No half-done changes left uncommitted.
+2. **Tests green** — `npx tsc --noEmit && npx tsx scripts/test-cascade.ts`.
+3. **Live site verified** — last change smoke-tested on Vercel.
+4. **This file updated** — `docs/master-context.md`. Specifically:
+   - Section 6's "Repo state / Latest commits" list refreshed with `git log --oneline -20`.
+   - Section 7's deferred table updated (add new deferrals, remove completed ones).
+   - Section 8's Open Backlog reordered if priorities shifted.
+   - Any new architectural decisions banked in section 9.
+   - Any new "things that bit us" banked in section 7's Watch-outs.
+5. **Memory updates** — if an interaction pattern emerged, bank it in `memory/feedback_*.md`.
+6. **Session note** — a couple of lines in git log or a comment summarising what shipped + what's next.
+
+### 11.11 Context compaction
+
+Long sessions auto-compact their history. Signs of a recent compaction: a "summary of the earlier conversation" system message and missing code references. If you see this:
+- **Re-read this file** immediately — it's the only reliable source for state post-compaction.
+- **Re-read the most recent 10-20 git commits** to ground yourself.
+- **Don't trust claims about file state** from before compaction — verify with `Read`.
+
+---
+
+## 12. WHAT TO DO IF YOU'RE UNSURE
+
+Ranking by what to do when something is ambiguous:
+
+1. **Read the relevant code** (Grep for the symbol, then Read the file).
+2. **Read this doc's relevant section** — you may be forgetting something you already read.
+3. **Check `memory/*.md`** for previously-banked guidance.
+4. **Run the cascade tests + tsc** silently to sanity-check current state.
+5. **Ask Keith a multiple-choice question** — never guess on UX-visible decisions.
+6. **Flag it as deferred** if you can't resolve and the rest of the work doesn't depend on it.
+
+When in doubt: **ask rather than assume**. Keith would rather answer a 4-option question than review a wrong implementation.
+
+---
+
 *End of master context. Hand this to the next AI verbatim.*
+
+*Last refresh: Apr 2026 session. Verify against `git log` + `date` before assuming nothing has changed.*
