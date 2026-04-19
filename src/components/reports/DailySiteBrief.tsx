@@ -12,6 +12,7 @@ import { useOrderEmail } from "@/hooks/useOrderEmail";
 import { useJobAction } from "@/hooks/useJobAction";
 import { useAddNote } from "@/hooks/useAddNote";
 import { useDelayJob } from "@/hooks/useDelayJob";
+import { usePullForwardDecision } from "@/hooks/usePullForwardDecision";
 import { useOrderStatus, type OrderStatus } from "@/hooks/useOrderStatus";
 import { useSnagAction, type SnagStatus } from "@/hooks/useSnagAction";
 import {
@@ -443,6 +444,11 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
 
   // Centralised delay-job flow (shared across Daily Brief, Programme, Walkthrough, Tasks, Jobs)
   const { openDelayDialog, dialogs: delayDialogs } = useDelayJob(
+    () => setRefreshKey((k) => k + 1)
+  );
+
+  // Centralised pull-forward decision flow — same surfaces as Delay.
+  const { openPullForwardDialog, dialogs: pullForwardDialogs } = usePullForwardDecision(
     () => setRefreshKey((k) => k + 1)
   );
 
@@ -1799,6 +1805,11 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                               }}>
                                 <CalendarClock className="size-2.5" /> Delay
                               </Button>
+                              <Button variant="outline" size="sm" className="h-6 gap-1 border-emerald-200 px-2 text-[10px] text-emerald-700 hover:bg-emerald-50" onClick={() => {
+                                openPullForwardDialog({ id: j.id, name: j.name, startDate: null, endDate: null });
+                              }}>
+                                <CalendarClock className="size-2.5" /> Pull
+                              </Button>
                               <Button variant="outline" size="sm" className="h-6 gap-1 px-2 text-[10px]" onClick={() => openNoteDialog({ id: j.id, name: j.name })}>
                                 <StickyNote className="size-2.5" /> Note
                               </Button>
@@ -1902,6 +1913,11 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                           );
                         }}>
                           <CalendarClock className="size-2.5" /> Delay
+                        </Button>
+                        <Button variant="outline" size="sm" className="h-6 gap-1 border-emerald-200 px-2 text-[10px] text-emerald-700 hover:bg-emerald-50" onClick={() => {
+                          openPullForwardDialog({ id: j.id, name: j.name, startDate: j.startDate ?? null, endDate: j.endDate ?? null });
+                        }}>
+                          <CalendarClock className="size-2.5" /> Pull
                         </Button>
                       </div>
                     </div>
@@ -2318,6 +2334,11 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                           openDelayDialog({ id: j.id, name: j.name, startDate: j.startDate, endDate: j.endDate });
                         }}>
                           <CalendarClock className="size-2.5" /> Delay Further
+                        </Button>
+                        <Button variant="outline" size="sm" className="h-6 gap-1 border-emerald-200 px-2 text-[10px] text-emerald-700 hover:bg-emerald-50" onClick={() => {
+                          openPullForwardDialog({ id: j.id, name: j.name, startDate: j.startDate, endDate: j.endDate });
+                        }}>
+                          <CalendarClock className="size-2.5" /> Pull
                         </Button>
                       </div>
                     </div>
@@ -3015,6 +3036,8 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
 
       {/* Delay dialog — delegated to useDelayJob hook (rendered via {delayDialogs} below). */}
       {delayDialogs}
+      {/* Pull-forward dialog — delegated to usePullForwardDecision hook. */}
+      {pullForwardDialogs}
 
       {/* Supplier email dialog — delegated to useOrderEmail hook. */}
       {orderEmailDialogs}

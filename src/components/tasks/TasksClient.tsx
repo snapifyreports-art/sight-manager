@@ -34,6 +34,7 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useDelayJob } from "@/hooks/useDelayJob";
+import { usePullForwardDecision } from "@/hooks/usePullForwardDecision";
 import { useOrderStatus } from "@/hooks/useOrderStatus";
 import { useOrderEmail } from "@/hooks/useOrderEmail";
 
@@ -261,6 +262,11 @@ export function TasksClient() {
   // new end date), rain/temperature/other reason picker, AND weather
   // auto-suggestion (lives inside useDelayJob now).
   const { openDelayDialog, dialogs: delayDialogs } = useDelayJob(() => {
+    setRefreshKey((k) => k + 1);
+  });
+
+  // ── Pull forward ── same surfaces as Delay. Unified hook.
+  const { openPullForwardDialog, dialogs: pullForwardDialogs } = usePullForwardDecision(() => {
     setRefreshKey((k) => k + 1);
   });
 
@@ -622,6 +628,19 @@ export function TasksClient() {
                     >
                       <Clock className="size-3.5" />
                       <span className="hidden sm:inline">Delay</span>
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 shrink-0 border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openPullForwardDialog(job);
+                      }}
+                      title="Pull this job forward"
+                    >
+                      <Clock className="size-3.5" />
+                      <span className="hidden sm:inline">Pull</span>
                     </Button>
                     <Button
                       variant="outline"
@@ -1124,6 +1143,7 @@ export function TasksClient() {
           both Chase (overdue) and Send Order (bulk) flows. */}
       {emailDialogs}
 
+      {pullForwardDialogs}
       {/* Unified delay dialog (useDelayJob) — same UX as Daily Brief, Walkthrough,
           and JobWeekPanel. Both input modes + reason picker live in one place. */}
       {delayDialogs}

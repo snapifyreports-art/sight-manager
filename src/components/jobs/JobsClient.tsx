@@ -55,6 +55,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useJobAction } from "@/hooks/useJobAction";
 import { useDelayJob } from "@/hooks/useDelayJob";
+import { usePullForwardDecision } from "@/hooks/usePullForwardDecision";
 
 // ---------- Types ----------
 
@@ -283,6 +284,11 @@ export function JobsClient({ initialJobs, workflows, users }: JobsClientProps) {
   // Centralised delay flow — both input modes + weather auto-suggestion all
   // live in useDelayJob (same dialog used by Daily Brief / Walkthrough / Tasks).
   const { openDelayDialog: openDelayJobDialog, dialogs: delayDialogs } = useDelayJob(
+    () => { router.refresh(); }
+  );
+
+  // Centralised pull-forward flow — same surfaces as Delay.
+  const { openPullForwardDialog: openPullJobDialog, dialogs: pullForwardDialogs } = usePullForwardDecision(
     () => { router.refresh(); }
   );
 
@@ -518,6 +524,22 @@ export function JobsClient({ initialJobs, workflows, users }: JobsClientProps) {
                           Delay Job
                         </DropdownMenuItem>
                       )}
+                      {job.status !== "COMPLETED" && (
+                        <DropdownMenuItem
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openPullJobDialog({
+                              id: job.id,
+                              name: job.name,
+                              startDate: job.startDate,
+                              endDate: job.endDate,
+                            });
+                          }}
+                        >
+                          <Clock className="size-4 text-emerald-500" />
+                          Pull Forward
+                        </DropdownMenuItem>
+                      )}
                       <DropdownMenuSeparator />
                       <DropdownMenuItem
                         onClick={(e) => {
@@ -629,6 +651,8 @@ export function JobsClient({ initialJobs, workflows, users }: JobsClientProps) {
 
       {/* Delay Dialog — delegated to useDelayJob hook */}
       {delayDialogs}
+      {/* Pull Forward Dialog — delegated to usePullForwardDecision hook */}
+      {pullForwardDialogs}
     </div>
   );
 }

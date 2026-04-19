@@ -31,6 +31,7 @@ import {
   Check,
   Bug,
   StickyNote,
+  Activity,
 } from "lucide-react";
 import { JobSiblingNav } from "@/components/jobs/JobSiblingNav";
 import { SnagDialog } from "@/components/snags/SnagDialog";
@@ -59,6 +60,11 @@ import { Textarea } from "@/components/ui/textarea";
 import { HelpTip } from "@/components/shared/HelpTip";
 import { PhotoUpload } from "./PhotoUpload";
 import { useJobAction } from "@/hooks/useJobAction";
+import { useDelayJob } from "@/hooks/useDelayJob";
+import { usePullForwardDecision } from "@/hooks/usePullForwardDecision";
+import { useAddNote } from "@/hooks/useAddNote";
+import { useSnagAction, type SnagStatus } from "@/hooks/useSnagAction";
+import { useOrderStatus, type OrderStatus } from "@/hooks/useOrderStatus";
 import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 import { JobStatusBadge, OrderStatusBadge, SnagStatusBadge, SnagPriorityBadge } from "@/components/shared/StatusBadge";
 import { useJobContractorPicker } from "@/hooks/useJobContractorPicker";
@@ -262,6 +268,24 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
       router.refresh();
     }
   );
+
+  // Delay + Pull Forward flows — previously missing from Job Detail
+  // (Keith Apr 2026 sweep: core-flow parity gap, every job-action
+  // surface must expose these since they route through the same
+  // cascade engine). Both fire router.refresh() on success so the
+  // job's dates re-read from the server.
+  const { openDelayDialog, dialogs: delayDialogs } = useDelayJob(async () => { router.refresh(); });
+  const { openPullForwardDialog, dialogs: pullForwardDialogs } = usePullForwardDecision(async () => { router.refresh(); });
+
+  // Inline snag + order status flips — quick one-click lifecycle from the job page.
+  // Full sign-off (with photo) still routes to the snag surface; these handle the
+  // "mark in progress" / "mark resolved" / "mark ordered" micro-transitions.
+  const { setSnagStatus, isPending: isSnagPending } = useSnagAction({
+    onChange: () => { router.refresh(); },
+  });
+  const { setOrderStatus, isPending: isOrderPending } = useOrderStatus({
+    onChange: () => { router.refresh(); },
+  });
 
   // Add note state
   const [noteText, setNoteText] = useState("");
@@ -754,6 +778,42 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
                 Sign Off
               </Button>
             )}
+            {/* Delay + Pull Forward — available on every non-completed
+                job for parity with the Programme panel, Walkthrough, and
+                Daily Brief. Click routes to the shared hook dialogs
+                (same reason picker, same constraint-aware date picker). */}
+            {job.status !== "COMPLETED" && (
+              <>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="border-emerald-200 text-emerald-700 hover:bg-emerald-50"
+                  onClick={() => openPullForwardDialog({
+                    id: job.id,
+                    name: job.name,
+                    startDate: job.startDate,
+                    endDate: job.endDate,
+                  })}
+                  title="Shift this job's start earlier — useful when materials arrive early or the predecessor finishes ahead"
+                >
+                  Pull Forward
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="border-red-200 text-red-700 hover:bg-red-50"
+                  onClick={() => openDelayDialog({
+                    id: job.id,
+                    name: job.name,
+                    startDate: job.startDate,
+                    endDate: job.endDate,
+                  })}
+                  title="Push this job's end date back — picks up weather, contractor no-show, etc."
+                >
+                  Delay
+                </Button>
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -952,6 +1012,22 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
                       </div>
                       <div className="flex flex-col items-end gap-1.5">
                         <OrderStatusBadge status={order.status} />
+                        {order.status === "PENDING" && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-6 gap-1 border-blue-200 px-2 text-[11px] text-blue-700 hover:bg-blue-50"
+                            disabled={isOrderPending(order.id)}
+                            onClick={() => setOrderStatus(order.id, "ORDERED")}
+                          >
+                            {isOrderPending(order.id) ? (
+                              <Loader2 className="size-3 animate-spin" />
+                            ) : (
+                              <Send className="size-3" />
+                            )}
+                            Mark Ordered
+                          </Button>
+                        )}
                         {order.status !== "DELIVERED" &&
                           order.status !== "CANCELLED" && (
                             <Button
@@ -1148,27 +1224,63 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
             <p className="text-sm text-muted-foreground">No snags linked to this job</p>
           ) : (
             <div className="space-y-2">
-              {jobSnags.map((snag) => (
-                <Link
-                  key={snag.id}
-                  href={`/sites/${job.plot.siteId}?tab=snags&snagId=${snag.id}`}
-                  className="flex items-start justify-between rounded-lg border p-3 hover:bg-muted/50 no-underline"
-                >
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium text-foreground">{snag.description}</p>
-                    {snag.location && <p className="text-xs text-muted-foreground mt-0.5">{snag.location}</p>}
-                    {(snag.assignedTo || snag.contact) && (
-                      <p className="text-xs text-muted-foreground mt-0.5">
-                        {snag.contact?.company || snag.contact?.name || snag.assignedTo?.name}
-                      </p>
+              {jobSnags.map((snag) => {
+                const pending = isSnagPending(snag.id);
+                return (
+                  <div
+                    key={snag.id}
+                    className="rounded-lg border p-3 hover:bg-muted/50"
+                  >
+                    <div className="flex items-start justify-between">
+                      <Link
+                        href={`/sites/${job.plot.siteId}?tab=snags&snagId=${snag.id}`}
+                        className="min-w-0 flex-1 no-underline"
+                      >
+                        <p className="text-sm font-medium text-foreground">{snag.description}</p>
+                        {snag.location && <p className="text-xs text-muted-foreground mt-0.5">{snag.location}</p>}
+                        {(snag.assignedTo || snag.contact) && (
+                          <p className="text-xs text-muted-foreground mt-0.5">
+                            {snag.contact?.company || snag.contact?.name || snag.assignedTo?.name}
+                          </p>
+                        )}
+                      </Link>
+                      <div className="ml-3 flex flex-col items-end gap-1 shrink-0">
+                        <SnagStatusBadge status={snag.status} />
+                        <SnagPriorityBadge priority={snag.priority} />
+                      </div>
+                    </div>
+                    {/* Inline lifecycle flips (useSnagAction). Close-with-photo still
+                        routes to snag detail for the rich dialog. */}
+                    {(snag.status === "OPEN" || snag.status === "IN_PROGRESS") && (
+                      <div className="mt-2 flex items-center gap-1 border-t pt-2">
+                        <span className="mr-auto text-[10px] font-medium text-muted-foreground">Quick actions</span>
+                        {snag.status === "OPEN" && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-6 gap-1 border-blue-200 px-2 text-[10px] text-blue-700 hover:bg-blue-50"
+                            disabled={pending}
+                            onClick={() => setSnagStatus(snag.id, "IN_PROGRESS")}
+                          >
+                            {pending ? <Loader2 className="size-2.5 animate-spin" /> : <Activity className="size-2.5" />}
+                            Mark In Progress
+                          </Button>
+                        )}
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-6 gap-1 border-emerald-200 px-2 text-[10px] text-emerald-700 hover:bg-emerald-50"
+                          disabled={pending}
+                          onClick={() => setSnagStatus(snag.id, "RESOLVED")}
+                        >
+                          {pending ? <Loader2 className="size-2.5 animate-spin" /> : <CheckCircle className="size-2.5" />}
+                          Mark Resolved
+                        </Button>
+                      </div>
                     )}
                   </div>
-                  <div className="ml-3 flex flex-col items-end gap-1 shrink-0">
-                    <SnagStatusBadge status={snag.status} />
-                    <SnagPriorityBadge priority={snag.priority} />
-                  </div>
-                </Link>
-              ))}
+                );
+              })}
             </div>
           )}
         </CardContent>
@@ -1851,6 +1963,10 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
 
       {/* Centralised pre-start / early-start / order-conflict dialogs */}
       {jobActionDialogs}
+      {/* Delay + Pull Forward dialogs — rendered from shared hooks so
+          the UX matches Walkthrough, Daily Brief, and JobWeekPanel. */}
+      {delayDialogs}
+      {pullForwardDialogs}
     </div>
   );
 }

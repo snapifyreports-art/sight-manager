@@ -6,6 +6,8 @@ import { useRouter } from "next/navigation";
 import { useJobAction } from "@/hooks/useJobAction";
 import { useOrderStatus, type OrderStatus } from "@/hooks/useOrderStatus";
 import { useOrderEmail } from "@/hooks/useOrderEmail";
+import { useDelayJob } from "@/hooks/useDelayJob";
+import { usePullForwardDecision } from "@/hooks/usePullForwardDecision";
 import { PostCompletionDialog } from "@/components/PostCompletionDialog";
 import { differenceInCalendarDays, isSameDay, format } from "date-fns";
 import { getCurrentDateAtMidnight } from "@/lib/dev-date";
@@ -115,6 +117,14 @@ export function PlotTodoList({ jobs, snagSummary, siteId, siteName, plotId, plot
   const { triggerAction: triggerJobAction, runSimpleAction, dialogs: jobActionDialogs } = useJobAction(
     (_action, _jobId) => { router.refresh(); }
   );
+
+  // Delay + Pull Forward — parity with Walkthrough / Programme panel /
+  // JobDetail. Users should be able to reschedule a job from any
+  // surface where they see it, not navigate away to do it.
+  const { openDelayDialog, dialogs: delayDialogs } = useDelayJob(async () => { router.refresh(); });
+  const { openPullForwardDialog, dialogs: pullForwardDialogs } = usePullForwardDecision(async () => { router.refresh(); });
+  const handleDelay = (j: JobData) => openDelayDialog({ id: j.id, name: j.name, startDate: j.startDate, endDate: j.endDate });
+  const handlePullForward = (j: JobData) => openPullForwardDialog({ id: j.id, name: j.name, startDate: j.startDate, endDate: j.endDate });
 
   async function handleJobAction(jobId: string, action: "start" | "complete") {
     const jobData = jobs.find((j) => j.id === jobId);
@@ -251,6 +261,8 @@ export function PlotTodoList({ jobs, snagSummary, siteId, siteName, plotId, plot
     <div className="space-y-4">
       {jobActionDialogs}
       {orderEmailDialogs}
+      {delayDialogs}
+      {pullForwardDialogs}
       <PostCompletionDialog
         open={!!completionContext}
         completedJobName={completionContext?.completedJobName ?? ""}
@@ -289,6 +301,8 @@ export function PlotTodoList({ jobs, snagSummary, siteId, siteName, plotId, plot
                     variant="start"
                     isPending={pendingJobActions.has(j.id)}
                     onAction={handleJobAction}
+                    onDelay={handleDelay}
+                    onPullForward={handlePullForward}
                     now={now}
                   />
                 ))}
@@ -306,6 +320,8 @@ export function PlotTodoList({ jobs, snagSummary, siteId, siteName, plotId, plot
                     variant="progress"
                     isPending={pendingJobActions.has(j.id)}
                     onAction={handleJobAction}
+                    onDelay={handleDelay}
+                    onPullForward={handlePullForward}
                     now={now}
                   />
                 ))}
@@ -436,12 +452,16 @@ function JobRow({
   variant,
   isPending,
   onAction,
+  onDelay,
+  onPullForward,
   now,
 }: {
   job: JobData;
   variant: "start" | "progress";
   isPending: boolean;
   onAction: (id: string, action: "start" | "complete") => void;
+  onDelay: (job: JobData) => void;
+  onPullForward: (job: JobData) => void;
   now: Date;
 }) {
   const contractor = job.contractors?.[0]?.contact;
@@ -509,16 +529,31 @@ function JobRow({
         <span className="w-full text-[10px] font-medium text-muted-foreground sm:mr-auto sm:w-auto">Actions</span>
         {isPending ? (
           <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
-        ) : variant === "start" ? (
-          <Button size="sm" variant="outline" className="h-6 gap-1 border-green-200 px-2 text-[10px] text-green-700 hover:bg-green-50"
-            onClick={() => onAction(job.id, "start")}>
-            <Play className="size-2.5" /> Start
-          </Button>
         ) : (
-          <Button size="sm" variant="outline" className="h-6 gap-1 border-blue-200 px-2 text-[10px] text-blue-700 hover:bg-blue-50"
-            onClick={() => onAction(job.id, "complete")}>
-            <CheckCircle2 className="size-2.5" /> Complete
-          </Button>
+          <>
+            {variant === "start" ? (
+              <Button size="sm" variant="outline" className="h-6 gap-1 border-green-200 px-2 text-[10px] text-green-700 hover:bg-green-50"
+                onClick={() => onAction(job.id, "start")}>
+                <Play className="size-2.5" /> Start
+              </Button>
+            ) : (
+              <Button size="sm" variant="outline" className="h-6 gap-1 border-blue-200 px-2 text-[10px] text-blue-700 hover:bg-blue-50"
+                onClick={() => onAction(job.id, "complete")}>
+                <CheckCircle2 className="size-2.5" /> Complete
+              </Button>
+            )}
+            {/* Delay + Pull Forward — parity with other action surfaces. */}
+            <Button size="sm" variant="outline" className="h-6 gap-1 border-emerald-200 px-2 text-[10px] text-emerald-700 hover:bg-emerald-50"
+              onClick={() => onPullForward(job)}
+              title="Shift start earlier">
+              Pull
+            </Button>
+            <Button size="sm" variant="outline" className="h-6 gap-1 border-red-200 px-2 text-[10px] text-red-700 hover:bg-red-50"
+              onClick={() => onDelay(job)}
+              title="Push end date back with a reason">
+              Delay
+            </Button>
+          </>
         )}
       </div>
     </div>
