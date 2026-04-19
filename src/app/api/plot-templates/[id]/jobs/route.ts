@@ -17,7 +17,7 @@ export async function POST(
 
   const { id } = await params;
   const body = await request.json();
-  const { name, description, stageCode, sortOrder, startWeek, endWeek, parentId, durationWeeks, contactId } = body;
+  const { name, description, stageCode, sortOrder, startWeek, endWeek, parentId, durationWeeks, durationDays, contactId } = body;
 
   if (!name || typeof name !== "string" || name.trim().length === 0) {
     return NextResponse.json(
@@ -53,6 +53,7 @@ export async function POST(
         endWeek,
         parentId: parentId || null,
         durationWeeks: durationWeeks ?? null,
+        durationDays: durationDays ?? null,
         contactId: contactId || null,
       },
       include: {

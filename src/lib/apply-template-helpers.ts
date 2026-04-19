@@ -1,5 +1,5 @@
 import { addWeeks, addDays } from "date-fns";
-import { snapToWorkingDay } from "@/lib/working-days";
+import { snapToWorkingDay, addWorkingDays } from "@/lib/working-days";
 
 // Types matching what Prisma returns for template jobs with children
 interface TemplateOrderItem {
@@ -27,6 +27,9 @@ interface TemplateJobWithChildren {
   sortOrder: number;
   startWeek: number;
   endWeek: number;
+  // durationDays, when set, overrides the week-based endWeek at apply
+  // time — lets a sub-job span fewer than 5 working days.
+  durationDays?: number | null;
   weatherAffected?: boolean;
   weatherAffectedType?: string | null;
   parentId: string | null;
@@ -40,11 +43,38 @@ interface TemplateJobWithChildren {
     startWeek: number;
     endWeek: number;
     durationWeeks: number | null;
+    durationDays?: number | null;
     weatherAffected?: boolean;
     weatherAffectedType?: string | null;
     contactId?: string | null;
     orders: TemplateOrderWithItems[];
   }>;
+}
+
+/**
+ * Compute a job's end date from its template fields.
+ *
+ * If `durationDays` is set, it wins — the job spans that many working
+ * days starting at `startWeek`. Otherwise fall back to the classic
+ * week-based calculation (endWeek inclusive = startWeek + durationWeeks - 1).
+ *
+ * Days-precedence makes the "add days option" (Q2 Apr 2026) a pure
+ * addition — existing weeks-only templates are unchanged.
+ */
+function computeJobEndDate(
+  plotStartDate: Date,
+  startWeek: number,
+  endWeek: number,
+  durationDays: number | null | undefined,
+): Date {
+  const startDate = snapToWorkingDay(addWeeks(plotStartDate, startWeek - 1), "forward");
+  if (durationDays && durationDays > 0) {
+    // -1 because day 1 IS the start day, so a 3-day job ends on start+2WD.
+    return snapToWorkingDay(addWorkingDays(startDate, durationDays - 1), "forward");
+  }
+  // Legacy weeks path — endWeek is inclusive, so the week runs from
+  // startWeek Monday to endWeek Sunday. Add 6 calendar days then snap.
+  return snapToWorkingDay(addDays(addWeeks(plotStartDate, endWeek - 1), 6), "forward");
 }
 
 /**
@@ -79,7 +109,7 @@ export async function createJobsFromTemplate(
       // Parent's dates span from the earliest child start to the latest child end.
       const childWindows = templateJob.children.map((c) => ({
         start: snapToWorkingDay(addWeeks(plotStartDate, c.startWeek - 1), "forward"),
-        end: snapToWorkingDay(addDays(addWeeks(plotStartDate, c.endWeek - 1), 6), "forward"),
+        end: computeJobEndDate(plotStartDate, c.startWeek, c.endWeek, c.durationDays ?? null),
       }));
       const parentStart = new Date(Math.min(...childWindows.map((w) => w.start.getTime())));
       const parentEnd = new Date(Math.max(...childWindows.map((w) => w.end.getTime())));
@@ -173,9 +203,11 @@ export async function createJobsFromTemplate(
         addWeeks(plotStartDate, templateJob.startWeek - 1),
         "forward"
       );
-      const jobEndDate = snapToWorkingDay(
-        addDays(addWeeks(plotStartDate, templateJob.endWeek - 1), 6),
-        "forward"
+      const jobEndDate = computeJobEndDate(
+        plotStartDate,
+        templateJob.startWeek,
+        templateJob.endWeek,
+        templateJob.durationDays ?? null,
       );
 
       const job = await tx.job.create({

@@ -109,6 +109,7 @@ export async function POST(request: NextRequest) {
             siteId,
             plotNumber: plotInput.plotNumber?.trim() || null,
             houseType: template.typeLabel || null,
+            sourceTemplateId: template.id,
           },
         });
 
