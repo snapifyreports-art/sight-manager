@@ -804,7 +804,7 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
                 {job.contractors.map((c) => (
                   <Link
                     key={c.id}
-                    href={`/contacts?highlight=${c.contact.id}`}
+                    href={`/contacts/${c.contact.id}`}
                     className="inline-flex items-center rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700 hover:bg-blue-100"
                   >
                     {c.contact.company ? `${c.contact.company}` : c.contact.name}

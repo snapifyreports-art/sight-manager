@@ -25,6 +25,7 @@ import {
 } from "@/components/ui/dialog";
 import * as XLSX from "xlsx";
 import { SnagStatusBadge, SnagPriorityBadge } from "@/components/shared/StatusBadge";
+import { InlinePriorityPicker } from "./InlinePriorityPicker";
 import { useSnagAction, type SnagStatus } from "@/hooks/useSnagAction";
 
 interface SnagPhoto {
@@ -354,8 +355,12 @@ export function SnagList({ snags, onSelect, onRefresh, showPlot, highlightId, si
                     <p className="line-clamp-2 text-sm font-medium">
                       {snag.description}
                     </p>
-                    <span className="shrink-0">
-                      <SnagPriorityBadge priority={snag.priority} />
+                    <span className="shrink-0" onClick={(e) => e.stopPropagation()}>
+                      <InlinePriorityPicker
+                        snagId={snag.id}
+                        priority={snag.priority}
+                        onChanged={() => onRefresh?.()}
+                      />
                     </span>
                   </div>
 
@@ -395,7 +400,7 @@ export function SnagList({ snags, onSelect, onRefresh, showPlot, highlightId, si
                         </Link>
                       )}
                       {snag.contact && (
-                        <Link href={`/contacts?highlight=${snag.contact.id}`} className="flex items-center gap-1 hover:underline hover:text-blue-600" onClick={(e) => e.stopPropagation()}>
+                        <Link href={`/contacts/${snag.contact.id}`} className="flex items-center gap-1 hover:underline hover:text-blue-600" onClick={(e) => e.stopPropagation()}>
                           <HardHat className="size-2.5" />
                           {snag.contact.company ? `${snag.contact.company} — ${snag.contact.name}` : snag.contact.name}
                         </Link>

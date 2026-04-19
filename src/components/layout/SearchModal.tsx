@@ -135,7 +135,7 @@ export function SearchModal({
     { key: "sites", label: "Sites", icon: Building2, color: "text-blue-600", items: results.sites.map((s) => ({ id: s.id, label: s.name, sub: s.address, href: `/sites/${s.id}` })) },
     { key: "plots", label: "Plots", icon: MapPin, color: "text-green-600", items: results.plots.map((p) => ({ id: p.id, label: p.plotNumber ? `Plot ${p.plotNumber}` : p.name, sub: p.siteName, href: `/sites/${p.siteId}/plots/${p.id}` })) },
     { key: "jobs", label: "Jobs", icon: Briefcase, color: "text-indigo-600", items: results.jobs.map((j) => ({ id: j.id, label: j.name, sub: j.plotNumber ? `Plot ${j.plotNumber}` : undefined, href: `/jobs/${j.id}` })) },
-    { key: "contacts", label: "Contacts", icon: Users, color: "text-orange-600", items: results.contacts.map((c) => ({ id: c.id, label: c.company ? `${c.company} — ${c.name}` : c.name, sub: c.type, href: `/contacts?highlight=${c.id}` })) },
+    { key: "contacts", label: "Contacts", icon: Users, color: "text-orange-600", items: results.contacts.map((c) => ({ id: c.id, label: c.company ? `${c.company} — ${c.name}` : c.name, sub: c.type, href: `/contacts/${c.id}` })) },
     { key: "orders", label: "Orders", icon: Package, color: "text-violet-600", items: results.orders.map((o) => ({ id: o.id, label: o.description || "Order", sub: `${o.supplierName} · ${o.jobName}`, href: `/orders` })) },
     { key: "snags", label: "Snags", icon: Bug, color: "text-red-600", items: results.snags.map((s) => ({ id: s.id, label: s.description, sub: s.plotNumber ? `Plot ${s.plotNumber}` : undefined, href: `/sites/${s.siteId}?tab=snags&snagId=${s.id}` })) },
   ].filter((g) => g.items.length > 0) : [];

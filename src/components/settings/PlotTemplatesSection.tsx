@@ -9,6 +9,8 @@ import {
   Calendar,
   Trash2,
   FolderOpen,
+  Copy,
+  Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -45,6 +47,27 @@ export function PlotTemplatesSection({
   const router = useRouter();
   const toast = useToast();
   const [templates, setTemplates] = useState(initialTemplates);
+  const [cloningId, setCloningId] = useState<string | null>(null);
+
+  const handleClone = async (id: string, name: string) => {
+    setCloningId(id);
+    try {
+      const res = await fetch(`/api/plot-templates/${id}/clone`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: `${name} (copy)` }),
+      });
+      if (res.ok) {
+        const copy = await res.json();
+        toast.success(`Cloned as "${copy.name}"`);
+        router.refresh();
+      } else {
+        toast.error(await fetchErrorMessage(res, "Failed to clone template"));
+      }
+    } finally {
+      setCloningId(null);
+    }
+  };
   const [editingTemplate, setEditingTemplate] = useState<TemplateData | null>(
     null
   );
@@ -250,15 +273,32 @@ export function PlotTemplatesSection({
                     <span className="text-xs text-muted-foreground">
                       Click to edit
                     </span>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleOpenDelete(template.id, template.name);
-                      }}
-                      className="rounded p-1 text-muted-foreground transition-colors hover:bg-red-50 hover:text-red-600"
-                    >
-                      <Trash2 className="size-3.5" />
-                    </button>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleClone(template.id, template.name);
+                        }}
+                        disabled={cloningId === template.id}
+                        className="rounded p-1 text-muted-foreground transition-colors hover:bg-blue-50 hover:text-blue-600 disabled:opacity-50"
+                        title="Clone this template"
+                      >
+                        {cloningId === template.id ? (
+                          <Loader2 className="size-3.5 animate-spin" />
+                        ) : (
+                          <Copy className="size-3.5" />
+                        )}
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleOpenDelete(template.id, template.name);
+                        }}
+                        className="rounded p-1 text-muted-foreground transition-colors hover:bg-red-50 hover:text-red-600"
+                      >
+                        <Trash2 className="size-3.5" />
+                      </button>
+                    </div>
                   </div>
                 </CardContent>
               </Card>

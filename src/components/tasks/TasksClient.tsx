@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { Breadcrumbs } from "@/components/ui/breadcrumbs";
 import { format, isBefore, isSameDay, differenceInDays } from "date-fns";
 import { getCurrentDate, getCurrentDateAtMidnight } from "@/lib/dev-date";
 import { useDevDate } from "@/lib/dev-date-context";
@@ -376,6 +378,10 @@ export function TasksClient() {
 
   return (
     <div className="space-y-6">
+      <Breadcrumbs items={[
+        { label: "Dashboard", href: "/dashboard" },
+        { label: "Tasks" },
+      ]} />
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Tasks</h1>
         <p className="mt-1 text-sm text-muted-foreground">
@@ -472,7 +478,13 @@ export function TasksClient() {
                       onClick={() => router.push(`/jobs/${order.job.id}`)}
                     >
                       <p className="text-sm font-medium text-red-800">
-                        {order.supplier.name}
+                        <Link
+                          href={`/suppliers/${order.supplier.id}`}
+                          onClick={(e) => e.stopPropagation()}
+                          className="hover:underline"
+                        >
+                          {order.supplier.name}
+                        </Link>
                       </p>
                       <p className="text-xs text-red-600">
                         {order.job.plot.site.name} &bull; {order.job.plot.name} &bull; {order.job.name}
@@ -686,7 +698,13 @@ export function TasksClient() {
                       onClick={() => router.push(`/jobs/${order.job.id}`)}
                     >
                       <p className="text-sm font-medium">
-                        {order.supplier.name}
+                        <Link
+                          href={`/suppliers/${order.supplier.id}`}
+                          onClick={(e) => e.stopPropagation()}
+                          className="hover:underline"
+                        >
+                          {order.supplier.name}
+                        </Link>
                       </p>
                       <p className="text-xs opacity-75">
                         {order.job.plot.site.name} &bull; {order.job.plot.name}{" "}
@@ -874,7 +892,13 @@ export function TasksClient() {
                       onClick={() => router.push(`/jobs/${order.job.id}`)}
                     >
                       <p className="text-sm font-medium">
-                        {order.supplier.name}
+                        <Link
+                          href={`/suppliers/${order.supplier.id}`}
+                          onClick={(e) => e.stopPropagation()}
+                          className="hover:underline"
+                        >
+                          {order.supplier.name}
+                        </Link>
                       </p>
                       <p className="text-xs text-muted-foreground">
                         {order.job.plot.site.name} &bull; {order.job.plot.name}{" "}
@@ -1017,7 +1041,11 @@ export function TasksClient() {
                       >
                         Delivery
                       </Badge>
-                      <p className="text-sm font-medium">{order.supplier.name}</p>
+                      <p className="text-sm font-medium">
+                        <Link href={`/suppliers/${order.supplier.id}`} className="hover:underline">
+                          {order.supplier.name}
+                        </Link>
+                      </p>
                     </div>
                     <p className="mt-0.5 text-xs text-muted-foreground">
                       {order.job.plot.site.name} &bull; {order.job.plot.name} &bull;{" "}

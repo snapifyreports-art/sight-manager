@@ -147,7 +147,7 @@ interface BriefData {
     plotId: string;
     plot: { plotNumber: string | null; name: string };
     assignedTo: { name: string } | null;
-    contractors: Array<{ contact: { name: string; company: string | null } }>;
+    contractors: Array<{ contact: { id: string; name: string; company: string | null } }>;
   }>;
   blockedJobs: Array<{
     id: string;
@@ -166,7 +166,7 @@ interface BriefData {
     plotId?: string;
     plot: { plotNumber: string | null; name: string };
     assignedTo: { name: string } | null;
-    contractors: Array<{ contact: { name: string; company: string | null } }>;
+    contractors: Array<{ contact: { id: string; name: string; company: string | null } }>;
   }>;
   jobsStartingToday: Array<{
     id: string;
@@ -175,7 +175,7 @@ interface BriefData {
     plotId: string;
     plot: { plotNumber: string | null; name: string };
     assignedTo: { name: string } | null;
-    contractors: Array<{ contact: { name: string; company: string | null } }>;
+    contractors: Array<{ contact: { id: string; name: string; company: string | null } }>;
     readiness?: {
       hasContractor: boolean;
       hasAssignee: boolean;
@@ -279,7 +279,7 @@ interface BriefData {
     status: string;
     plot: { plotNumber: string | null; name: string };
     assignedTo: { name: string } | null;
-    contractors: Array<{ contact: { name: string; company: string | null } }>;
+    contractors: Array<{ contact: { id: string; name: string; company: string | null } }>;
   }>;
   needsAttention: Array<{
     id: string;
@@ -306,7 +306,7 @@ interface BriefData {
     plotId: string;
     plot: { plotNumber: string | null; name: string };
     assignedTo: { name: string } | null;
-    contractors: Array<{ contact: { name: string; company: string | null } }>;
+    contractors: Array<{ contact: { id: string; name: string; company: string | null } }>;
   }>;
 }
 
@@ -1158,7 +1158,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
 
   // Job row renderer with action buttons + optional checkbox
   const renderJobRow = (
-    j: { id: string; name: string; status: string; plot: { plotNumber: string | null; name: string }; assignedTo?: { name: string } | null; endDate?: string | null; contractors?: Array<{ contact: { name: string; company: string | null } }> },
+    j: { id: string; name: string; status: string; plot: { plotNumber: string | null; name: string }; assignedTo?: { name: string } | null; endDate?: string | null; contractors?: Array<{ contact: { id: string; name: string; company: string | null } }> },
     showAction = true,
     showContractorAssign = false
   ) => (
@@ -1191,7 +1191,18 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
       <p className="text-xs text-muted-foreground">
         {j.plot.plotNumber ? `Plot ${j.plot.plotNumber}` : j.plot.name}
         {j.assignedTo && <span className="hidden sm:inline"> · {j.assignedTo.name}</span>}
-        {j.contractors?.[0] && <span className="hidden sm:inline"> · {j.contractors[0].contact.company || j.contractors[0].contact.name}</span>}
+        {j.contractors?.[0] && (
+          <span className="hidden sm:inline">
+            {" · "}
+            <Link
+              href={`/contacts/${j.contractors[0].contact.id}`}
+              onClick={(e) => e.stopPropagation()}
+              className="hover:underline hover:text-blue-600"
+            >
+              {j.contractors[0].contact.company || j.contractors[0].contact.name}
+            </Link>
+          </span>
+        )}
         {j.endDate && <span className="hidden sm:inline"> · Due {format(new Date(j.endDate), "dd MMM")}</span>}
       </p>
       {showAction && !bulkMode && (
@@ -1620,7 +1631,18 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                         <p className="text-xs text-muted-foreground">
                           <Link href={`/sites/${siteId}/plots/${j.plotId}`} className="hover:underline hover:text-blue-600">{j.plot.plotNumber ? `Plot ${j.plot.plotNumber}` : j.plot.name}</Link>
                           {j.assignedTo && <span className="hidden sm:inline"> · {j.assignedTo.name}</span>}
-                          {j.contractors?.[0]?.contact && <span className="hidden sm:inline"> · {j.contractors[0].contact.company || j.contractors[0].contact.name}</span>}
+                          {j.contractors?.[0]?.contact && (
+                            <span className="hidden sm:inline">
+                              {" · "}
+                              <Link
+                                href={`/contacts/${j.contractors[0].contact.id}`}
+                                onClick={(e) => e.stopPropagation()}
+                                className="hover:underline hover:text-blue-600"
+                              >
+                                {j.contractors[0].contact.company || j.contractors[0].contact.name}
+                              </Link>
+                            </span>
+                          )}
                         </p>
                         {/* Readiness checklist — expandable inline */}
                         {r && j.status === "NOT_STARTED" && (
@@ -2177,9 +2199,25 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                     <p className="text-xs text-muted-foreground">
                       <Link href={`/sites/${siteId}/plots/${(j as { plotId?: string }).plotId}`} className="hover:underline hover:text-blue-600">{j.plot.plotNumber ? `Plot ${j.plot.plotNumber}` : j.plot.name}</Link>
                       {j.assignedTo && <span className="hidden sm:inline"> · {j.assignedTo.name}</span>}
-                      {(j as { contractors?: Array<{ contact: { company: string | null; name: string } }> }).contractors?.[0]?.contact && (
-                        <span className="hidden sm:inline"> · {(j as { contractors?: Array<{ contact: { company: string | null; name: string } }> }).contractors![0].contact.company || (j as { contractors?: Array<{ contact: { company: string | null; name: string } }> }).contractors![0].contact.name}</span>
-                      )}
+                      {(() => {
+                        const jWithContractors = j as unknown as {
+                          contractors?: Array<{ contact: { id: string; name: string; company: string | null } }>;
+                        };
+                        const c = jWithContractors.contractors?.[0]?.contact;
+                        if (!c) return null;
+                        return (
+                          <span className="hidden sm:inline">
+                            {" · "}
+                            <Link
+                              href={`/contacts/${c.id}`}
+                              onClick={(e) => e.stopPropagation()}
+                              className="hover:underline hover:text-blue-600"
+                            >
+                              {c.company || c.name}
+                            </Link>
+                          </span>
+                        );
+                      })()}
                       {j.endDate && <span> · Due {format(new Date(j.endDate), "dd MMM")}</span>}
                     </p>
                     <div className="mt-1.5 flex flex-wrap items-center gap-1 border-t pt-1.5">

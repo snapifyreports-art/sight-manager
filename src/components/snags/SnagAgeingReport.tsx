@@ -16,6 +16,8 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { ReportExportButtons } from "@/components/shared/ReportExportButtons";
+import { format } from "date-fns";
 
 interface AgeingData {
   totalSnags: number;
@@ -84,8 +86,29 @@ export function SnagAgeingReport({ siteId }: { siteId: string }) {
   ];
   const maxBucket = Math.max(...bucketItems.map((b) => b.count), 1);
 
+  // Flatten oldest-open rows for Excel.
+  const exportRows = data.oldestOpen.map((s) => ({
+    Plot: s.plot,
+    Description: s.description,
+    Location: s.location || "",
+    Priority: s.priority,
+    Status: s.status,
+    "Days Open": s.daysOpen,
+    Assigned: s.assignedTo || "",
+    Created: format(new Date(s.createdAt), "yyyy-MM-dd"),
+  }));
+
   return (
     <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h3 className="text-lg font-semibold">Snag Ageing Report</h3>
+        <ReportExportButtons
+          filename={`snag-ageing-${format(new Date(), "yyyy-MM-dd")}`}
+          rows={exportRows}
+          sheetName="Snag Ageing"
+          compact
+        />
+      </div>
       {/* Summary stats */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Card>

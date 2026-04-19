@@ -862,6 +862,21 @@ export function SiteDetailClient({
           </div>
 
           <div className="flex items-center gap-2">
+            {/* Quick Raise Snag — available on every tab so site managers
+                can log a defect without switching to the Snags tab.
+                Switches to the Snags tab via the existing handleTabChange;
+                the SnagsTab's own "Raise Snag" button is then one click
+                away. Keith Apr 2026 UX audit #13. */}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => handleTabChange("snags")}
+              className="gap-1.5 border-amber-200 text-amber-700 hover:bg-amber-50"
+              title="Go to Snags tab to raise a snag"
+            >
+              <AlertTriangle className="size-4" />
+              Raise Snag
+            </Button>
             {activeTab === "plots" && (
               <Button
                 variant="outline"

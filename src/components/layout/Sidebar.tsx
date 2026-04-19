@@ -18,6 +18,10 @@ import {
   CalendarDays,
   FolderOpen,
   Footprints,
+  ClipboardList,
+  Scroll,
+  FileBox,
+  Layers,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { NAV_PERMISSION_MAP } from "@/lib/permissions";
@@ -77,12 +81,17 @@ const SITE_TAB_GROUPS = [
   },
 ];
 
-// Main nav items (site-contextual)
+// Main nav items (global, not site-contextual)
 const navItems = [
-  { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-  { label: "Daily Brief", href: "/daily-brief", icon: CalendarDays },
-  { label: "Suppliers & Contractors", href: "/suppliers", icon: Package },
-  { label: "Analytics", href: "/analytics", icon: BarChart3 },
+  { label: "Dashboard",     href: "/dashboard",   icon: LayoutDashboard },
+  { label: "Daily Brief",   href: "/daily-brief", icon: CalendarDays },
+  { label: "Tasks",         href: "/tasks",       icon: ClipboardList },
+  { label: "Orders",        href: "/orders",      icon: Package },
+  { label: "Suppliers",     href: "/suppliers",   icon: FileBox },
+  { label: "Contacts",      href: "/contacts",    icon: HardHat },
+  { label: "Templates",     href: "/settings?tab=templates", icon: Layers },
+  { label: "Analytics",     href: "/analytics",   icon: BarChart3 },
+  { label: "Events Log",    href: "/events-log",  icon: Scroll },
 ];
 
 // Truly global items — always at the bottom

@@ -3,7 +3,10 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
+import { format } from "date-fns";
 import { useDevDate } from "@/lib/dev-date-context";
+import { ReportExportButtons } from "@/components/shared/ReportExportButtons";
+import { Breadcrumbs } from "@/components/ui/breadcrumbs";
 import {
   BarChart,
   Bar,
@@ -301,8 +304,25 @@ export function AnalyticsClient() {
     })
   );
 
+  // Flatten summary + contractor performance + site progress + supplier spend
+  // into separate sheets conceptually, but ReportExportButtons writes one
+  // sheet — so we emit the contractor performance table as the main data
+  // (most useful for board reporting).
+  const exportRows = data.contractorPerformance.map((c) => ({
+    Contractor: c.name,
+    "Total Jobs": c.totalJobs,
+    "Completed Jobs": c.completedJobs,
+    "On-Time Jobs": c.onTimeJobs,
+    "On-Time Rate %": c.onTimeRate ?? "",
+    "Avg Delay (days)": c.avgDelayDays,
+  }));
+
   return (
     <div className="space-y-6">
+      <Breadcrumbs items={[
+        { label: "Dashboard", href: "/dashboard" },
+        { label: "Analytics" },
+      ]} />
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -311,6 +331,12 @@ export function AnalyticsClient() {
             Performance insights across your sites and teams
           </p>
         </div>
+        <ReportExportButtons
+          filename={`analytics-${format(new Date(), "yyyy-MM-dd")}`}
+          rows={exportRows}
+          sheetName="Contractor Performance"
+          compact
+        />
       </div>
 
       {/* Summary Cards */}
@@ -605,7 +631,7 @@ export function AnalyticsClient() {
                   {data.contractorPerformance.map((c) => (
                     <tr key={c.id} className="border-b last:border-0">
                       <td className="py-2 font-medium">
-                        <Link href={`/contacts?highlight=${c.id}`} className="hover:text-blue-600 hover:underline">{c.name}</Link>
+                        <Link href={`/contacts/${c.id}`} className="hover:text-blue-600 hover:underline">{c.name}</Link>
                       </td>
                       <td className="py-2 text-center">{c.totalJobs}</td>
                       <td className="py-2 text-center">{c.completedJobs}</td>

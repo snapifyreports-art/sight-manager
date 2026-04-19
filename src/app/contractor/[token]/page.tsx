@@ -4,6 +4,8 @@ import { HardHat, PlayCircle, Clock, AlertTriangle, CheckCircle2, Phone, Mail, B
 import { prisma } from "@/lib/prisma";
 import { verifyContractorToken } from "@/lib/share-token";
 import { SnagSignOffCard } from "./SnagSignOffCard";
+import { PrintButton } from "./PrintButton";
+import { RequestSignOffButton } from "./RequestSignOffButton";
 
 export const dynamic = "force-dynamic";
 
@@ -102,6 +104,19 @@ export default async function ContractorSharePage({
     orderBy: { createdAt: "desc" },
   });
 
+  // Which live jobs already have a sign-off request logged? Used by the
+  // RequestSignOffButton to show "already requested" state without another
+  // client-side fetch.
+  const liveJobIds = jobs.filter((j) => j.status === "IN_PROGRESS").map((j) => j.id);
+  const signOffRequests = liveJobIds.length > 0
+    ? await prisma.jobAction.findMany({
+        where: { jobId: { in: liveJobIds }, action: "request_signoff" },
+        select: { jobId: true },
+        distinct: ["jobId"],
+      })
+    : [];
+  const requestedJobIds = new Set(signOffRequests.map((r) => r.jobId));
+
   const jobIds = jobs.map((j) => j.id);
   const materialOrders = jobIds.length > 0
     ? await prisma.materialOrder.findMany({
@@ -186,14 +201,17 @@ export default async function ContractorSharePage({
     <div className="min-h-screen bg-slate-50">
       <div className="border-b bg-white px-6 py-4 shadow-sm">
         <div className="mx-auto max-w-2xl">
-          <div className="flex items-center gap-3">
-            <div className="flex size-10 items-center justify-center rounded-full bg-blue-600 text-white">
-              <HardHat className="size-5" />
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="flex size-10 items-center justify-center rounded-full bg-blue-600 text-white">
+                <HardHat className="size-5" />
+              </div>
+              <div>
+                <h1 className="text-lg font-bold">{contact.name}</h1>
+                {contact.company && <p className="text-sm text-muted-foreground">{contact.company}</p>}
+              </div>
             </div>
-            <div>
-              <h1 className="text-lg font-bold">{contact.name}</h1>
-              {contact.company && <p className="text-sm text-muted-foreground">{contact.company}</p>}
-            </div>
+            <PrintButton />
           </div>
           <div className="mt-3 flex flex-wrap items-center gap-4">
             <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
@@ -234,6 +252,13 @@ export default async function ContractorSharePage({
                         <p className="text-sm text-muted-foreground">{plotLabel(job.plot)}</p>
                       </div>
                       <p className="text-sm text-muted-foreground">Due {fmtDate(job.endDate)}</p>
+                    </div>
+                    <div className="mt-2 flex justify-end">
+                      <RequestSignOffButton
+                        token={token}
+                        jobId={job.id}
+                        alreadyRequested={requestedJobIds.has(job.id)}
+                      />
                     </div>
                   </div>
                 ))}

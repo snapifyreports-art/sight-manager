@@ -4,6 +4,7 @@ import { useState, useMemo, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useRefreshOnFocus } from "@/hooks/useRefreshOnFocus";
 import Link from "next/link";
+import { Breadcrumbs } from "@/components/ui/breadcrumbs";
 import { useSearchParams } from "next/navigation";
 import { format, isBefore } from "date-fns";
 import { OrderDetailSheet } from "./OrderDetailSheet";
@@ -915,6 +916,10 @@ export function OrdersClient({
 
   return (
     <div className="space-y-6">
+      <Breadcrumbs items={[
+        { label: "Dashboard", href: "/dashboard" },
+        { label: "Orders" },
+      ]} />
       {/* Page Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
