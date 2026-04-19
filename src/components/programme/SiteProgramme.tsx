@@ -19,6 +19,7 @@ import {
 } from "date-fns";
 import { getCurrentDate, getCurrentDateAtMidnight } from "@/lib/dev-date";
 import { useDevDate } from "@/lib/dev-date-context";
+import { differenceInWorkingDays } from "@/lib/working-days";
 import { Loader2, Columns3, ChevronRight, Download, FileText, Search, X, Camera, StickyNote, CalendarDays, Calendar, Layers, List, CheckSquare, Clock, ZoomIn, ZoomOut, Maximize2, Minimize2, Play } from "lucide-react";
 import Link from "next/link";
 import { getStageCode, getStageColor } from "@/lib/stage-codes";
@@ -1679,11 +1680,45 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                         (c) => jobStart < c.endDate && jobEnd >= c.date
                       );
 
+                      // Total working-day duration of this bar — used below
+                      // in Week view to render partial-week fills for short
+                      // (day-granularity) jobs. A 3-day job fills 60% of a
+                      // week cell instead of the whole thing.
+                      const barWorkingDays = Math.max(1, differenceInWorkingDays(jobEnd, jobStart) + 1);
+
                       const currentCells = columns.map((col, colIdx) => {
                         const overlaps = jobStart < col.endDate && jobEnd >= col.date;
                         if (!overlaps) return null;
 
                         const isFirstJobCell = colIdx === jobFirstColIdx;
+
+                        // Partial-week fill detection. Week view only.
+                        // Working days of this bar that fall within THIS column.
+                        // For single-week jobs shorter than 5 WDs we show a
+                        // shorter bar aligned to the start of the cell.
+                        let partialWidth: number | null = null;
+                        let partialLeft = 0;
+                        if (viewMode === "week") {
+                          // Start of this column's bar portion = max(jobStart, col.date)
+                          const cellStart = col.date > jobStart ? col.date : jobStart;
+                          const cellEnd = col.endDate < jobEnd ? col.endDate : jobEnd;
+                          // Clamp to column edges, compute working days in this cell.
+                          const daysInCell = Math.max(
+                            1,
+                            differenceInWorkingDays(cellEnd, cellStart) + 1
+                          );
+                          // If the bar doesn't fill the full 5 working days
+                          // of the column, render a proportional width.
+                          if (daysInCell < 5 || barWorkingDays < 5) {
+                            const fullInner = cellWidth - 2;
+                            partialWidth = Math.max(8, (fullInner * daysInCell) / 5);
+                            // Offset from left when job starts mid-week —
+                            // how many working days are we into the column.
+                            const leadIn = differenceInWorkingDays(cellStart, col.date);
+                            partialLeft = Math.max(0, (fullInner * leadIn) / 5);
+                          }
+                        }
+                        void partialLeft; // applied in the wrapper div below
                         const colDateStr = format(col.date, "yyyy-MM-dd");
                         const colEndStr = format(col.endDate, "yyyy-MM-dd");
                         const isDotCol = job._dotStartDates
@@ -1755,7 +1790,15 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                                 })()
                               }`}
                               style={{
-                                width: cellWidth - 2,
+                                // Partial-week fills: if this column holds only
+                                // a fraction of a 5-WD week (because the job is
+                                // a day-granularity sub-job or spans mid-week),
+                                // shrink the bar + offset from the left. Keeps
+                                // day-precision visible in Week view without
+                                // needing to switch to Day view.
+                                position: partialWidth !== null ? "absolute" : "relative",
+                                ...(partialWidth !== null ? { left: partialLeft } : {}),
+                                width: partialWidth !== null ? partialWidth : cellWidth - 2,
                                 height: ROW_HEIGHT - 6,
                                 backgroundColor: (() => {
                                   if (!job.weatherAffected || viewMode !== "day") return colors.bg;
