@@ -29,6 +29,7 @@ import {
 } from "@/components/ui/sheet";
 import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 import { OrderStatusBadge } from "@/components/shared/StatusBadge";
+import { HelpTip } from "@/components/shared/HelpTip";
 import { useOrderStatus } from "@/hooks/useOrderStatus";
 import { useOrderEmail } from "@/hooks/useOrderEmail";
 import { useConfirmAction } from "@/hooks/useConfirmAction";
@@ -278,6 +279,12 @@ export function OrderDetailSheet({
     <>
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="right" className="sm:max-w-lg overflow-y-auto">
+        <HelpTip title="About Orders" anchor="below-left">
+          <p><strong>What it does:</strong> captures a single materials or services order from a supplier — items, quantities, dates, and the job it feeds.</p>
+          <p><strong>Lifecycle:</strong> <strong>PENDING</strong> → <strong>ORDERED</strong> (sent to supplier) → <strong>DELIVERED</strong> (received on site). <strong>CANCELLED</strong> is a dead end.</p>
+          <p><strong>Why dates matter:</strong> <em>Order Date</em> and <em>Expected Delivery</em> are tied to the linked job&apos;s start — when the job shifts, the order shifts with it (cascade). That&apos;s why manual date edits here are rare.</p>
+          <p><strong>Gotcha:</strong> marking as DELIVERED stamps the current date — only use it when materials are actually on site, not when you plan to receive them.</p>
+        </HelpTip>
         <SheetHeader>
           <div className="flex items-center gap-2">
             <OrderStatusBadge status={order.status} />
