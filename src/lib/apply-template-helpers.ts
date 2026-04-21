@@ -96,13 +96,41 @@ export async function createJobsFromTemplate(
   for (const templateJob of templateJobs) {
     if (templateJob.children && templateJob.children.length > 0) {
       // HIERARCHICAL: create a REAL parent Job row, then children with parentId set.
-      // Parent's dates span from the earliest child start to the latest child end.
-      const childWindows = templateJob.children.map((c) => ({
-        start: snapToWorkingDay(addWeeks(plotStartDate, c.startWeek - 1), "forward"),
-        end: computeJobEndDate(plotStartDate, c.startWeek, c.endWeek, c.durationDays ?? null),
-      }));
-      const parentStart = new Date(Math.min(...childWindows.map((w) => w.start.getTime())));
-      const parentEnd = new Date(Math.max(...childWindows.map((w) => w.end.getTime())));
+      //
+      // Keith Apr 2026 model: children cascade SEQUENTIALLY in sortOrder.
+      // Previously each child's startWeek/endWeek on the template dictated
+      // its position, which let templates author overlapping or gapped
+      // children — confusing and not what users want. Now:
+      //   - Anchor point = plot-start + parent.startWeek-1 (parent offset)
+      //   - First child starts at the anchor (snapped to working day)
+      //   - Each subsequent child starts the working day after the prev
+      //     child ends
+      //   - Child duration = durationDays (or durationWeeks × 5 fallback)
+      //   - Parent span = first child start → last child end
+      const parentAnchor = snapToWorkingDay(
+        addWeeks(plotStartDate, templateJob.startWeek - 1),
+        "forward",
+      );
+      const sortedChildren = [...templateJob.children].sort(
+        (a, b) => a.sortOrder - b.sortOrder
+      );
+      const childWindows: Array<{ start: Date; end: Date }> = [];
+      let cursor = parentAnchor;
+      for (const c of sortedChildren) {
+        const durationDays =
+          c.durationDays && c.durationDays > 0
+            ? c.durationDays
+            : c.durationWeeks && c.durationWeeks > 0
+              ? c.durationWeeks * 5
+              : 5; // fallback: one working week
+        const jobStart = snapToWorkingDay(cursor, "forward");
+        const jobEnd = addWorkingDays(jobStart, durationDays - 1);
+        childWindows.push({ start: jobStart, end: jobEnd });
+        // Next child starts one working day after this one ends.
+        cursor = addWorkingDays(jobEnd, 1);
+      }
+      const parentStart = childWindows[0].start;
+      const parentEnd = childWindows[childWindows.length - 1].end;
 
       const parentJob = await tx.job.create({
         data: {
@@ -144,9 +172,11 @@ export async function createJobsFromTemplate(
         );
       }
 
-      // Create child Jobs with parentId pointing at the real parent
-      for (let i = 0; i < templateJob.children.length; i++) {
-        const child = templateJob.children[i];
+      // Create child Jobs with parentId pointing at the real parent.
+      // Iterate sortedChildren so the childWindows array lines up with
+      // each child 1:1 (sortedChildren[i] ↔ childWindows[i]).
+      for (let i = 0; i < sortedChildren.length; i++) {
+        const child = sortedChildren[i];
         const { start: jobStartDate, end: jobEndDate } = childWindows[i];
 
         const job = await tx.job.create({

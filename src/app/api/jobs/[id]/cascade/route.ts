@@ -21,7 +21,7 @@ export const dynamic = "force-dynamic";
  * recomputed separately, causing duration drift.
  */
 
-function buildCascadeArgs(allPlotJobs: Array<{ id: string; name: string; startDate: Date | null; endDate: Date | null; sortOrder: number; status: string }>, allOrders: Array<{ id: string; jobId: string | null; dateOfOrder: Date; expectedDeliveryDate: Date | null; status: string }>) {
+function buildCascadeArgs(allPlotJobs: Array<{ id: string; name: string; startDate: Date | null; endDate: Date | null; sortOrder: number; status: string; parentId?: string | null }>, allOrders: Array<{ id: string; jobId: string | null; dateOfOrder: Date; expectedDeliveryDate: Date | null; status: string }>) {
   return {
     jobs: allPlotJobs.map((j) => ({
       id: j.id,
@@ -30,6 +30,12 @@ function buildCascadeArgs(allPlotJobs: Array<{ id: string; name: string; startDa
       endDate: j.endDate,
       sortOrder: j.sortOrder,
       status: j.status,
+      // Pass parentId so the cascade engine can treat parent stages as
+      // aggregates (re-derived from children) rather than independently
+      // shifted jobs. Keith Apr 2026: Brickwork parent kept flagging
+      // "would start in the past" because the engine was shifting it
+      // by the full -N WD delta from its own current start.
+      parentId: j.parentId ?? null,
     })),
     orders: allOrders.map((o) => ({
       id: o.id,

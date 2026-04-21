@@ -29,6 +29,10 @@ interface CascadeJob {
   sortOrder: number;
   /** Optional — when provided, COMPLETED jobs are excluded per I4. */
   status?: string;
+  /** Parent job id (for sub-jobs) — when provided, parents are NOT
+   *  independently shifted; their dates are re-derived from their
+   *  (moved) children after the child shift is computed. */
+  parentId?: string | null;
 }
 
 interface CascadeOrder {
@@ -122,11 +126,29 @@ export function calculateCascade(
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
+  // Parent jobs are aggregates — their dates are MIN/MAX of their children.
+  // Shifting them independently is wrong: a parent whose first child is
+  // still in the future can have a startDate that matches that child's
+  // startDate, but when the cascade shifts the parent by -N working days
+  // it can land in the past even though NO child actually ends up past.
+  // Keith hit exactly this on Plot 17 "Brickwork — would start in the past".
+  //
+  // Fix: identify parents (jobs that have at least one child in the plot's
+  // job list), exclude them from the per-job shift, then re-derive their
+  // new start/end from the children's new positions after the main loop.
+  const parentIds = new Set<string>();
+  for (const j of allPlotJobs) {
+    if (j.parentId) parentIds.add(j.parentId);
+  }
+  const isParent = (job: CascadeJob) => parentIds.has(job.id);
+
   // Build the set of jobs to shift. The trigger is always in; downstream is
   // by sortOrder, plus stage-sibling catch for pull-forward.
   const triggerStart = trigger.startDate;
   const jobsToShift = allPlotJobs.filter((j) => {
     if (j.status === "COMPLETED") return false;
+    // Parents never shift independently — re-derived below.
+    if (isParent(j)) return false;
     if (j.id === triggerJobId) return true;
     if (!j.startDate || !j.endDate) return false;
     if (j.sortOrder > trigger.sortOrder) return true;
@@ -137,6 +159,9 @@ export function calculateCascade(
   const jobUpdates: CascadeJobUpdate[] = [];
   const orderUpdates: CascadeOrderUpdate[] = [];
   const conflicts: CascadeConflict[] = [];
+
+  // Track every child's new position for later parent re-derivation.
+  const newPositionsById = new Map<string, { newStart: Date; newEnd: Date }>();
 
   for (const job of jobsToShift) {
     if (!job.startDate || !job.endDate) continue;
@@ -160,6 +185,7 @@ export function calculateCascade(
       });
     }
 
+    newPositionsById.set(job.id, { newStart, newEnd });
     jobUpdates.push({
       jobId: job.id,
       jobName: job.name,
@@ -200,6 +226,36 @@ export function calculateCascade(
         newDeliveryDate,
       });
     }
+  }
+
+  // Re-derive parent dates from their (moved) children. A parent's new
+  // startDate = min of its children's new starts, endDate = max of its
+  // children's new ends. If a parent's children didn't move, the parent
+  // doesn't move either. Parents are NEVER flagged job_in_past — they
+  // inherit validity from their children.
+  for (const parent of allPlotJobs) {
+    if (!isParent(parent)) continue;
+    if (parent.status === "COMPLETED") continue;
+
+    // Children of this parent that got moved.
+    const movedChildren = allPlotJobs
+      .filter((c) => c.parentId === parent.id)
+      .map((c) => newPositionsById.get(c.id))
+      .filter((pos): pos is { newStart: Date; newEnd: Date } => !!pos);
+
+    if (movedChildren.length === 0) continue;
+
+    const newStart = new Date(Math.min(...movedChildren.map((p) => p.newStart.getTime())));
+    const newEnd = new Date(Math.max(...movedChildren.map((p) => p.newEnd.getTime())));
+
+    jobUpdates.push({
+      jobId: parent.id,
+      jobName: parent.name,
+      originalStart: parent.startDate,
+      originalEnd: parent.endDate,
+      newStart,
+      newEnd,
+    });
   }
 
   return { deltaDays, jobUpdates, orderUpdates, conflicts };
