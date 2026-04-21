@@ -296,9 +296,11 @@ export function useJobAction(
     }
     setPullForwardFeasibility({ status: "checking" });
     // Default custom date = today (max pull). User can bump it later.
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    setCustomPullDate(today.toISOString().split("T")[0]);
+    // IMPORTANT: use date-fns format() which respects the local timezone.
+    // toISOString() converts to UTC and in BST (UTC+1) "today 00:00 local"
+    // is "yesterday 23:00 UTC" → picker defaulted to yesterday. Bug report
+    // filed by Keith while testing the dialog.
+    setCustomPullDate(format(new Date(), "yyyy-MM-dd"));
     // Use outer async function so React cleanup works cleanly.
     let cancelled = false;
     (async () => {
@@ -1333,36 +1335,88 @@ export function useJobAction(
           </DialogHeader>
           {earlyStartDialog && (
             <div className="space-y-2">
-              {/* Pull-forward button — disabled if preflight found a
-                  downstream conflict. Reason shown inline so the user
-                  isn't left guessing why it's greyed out. */}
-              <button
-                onClick={handlePullForward}
-                disabled={cascadeLoading || pullForwardFeasibility?.status === "conflict"}
-                className="flex w-full items-start gap-3 rounded-xl border-2 border-blue-200 bg-blue-50 px-4 py-3.5 text-left hover:border-blue-400 hover:bg-blue-100 transition-colors disabled:opacity-60 disabled:hover:border-blue-200 disabled:hover:bg-blue-50"
-              >
-                <span className="mt-0.5 text-lg">⏩</span>
-                <div>
-                  <p className="text-sm font-semibold text-blue-800">
-                    Pull Programme Forward
-                  </p>
-                  <p className="text-xs text-blue-600">
-                    Shift this job and all subsequent jobs{" "}
-                    {earlyStartDialog.daysEarly} working day
-                    {earlyStartDialog.daysEarly !== 1 ? "s" : ""} earlier.
-                  </p>
-                  {pullForwardFeasibility?.status === "checking" && (
-                    <p className="mt-1 flex items-center gap-1 text-[11px] text-blue-500">
-                      <Loader2 className="size-2.5 animate-spin" /> Checking…
-                    </p>
-                  )}
-                  {pullForwardFeasibility?.status === "conflict" && (
-                    <p className="mt-1 text-[11px] font-medium text-red-600">
-                      {pullForwardFeasibility.reason}
-                    </p>
-                  )}
-                </div>
-              </button>
+              {/* Unified Pull Forward — one section. Date picker defaults to
+                  today (= pull fully forward, old "Pull Programme Forward"
+                  button). User can nudge later if a full pull hits a
+                  downstream conflict. Preflight runs on every change. */}
+              {activeJob?.startDate && activeJob?.endDate && (() => {
+                // Local-time formatting — toISOString() was producing
+                // yesterday's date in BST (UTC+1) so the min/max and
+                // default value all came out one day early.
+                const todayISO = format(new Date(), "yyyy-MM-dd");
+                const plannedISO = format(new Date(activeJob.startDate), "yyyy-MM-dd");
+                const atPlanned = customPullDate === plannedISO;
+                const atToday = customPullDate === todayISO;
+                return (
+                  <div className="rounded-xl border-2 border-blue-200 bg-blue-50 px-4 py-3.5">
+                    <div className="flex items-start gap-3">
+                      <span className="mt-0.5 text-lg">⏩</span>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-semibold text-blue-800">
+                          Pull Programme Forward
+                        </p>
+                        <p className="text-xs text-blue-600">
+                          Choose a start date — defaults to today. Everything
+                          downstream shifts by the same number of working days.
+                        </p>
+                        <div className="mt-2 flex items-center gap-2">
+                          <input
+                            type="date"
+                            value={customPullDate}
+                            min={todayISO}
+                            max={plannedISO}
+                            onChange={(e) => setCustomPullDate(e.target.value)}
+                            disabled={cascadeLoading}
+                            className="flex-1 rounded-lg border border-blue-300 bg-white px-2 py-1.5 text-sm"
+                          />
+                          <Button
+                            size="sm"
+                            variant="default"
+                            disabled={
+                              cascadeLoading ||
+                              !customPullDate ||
+                              atPlanned ||
+                              customPullFeasibility?.status === "checking" ||
+                              customPullFeasibility?.status === "conflict"
+                            }
+                            onClick={handlePullToCustomDate}
+                            className="h-8"
+                          >
+                            Apply
+                          </Button>
+                        </div>
+                        {/* Quick reset-to-today button if user bumped the
+                            date and wants to snap back. */}
+                        {!atToday && (
+                          <button
+                            type="button"
+                            onClick={() => setCustomPullDate(todayISO)}
+                            className="mt-1.5 text-[11px] text-blue-700 underline hover:text-blue-900"
+                          >
+                            Reset to today
+                          </button>
+                        )}
+                        {customPullFeasibility?.status === "checking" && (
+                          <p className="mt-1.5 flex items-center gap-1 text-[11px] text-blue-500">
+                            <Loader2 className="size-2.5 animate-spin" /> Checking…
+                          </p>
+                        )}
+                        {customPullFeasibility?.status === "ok" && (
+                          <p className="mt-1.5 text-[11px] font-medium text-emerald-600">
+                            ✓ Safe to pull to this date
+                          </p>
+                        )}
+                        {customPullFeasibility?.status === "conflict" && (
+                          <p className="mt-1.5 text-[11px] font-medium text-red-600">
+                            {customPullFeasibility.reason} Try a later date.
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
               <button
                 onClick={handleExpandJob}
                 disabled={cascadeLoading}
@@ -1396,71 +1450,6 @@ export function useJobAction(
                   </div>
                 </button>
               )}
-
-              {/* Custom date — pick any specific start date. Preflight
-                  runs as the user changes the date so we can show
-                  "Safe to pull here" vs "Conflicts: X" without them
-                  having to click and get a toast error. */}
-              {activeJob?.startDate && activeJob?.endDate && (() => {
-                const todayISO = new Date().toISOString().split("T")[0];
-                const plannedISO = new Date(activeJob.startDate).toISOString().split("T")[0];
-                return (
-                  <div className="rounded-xl border-2 border-slate-200 bg-slate-50 px-4 py-3.5">
-                    <div className="flex items-start gap-3">
-                      <span className="mt-0.5 text-lg">📅</span>
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm font-semibold text-slate-800">
-                          Pull to a Specific Date
-                        </p>
-                        <p className="text-xs text-slate-600">
-                          Choose any start date between today and the planned start.
-                        </p>
-                        <div className="mt-2 flex items-center gap-2">
-                          <input
-                            type="date"
-                            value={customPullDate}
-                            min={todayISO}
-                            max={plannedISO}
-                            onChange={(e) => setCustomPullDate(e.target.value)}
-                            disabled={cascadeLoading}
-                            className="flex-1 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm"
-                          />
-                          <Button
-                            size="sm"
-                            variant="default"
-                            disabled={
-                              cascadeLoading ||
-                              !customPullDate ||
-                              customPullDate === plannedISO ||
-                              customPullFeasibility?.status === "checking" ||
-                              customPullFeasibility?.status === "conflict"
-                            }
-                            onClick={handlePullToCustomDate}
-                            className="h-8"
-                          >
-                            Apply
-                          </Button>
-                        </div>
-                        {customPullFeasibility?.status === "checking" && (
-                          <p className="mt-1.5 flex items-center gap-1 text-[11px] text-slate-500">
-                            <Loader2 className="size-2.5 animate-spin" /> Checking…
-                          </p>
-                        )}
-                        {customPullFeasibility?.status === "ok" && (
-                          <p className="mt-1.5 text-[11px] font-medium text-emerald-600">
-                            ✓ Safe to pull to this date
-                          </p>
-                        )}
-                        {customPullFeasibility?.status === "conflict" && (
-                          <p className="mt-1.5 text-[11px] font-medium text-red-600">
-                            {customPullFeasibility.reason}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })()}
 
               <button
                 onClick={() => { setEarlyStartDialog(null); setActiveJob(null); }}
