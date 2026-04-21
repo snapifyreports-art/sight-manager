@@ -529,7 +529,7 @@ export function TasksClient() {
                       ) : (
                         <CircleCheck className="size-3.5" />
                       )}
-                      <span className="hidden sm:inline">Confirm</span>
+                      <span>Confirm</span>
                     </Button>
                     <Button
                       variant="outline"
@@ -542,7 +542,7 @@ export function TasksClient() {
                       title="Chase supplier via email"
                     >
                       <Mail className="size-3.5" />
-                      <span className="hidden sm:inline">Chase</span>
+                      <span>Chase</span>
                     </Button>
                   </div>
                 );
@@ -621,7 +621,7 @@ export function TasksClient() {
                       title="Delay this job"
                     >
                       <Clock className="size-3.5" />
-                      <span className="hidden sm:inline">Delay</span>
+                      <span>Delay</span>
                     </Button>
                     <Button
                       variant="outline"
@@ -634,7 +634,7 @@ export function TasksClient() {
                       title="Pull this job forward"
                     >
                       <Clock className="size-3.5" />
-                      <span className="hidden sm:inline">Pull</span>
+                      <span>Pull</span>
                     </Button>
                     <Button
                       variant="outline"
@@ -647,7 +647,7 @@ export function TasksClient() {
                       title="Go to job to sign off"
                     >
                       <CheckCircle className="size-3.5" />
-                      <span className="hidden sm:inline">Sign Off</span>
+                      <span>Sign Off</span>
                     </Button>
                   </div>
                 );
@@ -863,7 +863,7 @@ export function TasksClient() {
                         title="Send order to supplier via email"
                       >
                         <Mail className="size-3.5" />
-                        <span className="hidden sm:inline">Send Order</span>
+                        <span>Send Order</span>
                       </Button>
                       <Button
                         variant="outline"
@@ -878,7 +878,7 @@ export function TasksClient() {
                         ) : (
                           <CircleCheck className="size-3.5" />
                         )}
-                        <span className="hidden sm:inline">Mark Sent</span>
+                        <span>Mark Sent</span>
                       </Button>
                     </div>
 
@@ -988,7 +988,7 @@ export function TasksClient() {
                       ) : (
                         <CircleCheck className="size-3.5" />
                       )}
-                      <span className="hidden sm:inline">Confirm</span>
+                      <span>Confirm</span>
                     </Button>
                   </div>
                 );
