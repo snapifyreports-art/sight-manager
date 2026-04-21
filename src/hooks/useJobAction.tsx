@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { differenceInCalendarDays, addDays, format } from "date-fns";
 import { AlertTriangle, Loader2 } from "lucide-react";
 import { addWorkingDays, differenceInWorkingDays, isWorkingDay, snapToWorkingDay } from "@/lib/working-days";
@@ -75,6 +75,18 @@ export function useJobAction(
     nearestEvent?: { date: string; label: string; daysToEvent: number } | null;
     targetDate?: string | null; // if set, pull to this date instead of today (e.g. delivery date)
   } | null>(null);
+  // Pre-flight result for the full Pull Forward shift — if the cascade
+  // would conflict (downstream job would start in the past, or an order
+  // would need placing in the past), we disable the button + explain why
+  // instead of letting the user click and get a toast error.
+  const [pullForwardFeasibility, setPullForwardFeasibility] = useState<
+    { status: "checking" | "ok" | "conflict"; reason?: string } | null
+  >(null);
+  // User-picked custom start date for "Pull to specific date" option.
+  const [customPullDate, setCustomPullDate] = useState<string>("");
+  const [customPullFeasibility, setCustomPullFeasibility] = useState<
+    { status: "checking" | "ok" | "conflict"; reason?: string } | null
+  >(null);
   const [cascadeLoading, setCascadeLoading] = useState(false);
 
   // ---- Late-start dialog ----
@@ -236,6 +248,73 @@ export function useJobAction(
     []
   );
 
+  // ---- Preflight check for Pull Forward ----
+  // Posts to the cascade preview endpoint (no DB writes) to find out if
+  // the proposed shift would hit a conflict (downstream job/order in past).
+  // Returns ok:true if safe, or ok:false with a human-readable reason.
+  const previewPullForward = useCallback(
+    async (jobId: string, endDate: string, daysEarly: number):
+      Promise<{ ok: boolean; reason?: string }> => {
+      try {
+        const newEnd = addWorkingDays(new Date(endDate), -daysEarly)
+          .toISOString()
+          .split("T")[0];
+        const res = await fetch(`/api/jobs/${jobId}/cascade`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ newEndDate: newEnd }),
+        });
+        if (!res.ok) return { ok: false, reason: "Cascade preview failed" };
+        const data = await res.json();
+        if (data.conflicts && data.conflicts.length > 0) {
+          const first = data.conflicts[0];
+          const reason =
+            first.kind === "job_in_past"
+              ? `Shift blocked — "${first.jobName || "a downstream job"}" would start in the past.`
+              : first.kind === "order_in_past"
+                ? `Shift blocked — an order would need placing in the past.`
+                : "Programme conflict";
+          return { ok: false, reason };
+        }
+        return { ok: true };
+      } catch (e) {
+        return { ok: false, reason: e instanceof Error ? e.message : "Preview error" };
+      }
+    },
+    []
+  );
+
+  // ---- Run preflight whenever the early-start dialog opens ----
+  // Resets any stale feasibility when the dialog closes, and seeds the
+  // custom date picker to today (the earliest possible start).
+  useEffect(() => {
+    if (!earlyStartDialog || !activeJob || !activeJob.endDate) {
+      setPullForwardFeasibility(null);
+      setCustomPullFeasibility(null);
+      setCustomPullDate("");
+      return;
+    }
+    setPullForwardFeasibility({ status: "checking" });
+    // Default custom date = today (max pull). User can bump it later.
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    setCustomPullDate(today.toISOString().split("T")[0]);
+    // Use outer async function so React cleanup works cleanly.
+    let cancelled = false;
+    (async () => {
+      const result = await previewPullForward(
+        activeJob.id,
+        activeJob.endDate!,
+        earlyStartDialog.daysEarly
+      );
+      if (cancelled) return;
+      setPullForwardFeasibility(
+        result.ok ? { status: "ok" } : { status: "conflict", reason: result.reason }
+      );
+    })();
+    return () => { cancelled = true; };
+  }, [earlyStartDialog, activeJob, previewPullForward]);
+
   // ---- Pull forward then start ----
   // `daysEarly` is in WORKING days — matches the cascade engine (see
   // docs/cascade-spec.md). Caller computes this via differenceInWorkingDays.
@@ -314,6 +393,48 @@ export function useJobAction(
     const daysToShift = earlyStartDialog.nearestEvent.daysToEvent;
     await executePullForward(activeJob, daysToShift, earlyStartDialog.endDate);
   }, [earlyStartDialog, activeJob, executePullForward]);
+
+  // ---- Custom-date pull forward ----
+  // User picked a specific date. Compute the working-day delta from the
+  // job's planned start to that date, preflight check, then apply if safe.
+  const handlePullToCustomDate = useCallback(async () => {
+    if (!earlyStartDialog || !activeJob || !activeJob.endDate || !customPullDate) return;
+    const planned = new Date(activeJob.startDate ?? activeJob.endDate);
+    planned.setHours(0, 0, 0, 0);
+    const chosen = new Date(customPullDate);
+    chosen.setHours(0, 0, 0, 0);
+    const delta = differenceInWorkingDays(planned, chosen);
+    if (delta <= 0) return; // No shift needed (chosen >= planned)
+    await executePullForward(activeJob, delta, earlyStartDialog.endDate);
+  }, [earlyStartDialog, activeJob, customPullDate, executePullForward]);
+
+  // Re-run preflight when user changes the custom date.
+  useEffect(() => {
+    if (!earlyStartDialog || !activeJob || !activeJob.endDate || !customPullDate || !activeJob.startDate) {
+      setCustomPullFeasibility(null);
+      return;
+    }
+    const planned = new Date(activeJob.startDate);
+    planned.setHours(0, 0, 0, 0);
+    const chosen = new Date(customPullDate);
+    chosen.setHours(0, 0, 0, 0);
+    const delta = differenceInWorkingDays(planned, chosen);
+    if (delta <= 0) {
+      // Chosen date is on/after planned start — nothing to do
+      setCustomPullFeasibility(null);
+      return;
+    }
+    setCustomPullFeasibility({ status: "checking" });
+    let cancelled = false;
+    (async () => {
+      const result = await previewPullForward(activeJob.id, activeJob.endDate!, delta);
+      if (cancelled) return;
+      setCustomPullFeasibility(
+        result.ok ? { status: "ok" } : { status: "conflict", reason: result.reason }
+      );
+    })();
+    return () => { cancelled = true; };
+  }, [customPullDate, earlyStartDialog, activeJob, previewPullForward]);
 
   const handlePreStartConfirm = useCallback(async () => {
     if (!preStartChecks || !activeJob) return;
@@ -1202,7 +1323,7 @@ export function useJobAction(
                   <span className="font-medium">{activeJob?.name}</span> is
                   planned to start in{" "}
                   <span className="font-semibold text-blue-600">
-                    {earlyStartDialog.daysEarly} day
+                    {earlyStartDialog.daysEarly} working day
                     {earlyStartDialog.daysEarly !== 1 ? "s" : ""}
                   </span>
                   . How would you like to handle the programme?
@@ -1212,10 +1333,13 @@ export function useJobAction(
           </DialogHeader>
           {earlyStartDialog && (
             <div className="space-y-2">
+              {/* Pull-forward button — disabled if preflight found a
+                  downstream conflict. Reason shown inline so the user
+                  isn't left guessing why it's greyed out. */}
               <button
                 onClick={handlePullForward}
-                disabled={cascadeLoading}
-                className="flex w-full items-start gap-3 rounded-xl border-2 border-blue-200 bg-blue-50 px-4 py-3.5 text-left hover:border-blue-400 hover:bg-blue-100 transition-colors disabled:opacity-60"
+                disabled={cascadeLoading || pullForwardFeasibility?.status === "conflict"}
+                className="flex w-full items-start gap-3 rounded-xl border-2 border-blue-200 bg-blue-50 px-4 py-3.5 text-left hover:border-blue-400 hover:bg-blue-100 transition-colors disabled:opacity-60 disabled:hover:border-blue-200 disabled:hover:bg-blue-50"
               >
                 <span className="mt-0.5 text-lg">⏩</span>
                 <div>
@@ -1224,9 +1348,19 @@ export function useJobAction(
                   </p>
                   <p className="text-xs text-blue-600">
                     Shift this job and all subsequent jobs{" "}
-                    {earlyStartDialog.daysEarly} day
+                    {earlyStartDialog.daysEarly} working day
                     {earlyStartDialog.daysEarly !== 1 ? "s" : ""} earlier.
                   </p>
+                  {pullForwardFeasibility?.status === "checking" && (
+                    <p className="mt-1 flex items-center gap-1 text-[11px] text-blue-500">
+                      <Loader2 className="size-2.5 animate-spin" /> Checking…
+                    </p>
+                  )}
+                  {pullForwardFeasibility?.status === "conflict" && (
+                    <p className="mt-1 text-[11px] font-medium text-red-600">
+                      {pullForwardFeasibility.reason}
+                    </p>
+                  )}
                 </div>
               </button>
               <button
@@ -1257,11 +1391,77 @@ export function useJobAction(
                       Pull to Next Event
                     </p>
                     <p className="text-xs text-purple-600">
-                      Shift to align with {earlyStartDialog.nearestEvent.label} ({earlyStartDialog.nearestEvent.daysToEvent} day{earlyStartDialog.nearestEvent.daysToEvent !== 1 ? "s" : ""} from now).
+                      Shift to align with {earlyStartDialog.nearestEvent.label} ({earlyStartDialog.nearestEvent.daysToEvent} working day{earlyStartDialog.nearestEvent.daysToEvent !== 1 ? "s" : ""} from now).
                     </p>
                   </div>
                 </button>
               )}
+
+              {/* Custom date — pick any specific start date. Preflight
+                  runs as the user changes the date so we can show
+                  "Safe to pull here" vs "Conflicts: X" without them
+                  having to click and get a toast error. */}
+              {activeJob?.startDate && activeJob?.endDate && (() => {
+                const todayISO = new Date().toISOString().split("T")[0];
+                const plannedISO = new Date(activeJob.startDate).toISOString().split("T")[0];
+                return (
+                  <div className="rounded-xl border-2 border-slate-200 bg-slate-50 px-4 py-3.5">
+                    <div className="flex items-start gap-3">
+                      <span className="mt-0.5 text-lg">📅</span>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-semibold text-slate-800">
+                          Pull to a Specific Date
+                        </p>
+                        <p className="text-xs text-slate-600">
+                          Choose any start date between today and the planned start.
+                        </p>
+                        <div className="mt-2 flex items-center gap-2">
+                          <input
+                            type="date"
+                            value={customPullDate}
+                            min={todayISO}
+                            max={plannedISO}
+                            onChange={(e) => setCustomPullDate(e.target.value)}
+                            disabled={cascadeLoading}
+                            className="flex-1 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm"
+                          />
+                          <Button
+                            size="sm"
+                            variant="default"
+                            disabled={
+                              cascadeLoading ||
+                              !customPullDate ||
+                              customPullDate === plannedISO ||
+                              customPullFeasibility?.status === "checking" ||
+                              customPullFeasibility?.status === "conflict"
+                            }
+                            onClick={handlePullToCustomDate}
+                            className="h-8"
+                          >
+                            Apply
+                          </Button>
+                        </div>
+                        {customPullFeasibility?.status === "checking" && (
+                          <p className="mt-1.5 flex items-center gap-1 text-[11px] text-slate-500">
+                            <Loader2 className="size-2.5 animate-spin" /> Checking…
+                          </p>
+                        )}
+                        {customPullFeasibility?.status === "ok" && (
+                          <p className="mt-1.5 text-[11px] font-medium text-emerald-600">
+                            ✓ Safe to pull to this date
+                          </p>
+                        )}
+                        {customPullFeasibility?.status === "conflict" && (
+                          <p className="mt-1.5 text-[11px] font-medium text-red-600">
+                            {customPullFeasibility.reason}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
               <button
                 onClick={() => { setEarlyStartDialog(null); setActiveJob(null); }}
                 disabled={cascadeLoading}
