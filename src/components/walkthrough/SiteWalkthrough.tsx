@@ -836,7 +836,7 @@ export default function SiteWalkthrough({
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-2 text-sm">
+                    <div className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
                       {job.contractorName && (
                         <Link
                           href={`/sites/${siteId}?tab=contractor-comms`}
@@ -1333,7 +1333,7 @@ export default function SiteWalkthrough({
                 className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               <div>
                 <label className="mb-1 block text-xs font-medium text-muted-foreground">Priority</label>
                 <select

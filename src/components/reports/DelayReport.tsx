@@ -299,9 +299,9 @@ export function DelayReport({ siteId }: DelayReportProps) {
         </div>
       </div>
 
-      {/* Plot filter */}
+      {/* Plot filter — interactive control, skip on print */}
       {plots.length > 0 && (
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 print:hidden">
           <span className="text-xs font-medium text-muted-foreground">Filter plots:</span>
           <button
             onClick={() => setSelectedPlots(new Set())}

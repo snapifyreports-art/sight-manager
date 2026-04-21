@@ -465,7 +465,7 @@ export function ContractorDaySheets({ siteId }: ContractorDaySheetsProps) {
       {/* Date nav + print */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="icon" onClick={prevDay}>
+          <Button variant="outline" size="icon" onClick={prevDay} className="print:hidden">
             <ChevronLeft className="size-4" />
           </Button>
           <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
@@ -486,13 +486,13 @@ export function ContractorDaySheets({ siteId }: ContractorDaySheetsProps) {
               />
             </PopoverContent>
           </Popover>
-          <Button variant="outline" size="icon" onClick={nextDay}>
+          <Button variant="outline" size="icon" onClick={nextDay} className="print:hidden">
             <ChevronRight className="size-4" />
           </Button>
         </div>
         <div className="flex items-center gap-2">
           <Badge variant="secondary">{totalJobs} jobs across {totalSheets} sheets</Badge>
-          <Button variant="outline" size="sm" onClick={goToday}>
+          <Button variant="outline" size="sm" onClick={goToday} className="print:hidden">
             Today
           </Button>
           <Button

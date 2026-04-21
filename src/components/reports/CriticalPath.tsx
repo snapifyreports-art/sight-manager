@@ -344,7 +344,10 @@ export function CriticalPath({ siteId }: CriticalPathProps) {
               </div>
             </button>
 
-            {isExpanded && jobs.length > 0 && (
+            {/* Always-in-DOM so print output includes every plot's bar chart
+                even when collapsed on screen (print:block overrides hidden). */}
+            {jobs.length > 0 && (
+              <div className={isExpanded ? "" : "hidden print:block"}>
               <CardContent className="border-t pt-3">
                 {/* Gantt-like bar chart */}
                 <div className="space-y-1.5">
@@ -414,6 +417,7 @@ export function CriticalPath({ siteId }: CriticalPathProps) {
                 </div>
 
               </CardContent>
+              </div>
             )}
           </Card>
         );

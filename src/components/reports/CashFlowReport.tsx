@@ -150,7 +150,7 @@ export function CashFlowReport({ siteId }: { siteId: string }) {
     <div className="space-y-4">
       {/* Date mode toggle + exports */}
       <div className="flex flex-wrap items-center justify-between gap-3">
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 print:hidden">
         <div className="flex items-center gap-1 rounded-lg border p-0.5">
           <button
             onClick={() => setDateMode("current")}
