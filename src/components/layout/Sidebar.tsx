@@ -162,11 +162,23 @@ function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: boolean; on
       .then((r) => r.json())
       .then((data) => {
         if (Array.isArray(data)) {
-          setSites(data.map((s: { id: string; name: string; status: string }) => ({
+          const list = data.map((s: { id: string; name: string; status: string }) => ({
             id: s.id,
             name: s.name,
             status: s.status,
-          })));
+          }));
+          setSites(list);
+          // Clean up stale localStorage — if the stored "last site" no longer
+          // exists (deleted or user lost access), forget it. Otherwise the
+          // sidebar builds dead links and every click 404s.
+          const ids = new Set(list.map((s) => s.id));
+          setFallbackSiteId((prev) => {
+            if (prev && !ids.has(prev)) {
+              try { localStorage.removeItem("sight-manager-last-site"); } catch {}
+              return "";
+            }
+            return prev;
+          });
         }
       })
       .catch(() => {});
@@ -176,7 +188,14 @@ function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: boolean; on
   // then ?site= query param, then the localStorage-seeded fallback.
   const siteFromQuery = searchParams.get("site");
   const effectiveSiteId = siteIdFromPath || siteFromQuery || fallbackSiteId;
-  const selectedSiteId = effectiveSiteId;
+  // Only trust effectiveSiteId if it's in the fetched list (sites may have
+  // been deleted since localStorage was written). `sites` starts empty before
+  // the fetch resolves — during that window, trust effectiveSiteId optimistically
+  // so nav doesn't flash-hide.
+  const selectedSiteId =
+    effectiveSiteId && (sites.length === 0 || sites.some((s) => s.id === effectiveSiteId))
+      ? effectiveSiteId
+      : "";
 
   // Persist any new siteId to localStorage so global pages remember it when
   // the user navigates away. This is a pure side-effect (localStorage write,
@@ -256,10 +275,13 @@ function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: boolean; on
       <ScrollArea className="flex-1 overflow-hidden py-2">
         <nav className={cn("flex flex-col gap-0.5", collapsed ? "px-2" : "px-3")}>
 
-          {/* Site section groups — styled like regular nav, shown when site selected */}
-          {!collapsed && selectedSiteId && SITE_TAB_GROUPS.map((group) => {
+          {/* Site section groups — always rendered so users can see what's
+              available. When no site is picked, the sub-items link to
+              /sites?pickFor=<tab> and the sites page redirects to the chosen
+              site's tab after picking. */}
+          {!collapsed && SITE_TAB_GROUPS.map((group) => {
             const isOpen = openGroups.has(group.label);
-            const hasActive = siteIdFromPath === selectedSiteId &&
+            const hasActive = !!selectedSiteId && siteIdFromPath === selectedSiteId &&
               group.tabs.some((t) => t.tab === currentTab);
             return (
               <div key={group.label} className="relative">
@@ -288,8 +310,10 @@ function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: boolean; on
                 {isOpen && (
                   <div className="mb-1 pl-9">
                     {group.tabs.map((t) => {
-                      const href = `/sites/${selectedSiteId}?tab=${t.tab}`;
-                      const isActive = siteIdFromPath === selectedSiteId && currentTab === t.tab;
+                      const href = selectedSiteId
+                        ? `/sites/${selectedSiteId}?tab=${t.tab}`
+                        : `/sites?pickFor=${t.tab}`;
+                      const isActive = !!selectedSiteId && siteIdFromPath === selectedSiteId && currentTab === t.tab;
                       return (
                         <Link
                           key={t.tab}
@@ -312,16 +336,21 @@ function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: boolean; on
             );
           })}
 
-          {/* Walkthrough — standalone prominent button when site selected */}
-          {!collapsed && selectedSiteId && (() => {
-            const isActive = pathname === `/sites/${siteIdFromPath}/walkthrough`;
+          {/* Walkthrough — standalone prominent button. When no site is
+              picked it sends the user to /sites?pickFor=walkthrough so the
+              picker page can forward them to the chosen site's walkthrough. */}
+          {!collapsed && (() => {
+            const isActive = !!selectedSiteId && pathname === `/sites/${siteIdFromPath}/walkthrough`;
+            const walkthroughHref = selectedSiteId
+              ? `/sites/${selectedSiteId}/walkthrough`
+              : `/sites?pickFor=walkthrough`;
             return (
               <div className="relative my-1">
                 {isActive && (
                   <div className="absolute left-0 h-6 w-[3px] rounded-r-full bg-blue-600 top-[10px]" />
                 )}
                 <Link
-                  href={`/sites/${selectedSiteId}/walkthrough`}
+                  href={walkthroughHref}
                   onClick={onNavigate}
                   className={cn(
                     "group flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-[13px] font-semibold transition-all duration-150",
@@ -341,7 +370,7 @@ function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: boolean; on
           })()}
 
           {/* Divider before main nav */}
-          {!collapsed && selectedSiteId && <div className="my-1 border-t border-border/40" />}
+          {!collapsed && <div className="my-1 border-t border-border/40" />}
 
           {/* Main nav items — site-contextual */}
           {navItems.filter((item) => {
@@ -489,7 +518,20 @@ function renderNavItem(
 }
 
 export function Sidebar() {
-  const [collapsed, setCollapsed] = useState(false);
+  // Persist across navigations — React useState resets on every page load, so
+  // without localStorage the sidebar snapped back to expanded every click,
+  // which felt like the collapse button was "broken".
+  const [collapsed, setCollapsed] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    try { return localStorage.getItem("sight-manager-sidebar-collapsed") === "1"; } catch { return false; }
+  });
+  const toggleCollapsed = () => {
+    setCollapsed((prev) => {
+      const next = !prev;
+      try { localStorage.setItem("sight-manager-sidebar-collapsed", next ? "1" : "0"); } catch {}
+      return next;
+    });
+  };
 
   return (
     <aside
@@ -503,11 +545,14 @@ export function Sidebar() {
           <SidebarNav collapsed={collapsed} />
         </Suspense>
       </div>
-      <Button
-        variant="outline"
-        size="icon-xs"
-        className="absolute -right-3 top-[22px] z-20 rounded-full border bg-white shadow-sm transition-shadow hover:shadow-md"
-        onClick={() => setCollapsed(!collapsed)}
+      {/* Collapse toggle — sits slightly outside the sidebar's right edge.
+          z-30 + bg-white to guarantee it paints above the main content. */}
+      <button
+        type="button"
+        aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+        title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+        onClick={toggleCollapsed}
+        className="absolute -right-3 top-[22px] z-30 flex size-6 items-center justify-center rounded-full border border-border bg-white shadow-sm transition-shadow hover:shadow-md"
       >
         <ChevronLeft
           className={cn(
@@ -515,7 +560,7 @@ export function Sidebar() {
             collapsed && "rotate-180"
           )}
         />
-      </Button>
+      </button>
     </aside>
   );
 }

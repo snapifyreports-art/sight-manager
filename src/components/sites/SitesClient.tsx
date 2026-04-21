@@ -1,9 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { format } from "date-fns";
-import { Plus, Building2, MapPin, FolderOpen, Trash2, Loader2 } from "lucide-react";
+import { AlertCircle, Plus, Building2, MapPin, FolderOpen, Trash2, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -92,8 +92,31 @@ export function SitesClient({
 }) {
   const router = useRouter();
   const toast = useToast();
+  const searchParams = useSearchParams();
   const [sites, setSites] = useState(initialSites);
   const [dialogOpen, setDialogOpen] = useState(false);
+
+  // When the sidebar sent the user here without a site picked (e.g. they
+  // clicked "Programme" with no site selected), `?pickFor=<tab>` tells us
+  // which tab to forward them to after they pick. Pretty-label for the
+  // banner so they know why they're on this page.
+  const pickFor = searchParams.get("pickFor");
+  const pickForLabel = pickFor
+    ? pickFor
+        .split("-")
+        .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+        .join(" ")
+    : null;
+
+  const goToSite = (siteId: string) => {
+    if (pickFor === "walkthrough") {
+      router.push(`/sites/${siteId}/walkthrough`);
+    } else if (pickFor) {
+      router.push(`/sites/${siteId}?tab=${pickFor}`);
+    } else {
+      router.push(`/sites/${siteId}`);
+    }
+  };
 
   // Confirm-delete shared via useConfirmAction
   const { confirmAction, dialogs: confirmDialogs } = useConfirmAction();
@@ -140,6 +163,22 @@ export function SitesClient({
 
   return (
     <div className="space-y-6">
+      {/* Pick-a-site banner — shown when the user arrived here via a sidebar
+          link that needs a site context (e.g. clicked "Programme" with no
+          site selected). Explains why they're here rather than on the tab
+          they expected. */}
+      {pickForLabel && (
+        <div className="flex items-start gap-3 rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
+          <AlertCircle className="mt-0.5 size-4 shrink-0 text-blue-600" />
+          <div>
+            <p className="font-medium">Pick a site to view its {pickForLabel}</p>
+            <p className="text-xs text-blue-800/80">
+              Click any site below and you&apos;ll land on {pickForLabel} for that site.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Page Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -195,7 +234,7 @@ export function SitesClient({
               <Card
                 key={site.id}
                 className="group cursor-pointer overflow-hidden border-border/50 bg-white shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md"
-                onClick={() => router.push(`/sites/${site.id}`)}
+                onClick={() => goToSite(site.id)}
               >
                 <CardHeader>
                   <div className="flex items-start justify-between gap-2">
