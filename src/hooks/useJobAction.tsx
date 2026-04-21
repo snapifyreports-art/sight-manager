@@ -257,8 +257,7 @@ export function useJobAction(
       Promise<{ ok: boolean; reason?: string }> => {
       try {
         const newEnd = addWorkingDays(new Date(endDate), -daysEarly)
-          .toISOString()
-          .split("T")[0];
+          .toLocaleDateString("en-CA");
         const res = await fetch(`/api/jobs/${jobId}/cascade`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -327,8 +326,7 @@ export function useJobAction(
       try {
         if (endDate) {
           const newEnd = addWorkingDays(new Date(endDate), -daysEarly)
-            .toISOString()
-            .split("T")[0];
+            .toLocaleDateString("en-CA");
           console.log("[CASCADE] Calling cascade PUT:", { jobId: job.id, newEnd });
           const cascadeRes = await fetch(`/api/jobs/${job.id}/cascade`, {
             method: "PUT",
