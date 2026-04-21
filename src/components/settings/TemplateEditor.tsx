@@ -101,6 +101,10 @@ export function TemplateEditor({
   const [jobWeatherAffectedType, setJobWeatherAffectedType] = useState<"RAIN" | "TEMPERATURE" | "BOTH" | null>(null);
   const [jobContractorId, setJobContractorId] = useState("");
   const [savingJob, setSavingJob] = useState(false);
+  // Keith Apr 2026 model: a job either has sub-jobs (duration auto-calc)
+  // or is atomic (user sets duration directly). Ticked when the user
+  // opts in to direct duration on a currently-childless job.
+  const [jobIsAtomic, setJobIsAtomic] = useState(false);
 
   // Add Stage dialog
   const [stageDialogOpen, setStageDialogOpen] = useState(false);
@@ -298,6 +302,74 @@ export function TemplateEditor({
     setDraggedJobId(null);
     setDragOverJobId(null);
     void persistStageOrder(stages);
+  }
+
+  // Sub-job drop handler — reorders children within the same parent. If
+  // user drags a sub-job onto a sub-job with a DIFFERENT parent, we reject
+  // (keeps stage groupings clean; user should edit the sub-job to move it
+  // across stages rather than drag).
+  function handleSubJobDrop(target: TemplateJobData) {
+    if (!draggedJobId || draggedJobId === target.id) {
+      setDraggedJobId(null);
+      setDragOverJobId(null);
+      return;
+    }
+    // Find the dragged sub-job across all parents
+    type FlatSub = { sub: TemplateJobData; parent: TemplateJobData };
+    const flatSubs: FlatSub[] = [];
+    for (const p of template.jobs) {
+      for (const c of p.children ?? []) flatSubs.push({ sub: c, parent: p });
+    }
+    const draggedEntry = flatSubs.find((e) => e.sub.id === draggedJobId);
+    if (!draggedEntry) {
+      setDraggedJobId(null);
+      setDragOverJobId(null);
+      return;
+    }
+    if (draggedEntry.parent.id !== target.parentId) {
+      toast.error("Drag only within the same stage. To move a sub-job across stages, edit it.");
+      setDraggedJobId(null);
+      setDragOverJobId(null);
+      return;
+    }
+    const parentIdx = template.jobs.findIndex((p) => p.id === draggedEntry.parent.id);
+    if (parentIdx < 0) return;
+    const parent = template.jobs[parentIdx];
+    const children = [...(parent.children ?? [])];
+    const fromIdx = children.findIndex((c) => c.id === draggedJobId);
+    const toIdx = children.findIndex((c) => c.id === target.id);
+    if (fromIdx < 0 || toIdx < 0) return;
+    const [moved] = children.splice(fromIdx, 1);
+    children.splice(toIdx, 0, moved);
+    // Optimistic local update
+    const updatedJobs = [...template.jobs];
+    updatedJobs[parentIdx] = { ...parent, children };
+    onUpdate({ ...template, jobs: updatedJobs });
+    setDraggedJobId(null);
+    setDragOverJobId(null);
+    // Persist: write new sortOrder for each child
+    void persistSubJobOrder(parent.id, children);
+  }
+
+  async function persistSubJobOrder(parentId: string, orderedChildren: TemplateJobData[]) {
+    try {
+      await Promise.all(
+        orderedChildren.map((c, idx) =>
+          fetch(`/api/plot-templates/${template.id}/jobs/${c.id}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sortOrder: idx }),
+          })
+        )
+      );
+      // Re-run the parent's recalculate to re-derive parent span from new
+      // child order.
+      await fetch(`/api/plot-templates/${template.id}/jobs/${parentId}/recalculate`, { method: "POST" });
+      const tplRes = await fetch(`/api/plot-templates/${template.id}`, { cache: "no-store" });
+      if (tplRes.ok) onUpdate(await tplRes.json());
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to save new sub-job order");
+    }
   }
 
   // ---------- Split flat job into sub-jobs ----------
@@ -627,6 +699,13 @@ export function TemplateEditor({
     setJobWeatherAffectedType(job.weatherAffectedType ?? null);
     setJobContractorId(job.contactId ?? "");
     setJobDurationDays(job.durationDays ?? "");
+    // A sub-job is always "atomic" at its own level. Top-level jobs default
+    // atomic if they ALREADY have a duration (i.e. were saved as atomic
+    // previously) and no children — otherwise the user must explicitly
+    // opt in via the toggle.
+    const hasChildren = !!(job.children && job.children.length > 0);
+    const isSubJob = !!job.parentId;
+    setJobIsAtomic(isSubJob || (!hasChildren && (job.durationDays != null || job.durationWeeks != null)));
     setJobDialogOpen(true);
   }
 
@@ -635,9 +714,23 @@ export function TemplateEditor({
     setSavingJob(true);
     try {
       if (editingJob) {
-        // For sub-jobs, also update durationWeeks
         const isSubJob = !!editingJob.parentId;
-        const durationWeeks = jobEndWeek - jobStartWeek + 1;
+        const hasChildren = !!(editingJob.children && editingJob.children.length > 0);
+
+        // Keith Apr 2026 model: don't send Start/End Week anymore — the
+        // new cascade derives positions from sortOrder + durationDays.
+        // Send ONLY what changed for this job:
+        //   - Parent with children: no duration fields (auto-calc)
+        //   - Atomic job or sub-job: durationDays set, durationWeeks null
+        //   - Non-atomic leaf (user hasn't ticked atomic): leave as-is
+        const durationPayload: Record<string, number | null> = {};
+        if (!hasChildren && (jobIsAtomic || isSubJob)) {
+          durationPayload.durationDays =
+            typeof jobDurationDays === "number" && jobDurationDays > 0
+              ? jobDurationDays
+              : 5; // default 1 week if user left blank
+          durationPayload.durationWeeks = null;
+        }
 
         const res = await fetch(
           `/api/plot-templates/${template.id}/jobs/${editingJob.id}`,
@@ -648,16 +741,10 @@ export function TemplateEditor({
               name: jobName,
               description: jobDescription || null,
               stageCode: jobStageCode || null,
-              startWeek: jobStartWeek,
-              endWeek: jobEndWeek,
               weatherAffected: jobWeatherAffected,
               weatherAffectedType: jobWeatherAffected ? jobWeatherAffectedType : null,
               contactId: jobContractorId && jobContractorId !== "__none__" ? jobContractorId : null,
-              ...(isSubJob && { durationWeeks }),
-              // durationDays: send null if field cleared, the number if set.
-              // Applies to both leaf stages and sub-jobs — apply-template
-              // honours it over durationWeeks at create time.
-              durationDays: typeof jobDurationDays === "number" && jobDurationDays > 0 ? jobDurationDays : null,
+              ...durationPayload,
             }),
           }
         );
@@ -785,8 +872,13 @@ export function TemplateEditor({
     parentId: string
   ) {
     const newVal = editingDurations[subJob.id];
-    if (newVal === undefined || newVal === subJob.durationWeeks) {
-      // No change, clear editing state
+    // Sub-jobs are measured in working days — persist durationDays, null
+    // durationWeeks so the days value is the single source of truth.
+    const currentDays =
+      subJob.durationDays != null && subJob.durationDays > 0
+        ? subJob.durationDays
+        : (subJob.durationWeeks ?? 1) * 5;
+    if (newVal === undefined || newVal === currentDays) {
       setEditingDurations((prev) => {
         const next = { ...prev };
         delete next[subJob.id];
@@ -801,7 +893,7 @@ export function TemplateEditor({
         {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ durationWeeks: newVal }),
+          body: JSON.stringify({ durationDays: newVal, durationWeeks: null }),
         }
       );
       if (!res.ok) {
@@ -1112,20 +1204,44 @@ export function TemplateEditor({
    * granularity later.
    */
   const renderSubJobNode = (child: TemplateJobData, depth: number): React.ReactNode => {
+    // Keith Apr 2026: sub-jobs are measured in WORKING DAYS. durationDays
+    // is authoritative post-migration. Fallback to durationWeeks × 5 for
+    // any row that somehow still has only weeks set.
+    const durationInDays =
+      child.durationDays != null && child.durationDays > 0
+        ? child.durationDays
+        : (child.durationWeeks ?? 1) * 5;
     const durationValue =
       editingDurations[child.id] !== undefined
         ? editingDurations[child.id]
-        : (child.durationWeeks ?? 1);
+        : durationInDays;
     const isChildExpanded = expandedJobs.has(child.id);
     const hasGrandchildren = !!(child.children && child.children.length > 0);
+    const isDraggedSub = draggedJobId === child.id;
+    const isDragOverSub = dragOverJobId === child.id;
     return (
       <div key={child.id} className="space-y-0">
         <div
-          className={`flex items-center gap-2 rounded-md border bg-white px-3 py-2 ${child.orders.length > 0 ? "cursor-pointer hover:bg-slate-50" : ""}`}
+          draggable
+          onDragStart={(e) => { e.stopPropagation(); setDraggedJobId(child.id); }}
+          onDragEnd={() => { setDraggedJobId(null); setDragOverJobId(null); }}
+          onDragOver={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (draggedJobId && draggedJobId !== child.id) setDragOverJobId(child.id);
+          }}
+          onDragLeave={() => setDragOverJobId(null)}
+          onDrop={(e) => { e.preventDefault(); e.stopPropagation(); handleSubJobDrop(child); }}
+          className={`flex items-center gap-2 rounded-md border bg-white px-3 py-2 ${
+            child.orders.length > 0 ? "cursor-pointer hover:bg-slate-50" : ""
+          } ${isDraggedSub ? "opacity-50" : ""} ${
+            isDragOverSub ? "ring-2 ring-blue-400" : ""
+          }`}
           onClick={() => {
             if (child.orders.length > 0) toggleJobExpand(child.id);
           }}
         >
+          <GripVertical className="size-3.5 shrink-0 cursor-grab text-muted-foreground/40 hover:text-muted-foreground" />
           <Badge
             variant="secondary"
             className="shrink-0 font-mono text-[10px]"
@@ -1161,9 +1277,10 @@ export function TemplateEditor({
               }}
               onBlur={() => handleDurationBlur(child, child.parentId ?? "")}
               className="h-7 w-16 text-center text-xs"
+              title="Duration in working days"
             />
             <span className="text-xs text-muted-foreground">
-              wk
+              d
             </span>
           </div>
           <div className="flex shrink-0 items-center gap-0.5">
@@ -2398,52 +2515,87 @@ export function TemplateEditor({
                 </Select>
               </div>
             )}
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Start Week</Label>
-                <Input
-                  type="number"
-                  min={1}
-                  value={jobStartWeek}
-                  onChange={(e) =>
-                    setJobStartWeek(parseInt(e.target.value) || 1)
-                  }
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>End Week</Label>
-                <Input
-                  type="number"
-                  min={jobStartWeek}
-                  value={jobEndWeek}
-                  onChange={(e) =>
-                    setJobEndWeek(parseInt(e.target.value) || jobStartWeek)
-                  }
-                />
-              </div>
-            </div>
-            {/* Days-granularity override — applies to both stages and sub-jobs.
-                When set, takes precedence over the week range at apply time.
-                Blank = use weeks, any positive number = use that many working days. */}
-            <div className="space-y-2">
-              <Label>Duration in days (optional)</Label>
-              <Input
-                type="number"
-                min={1}
-                max={90}
-                value={jobDurationDays}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  setJobDurationDays(v === "" ? "" : (parseInt(v) || ""));
-                }}
-                placeholder="Leave blank for weeks"
-                className="w-40"
-              />
-              <p className="text-[11px] text-muted-foreground">
-                Leave blank to use the Start / End Week above. Set a number
-                for sub-week jobs (e.g. 3 for a 3-day paint touch-up).
-              </p>
-            </div>
+            {/* Keith Apr 2026 model:
+                 - A job with sub-jobs: duration = sum of sub-job durations
+                   (auto-calculated). No manual Start/End Week or Duration.
+                 - A job WITHOUT sub-jobs: user can tick "atomic" to
+                   specify Duration directly. Otherwise nudged to add
+                   sub-jobs first.
+                 - Sub-jobs (parentId set) are always atomic at their own
+                   level → Duration input only.
+            */}
+            {(() => {
+              const hasChildren = !!(editingJob?.children && editingJob.children.length > 0);
+              const isSubJob = !!editingJob?.parentId;
+
+              if (hasChildren) {
+                const childCount = editingJob!.children!.length;
+                const totalDays = editingJob!.children!.reduce((sum, c) => {
+                  const d = c.durationDays != null && c.durationDays > 0
+                    ? c.durationDays
+                    : (c.durationWeeks ?? 1) * 5;
+                  return sum + d;
+                }, 0);
+                return (
+                  <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm">
+                    <p className="font-medium text-blue-900">
+                      Duration auto-calculated
+                    </p>
+                    <p className="mt-0.5 text-xs text-blue-700">
+                      {childCount} sub-job{childCount !== 1 ? "s" : ""} · {totalDays} working day{totalDays !== 1 ? "s" : ""} total. Reorder or edit sub-jobs to change the span.
+                    </p>
+                  </div>
+                );
+              }
+
+              // No children yet — atomic toggle only shown for top-level
+              // jobs (sub-jobs are implicitly atomic at their level).
+              return (
+                <div className="space-y-3">
+                  {!isSubJob && (
+                    <label className="flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={jobIsAtomic}
+                        onChange={(e) => setJobIsAtomic(e.target.checked)}
+                        className="mt-0.5"
+                      />
+                      <span>
+                        <span className="font-medium">This job has no sub-jobs</span>
+                        <span className="block text-xs text-muted-foreground">
+                          Enter the working-day duration directly. If you later add a sub-job, duration will switch to auto-calculated.
+                        </span>
+                      </span>
+                    </label>
+                  )}
+                  {(jobIsAtomic || isSubJob) && (
+                    <div className="space-y-2">
+                      <Label>Duration (working days)</Label>
+                      <Input
+                        type="number"
+                        min={1}
+                        max={365}
+                        value={jobDurationDays === "" ? "" : jobDurationDays}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setJobDurationDays(v === "" ? "" : (parseInt(v) || 1));
+                        }}
+                        placeholder="e.g. 5"
+                        className="w-40"
+                      />
+                      <p className="text-[11px] text-muted-foreground">
+                        Working days only (Mon-Fri).
+                      </p>
+                    </div>
+                  )}
+                  {!jobIsAtomic && !isSubJob && (
+                    <p className="text-xs text-amber-700">
+                      Tick the box above to set a direct duration, or close this dialog and add sub-jobs below the stage.
+                    </p>
+                  )}
+                </div>
+              );
+            })()}
           </div>
           <DialogFooter>
             <DialogClose render={<Button variant="outline" />}>
