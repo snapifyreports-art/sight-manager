@@ -117,7 +117,7 @@ export function TemplateEditor({
   const [customStageName, setCustomStageName] = useState("");
   const [customStageCode, setCustomStageCode] = useState("");
   const [customSubJobs, setCustomSubJobs] = useState<
-    Array<{ name: string; code: string; duration: number }>
+    Array<{ name: string; code: string; duration: number; unit: "weeks" | "days" }>
   >([]);
 
   // Add Sub-Job dialog — subJobDurationUnit toggle lets user pick days
@@ -523,8 +523,12 @@ export function TemplateEditor({
           template.jobs.length > 0
             ? Math.max(...template.jobs.map((j) => j.endWeek))
             : 0;
+        // Parent stage's total span: each sub-job occupies at least 1 week
+        // in the programme grid. Days-unit sub-jobs compress into 1 week
+        // (actual duration lives in durationDays on the child); week-unit
+        // sub-jobs occupy their full N weeks.
         const totalDuration = customSubJobs.reduce(
-          (sum, sj) => sum + sj.duration,
+          (sum, sj) => sum + (sj.unit === "days" ? 1 : sj.duration),
           0
         );
         const startWeek = maxEndWeek + 1;
@@ -551,18 +555,25 @@ export function TemplateEditor({
         }
         const stageData = await res.json();
 
-        // Create sub-jobs sequentially
+        // Create sub-jobs sequentially. Days-unit sub-jobs: durationDays is
+        // the real value, durationWeeks is 1 as a grid-slot placeholder (the
+        // apply-template-helpers cascade uses durationDays at plot-creation
+        // time to compute actual working-day end dates).
         let subStart = startWeek;
         for (let i = 0; i < customSubJobs.length; i++) {
           const sj = customSubJobs[i];
-          const subEnd = subStart + sj.duration - 1;
+          const isDays = sj.unit === "days";
+          const weeksSpan = isDays ? 1 : sj.duration;
+          const subEnd = subStart + weeksSpan - 1;
           const subRes = await fetch(`/api/plot-templates/${template.id}/jobs`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               name: sj.name,
               stageCode: sj.code,
-              durationWeeks: sj.duration,
+              ...(isDays
+                ? { durationDays: sj.duration, durationWeeks: 1 }
+                : { durationWeeks: sj.duration, durationDays: null }),
               parentId: stageData.id,
               startWeek: subStart,
               endWeek: subEnd,
@@ -1065,14 +1076,14 @@ export function TemplateEditor({
   function addCustomSubJob() {
     setCustomSubJobs((prev) => [
       ...prev,
-      { name: "", code: "", duration: 1 },
+      { name: "", code: "", duration: 1, unit: "weeks" },
     ]);
   }
 
   function updateCustomSubJob(
     index: number,
     field: string,
-    value: string | number
+    value: string | number | "weeks" | "days"
   ) {
     setCustomSubJobs((prev) =>
       prev.map((sj, i) => (i === index ? { ...sj, [field]: value } : sj))
@@ -2008,16 +2019,17 @@ export function TemplateEditor({
                   </div>
                   {customSubJobs.length > 0 && (
                     <div className="space-y-1.5">
-                      <div className="grid grid-cols-[1fr_80px_70px_28px] gap-1.5 text-[11px] font-medium text-muted-foreground">
+                      <div className="grid grid-cols-[1fr_72px_56px_56px_28px] gap-1.5 text-[11px] font-medium text-muted-foreground">
                         <span>Name</span>
                         <span>Code</span>
-                        <span>Weeks</span>
+                        <span>Duration</span>
+                        <span>Unit</span>
                         <span />
                       </div>
                       {customSubJobs.map((sj, idx) => (
                         <div
                           key={idx}
-                          className="grid grid-cols-[1fr_80px_70px_28px] gap-1.5"
+                          className="grid grid-cols-[1fr_72px_56px_56px_28px] gap-1.5"
                         >
                           <Input
                             placeholder="Sub-job name"
@@ -2040,6 +2052,7 @@ export function TemplateEditor({
                                 "code",
                                 e.target.value
                                   .toUpperCase()
+                                  .replace(/[^A-Z0-9]/g, "")
                                   .slice(0, 4)
                               )
                             }
@@ -2059,6 +2072,23 @@ export function TemplateEditor({
                             }
                             className="h-8 text-xs"
                           />
+                          {/* Unit toggle — days or weeks. Matches the
+                              existing Add Sub-Job dialog so both inputs
+                              behave identically. */}
+                          <button
+                            type="button"
+                            onClick={() =>
+                              updateCustomSubJob(
+                                idx,
+                                "unit",
+                                sj.unit === "days" ? "weeks" : "days"
+                              )
+                            }
+                            title={`Switch to ${sj.unit === "days" ? "weeks" : "days"}`}
+                            className="h-8 rounded border border-input bg-background text-xs font-medium hover:bg-accent"
+                          >
+                            {sj.unit === "days" ? "d" : "w"}
+                          </button>
                           <button
                             onClick={() => removeCustomSubJob(idx)}
                             className="flex size-8 items-center justify-center rounded text-muted-foreground hover:bg-red-50 hover:text-red-600"
@@ -2073,18 +2103,52 @@ export function TemplateEditor({
               </div>
             )}
           </div>
+          {/* Inline validation — show exactly what's missing so users aren't
+              staring at a greyed-out "Add Stage" button wondering why. */}
+          {(() => {
+            const isCustom = selectedStageCodes.has(CUSTOM_STAGE_KEY);
+            const errors: string[] = [];
+            if (selectedStageCodes.size === 0) {
+              errors.push("Select at least one stage");
+            }
+            if (isCustom) {
+              if (!customStageName.trim()) errors.push("Stage Name is required");
+              if (!customStageCode.trim()) errors.push("Stage Code is required");
+              const badSubJob = customSubJobs.findIndex(
+                (sj) => !sj.name.trim() || !sj.code.trim() || sj.duration < 1
+              );
+              if (badSubJob >= 0) {
+                errors.push(`Sub-job ${badSubJob + 1} is missing name, code, or duration`);
+              }
+            }
+            if (errors.length === 0) return null;
+            return (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                <p className="mb-0.5 font-medium">Can&apos;t save yet:</p>
+                <ul className="list-inside list-disc space-y-0.5 text-amber-800">
+                  {errors.map((e, i) => (
+                    <li key={i}>{e}</li>
+                  ))}
+                </ul>
+              </div>
+            );
+          })()}
           <DialogFooter>
             <DialogClose render={<Button variant="outline" />}>
               Cancel
             </DialogClose>
             <Button
               onClick={handleAddStage}
-              disabled={
-                savingStage ||
-                selectedStageCodes.size === 0 ||
-                (selectedStageCodes.has(CUSTOM_STAGE_KEY) &&
-                  (!customStageName.trim() || !customStageCode.trim()))
-              }
+              disabled={(() => {
+                if (savingStage) return true;
+                if (selectedStageCodes.size === 0) return true;
+                if (selectedStageCodes.has(CUSTOM_STAGE_KEY)) {
+                  if (!customStageName.trim() || !customStageCode.trim()) return true;
+                  // Sub-job rows must be complete if present
+                  if (customSubJobs.some((sj) => !sj.name.trim() || !sj.code.trim() || sj.duration < 1)) return true;
+                }
+                return false;
+              })()}
             >
               {savingStage ? (
                 <>
