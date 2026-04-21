@@ -37,6 +37,7 @@ import { useDelayJob } from "@/hooks/useDelayJob";
 import { usePullForwardDecision } from "@/hooks/usePullForwardDecision";
 import { useOrderStatus } from "@/hooks/useOrderStatus";
 import { useOrderEmail } from "@/hooks/useOrderEmail";
+import { useJobAction } from "@/hooks/useJobAction";
 import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 
 // ---------- Types ----------
@@ -167,7 +168,11 @@ export function TasksClient() {
   const [data, setData] = useState<TaskData | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshKey, setRefreshKey] = useState(0);
-  const [stoppingIds, setStoppingIds] = useState<Set<string>>(new Set());
+  // Centralised job action flow — reuses the stop-reason dialog from useJobAction
+  // so the decision is captured at the moment of stopping, not inferred later.
+  const { triggerAction: triggerJobAction, isLoading: jobActionLoading, dialogs: jobActionDialogs } = useJobAction(() => {
+    setRefreshKey((k) => k + 1);
+  });
   const [sendingGroupIds, setSendingGroupIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
@@ -234,31 +239,9 @@ export function TasksClient() {
     }
   }
 
-  // ── Quick stop job ──
-  async function handleStopJob(jobId: string) {
-    setStoppingIds((prev) => new Set(prev).add(jobId));
-    try {
-      const res = await fetch(`/api/jobs/${jobId}/actions`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "stop", notes: "Stopped from tasks — overdue" }),
-      });
-      if (res.ok) {
-        setRefreshKey((k) => k + 1);
-        toast.success("Job put on hold");
-      } else {
-        toast.error(await fetchErrorMessage(res, "Failed to stop job"));
-      }
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Network error stopping job");
-    } finally {
-      setStoppingIds((prev) => {
-        const next = new Set(prev);
-        next.delete(jobId);
-        return next;
-      });
-    }
-  }
+  // Stop now delegated to useJobAction.triggerAction — opens the shared
+  // reason-capture dialog, so stopping from Tasks behaves identically to
+  // stopping from Jobs / JobDetail / Programme.
 
   // ── Delay job ──
   // Unified via useDelayJob — replaces the prior ~80 lines of bespoke
@@ -585,7 +568,6 @@ export function TasksClient() {
             <div className="space-y-2">
               {data.overdueJobs.map((job) => {
                 const days = daysOverdue(job.endDate);
-                const isStopping = stoppingIds.has(job.id);
                 return (
                   <div
                     key={job.id}
@@ -610,19 +592,23 @@ export function TasksClient() {
                       variant="outline"
                       size="sm"
                       className="h-7 shrink-0 border-red-300 text-red-700 hover:bg-red-100 hover:text-red-800"
-                      disabled={isStopping}
+                      disabled={jobActionLoading}
                       onClick={(e) => {
                         e.stopPropagation();
-                        handleStopJob(job.id);
+                        // Opens shared stop-reason dialog from useJobAction
+                        triggerJobAction(
+                          { id: job.id, name: job.name, status: "IN_PROGRESS", startDate: job.startDate, endDate: job.endDate },
+                          "stop"
+                        );
                       }}
                       title="Put job on hold"
                     >
-                      {isStopping ? (
+                      {jobActionLoading ? (
                         <Loader2 className="size-3.5 animate-spin" />
                       ) : (
                         <Square className="size-3.5" />
                       )}
-                      <span className="hidden sm:inline">Stop</span>
+                      <span>Stop</span>
                     </Button>
                     <Button
                       variant="outline"
@@ -1155,6 +1141,8 @@ export function TasksClient() {
       {/* Unified delay dialog (useDelayJob) — same UX as Daily Brief, Walkthrough,
           and JobWeekPanel. Both input modes + reason picker live in one place. */}
       {delayDialogs}
+      {/* Unified job-action dialogs (stop-reason, etc.) from useJobAction */}
+      {jobActionDialogs}
     </div>
   );
 }

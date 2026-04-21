@@ -320,7 +320,18 @@ export function JobsClient({ initialJobs, workflows, users }: JobsClientProps) {
       );
       return;
     }
-    const res = await runSimpleAction(jobId, action as "stop" | "complete" | "signoff" | "note");
+    // Stop routes through the shared stop-reason dialog in useJobAction.
+    // Complete / signoff / note still go through runSimpleAction (no dialog needed).
+    if (action === "stop") {
+      const j = jobs.find((x) => x.id === jobId);
+      if (!j) return;
+      await triggerJobAction(
+        { id: j.id, name: j.name, status: j.status, startDate: j.startDate, endDate: j.endDate },
+        "stop"
+      );
+      return;
+    }
+    const res = await runSimpleAction(jobId, action as "complete" | "signoff" | "note");
     if (res.ok) {
       const updated = res.data as JobRow | undefined;
       if (updated?.id) {

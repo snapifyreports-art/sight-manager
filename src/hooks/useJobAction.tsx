@@ -11,7 +11,11 @@ import {
   DialogHeader,
   DialogTitle,
   DialogDescription,
+  DialogFooter,
 } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 
 export interface JobForAction {
   id: string;
@@ -97,6 +101,14 @@ export function useJobAction(
 
   // Track whether user chose "start anyway" (skip order auto-progression)
   const [skipOrderProgression, setSkipOrderProgression] = useState(false);
+
+  // ---- Stop-reason dialog ----
+  // Keith's "flow of decision" rule: stopping a job is a deliberate call, not a
+  // reflex. Every surface that triggers stop (Tasks, Jobs, JobDetail, Programme)
+  // now goes through this dialog so the reason is captured at the moment of
+  // decision rather than inferred later from an audit log.
+  const [stopDialog, setStopDialog] = useState<{ job: JobForAction } | null>(null);
+  const [stopReason, setStopReason] = useState("");
 
   // ---- Core action executor ----
   const executeAction = useCallback(
@@ -449,6 +461,13 @@ export function useJobAction(
   // ---- Main entry point ----
   const triggerAction = useCallback(
     async (job: JobForAction, action: string, notes?: string) => {
+      // Stop routes through a reason-capture dialog unless the caller
+      // pre-supplies notes (e.g. programmatic/automated stop with context).
+      if (action === "stop" && !notes) {
+        setStopReason("");
+        setStopDialog({ job });
+        return;
+      }
       if (action !== "start") {
         await executeAction(job.id, action, notes);
         return;
@@ -1402,6 +1421,59 @@ export function useJobAction(
               </button>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Stop-reason dialog — fires before any stop action so the user's
+          decision is captured (what's blocking this job?) at the moment
+          it happens, not inferred later from the event log. */}
+      <Dialog
+        open={!!stopDialog}
+        onOpenChange={(o) => { if (!o) { setStopDialog(null); setStopReason(""); } }}
+      >
+        <DialogContent className="w-[calc(100vw-2rem)] max-w-md">
+          <DialogHeader>
+            <DialogTitle>Stop Job</DialogTitle>
+            <DialogDescription>
+              Put <span className="font-medium">{stopDialog?.job.name}</span> on hold.
+              Leave a short note explaining why so anyone checking later knows the reason.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 py-1">
+            <Label htmlFor="stop-reason" className="text-sm">Reason</Label>
+            <Textarea
+              id="stop-reason"
+              autoFocus
+              value={stopReason}
+              onChange={(e) => setStopReason(e.target.value)}
+              placeholder="e.g. Waiting for materials / Weather too cold for pour / Contractor no-show"
+              rows={3}
+              className="resize-none"
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => { setStopDialog(null); setStopReason(""); }}
+              disabled={isLoading}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={isLoading || !stopReason.trim()}
+              onClick={async () => {
+                const job = stopDialog?.job;
+                if (!job) return;
+                const notes = stopReason.trim();
+                setStopDialog(null);
+                setStopReason("");
+                await executeAction(job.id, "stop", notes);
+              }}
+            >
+              {isLoading ? <><Loader2 className="size-3.5 animate-spin" /> Stopping…</> : "Stop Job"}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </>
