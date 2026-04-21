@@ -197,14 +197,17 @@ export function TemplateExtras({ templateId, templateName }: { templateId: strin
             };
 
             // 2. Upload bytes directly to Supabase Storage — the signed URL
-            //    accepts a PUT with the raw file body, bypassing Vercel.
+            //    accepts a PUT with multipart/form-data (matches what the
+            //    official SDK's uploadToSignedUrl does). Raw-body PUT gets
+            //    rejected by the Storage server with a 400.
+            const fd = new FormData();
+            fd.append("cacheControl", "3600");
+            // Empty-string key is what the Supabase SDK uses for the file field.
+            fd.append("", p.file);
             const putRes = await fetch(signedUrl, {
               method: "PUT",
-              headers: {
-                "Content-Type": p.file.type || "application/octet-stream",
-                "x-upsert": "false",
-              },
-              body: p.file,
+              headers: { "x-upsert": "false" },
+              body: fd,
             });
             if (!putRes.ok) {
               throw new Error(

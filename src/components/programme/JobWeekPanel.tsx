@@ -697,6 +697,16 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
       return;
     }
 
+    // Stop — delegate to the shared stop-reason dialog. Same flow as Tasks
+    // / Jobs / JobDetail so every surface captures WHY a job was stopped.
+    if (action === "stop" && !notes) {
+      await triggerCentralStart(
+        { id: jobId, name: context.job.name, status: context.job.status, startDate: context.job.startDate ?? null, endDate: context.job.endDate ?? null },
+        "stop"
+      );
+      return;
+    }
+
     setJobActionLoading(true);
     try {
       const ok = await fireJobAction(jobId, action, notes);
@@ -721,6 +731,17 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
       await triggerCentralStart(
         { id: childId, name: child?.name ?? "", status: child?.status ?? "NOT_STARTED", startDate: child?.startDate ?? null, endDate: child?.endDate ?? null },
         "start"
+      );
+      return;
+    }
+
+    // Stop — delegate to shared stop-reason dialog. Consistent with the
+    // main JobWeekPanel path and every other surface.
+    if (action === "stop" && !notes) {
+      const child = childJobs.find((c) => c.id === childId);
+      await triggerCentralStart(
+        { id: childId, name: child?.name ?? "", status: child?.status ?? "IN_PROGRESS", startDate: child?.startDate ?? null, endDate: child?.endDate ?? null },
+        "stop"
       );
       return;
     }
