@@ -486,7 +486,7 @@ export function useJobAction(
           let cascadePreview: { jobCount: number; deltaDays: number } | null = null;
           if (activeJob.endDate) {
             try {
-              const newEnd = addWorkingDays(new Date(activeJob.endDate), daysLate).toISOString().split("T")[0];
+              const newEnd = addWorkingDays(new Date(activeJob.endDate), daysLate).toLocaleDateString("en-CA");
               const prev = await fetch(`/api/jobs/${activeJob.id}/cascade`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -520,7 +520,7 @@ export function useJobAction(
       if (activeJob.endDate) {
         // daysLate is in working days — shift end forward by that many WDs.
         const newEnd = addWorkingDays(new Date(activeJob.endDate), lateStartDialog.daysLate)
-          .toISOString().split("T")[0];
+          .toLocaleDateString("en-CA");
         const cascadeRes = await fetch(`/api/jobs/${activeJob.id}/cascade`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
@@ -778,7 +778,7 @@ export function useJobAction(
           let cascadePreview: { jobCount: number; deltaDays: number } | null = null;
           if (jobWithOrders.endDate) {
             try {
-              const newEnd = addWorkingDays(new Date(jobWithOrders.endDate), daysLate).toISOString().split("T")[0];
+              const newEnd = addWorkingDays(new Date(jobWithOrders.endDate), daysLate).toLocaleDateString("en-CA");
               const prev = await fetch(`/api/jobs/${jobWithOrders.id}/cascade`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -921,7 +921,7 @@ export function useJobAction(
                       <div className="flex items-center gap-2">
                         <input
                           type="date"
-                          min={new Date().toISOString().split("T")[0]}
+                          min={new Date().toLocaleDateString("en-CA")}
                           className="rounded border bg-white px-2 py-1 text-sm"
                           onChange={(e) => {
                             if (!e.target.value || !activeJob) return;
@@ -932,7 +932,7 @@ export function useJobAction(
                               const pickedFwd = isWorkingDay(picked) ? picked : snapToWorkingDay(picked, "forward");
                               const deltaWD = differenceInWorkingDays(pickedFwd, planned);
                               if (deltaWD !== 0 && activeJob.endDate) {
-                                const newEnd = addWorkingDays(new Date(activeJob.endDate), deltaWD).toISOString().split("T")[0];
+                                const newEnd = addWorkingDays(new Date(activeJob.endDate), deltaWD).toLocaleDateString("en-CA");
                                 setPreStartChecks(null);
                                 setCascadeLoading(true);
                                 toast.info("Shifting programme…");
@@ -1023,7 +1023,7 @@ export function useJobAction(
                         const planned = activeJob.startDate ? new Date(activeJob.startDate) : null;
                         if (planned && activeJob.endDate) {
                           const deltaWD = differenceInWorkingDays(targetDate, planned);
-                          const newEnd = addWorkingDays(new Date(activeJob.endDate), deltaWD).toISOString().split("T")[0];
+                          const newEnd = addWorkingDays(new Date(activeJob.endDate), deltaWD).toLocaleDateString("en-CA");
                           setPreStartChecks(null);
                           setCascadeLoading(true);
                           toast.info("Shifting programme…");

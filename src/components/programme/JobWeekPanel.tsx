@@ -628,7 +628,7 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
         const diffWD = differenceInWorkingDays(planned, todayFwd);
         if (diffWD !== 0) {
           // Pull forward (early) or push back (late) — cascade the programme
-          const newEnd = addWorkingDays(new Date(jobEnd), -diffWD).toISOString().split("T")[0];
+          const newEnd = addWorkingDays(new Date(jobEnd), -diffWD).toLocaleDateString("en-CA");
           const cascadeRes = await fetch(`/api/jobs/${jobId}/cascade`, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
@@ -776,7 +776,7 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
     setCascadeLoading(true);
     try {
       if (endDate) {
-        const newEnd = addWorkingDays(new Date(endDate), -daysEarly).toISOString().split("T")[0];
+        const newEnd = addWorkingDays(new Date(endDate), -daysEarly).toLocaleDateString("en-CA");
         const cascadeRes = await fetch(`/api/jobs/${jobId}/cascade`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
@@ -807,7 +807,7 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
 
     // Preview the cascade to check if any order dates would go into the past
     if (endDate) {
-      const newEnd = addWorkingDays(new Date(endDate), -daysEarly).toISOString().split("T")[0];
+      const newEnd = addWorkingDays(new Date(endDate), -daysEarly).toLocaleDateString("en-CA");
       try {
         const res = await fetch(`/api/jobs/${jobId}/cascade`, {
           method: "POST",
@@ -816,7 +816,7 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
         });
         if (res.ok) {
           const preview = await res.json();
-          const today = new Date().toISOString().split("T")[0];
+          const today = new Date().toLocaleDateString("en-CA");
           // Build a map of jobId → jobName from the preview
           type PreviewJobUpdate = { jobId: string; jobName: string };
           type PreviewOrderUpdate = { orderId: string; jobId: string; newOrderDate: string; newDeliveryDate: string | null; originalOrderDate: string; originalDeliveryDate: string | null };
