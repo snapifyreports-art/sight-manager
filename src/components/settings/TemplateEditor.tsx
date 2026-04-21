@@ -1978,7 +1978,12 @@ export function TemplateEditor({
                       value={customStageCode}
                       onChange={(e) =>
                         setCustomStageCode(
-                          e.target.value.toUpperCase().slice(0, 4)
+                          // A-Z / 0-9 only — stray punctuation (the BW"
+                          // bug) silently broke downstream lookups.
+                          e.target.value
+                            .toUpperCase()
+                            .replace(/[^A-Z0-9]/g, "")
+                            .slice(0, 4)
                         )
                       }
                       maxLength={4}

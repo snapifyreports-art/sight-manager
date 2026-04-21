@@ -122,13 +122,17 @@ export async function PUT(
 
   // Handle status changes
   if (body.status !== undefined) {
-    // Block invalid PENDING → DELIVERED direct transition (must go via ORDERED)
-    if (existing.status === "PENDING" && body.status === "DELIVERED") {
-      return NextResponse.json(
-        { error: "Cannot mark PENDING order as DELIVERED — transition to ORDERED first" },
-        { status: 400 }
-      );
-    }
+    // PENDING → DELIVERED previously returned 400. But a ton of UI surfaces
+    // ("Confirm Delivery" buttons in Daily Brief / Walkthrough / Programme)
+    // let users jump straight from PENDING to DELIVERED — the action reads as
+    // "this order arrived on site today" and nobody cares whether we ticked
+    // Sent earlier. The block caused silent 400s: user thought they confirmed
+    // delivery, system stayed PENDING, Daily Brief still showed "1 order not
+    // sent" and "0 awaiting delivery" forever. Now we auto-bridge: mark the
+    // order as placed + delivered in one call, server-side, so the state
+    // machine stays consistent without blocking the user.
+    const autoBridgePendingToDelivered =
+      existing.status === "PENDING" && body.status === "DELIVERED";
 
     data.status = body.status;
 
@@ -150,6 +154,12 @@ export async function PUT(
       !body.deliveredDate
     ) {
       data.deliveredDate = getServerCurrentDate(req);
+    }
+
+    // Bridge case: if user jumped PENDING → DELIVERED, also back-fill
+    // dateOfOrder so reports and supplier performance don't see a null.
+    if (autoBridgePendingToDelivered && !existing.dateOfOrder && body.dateOfOrder === undefined) {
+      data.dateOfOrder = getServerCurrentDate(req);
     }
   }
 
