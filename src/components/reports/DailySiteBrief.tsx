@@ -464,6 +464,50 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
       return next;
     });
 
+  // Shared scroll-to-section helper used by pills + alerts. Body is
+  // overflow-hidden (<main> is the scroll container), so the native
+  // href="#id" does nothing. scrollIntoView works regardless.
+  // Also auto-expands the target's collapsible section if closed.
+  const SECTION_TO_TOGGLE: Record<string, string> = {
+    "section-starting-today": "todays-jobs",
+    "section-late-starts": "todays-jobs",
+    "section-blocked": "todays-jobs",
+    "section-overdue": "todays-jobs",
+    "section-awaiting-signoff": "todays-jobs",
+    "section-active": "in-progress",
+    "section-delayed": "delayed",
+    "section-starting-tomorrow": "starting-tomorrow",
+    "section-orders": "materials",
+    "section-deliveries": "materials",
+    "section-upcoming-deliveries": "upcoming-deliveries",
+    "section-snags": "snags",
+    "section-inactive-plots": "inactive-plots",
+    "section-contractor-confirmations": "contractor-confirmations",
+    "section-needs-attention": "needs-attention",
+  };
+  const scrollToSection = (anchor: string) => {
+    const id = anchor.startsWith("#") ? anchor.slice(1) : anchor;
+    const toggleKey = SECTION_TO_TOGGLE[id];
+    if (toggleKey) {
+      setOpenSections((prev) => {
+        if (prev.has(toggleKey)) return prev;
+        const next = new Set(prev);
+        next.add(toggleKey);
+        return next;
+      });
+    }
+    // Defer scroll one tick so a just-expanded section is in the DOM.
+    setTimeout(() => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.scrollIntoView({ behavior: "smooth", block: "start" });
+      el.classList.add("ring-2", "ring-blue-400", "ring-offset-2");
+      setTimeout(() => {
+        el.classList.remove("ring-2", "ring-blue-400", "ring-offset-2");
+      }, 1500);
+    }, 50);
+  };
+
   // Quick action state (UX #1)
   const [pendingActions, setPendingActions] = useState<Set<string>>(new Set());
 
@@ -1367,7 +1411,14 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
             </div>
           );
           return anchor && !isZero ? (
-            <a key={label} href={`#${anchor}`} className="no-underline hover:opacity-80 transition-opacity">{inner}</a>
+            <button
+              key={label}
+              type="button"
+              onClick={() => scrollToSection(anchor)}
+              className="no-underline hover:opacity-80 transition-opacity"
+            >
+              {inner}
+            </button>
           ) : (
             <div key={label}>{inner}</div>
           );
@@ -1396,7 +1447,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
               {pill("Blocked", s.blockedCount, "section-blocked", "text-slate-500")}
               {pill("Overdue", s.overdueJobCount, "section-overdue", "text-red-600")}
               {pill("Delayed", data.delayedJobs?.length || 0, "section-delayed", "text-amber-600")}
-              {pill("Tomorrow", data.jobsStartingTomorrow?.length || 0, "section-tomorrow", "text-slate-600")}
+              {pill("Tomorrow", data.jobsStartingTomorrow?.length || 0, "section-starting-tomorrow", "text-slate-600")}
               {pill("Sign Off", data.awaitingSignOff?.length || 0, "section-awaiting-signoff", "text-amber-600")}
             </div>
 
@@ -1409,7 +1460,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
               {pill("Scheduled", data.upcomingOrders?.length || 0, "section-upcoming-orders", "text-violet-500")}
               {pill("Due Today", data.deliveriesToday.length, "section-deliveries", "text-blue-600")}
               {pill("Upcoming", data.upcomingDeliveries?.length || 0, "section-upcoming-deliveries", "text-blue-500")}
-              {pill("Overdue", data.overdueDeliveries?.length || 0, "section-overdue-deliveries", "text-red-600")}
+              {pill("Overdue", data.overdueDeliveries?.length || 0, "section-overdue", "text-red-600")}
             </div>
 
             {/* Issues — Rained Off added when weather impact today. */}
@@ -1578,9 +1629,14 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
             </div>
             <div className="space-y-1.5 rounded-lg border border-blue-100 bg-blue-50/30 p-3">
               {lines.map((line, i) => (
-                <a key={i} href={line.href} className={`flex items-center gap-2 text-xs ${line.color} no-underline hover:underline`}>
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => scrollToSection(line.href)}
+                  className={`flex w-full items-center gap-2 text-left text-xs ${line.color} no-underline hover:underline`}
+                >
                   {line.icon} {line.text}
-                </a>
+                </button>
               ))}
             </div>
           </>
@@ -2217,7 +2273,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
 
       {/* In Progress jobs — separate card */}
       {data.activeJobs.length > 0 && (
-        <Card>
+        <Card id="section-active">
           <CardHeader className="cursor-pointer select-none pb-2" onClick={() => toggleSection("in-progress")}>
             <CardTitle className="flex items-center gap-2 text-sm">
               <Activity className="size-4 text-blue-600" />
@@ -2291,7 +2347,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
       {/* Delayed jobs — pushed forward, not yet started */}
       {(data.delayedJobs?.length || 0) > 0 && (
         <>
-          <div className="mt-6 flex items-center gap-2 border-b-2 border-purple-200 pb-1">
+          <div id="section-delayed" className="mt-6 flex items-center gap-2 border-b-2 border-purple-200 pb-1">
             <CalendarClock className="size-4 text-purple-600" />
             <h2 className="text-xs font-bold text-purple-900 uppercase tracking-widest">Delayed</h2>
             <span className="rounded-full bg-purple-100 px-2 py-0.5 text-[10px] font-semibold text-purple-700">
@@ -2893,7 +2949,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
 
       {/* Upcoming Orders (future, scheduled) — collapsible */}
       {data.upcomingOrders.length > 0 && (
-        <Card>
+        <Card id="section-upcoming-orders">
           <CardHeader className="cursor-pointer select-none pb-2" onClick={() => setUpcomingOrdersOpen((o) => !o)}>
             <CardTitle className="flex items-center gap-2 text-sm">
               <ShoppingCart className="size-4 text-slate-500" />
