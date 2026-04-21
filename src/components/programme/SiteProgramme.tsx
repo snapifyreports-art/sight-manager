@@ -10,7 +10,6 @@ import {
   addDays,
   differenceInWeeks,
   differenceInCalendarDays,
-  isWithinInterval,
   eachDayOfInterval,
   isWeekend,
   isSameDay,
@@ -759,9 +758,14 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
         });
       }
 
+      // `isWithinInterval` is inclusive on BOTH ends, which means when `now`
+      // is exactly a Monday midnight it matches BOTH the previous week (whose
+      // end is that Monday) AND the current week (whose start is that Monday).
+      // findIndex picks the first match = wrong week. Use half-open interval
+      // [start, end) instead so Monday morning sits in the new week's column.
       const todayIdx = cols.findIndex((w, i) => {
         const nextDate = i < cols.length - 1 ? cols[i + 1].date : addWeeks(w.date, 1);
-        return isWithinInterval(now, { start: w.date, end: nextDate });
+        return now.getTime() >= w.date.getTime() && now.getTime() < nextDate.getTime();
       });
 
       return { columns: cols, todayIndex: todayIdx, monthSpans: [] as MonthSpan[] };
@@ -1892,37 +1896,88 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                   </div>
                 ))}
 
-                {/* Order/delivery dots — rendered as a separate layer on actual calendar dates */}
+                {/* Order/delivery dots — rendered as a separate layer on actual
+                    calendar dates. Each dot is a clickable button that opens
+                    the JobWeekPanel for the job that owns the order/delivery.
+                    Visual dot stays small (8px) but the hit area is 20×18 so
+                    it's tappable on mobile without swallowing the job cell's
+                    clicks (dots only cover the bottom strip of the cell). */}
                 {processedPlots.map((plot, plotIndex) => {
-                  // Collect ALL orders from ALL jobs on this plot
-                  const allOrders = plot.jobs.flatMap((j) => (j.orders ?? []).map((o) => ({ ...o, jobName: j.name })));
-                  if (allOrders.length === 0) return null;
+                  // Flatten orders tagged with their owning job so we can
+                  // resolve the click target back to a job.
+                  const ordersWithJob = plot.jobs.flatMap((j) =>
+                    (j.orders ?? []).map((o) => ({ ...o, _job: j }))
+                  );
+                  if (ordersWithJob.length === 0) return null;
 
                   return columns.map((col, colIdx) => {
                     const colDateStr = format(col.date, "yyyy-MM-dd");
                     const colEndStr = format(col.endDate, "yyyy-MM-dd");
 
-                    const hasOrder = allOrders.some((o) => {
+                    // First order placed in this cell — click target for purple dot
+                    const orderInCell = ordersWithJob.find((o) => {
                       const ds = o.dateOfOrder?.slice(0, 10);
                       return ds && ds >= colDateStr && ds < colEndStr;
                     });
-                    const hasDelivery = allOrders.some((o) => {
+                    // First delivery expected in this cell — click target for teal dot
+                    const deliveryInCell = ordersWithJob.find((o) => {
                       if (!o.expectedDeliveryDate) return false;
                       const ds = o.expectedDeliveryDate.slice(0, 10);
                       return ds >= colDateStr && ds < colEndStr;
                     });
 
-                    if (!hasOrder && !hasDelivery) return null;
+                    if (!orderInCell && !deliveryInCell) return null;
+
+                    const openPanelFor = (job: ProgrammeJob) => {
+                      let childJobIds: string[] | undefined;
+                      if (job.id.startsWith("synth-")) {
+                        const origPlot = site?.plots.find((p) => p.id === plot.id);
+                        if (origPlot) {
+                          childJobIds = origPlot.jobs
+                            .filter((j) => j.parentStage === job.name)
+                            .map((j) => j.id);
+                        }
+                      }
+                      setPanelContext({
+                        job,
+                        plotName: plot.plotNumber ? `Plot ${plot.plotNumber}` : plot.name,
+                        plotId: plot.id,
+                        siteName: site!.name,
+                        siteId: site!.id,
+                        childJobIds,
+                      });
+                      setPanelOpen(true);
+                    };
 
                     return (
                       <div
                         key={`dots-${plot.id}-${col.key}`}
-                        className="absolute pointer-events-none"
+                        className="pointer-events-none absolute"
                         style={{ left: colIdx * cellWidth, top: plotIndex * effectiveRowHeight, width: cellWidth, height: ROW_HEIGHT }}
                       >
-                        <div className="absolute bottom-0.5 left-1/2 -translate-x-1/2 flex gap-0.5">
-                          {hasOrder && <div className="size-[5px] rounded-full bg-purple-500" />}
-                          {hasDelivery && <div className="size-[5px] rounded-full bg-teal-500" />}
+                        <div className="absolute bottom-0 left-1/2 flex -translate-x-1/2 gap-0.5">
+                          {orderInCell && (
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); openPanelFor(orderInCell._job); }}
+                              title={`Order: ${orderInCell.supplier?.name || "Unknown"} — ${orderInCell._job.name}`}
+                              aria-label={`Open order details: ${orderInCell.supplier?.name || "order"} on ${orderInCell._job.name}`}
+                              className="pointer-events-auto flex h-5 w-5 items-center justify-center rounded hover:bg-purple-100 active:bg-purple-200"
+                            >
+                              <div className="size-2 rounded-full bg-purple-500" />
+                            </button>
+                          )}
+                          {deliveryInCell && (
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); openPanelFor(deliveryInCell._job); }}
+                              title={`Delivery: ${deliveryInCell.supplier?.name || "Unknown"} — ${deliveryInCell._job.name}`}
+                              aria-label={`Open delivery details: ${deliveryInCell.supplier?.name || "delivery"} on ${deliveryInCell._job.name}`}
+                              className="pointer-events-auto flex h-5 w-5 items-center justify-center rounded hover:bg-teal-100 active:bg-teal-200"
+                            >
+                              <div className="size-2 rounded-full bg-teal-500" />
+                            </button>
+                          )}
                         </div>
                       </div>
                     );
