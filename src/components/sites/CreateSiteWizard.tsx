@@ -81,11 +81,79 @@ interface Supplier {
 interface PlotBatch {
   id: string;
   mode: "blank" | "template";
-  rangeStart: string;
-  rangeEnd: string;
+  /** Parsed list of plot numbers — may be consecutive integers ("1","2","3")
+   *  from a "1-3" range shortcut, or custom alphanumeric ("47-A", "Block 2"). */
+  plotNumbers: string[];
   startDate: string;
   templateId: string;
   templateName: string;
+}
+
+/**
+ * Parse a plot-numbers input string into an array.
+ *
+ * Accepts:
+ *   - "1-20"                → ["1","2",...,"20"] (integer range shortcut)
+ *   - "47-A, 47-B, 50"      → as-is (comma list, any strings)
+ *   - "1-5, 10, 12-14"      → mixed: ["1","2","3","4","5","10","12","13","14"]
+ *   - Whitespace trimmed, empty entries skipped
+ *
+ * Returns errors for: invalid ranges, ranges too large (>500), duplicates.
+ * A-Z range syntax ("A-E") is NOT expanded — it's treated as a literal
+ * single plot number, which is almost certainly what the user intended.
+ */
+function parsePlotNumbers(input: string): { numbers: string[]; errors: string[] } {
+  const parts = input.split(/[,\n]/).map((s) => s.trim()).filter(Boolean);
+  const raw: string[] = [];
+  const errors: string[] = [];
+  for (const part of parts) {
+    // Only expand integer-integer ranges. "47-A" is treated as a literal
+    // (hyphen is valid in plot numbers, e.g. "47-A" or "Phase-2-Block-12").
+    const rangeMatch = part.match(/^(\d+)\s*-\s*(\d+)$/);
+    if (rangeMatch) {
+      const start = parseInt(rangeMatch[1], 10);
+      const end = parseInt(rangeMatch[2], 10);
+      if (end < start) {
+        errors.push(`"${part}": end must be ≥ start`);
+        continue;
+      }
+      if (end - start > 499) {
+        errors.push(`"${part}": range too large (${end - start + 1} plots, max 500)`);
+        continue;
+      }
+      for (let i = start; i <= end; i++) raw.push(String(i));
+    } else {
+      raw.push(part);
+    }
+  }
+  // Dedupe inside the batch
+  const seen = new Set<string>();
+  const dupes = new Set<string>();
+  const numbers: string[] = [];
+  for (const n of raw) {
+    if (seen.has(n)) dupes.add(n);
+    else {
+      seen.add(n);
+      numbers.push(n);
+    }
+  }
+  if (dupes.size > 0) errors.push(`Duplicates: ${[...dupes].join(", ")}`);
+  return { numbers, errors };
+}
+
+/** Compact label for a batch row. Collapses long consecutive-integer runs. */
+function batchLabel(nums: string[]): string {
+  if (nums.length === 0) return "No plots";
+  if (nums.length === 1) return `Plot ${nums[0]}`;
+  // If all numbers are consecutive pure integers starting from nums[0], collapse.
+  const allInts = nums.every((n) => /^\d+$/.test(n));
+  if (allInts) {
+    const ints = nums.map((n) => parseInt(n, 10));
+    const consecutive = ints.every((v, i) => i === 0 || v === ints[i - 1] + 1);
+    if (consecutive) return `Plots ${ints[0]}–${ints[ints.length - 1]}`;
+  }
+  if (nums.length <= 4) return `Plots ${nums.join(", ")}`;
+  return `Plots ${nums.slice(0, 3).join(", ")} +${nums.length - 3} more`;
 }
 
 interface CreatedSite {
@@ -147,8 +215,9 @@ export function CreateSiteWizard({
   const [plotBatches, setPlotBatches] = useState<PlotBatch[]>([]);
   const [showAddForm, setShowAddForm] = useState(false);
   const [batchMode, setBatchMode] = useState<"blank" | "template">("template");
-  const [batchRangeStart, setBatchRangeStart] = useState("");
-  const [batchRangeEnd, setBatchRangeEnd] = useState("");
+  // Free-form plot numbers input — supports ranges, comma lists, alphanumeric.
+  // Parsed via parsePlotNumbers() into batch.plotNumbers.
+  const [batchPlotNumbersInput, setBatchPlotNumbersInput] = useState("");
   const [batchTemplateId, setBatchTemplateId] = useState("");
   const [batchStartDate, setBatchStartDate] = useState("");
   const [batchError, setBatchError] = useState("");
@@ -218,48 +287,38 @@ export function CreateSiteWizard({
 
   function resetBatchForm() {
     setBatchMode("template");
-    setBatchRangeStart("");
-    setBatchRangeEnd("");
+    setBatchPlotNumbersInput("");
     setBatchTemplateId("");
     setBatchStartDate("");
     setBatchError("");
   }
 
-  // Get all plot numbers already claimed
-  const claimedNumbers = new Set(
-    plotBatches.flatMap((b) => {
-      const s = parseInt(b.rangeStart);
-      const e = parseInt(b.rangeEnd);
-      if (isNaN(s) || isNaN(e)) return [];
-      return Array.from({ length: e - s + 1 }, (_, i) => s + i);
-    })
+  // Plot numbers already claimed by other batches — string-level uniqueness
+  // since plot numbers can be alphanumeric ("47-A", "Block 2").
+  const claimedNumbers = new Set<string>(
+    plotBatches.flatMap((b) => b.plotNumbers)
   );
 
   function handleAddBatch() {
     setBatchError("");
 
-    const start = parseInt(batchRangeStart);
-    const end = batchRangeEnd ? parseInt(batchRangeEnd) : start;
-
-    if (isNaN(start) || start < 1) {
-      setBatchError("Enter a valid starting plot number.");
+    const { numbers, errors } = parsePlotNumbers(batchPlotNumbersInput);
+    if (errors.length > 0) {
+      setBatchError(errors.join(" · "));
       return;
     }
-    if (isNaN(end) || end < start) {
-      setBatchError("End must be greater than or equal to start.");
-      return;
-    }
-    if (end - start > 199) {
-      setBatchError("Maximum 200 plots per group.");
+    if (numbers.length === 0) {
+      setBatchError("Enter at least one plot number (e.g. \"1-20\" or \"47-A, 48\").");
       return;
     }
 
-    // Check overlap
-    for (let n = start; n <= end; n++) {
-      if (claimedNumbers.has(n)) {
-        setBatchError(`Plot ${n} is already in another group.`);
-        return;
-      }
+    // Cross-batch duplicate check
+    const overlap = numbers.filter((n) => claimedNumbers.has(n));
+    if (overlap.length > 0) {
+      setBatchError(
+        `Already in another group: ${overlap.slice(0, 5).join(", ")}${overlap.length > 5 ? "…" : ""}`
+      );
+      return;
     }
 
     if (batchMode === "template") {
@@ -280,8 +339,7 @@ export function CreateSiteWizard({
       {
         id: crypto.randomUUID(),
         mode: batchMode,
-        rangeStart: String(start),
-        rangeEnd: String(end),
+        plotNumbers: numbers,
         startDate: batchStartDate,
         templateId: batchTemplateId,
         templateName: tpl?.name ?? "",
@@ -297,11 +355,7 @@ export function CreateSiteWizard({
   }
 
   // Compute total plots
-  const totalPlots = plotBatches.reduce((sum, b) => {
-    const s = parseInt(b.rangeStart);
-    const e = parseInt(b.rangeEnd);
-    return sum + (isNaN(s) || isNaN(e) ? 0 : e - s + 1);
-  }, 0);
+  const totalPlots = plotBatches.reduce((sum, b) => sum + b.plotNumbers.length, 0);
 
   // Check if any template batch has orders (needs supplier mapping)
   const templateBatchesWithOrders = plotBatches.filter((b) => {
@@ -323,11 +377,7 @@ export function CreateSiteWizard({
       seen.add(batch.templateId);
       const labels = plotBatches
         .filter((b) => b.templateId === batch.templateId)
-        .map((b) =>
-          b.rangeStart === b.rangeEnd
-            ? `Plot ${b.rangeStart}`
-            : `Plots ${b.rangeStart}–${b.rangeEnd}`
-        );
+        .map((b) => batchLabel(b.plotNumbers));
       result.push({ template: tpl, batchLabels: labels });
     }
     return result;
@@ -338,15 +388,16 @@ export function CreateSiteWizard({
     (t) => t.id === batchTemplateId
   );
 
-  // Build a pending batch from the open form (if valid), or return null
+  // Build a pending batch from the open form (if valid), or return null.
+  // Used when the user hits "Next" with an open form — we auto-commit the
+  // pending batch so they don't lose their typed values.
   function buildPendingBatch(): PlotBatch | null {
     if (!showAddForm) return null;
 
-    const start = parseInt(batchRangeStart);
-    const end = batchRangeEnd ? parseInt(batchRangeEnd) : start;
-
-    if (isNaN(start) || start < 1) return null;
-    if (isNaN(end) || end < start) return null;
+    const { numbers, errors } = parsePlotNumbers(batchPlotNumbersInput);
+    if (errors.length > 0 || numbers.length === 0) return null;
+    // Overlap with already-committed batches
+    if (numbers.some((n) => claimedNumbers.has(n))) return null;
 
     if (batchMode === "template" && (!batchTemplateId || !batchStartDate)) {
       return null;
@@ -356,8 +407,7 @@ export function CreateSiteWizard({
     return {
       id: crypto.randomUUID(),
       mode: batchMode,
-      rangeStart: String(start),
-      rangeEnd: String(end),
+      plotNumbers: numbers,
       startDate: batchStartDate,
       templateId: batchTemplateId,
       templateName: tpl?.name ?? "",
@@ -432,18 +482,16 @@ export function CreateSiteWizard({
 
       for (let i = 0; i < batches.length; i++) {
         const batch = batches[i];
-        const rangeLabel =
-          batch.rangeStart === batch.rangeEnd
-            ? `Plot ${batch.rangeStart}`
-            : `Plots ${batch.rangeStart}–${batch.rangeEnd}`;
+        const rangeLabel = batchLabel(batch.plotNumbers);
         setSubmitProgress(`Creating ${rangeLabel}...`);
 
         try {
-          const start = parseInt(batch.rangeStart);
-          const end = parseInt(batch.rangeEnd);
-          const plots = Array.from({ length: end - start + 1 }, (_, i) => ({
-            plotNumber: String(start + i),
-            plotName: `Plot ${start + i}`,
+          // Use the batch's custom plot numbers verbatim — they may be
+          // alphanumeric ("47-A", "Block 2") from user input, not just
+          // auto-expanded integer sequences.
+          const plots = batch.plotNumbers.map((pn) => ({
+            plotNumber: pn,
+            plotName: `Plot ${pn}`,
           }));
 
           if (batch.mode === "blank") {
@@ -659,8 +707,7 @@ export function CreateSiteWizard({
               {plotBatches.length > 0 && (
                 <div className="max-h-[30vh] space-y-2 overflow-y-auto">
                   {plotBatches.map((batch) => {
-                    const count =
-                      parseInt(batch.rangeEnd) - parseInt(batch.rangeStart) + 1;
+                    const count = batch.plotNumbers.length;
                     return (
                       <div
                         key={batch.id}
@@ -669,13 +716,17 @@ export function CreateSiteWizard({
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2 text-sm font-medium">
                             <Layers className="size-3.5 text-muted-foreground" />
-                            {batch.rangeStart === batch.rangeEnd
-                              ? `Plot ${batch.rangeStart}`
-                              : `Plots ${batch.rangeStart}–${batch.rangeEnd}`}
+                            {batchLabel(batch.plotNumbers)}
                             <span className="text-xs font-normal text-muted-foreground">
                               ({count} {count === 1 ? "plot" : "plots"})
                             </span>
                           </div>
+                          {/* Show all plot numbers on hover/expand if not collapsed. */}
+                          {count > 4 && batchLabel(batch.plotNumbers).includes("more") && (
+                            <div className="mt-0.5 truncate text-[10px] text-muted-foreground/70" title={batch.plotNumbers.join(", ")}>
+                              {batch.plotNumbers.join(", ")}
+                            </div>
+                          )}
                           <div className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
                             {batch.mode === "template" ? (
                               <>
@@ -734,31 +785,35 @@ export function CreateSiteWizard({
                     </Button>
                   </div>
 
-                  {/* Plot range */}
+                  {/* Plot numbers — free-form input. Accepts ranges, comma
+                      lists, and alphanumeric plot numbers. */}
                   <div className="space-y-1.5">
                     <Label className="text-xs">Plot Numbers</Label>
-                    <div className="flex items-center gap-2">
-                      <Input
-                        type="number"
-                        placeholder="From"
-                        value={batchRangeStart}
-                        onChange={(e) => setBatchRangeStart(e.target.value)}
-                        className="h-8 w-20 text-sm"
-                        min={1}
-                      />
-                      <span className="text-xs text-muted-foreground">to</span>
-                      <Input
-                        type="number"
-                        placeholder="To"
-                        value={batchRangeEnd}
-                        onChange={(e) => setBatchRangeEnd(e.target.value)}
-                        className="h-8 w-20 text-sm"
-                        min={1}
-                      />
-                      <span className="text-[11px] text-muted-foreground">
-                        Leave &ldquo;To&rdquo; empty for a single plot
-                      </span>
-                    </div>
+                    <Input
+                      type="text"
+                      placeholder={"e.g.  1-20   or   47-A, 47-B, 48, 50   or   1-5, 10, 12-14"}
+                      value={batchPlotNumbersInput}
+                      onChange={(e) => setBatchPlotNumbersInput(e.target.value)}
+                      className="h-8 text-sm font-mono"
+                    />
+                    <p className="text-[11px] text-muted-foreground">
+                      Enter a range (<span className="font-mono">1-20</span>), a list
+                      (<span className="font-mono">47-A, 48, 50</span>), or mix both.
+                      {(() => {
+                        const preview = parsePlotNumbers(batchPlotNumbersInput);
+                        if (batchPlotNumbersInput.trim() === "") return null;
+                        if (preview.errors.length > 0) {
+                          return (
+                            <span className="ml-1 font-medium text-red-600">{preview.errors[0]}</span>
+                          );
+                        }
+                        return (
+                          <span className="ml-1 font-medium text-emerald-700">
+                            {preview.numbers.length} plot{preview.numbers.length === 1 ? "" : "s"} parsed
+                          </span>
+                        );
+                      })()}
+                    </p>
                   </div>
 
                   {/* Template selection */}
