@@ -441,9 +441,10 @@ export function TemplateEditor({
         onUpdate(updated);
       } catch (error) {
         console.error("Failed to update job via timeline:", error);
+        toast.error(error instanceof Error ? `Failed to update timeline: ${error.message}` : "Failed to update timeline");
       }
     },
-    [template.id, template.jobs, onUpdate]
+    [template.id, template.jobs, onUpdate, toast]
   );
 
   // ---------- Save template metadata ----------

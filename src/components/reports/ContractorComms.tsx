@@ -34,7 +34,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-import { fetchErrorMessage } from "@/components/ui/toast";
+import { fetchErrorMessage, useToast } from "@/components/ui/toast";
 import { useCopyToClipboard } from "@/hooks/useCopyToClipboard";
 import { MiniGantt } from "@/components/shared/MiniGantt";
 
@@ -241,6 +241,7 @@ function ShareDialog({
 }
 
 function SnagCard({ snag, siteId }: { snag: Snag; siteId: string }) {
+  const toast = useToast();
   const [expanded, setExpanded] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [notes, setNotes] = useState("");
@@ -271,19 +272,32 @@ function SnagCard({ snag, siteId }: { snag: Snag; siteId: string }) {
   const handleSubmit = async () => {
     setSubmitting(true);
     try {
+      // Photo upload first — if this fails, abort so we don't request
+      // sign-off without the evidence the contractor is expected to review.
       if (photos.length > 0) {
         const fd = new FormData();
         photos.forEach((f) => fd.append("photos", f));
         fd.append("tag", "after");
-        await fetch(`/api/snags/${snag.id}/photos`, { method: "POST", body: fd });
+        const photoRes = await fetch(`/api/snags/${snag.id}/photos`, { method: "POST", body: fd });
+        if (!photoRes.ok) {
+          toast.error(await fetchErrorMessage(photoRes, "Photo upload failed — sign-off NOT requested"));
+          return;
+        }
       }
-      await fetch(`/api/snags/${snag.id}/request-signoff`, {
+      const res = await fetch(`/api/snags/${snag.id}/request-signoff`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ notes: notes.trim() || undefined }),
       });
+      if (!res.ok) {
+        toast.error(await fetchErrorMessage(res, "Failed to request sign-off"));
+        return;
+      }
+      toast.success("Sign-off requested");
       setRequested(true);
       setShowForm(false);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Network error requesting sign-off");
     } finally {
       setSubmitting(false);
     }
@@ -447,6 +461,7 @@ function ContractorCard({
   contractor: Contractor;
   siteId: string;
 }) {
+  const toast = useToast();
   const [shareOpen, setShareOpen] = useState(false);
   const { lastSent, log: shareLog, markSent } = useLastShareSent(siteId, contractor.id);
   const [requestingSignOff, setRequestingSignOff] = useState<Set<string>>(new Set());
@@ -487,7 +502,12 @@ function ContractorCard({
       if (res.ok) {
         const doc = await res.json();
         setRamsDocs((prev) => (prev ? [doc, ...prev] : [doc]));
+        toast.success(`"${file.name}" uploaded`);
+      } else {
+        toast.error(await fetchErrorMessage(res, "Upload failed"));
       }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Network error uploading document");
     } finally {
       setRamsUploading(false);
       if (ramsInputRef.current) ramsInputRef.current.value = "";
@@ -497,9 +517,17 @@ function ContractorCard({
   const handleRamsDelete = async (docId: string) => {
     const ok = confirm("Delete this document? This cannot be undone.");
     if (!ok) return;
-    const res = await fetch(`/api/documents/${docId}`, { method: "DELETE" });
-    if (res.ok) {
-      setRamsDocs((prev) => (prev ? prev.filter((d) => d.id !== docId) : prev));
+    try {
+      const res = await fetch(`/api/documents/${docId}`, { method: "DELETE" });
+      if (res.ok) {
+        setRamsDocs((prev) => (prev ? prev.filter((d) => d.id !== docId) : prev));
+        toast.success("Document deleted");
+      } else {
+        // Don't optimistically remove — the server rejected, so leave the UI alone
+        toast.error(await fetchErrorMessage(res, "Failed to delete document"));
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Network error deleting document");
     }
   };
 

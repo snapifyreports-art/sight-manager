@@ -181,8 +181,13 @@ export function SiteQuantsClient({
       if (res.ok) {
         setManualOpen(false);
         setMName(""); setMQuantity(""); setMUnitCost(""); setMCategory("");
+        toast.success("Material added");
         refresh();
+      } else {
+        toast.error(await fetchErrorMessage(res, "Failed to add material"));
       }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Network error adding material");
     } finally { setMSubmitting(false); }
   }
 
@@ -204,8 +209,13 @@ export function SiteQuantsClient({
         setOneOffOpen(false);
         setOSupplierId(""); setOPlotId("__site__"); setODesc("");
         setOItems([{ name: "", quantity: 1, unit: "each", unitCost: 0 }]);
+        toast.success("One-off order created");
         refresh();
+      } else {
+        toast.error(await fetchErrorMessage(res, "Failed to create order"));
       }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Network error creating order");
     } finally { setOSubmitting(false); }
   }
 

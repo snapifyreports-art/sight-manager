@@ -261,11 +261,11 @@ export function useJobAction(
               const msg = data?.conflicts?.length
                 ? `Cannot pull forward: ${data.conflicts[0].kind === "job_in_past" ? "a downstream job would start in the past" : "an order would need placing in the past"}. Try a later start date.`
                 : "Cannot pull forward — programme conflict.";
-              alert(msg);
+              toast.error(msg);
             } else {
               const errText = await cascadeRes.text();
               console.error("[CASCADE] FAILED:", cascadeRes.status, errText);
-              alert("Cascade failed: " + errText);
+              toast.error(`Cascade failed: ${errText || `HTTP ${cascadeRes.status}`}`);
             }
             return;
           }
@@ -279,7 +279,7 @@ export function useJobAction(
         setSkipOrderProgression(false);
       } catch (e) {
         console.error("[CASCADE] Exception:", e);
-        alert("Pull forward error: " + String(e));
+        toast.error(`Pull forward error: ${e instanceof Error ? e.message : String(e)}`);
       } finally {
         setCascadeLoading(false);
       }
@@ -383,10 +383,11 @@ export function useJobAction(
       setSkipOrderProgression(false);
     } catch (e) {
       console.error("Pre-start confirm failed:", e);
+      toast.error(e instanceof Error ? `Pre-start check failed: ${e.message}` : "Pre-start check failed");
     } finally {
       setPreStartLoading(false);
     }
-  }, [preStartChecks, activeJob, executeAction, skipOrderProgression]);
+  }, [preStartChecks, activeJob, executeAction, skipOrderProgression, toast]);
 
   // ---- Late start handlers ----
   const handleLateStartPush = useCallback(async () => {
@@ -405,9 +406,11 @@ export function useJobAction(
         if (!cascadeRes.ok) {
           if (cascadeRes.status === 409) {
             const data = await cascadeRes.json().catch(() => null);
-            alert(data?.conflicts?.length ? `Cannot push programme: ${data.conflicts[0].kind}` : "Programme shift conflict.");
+            toast.error(data?.conflicts?.length ? `Cannot push programme: ${data.conflicts[0].kind}` : "Programme shift conflict.");
           } else {
-            console.error("Late start cascade failed:", await cascadeRes.text());
+            const errText = await cascadeRes.text();
+            console.error("Late start cascade failed:", errText);
+            toast.error(`Late-start cascade failed: ${errText || `HTTP ${cascadeRes.status}`}`);
           }
           return;
         }
@@ -417,6 +420,7 @@ export function useJobAction(
       setSkipOrderProgression(false);
     } catch (e) {
       console.error("Late start push failed:", e);
+      toast.error(e instanceof Error ? `Late-start failed: ${e.message}` : "Late-start failed");
     } finally {
       setCascadeLoading(false);
     }

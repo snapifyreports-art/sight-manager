@@ -12,6 +12,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
+import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 
 interface PlotMaterial {
   id: string;
@@ -27,6 +28,7 @@ interface PlotMaterial {
 }
 
 export function PlotMaterialsSection({ plotId }: { plotId: string }) {
+  const toast = useToast();
   const [materials, setMaterials] = useState<PlotMaterial[]>([]);
   const [loading, setLoading] = useState(true);
   const [addOpen, setAddOpen] = useState(false);
@@ -47,18 +49,35 @@ export function PlotMaterialsSection({ plotId }: { plotId: string }) {
   useEffect(() => { load(); }, [load]);
 
   async function updateField(m: PlotMaterial, patch: Partial<Pick<PlotMaterial, "delivered" | "consumed" | "quantity">>) {
-    await fetch(`/api/plots/${plotId}/materials/${m.id}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(patch),
-    });
-    load();
+    try {
+      const res = await fetch(`/api/plots/${plotId}/materials/${m.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      if (!res.ok) {
+        toast.error(await fetchErrorMessage(res, "Failed to update material"));
+        return;
+      }
+      load();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Network error updating material");
+    }
   }
 
   async function deleteMaterial(m: PlotMaterial) {
     if (!confirm(`Delete "${m.name}"?`)) return;
-    await fetch(`/api/plots/${plotId}/materials/${m.id}`, { method: "DELETE" });
-    load();
+    try {
+      const res = await fetch(`/api/plots/${plotId}/materials/${m.id}`, { method: "DELETE" });
+      if (!res.ok) {
+        toast.error(await fetchErrorMessage(res, `Failed to delete "${m.name}"`));
+        return;
+      }
+      toast.success(`"${m.name}" deleted`);
+      load();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Network error deleting material");
+    }
   }
 
   async function submit() {
@@ -77,8 +96,13 @@ export function PlotMaterialsSection({ plotId }: { plotId: string }) {
       if (res.ok) {
         setAddOpen(false);
         setName(""); setQuantity(""); setUnitCost(""); setCategory("");
+        toast.success(`"${name}" added`);
         load();
+      } else {
+        toast.error(await fetchErrorMessage(res, "Failed to add material"));
       }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Network error adding material");
     } finally { setSubmitting(false); }
   }
 
