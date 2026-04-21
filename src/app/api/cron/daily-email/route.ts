@@ -109,6 +109,24 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ sent: 0, reason: "No managers with email" });
   }
 
+  // Early-exit if email isn't configured — otherwise each manager's send
+  // throws the same "RESEND_API_KEY is not set" error and we log a misleading
+  // "N failed" with no explanation.
+  if (!process.env.RESEND_API_KEY) {
+    await prisma.eventLog.create({
+      data: {
+        type: "NOTIFICATION",
+        description: `Daily brief email SKIPPED — RESEND_API_KEY not configured (${managers.length} manager${managers.length !== 1 ? "s" : ""} would have been notified)`,
+      },
+    });
+    return NextResponse.json({
+      sent: 0,
+      failed: 0,
+      skipped: managers.length,
+      reason: "RESEND_API_KEY not configured in environment",
+    });
+  }
+
   // Build email HTML
   const dateLabel = format(now, "EEEE d MMMM yyyy");
 
@@ -197,13 +215,27 @@ export async function GET(req: NextRequest) {
   );
 
   const sent = results.filter((r) => r.status === "fulfilled").length;
-  const failed = results.filter((r) => r.status === "rejected").length;
+  const failedResults = results.filter(
+    (r): r is PromiseRejectedResult => r.status === "rejected"
+  );
+  const failed = failedResults.length;
+
+  // If everything failed, surface the underlying reason in the event log
+  // so we don't just see "3 failed" forever with no explanation. Common
+  // cases: Resend domain not verified, rate limit, invalid API key.
+  let failureHint = "";
+  if (failed > 0) {
+    const firstReason = failedResults[0]?.reason;
+    const msg =
+      firstReason instanceof Error ? firstReason.message : String(firstReason);
+    failureHint = ` — ${msg.slice(0, 140)}`;
+  }
 
   // Log to event log
   await prisma.eventLog.create({
     data: {
       type: "NOTIFICATION",
-      description: `Daily brief email sent to ${sent} manager${sent !== 1 ? "s" : ""}${failed > 0 ? ` (${failed} failed)` : ""}`,
+      description: `Daily brief email sent to ${sent} manager${sent !== 1 ? "s" : ""}${failed > 0 ? ` (${failed} failed${failureHint})` : ""}`,
     },
   });
 
