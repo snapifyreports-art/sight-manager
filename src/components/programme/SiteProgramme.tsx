@@ -1585,12 +1585,17 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
 
               {/* Grid + Stage code cells */}
               <div className="relative" style={{ height: totalHeight }}>
-                {/* Today line */}
+                {/* Today line — all three overlays MUST be pointer-events-none.
+                    Previously the 40px-wide highlight column absorbed clicks,
+                    which meant any job/order/delivery that happened to fall in
+                    the current week became unclickable. A silent, high-impact
+                    bug since "today" is exactly the column the user most wants
+                    to interact with. */}
                 {todayIndex >= 0 && (
                   <>
                     {/* Semi-transparent highlight column behind today */}
                     <div
-                      className="absolute top-0 z-[5] bg-red-500/[0.06]"
+                      className="pointer-events-none absolute top-0 z-[5] bg-red-500/[0.06]"
                       style={{
                         left: todayIndex * cellWidth,
                         width: cellWidth,
@@ -1599,7 +1604,7 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                     />
                     {/* Today label at top */}
                     <div
-                      className="absolute z-20 -translate-x-1/2 rounded-b bg-red-500 px-1.5 py-0.5 text-[9px] font-bold leading-none text-white shadow-sm"
+                      className="pointer-events-none absolute z-20 -translate-x-1/2 rounded-b bg-red-500 px-1.5 py-0.5 text-[9px] font-bold leading-none text-white shadow-sm"
                       style={{
                         left: todayIndex * cellWidth + cellWidth / 2,
                         top: 0,
@@ -1609,7 +1614,7 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                     </div>
                     {/* Red vertical line */}
                     <div
-                      className="absolute top-0 z-10 bg-red-500"
+                      className="pointer-events-none absolute top-0 z-10 bg-red-500"
                       style={{
                         left: todayIndex * cellWidth + cellWidth / 2 - 1,
                         width: 2,
@@ -2022,11 +2027,11 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                     );
                   })}
 
-                {/* Vertical gridlines */}
+                {/* Vertical gridlines — decorative, must not eat clicks */}
                 {columns.map((col, i) => (
                   <div
                     key={`grid-${col.key}`}
-                    className="absolute top-0 border-r border-slate-100"
+                    className="pointer-events-none absolute top-0 border-r border-slate-100"
                     style={{
                       left: i * cellWidth,
                       height: totalHeight,
