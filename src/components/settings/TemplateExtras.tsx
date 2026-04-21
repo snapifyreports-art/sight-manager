@@ -153,6 +153,11 @@ export function TemplateExtras({ templateId, templateName }: { templateId: strin
 
   // Upload all queued files in parallel. Per-file status tracked so partial
   // failures (e.g. one oversize file) don't block the rest.
+  //
+  // Uses a 3-step signed-upload flow (sign → upload direct to Supabase →
+  // register) so large drawings bypass Vercel's 4.5MB request body limit.
+  // Site managers upload 10-30MB PDFs routinely; the old single-POST-to-
+  // Vercel route 413'd on anything above ~4MB.
   async function uploadDocs() {
     if (pendingDocs.length === 0 || dSubmitting) return;
     setDSubmitting(true);
@@ -164,21 +169,77 @@ export function TemplateExtras({ templateId, templateName }: { templateId: strin
           if (p.status === "done") return;
           updatePending(p.tempId, { status: "uploading", errorMsg: undefined });
           try {
-            const fd = new FormData();
-            fd.append("file", p.file);
-            fd.append("name", p.name || p.file.name);
-            fd.append("category", "DRAWING");
-            const res = await fetch(`/api/plot-templates/${templateId}/documents`, { method: "POST", body: fd });
-            if (res.ok) {
-              updatePending(p.tempId, { status: "done" });
-              successCount++;
-            } else {
-              const data = await res.json().catch(() => ({}));
-              updatePending(p.tempId, { status: "error", errorMsg: data.error ?? `HTTP ${res.status}` });
-              errorCount++;
+            // 1. Ask the server for a signed upload URL.
+            const signRes = await fetch(
+              `/api/plot-templates/${templateId}/documents/sign`,
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  fileName: p.file.name,
+                  fileSize: p.file.size,
+                  mimeType: p.file.type,
+                }),
+              }
+            );
+            if (!signRes.ok) {
+              const data = await signRes.json().catch(() => ({}));
+              const friendly =
+                signRes.status === 413
+                  ? data.error ?? `File too large (max 50MB)`
+                  : data.error ?? `Could not start upload (HTTP ${signRes.status})`;
+              throw new Error(friendly);
             }
+            const { signedUrl, storagePath } = (await signRes.json()) as {
+              signedUrl: string;
+              token: string;
+              storagePath: string;
+            };
+
+            // 2. Upload bytes directly to Supabase Storage — the signed URL
+            //    accepts a PUT with the raw file body, bypassing Vercel.
+            const putRes = await fetch(signedUrl, {
+              method: "PUT",
+              headers: {
+                "Content-Type": p.file.type || "application/octet-stream",
+                "x-upsert": "false",
+              },
+              body: p.file,
+            });
+            if (!putRes.ok) {
+              throw new Error(
+                `Upload to storage failed (HTTP ${putRes.status}). Check your connection and try again.`
+              );
+            }
+
+            // 3. Register the DB row.
+            const regRes = await fetch(
+              `/api/plot-templates/${templateId}/documents/register`,
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  storagePath,
+                  name: p.name || p.file.name,
+                  fileName: p.file.name,
+                  fileSize: p.file.size,
+                  mimeType: p.file.type,
+                  category: "DRAWING",
+                }),
+              }
+            );
+            if (!regRes.ok) {
+              const data = await regRes.json().catch(() => ({}));
+              throw new Error(data.error ?? `Could not save drawing (HTTP ${regRes.status})`);
+            }
+
+            updatePending(p.tempId, { status: "done" });
+            successCount++;
           } catch (e) {
-            updatePending(p.tempId, { status: "error", errorMsg: e instanceof Error ? e.message : "Network error" });
+            updatePending(p.tempId, {
+              status: "error",
+              errorMsg: e instanceof Error ? e.message : "Network error",
+            });
             errorCount++;
           }
         })
