@@ -113,12 +113,25 @@ export async function POST(req: NextRequest) {
         ...(items && items.length > 0
           ? {
               orderItems: {
-                create: items.map((item) => ({
-                  name: item.name,
-                  quantity: item.quantity,
-                  unit: item.unit,
-                  unitCost: item.unitCost,
-                })),
+                // Compute totalCost here. Schema defaults it to 0; if we
+                // omit the field on create, the stored row has 0 and the
+                // job page renders "= 0.00" even though the wizard UI
+                // showed a valid line total. Other creation paths
+                // (auto-reorder on job start, template propagation,
+                // one-off orders, manual item add) all compute this —
+                // only the wizard POST was missing it. Caught by Apr 22
+                // smoke test on the Asbestos-survey one-off order.
+                create: items.map((item) => {
+                  const qty = Number(item.quantity) || 0;
+                  const cost = Number(item.unitCost) || 0;
+                  return {
+                    name: item.name,
+                    quantity: qty,
+                    unit: item.unit,
+                    unitCost: cost,
+                    totalCost: qty * cost,
+                  };
+                }),
               },
             }
           : {}),

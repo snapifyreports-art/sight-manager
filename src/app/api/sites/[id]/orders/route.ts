@@ -56,6 +56,7 @@ export async function GET(
           quantity: true,
           unit: true,
           unitCost: true,
+          totalCost: true,
         },
       },
     },
