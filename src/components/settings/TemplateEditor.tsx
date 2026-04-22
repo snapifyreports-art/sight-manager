@@ -2734,41 +2734,80 @@ export function TemplateEditor({
                 </Select>
               </div>
 
-              {/* Lead time */}
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-muted-foreground">Lead time:</span>
-                <Input
-                  type="number"
-                  min={0}
-                  className="w-[70px]"
-                  value={leadTimeAmount}
-                  onChange={(e) => setLeadTimeAmount(parseInt(e.target.value) || 0)}
-                />
-                <Select value={leadTimeUnit} onValueChange={(v) => setLeadTimeUnit(v as "days" | "weeks")}>
-                  <SelectTrigger className="w-[100px]">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="weeks">Weeks</SelectItem>
-                    <SelectItem value="days">Days</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+              {/* Lead time — only relevant in Arrive mode (working
+                  backwards from desired delivery date). In Order mode
+                  the user is setting the order date directly; supplier
+                  lead time is their problem to communicate separately. */}
+              {anchorType === "arrive" && (
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-muted-foreground">Lead time:</span>
+                  <Input
+                    type="number"
+                    min={0}
+                    className="w-[70px]"
+                    value={leadTimeAmount}
+                    onChange={(e) => setLeadTimeAmount(parseInt(e.target.value) || 0)}
+                  />
+                  <Select value={leadTimeUnit} onValueChange={(v) => setLeadTimeUnit(v as "days" | "weeks")}>
+                    <SelectTrigger className="w-[100px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="weeks">Weeks</SelectItem>
+                      <SelectItem value="days">Days</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
 
-              {/* Preview */}
+              {/* Preview — shows the user's chosen anchor phrase AND the
+                  absolute week number so you can see at a glance whether
+                  the order falls before or after plot kick-off. In Arrive
+                  mode both Order and Arrive weeks are shown; in Order mode
+                  just the Order week (lead time is irrelevant there). */}
               {(() => {
                 const allJobs = getAllJobsFlat();
                 const ownerJob = allJobs.find((j) => j.id === orderJobId);
                 const ownerStartWeek = ownerJob ? ownerJob.startWeek : 1;
                 const { orderWeek, deliveryWeek } = computeOffsets(ownerStartWeek);
                 const refJob = allJobs.find((j) => j.id === anchorRefJobId);
+                const refLabel = refJob ? refJob.label : "job start";
+                const amountLabel = `${anchorAmount} ${anchorUnit} ${anchorDirection}`;
+                const ownerName = ownerJob?.label ?? "this job";
+
+                // Warn if the delivery lands AFTER the owner job starts —
+                // usually a mistake (materials arrive too late).
+                const deliveryAfterJob = deliveryWeek > ownerStartWeek;
+
+                if (anchorType === "order") {
+                  return (
+                    <div className="space-y-1">
+                      <p className="text-xs text-muted-foreground">
+                        <strong className="font-semibold text-foreground">Order Wk {orderWeek}</strong>
+                        <span className="italic"> · {amountLabel} {refLabel}</span>
+                      </p>
+                    </div>
+                  );
+                }
+
+                // Arrive mode — show BOTH the arrive week (primary input)
+                // and the derived order week (when to place it).
                 return (
-                  <p className="text-xs italic text-muted-foreground">
-                    {anchorType === "order" ? "Order" : "Arrive"}{" "}
-                    {anchorAmount} {anchorUnit} {anchorDirection}{" "}
-                    {refJob ? refJob.label : "job start"}
-                    {" → "}Order Wk {orderWeek} {"→"} Delivery Wk {deliveryWeek}
-                  </p>
+                  <div className="space-y-1">
+                    <p className="text-xs text-muted-foreground">
+                      <strong className="font-semibold text-foreground">Arrive Wk {deliveryWeek}</strong>
+                      <span className="italic"> · {amountLabel} {refLabel}</span>
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      <strong className="font-semibold text-foreground">Order Wk {orderWeek}</strong>
+                      <span className="italic"> · {leadTimeAmount} {leadTimeUnit} earlier (lead time)</span>
+                    </p>
+                    {deliveryAfterJob && (
+                      <p className="text-xs font-medium text-red-600">
+                        ⚠ Delivery is AFTER {ownerName} starts. Check your dates.
+                      </p>
+                    )}
+                  </div>
                 );
               })()}
             </div>

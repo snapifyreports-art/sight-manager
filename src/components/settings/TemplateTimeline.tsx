@@ -466,24 +466,30 @@ export function TemplateTimeline({ jobs, onJobUpdate, expandedJobIds, onToggleEx
                       {row.orderDots?.map((dot) => (
                         <div key={dot.id}>
                           <div
-                            className="absolute"
+                            className="absolute flex items-center gap-0.5"
                             style={{
-                              left: weekToLeft(dot.orderWeek) + WEEK_WIDTH / 2 - 4,
-                              top: rowTop + 2,
+                              left: weekToLeft(dot.orderWeek) + WEEK_WIDTH / 2 - 6,
+                              top: rowTop + 1,
                             }}
                             title={`Order: Wk ${dot.orderWeek}`}
                           >
-                            <div className="size-2 rounded-full bg-orange-500 ring-1 ring-white" />
+                            <div className="size-3 rounded-full bg-orange-500 ring-2 ring-white shadow-sm" />
+                            <span className="text-[9px] font-bold text-orange-700 drop-shadow-[0_0_2px_white]">
+                              W{dot.orderWeek}
+                            </span>
                           </div>
                           <div
-                            className="absolute"
+                            className="absolute flex items-center gap-0.5"
                             style={{
-                              left: weekToLeft(dot.deliveryWeek) + WEEK_WIDTH / 2 - 4,
-                              top: rowTop + ROW_HEIGHT - 10,
+                              left: weekToLeft(dot.deliveryWeek) + WEEK_WIDTH / 2 - 6,
+                              top: rowTop + ROW_HEIGHT - 13,
                             }}
                             title={`Delivery: Wk ${dot.deliveryWeek}`}
                           >
-                            <div className="size-2 rounded-full bg-green-500 ring-1 ring-white" />
+                            <div className="size-3 rounded-full bg-green-500 ring-2 ring-white shadow-sm" />
+                            <span className="text-[9px] font-bold text-green-700 drop-shadow-[0_0_2px_white]">
+                              W{dot.deliveryWeek}
+                            </span>
                           </div>
                         </div>
                       ))}
@@ -577,24 +583,30 @@ export function TemplateTimeline({ jobs, onJobUpdate, expandedJobIds, onToggleEx
                       return (
                         <div key={order.id}>
                           <div
-                            className="absolute"
+                            className="absolute flex items-center gap-0.5"
                             style={{
-                              left: weekToLeft(orderWeek) + WEEK_WIDTH / 2 - 4,
-                              top: rowTop + 2,
+                              left: weekToLeft(orderWeek) + WEEK_WIDTH / 2 - 6,
+                              top: rowTop + 1,
                             }}
                             title={`Order: Wk ${orderWeek}`}
                           >
-                            <div className="size-2 rounded-full bg-orange-500 ring-1 ring-white" />
+                            <div className="size-3 rounded-full bg-orange-500 ring-2 ring-white shadow-sm" />
+                            <span className="text-[9px] font-bold text-orange-700 drop-shadow-[0_0_2px_white]">
+                              W{orderWeek}
+                            </span>
                           </div>
                           <div
-                            className="absolute"
+                            className="absolute flex items-center gap-0.5"
                             style={{
-                              left: weekToLeft(deliveryWeek) + WEEK_WIDTH / 2 - 4,
-                              top: rowTop + ROW_HEIGHT - 10,
+                              left: weekToLeft(deliveryWeek) + WEEK_WIDTH / 2 - 6,
+                              top: rowTop + ROW_HEIGHT - 13,
                             }}
                             title={`Delivery: Wk ${deliveryWeek}`}
                           >
-                            <div className="size-2 rounded-full bg-green-500 ring-1 ring-white" />
+                            <div className="size-3 rounded-full bg-green-500 ring-2 ring-white shadow-sm" />
+                            <span className="text-[9px] font-bold text-green-700 drop-shadow-[0_0_2px_white]">
+                              W{deliveryWeek}
+                            </span>
                           </div>
                         </div>
                       );
@@ -607,12 +619,12 @@ export function TemplateTimeline({ jobs, onJobUpdate, expandedJobIds, onToggleEx
             {/* Legend */}
             <div className="flex items-center gap-4 border-t px-3 py-2">
               <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
-                <div className="size-2 rounded-full bg-orange-500" />
-                Order date
+                <div className="size-3 rounded-full bg-orange-500 ring-2 ring-white shadow-sm" />
+                Order week
               </div>
               <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
-                <div className="size-2 rounded-full bg-green-500" />
-                Delivery date
+                <div className="size-3 rounded-full bg-green-500 ring-2 ring-white shadow-sm" />
+                Delivery week
               </div>
               {interactive && (
                 <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
