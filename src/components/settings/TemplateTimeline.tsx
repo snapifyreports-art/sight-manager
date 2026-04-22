@@ -5,6 +5,12 @@ import { ChevronRight, ChevronDown, Package } from "lucide-react";
 import type { TemplateJobData } from "./types";
 
 const WEEK_WIDTH = 48;
+// Day view: each working day = 1 column, 5 days per week. Narrower per
+// column so the timeline doesn't become ungovernably wide, but wide
+// enough to show Mon/Tue/Wed/Thu/Fri labels.
+const DAY_WIDTH = 28;
+const DAYS_PER_WEEK = 5;
+const DAY_LABELS = ["M", "T", "W", "T", "F"];
 const ROW_HEIGHT = 40;
 const BAR_HEIGHT = 24;
 const LEFT_PANEL = 200;
@@ -60,6 +66,16 @@ export function TemplateTimeline({ jobs, onJobUpdate, expandedJobIds, onToggleEx
   // Use external expand state if provided, otherwise fallback to internal
   const [internalExpanded, setInternalExpanded] = useState<Set<string>>(new Set());
   const effectiveExpanded = expandedJobIds ?? internalExpanded;
+
+  // Keith Apr 2026: now that sub-jobs measure in working days, users want
+  // to zoom in to see day-level detail. Weeks stays the default (dense
+  // overview); Days zooms each week into 5 day cells so short sub-jobs
+  // (e.g. "3-day paint touch-up") render as distinct bars, not a smear.
+  // The underlying data shape doesn't change — positions just get
+  // multiplied up by DAYS_PER_WEEK.
+  const [viewMode, setViewMode] = useState<"weeks" | "days">("weeks");
+  const colWidth = viewMode === "days" ? DAY_WIDTH : WEEK_WIDTH;
+  const colsPerWeek = viewMode === "days" ? DAYS_PER_WEEK : 1;
 
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [dragPreview, setDragPreview] = useState<{
@@ -175,14 +191,19 @@ export function TemplateTimeline({ jobs, onJobUpdate, expandedJobIds, onToggleEx
   // Week 0 is skipped, so if gridStartWeek < 1 we add (0 - gridStartWeek) pre-start cols
   const preStartCols = gridStartWeek < 1 ? -gridStartWeek : 0;
   const totalWeeks = preStartCols + maxWeek + 2;
-  const timelineWidth = totalWeeks * WEEK_WIDTH;
+  // A full week is either one WEEK_WIDTH column (weeks mode) or five
+  // DAY_WIDTH columns (days mode). All bar positioning + dot math is
+  // expressed in terms of this derived weekPixels so the layout
+  // automatically zooms when the user toggles.
+  const weekPixels = colWidth * colsPerWeek;
+  const timelineWidth = totalWeeks * weekPixels;
 
   // Convert a week number to pixel offset, skipping the non-existent week 0
   const weekToLeft = (week: number): number => {
-    if (gridStartWeek >= 1) return (week - gridStartWeek) * WEEK_WIDTH;
-    if (week < 1) return (week - gridStartWeek) * WEEK_WIDTH;
+    if (gridStartWeek >= 1) return (week - gridStartWeek) * weekPixels;
+    if (week < 1) return (week - gridStartWeek) * weekPixels;
     // Positive weeks: place after all pre-start columns (gap where 0 would be skipped)
-    return (preStartCols + week - 1) * WEEK_WIDTH;
+    return (preStartCols + week - 1) * weekPixels;
   };
 
   // Build week header list, skipping 0
@@ -231,7 +252,9 @@ export function TemplateTimeline({ jobs, onJobUpdate, expandedJobIds, onToggleEx
     (e: React.MouseEvent) => {
       if (!dragState) return;
       const dx = e.clientX - dragState.startX;
-      const weekDelta = Math.round(dx / WEEK_WIDTH);
+      // Drag resolution: always snap to whole weeks (user intention is
+      // usually weekly changes; day-level precision via the edit dialog).
+      const weekDelta = Math.round(dx / weekPixels);
 
       let newStart = dragState.originalStartWeek;
       let newEnd = dragState.originalEndWeek;
@@ -276,15 +299,43 @@ export function TemplateTimeline({ jobs, onJobUpdate, expandedJobIds, onToggleEx
 
   return (
     <div className="rounded-lg border bg-white">
-      <div className="border-b px-4 py-2">
-        <h3 className="text-sm font-semibold text-slate-700">
-          Timeline Preview
-        </h3>
-        <p className="text-xs text-muted-foreground">
-          {interactive
-            ? "Drag bar edges to adjust week ranges"
-            : "Click stages to expand sub-jobs"}
-        </p>
+      <div className="flex items-center justify-between border-b px-4 py-2">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-700">
+            Timeline Preview
+          </h3>
+          <p className="text-xs text-muted-foreground">
+            {interactive
+              ? "Drag bar edges to adjust week ranges"
+              : "Click stages to expand sub-jobs"}
+          </p>
+        </div>
+        {/* Weeks / Days toggle — days view zooms each week into 5 cells
+            so short sub-jobs render as distinct bars. */}
+        <div className="flex items-center gap-1 rounded-lg border p-0.5">
+          <button
+            type="button"
+            onClick={() => setViewMode("weeks")}
+            className={`rounded px-2.5 py-0.5 text-[11px] font-medium transition-colors ${
+              viewMode === "weeks"
+                ? "bg-slate-900 text-white"
+                : "text-muted-foreground hover:bg-accent"
+            }`}
+          >
+            Weeks
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode("days")}
+            className={`rounded px-2.5 py-0.5 text-[11px] font-medium transition-colors ${
+              viewMode === "days"
+                ? "bg-slate-900 text-white"
+                : "text-muted-foreground hover:bg-accent"
+            }`}
+          >
+            Days
+          </button>
+        </div>
       </div>
 
       <div className="overflow-x-auto">
@@ -383,18 +434,54 @@ export function TemplateTimeline({ jobs, onJobUpdate, expandedJobIds, onToggleEx
 
           {/* Right panel - timeline */}
           <div className="relative flex-1">
-            {/* Week headers */}
-            <div className="flex h-8 border-b">
-              {weekHeaders.map((week) => (
-                <div
-                  key={week}
-                  className={`flex shrink-0 items-center justify-center border-r border-slate-100 text-[10px] font-medium ${week < 1 ? "text-amber-500" : "text-muted-foreground"}`}
-                  style={{ width: WEEK_WIDTH }}
-                >
-                  {`Wk ${week}`}
+            {/* Week / day headers */}
+            {viewMode === "weeks" ? (
+              <div className="flex h-8 border-b">
+                {weekHeaders.map((week) => (
+                  <div
+                    key={week}
+                    className={`flex shrink-0 items-center justify-center border-r border-slate-100 text-[10px] font-medium ${week < 1 ? "text-amber-500" : "text-muted-foreground"}`}
+                    style={{ width: WEEK_WIDTH }}
+                  >
+                    {`Wk ${week}`}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              // Days mode: two-row header. Top = week labels spanning 5 cols
+              // each. Bottom = M/T/W/T/F day labels. Alternating shade per
+              // week so weeks stay visually grouped.
+              <div className="border-b">
+                <div className="flex h-4 border-b border-slate-100">
+                  {weekHeaders.map((week, i) => (
+                    <div
+                      key={`w-${week}`}
+                      className={`flex shrink-0 items-center justify-center border-r border-slate-200 text-[10px] font-medium ${
+                        week < 1 ? "text-amber-500" : "text-muted-foreground"
+                      } ${i % 2 === 1 ? "bg-slate-50/60" : ""}`}
+                      style={{ width: DAY_WIDTH * DAYS_PER_WEEK }}
+                    >
+                      {`Wk ${week}`}
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
+                <div className="flex h-4">
+                  {weekHeaders.map((week, wi) =>
+                    DAY_LABELS.map((d, di) => (
+                      <div
+                        key={`d-${week}-${di}`}
+                        className={`flex shrink-0 items-center justify-center border-r border-slate-100 text-[9px] text-muted-foreground/70 ${
+                          wi % 2 === 1 ? "bg-slate-50/60" : ""
+                        }`}
+                        style={{ width: DAY_WIDTH }}
+                      >
+                        {d}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* Grid + Bars */}
             <div className="relative" style={{ height: totalHeight }}>
@@ -443,7 +530,7 @@ export function TemplateTimeline({ jobs, onJobUpdate, expandedJobIds, onToggleEx
                   const colorSet =
                     GROUP_COLORS[row.groupIndex % GROUP_COLORS.length];
                   const left = weekToLeft(pj.startWeek);
-                  const width = (pj.endWeek - pj.startWeek + 1) * WEEK_WIDTH - 4;
+                  const width = (pj.endWeek - pj.startWeek + 1) * weekPixels - 4;
                   const top = rowYPositions[idx] + (ROW_HEIGHT - BAR_HEIGHT) / 2;
                   const rowTop = rowYPositions[idx];
 
@@ -468,7 +555,7 @@ export function TemplateTimeline({ jobs, onJobUpdate, expandedJobIds, onToggleEx
                           <div
                             className="absolute flex items-center gap-0.5"
                             style={{
-                              left: weekToLeft(dot.orderWeek) + WEEK_WIDTH / 2 - 6,
+                              left: weekToLeft(dot.orderWeek) + weekPixels / 2 - 6,
                               top: rowTop + 1,
                             }}
                             title={`Order: Wk ${dot.orderWeek}`}
@@ -481,7 +568,7 @@ export function TemplateTimeline({ jobs, onJobUpdate, expandedJobIds, onToggleEx
                           <div
                             className="absolute flex items-center gap-0.5"
                             style={{
-                              left: weekToLeft(dot.deliveryWeek) + WEEK_WIDTH / 2 - 6,
+                              left: weekToLeft(dot.deliveryWeek) + weekPixels / 2 - 6,
                               top: rowTop + ROW_HEIGHT - 13,
                             }}
                             title={`Delivery: Wk ${dot.deliveryWeek}`}
@@ -510,7 +597,7 @@ export function TemplateTimeline({ jobs, onJobUpdate, expandedJobIds, onToggleEx
                   GROUP_COLORS[row.groupIndex % GROUP_COLORS.length];
 
                 const left = weekToLeft(sw);
-                const width = (ew - sw + 1) * WEEK_WIDTH - 4;
+                const width = (ew - sw + 1) * weekPixels - 4;
                 const top =
                   rowYPositions[idx] +
                   (ROW_HEIGHT - BAR_HEIGHT) / 2;
@@ -585,7 +672,7 @@ export function TemplateTimeline({ jobs, onJobUpdate, expandedJobIds, onToggleEx
                           <div
                             className="absolute flex items-center gap-0.5"
                             style={{
-                              left: weekToLeft(orderWeek) + WEEK_WIDTH / 2 - 6,
+                              left: weekToLeft(orderWeek) + weekPixels / 2 - 6,
                               top: rowTop + 1,
                             }}
                             title={`Order: Wk ${orderWeek}`}
@@ -598,7 +685,7 @@ export function TemplateTimeline({ jobs, onJobUpdate, expandedJobIds, onToggleEx
                           <div
                             className="absolute flex items-center gap-0.5"
                             style={{
-                              left: weekToLeft(deliveryWeek) + WEEK_WIDTH / 2 - 6,
+                              left: weekToLeft(deliveryWeek) + weekPixels / 2 - 6,
                               top: rowTop + ROW_HEIGHT - 13,
                             }}
                             title={`Delivery: Wk ${deliveryWeek}`}
