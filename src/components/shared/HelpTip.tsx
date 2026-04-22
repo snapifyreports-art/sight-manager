@@ -77,7 +77,12 @@ export function HelpTip({
       ref={containerRef}
       className={cn(
         "relative inline-flex items-center",
-        !inline && "absolute right-2 top-2 z-20",
+        // Default (non-inline) position: sit LEFT of the Dialog's close X
+        // rather than on top of it. DialogContent renders a 28px close
+        // button at right-2 top-2 — so our right-10 top-2.5 slots the ?
+        // next to it with a 4px gap. (Keith Apr 2026: was overlapping
+        // the X, which was "terrible" and I can't disagree.)
+        !inline && "absolute right-10 top-2.5 z-20",
         className,
       )}
     >
@@ -90,13 +95,19 @@ export function HelpTip({
           setOpen((o) => !o);
         }}
         className={cn(
-          "flex size-5 items-center justify-center rounded-full text-muted-foreground transition-colors",
-          open ? "bg-blue-100 text-blue-700" : "hover:bg-slate-100 hover:text-foreground",
+          // Bigger + coloured by default so it's obvious something is here
+          // (Keith Apr 2026: "the ? button is far too small it needs to be
+          // prominent"). Uses the blue accent family so it reads clearly
+          // as a help affordance even against slate UI.
+          "flex size-6 items-center justify-center rounded-full border transition-colors",
+          open
+            ? "border-blue-300 bg-blue-100 text-blue-700"
+            : "border-blue-200 bg-blue-50 text-blue-600 hover:border-blue-300 hover:bg-blue-100 hover:text-blue-700",
         )}
         aria-label={`What is ${title}?`}
         title={`What is ${title}?`}
       >
-        <HelpCircle className="size-3.5" />
+        <HelpCircle className="size-4" />
       </button>
 
       {open && (

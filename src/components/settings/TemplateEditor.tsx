@@ -2681,7 +2681,7 @@ export function TemplateEditor({
             <div className="space-y-3">
               <div className="flex items-center gap-2">
                 <Label>Timing</Label>
-                <HelpTip title="About order timing anchors" anchor="below-right">
+                <HelpTip inline title="About order timing anchors" anchor="below-right">
                   <p><strong>What this does:</strong> ties the order to a job&apos;s start so the dates stay correct when the programme shifts. No fixed calendar dates — the order moves with the job.</p>
                   <p><strong>&quot;Order&quot; vs &quot;Arrive&quot;:</strong> <em>Order</em> = when you place the order with the supplier. <em>Arrive</em> = when materials land on site. The other date is worked out from the supplier&apos;s lead time.</p>
                   <p><strong>Example:</strong> &quot;Order 2 weeks before Brickwork first lift&quot; means if brickwork shifts a week, the order date also shifts a week. Same relationship kept.</p>
