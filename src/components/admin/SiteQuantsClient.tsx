@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/select";
 import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 import { useOrderStatus } from "@/hooks/useOrderStatus";
+import { useReviewSupplierMaterials } from "@/hooks/useReviewSupplierMaterials";
 
 interface ManualByMaterial {
   name: string;
@@ -86,6 +87,10 @@ export function SiteQuantsClient({
   const [error, setError] = useState("");
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const toast = useToast();
+  // "Review items" dialog — fires after a one-off order save, offering
+  // to add any new items to the supplier's pricelist.
+  const { openReview: openMaterialReview, dialogs: materialReviewDialogs } =
+    useReviewSupplierMaterials();
 
   useEffect(() => {
     (async () => {
@@ -206,11 +211,28 @@ export function SiteQuantsClient({
         }),
       });
       if (res.ok) {
+        const savedItems = oItems.filter((i) => i.name && i.quantity > 0);
+        const reviewSupplierId = oSupplierId;
+        const reviewSupplierName = suppliers.find((s) => s.id === oSupplierId)?.name;
         setOneOffOpen(false);
         setOSupplierId(""); setOPlotId("__site__"); setODesc("");
         setOItems([{ name: "", quantity: 1, unit: "each", unitCost: 0 }]);
         toast.success("One-off order created");
         refresh();
+        // Offer to persist the one-off items to the supplier's pricelist
+        // — same flow template orders use. Fires silently if every item
+        // already matches.
+        if (reviewSupplierId && savedItems.length > 0) {
+          void openMaterialReview({
+            supplierId: reviewSupplierId,
+            supplierName: reviewSupplierName,
+            items: savedItems.map((i) => ({
+              name: i.name,
+              unit: i.unit,
+              unitCost: i.unitCost,
+            })),
+          });
+        }
       } else {
         toast.error(await fetchErrorMessage(res, "Failed to create order"));
       }
@@ -590,6 +612,10 @@ export function SiteQuantsClient({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Review items dialog — fires after a one-off order save if
+          items don't match the supplier's pricelist. */}
+      {materialReviewDialogs}
     </div>
   );
 }

@@ -57,6 +57,7 @@ import {
 import type { StageDefinition } from "@/lib/stage-library";
 import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 import { HelpTip } from "@/components/shared/HelpTip";
+import { useReviewSupplierMaterials } from "@/hooks/useReviewSupplierMaterials";
 
 interface MaterialSuggestion {
   name: string;
@@ -78,6 +79,10 @@ export function TemplateEditor({
   onUpdate,
 }: TemplateEditorProps) {
   const toast = useToast();
+  // "Review items" flow — after saving an order, offers to add any new
+  // items to the supplier's pricelist (or update differing prices).
+  const { openReview: openMaterialReview, dialogs: materialReviewDialogs } =
+    useReviewSupplierMaterials();
   const [editingMeta, setEditingMeta] = useState(false);
   const [metaName, setMetaName] = useState(template.name);
   const [metaDescription, setMetaDescription] = useState(
@@ -1101,6 +1106,26 @@ export function TemplateEditor({
       const updated = await tplRes.json();
       onUpdate(updated);
       setOrderDialogOpen(false);
+
+      // After the order persists, offer to add any new items to the
+      // supplier's pricelist (Keith Apr 2026). If every item already
+      // matches the pricelist exactly, the hook closes its own dialog
+      // silently — no extra modal for no-op reviews.
+      if (orderSupplierId) {
+        const supplierName = suppliers.find((s) => s.id === orderSupplierId)?.name;
+        const itemsToReview = payload.items.map((it) => ({
+          name: it.name,
+          unit: it.unit,
+          unitCost: it.unitCost,
+        }));
+        if (itemsToReview.length > 0) {
+          void openMaterialReview({
+            supplierId: orderSupplierId,
+            supplierName,
+            items: itemsToReview,
+          });
+        }
+      }
     } catch (error) {
       const msg = error instanceof Error ? error.message : "Failed to save order. Please try again.";
       setOrderError(msg);
@@ -3187,6 +3212,10 @@ export function TemplateEditor({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Review items dialog — fires after an order save if items don't
+          match the supplier's pricelist. */}
+      {materialReviewDialogs}
     </div>
   );
 }
