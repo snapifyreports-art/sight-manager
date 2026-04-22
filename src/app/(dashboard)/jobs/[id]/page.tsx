@@ -81,6 +81,10 @@ export default async function JobDetailPage({
     ...job,
     startDate: job.startDate?.toISOString() ?? null,
     endDate: job.endDate?.toISOString() ?? null,
+    // Actual dates are used by the client to show "Started: <actual> ·
+    // planned <planned>" when they diverge (e.g. after Expand).
+    actualStartDate: job.actualStartDate?.toISOString() ?? null,
+    actualEndDate: job.actualEndDate?.toISOString() ?? null,
     createdAt: job.createdAt.toISOString(),
     updatedAt: job.updatedAt.toISOString(),
     plot: {

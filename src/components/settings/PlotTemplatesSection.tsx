@@ -21,6 +21,7 @@ import {
   CardDescription,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { formatWeekRange } from "@/lib/week-format";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -262,7 +263,7 @@ export function PlotTemplatesSection({
                               marginLeft: `${leftPct}%`,
                               width: `${widthPct}%`,
                             }}
-                            title={`${job.name}: Wk ${job.startWeek}–${job.endWeek}`}
+                            title={`${job.name}: ${formatWeekRange(job.startWeek, job.endWeek)}`}
                           />
                         );
                       })}

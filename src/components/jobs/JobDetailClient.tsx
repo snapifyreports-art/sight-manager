@@ -80,6 +80,10 @@ interface JobDetail {
   address: string | null;
   startDate: string | null;
   endDate: string | null;
+  /** When the user actually pressed Start — distinct from planned startDate.
+      Used to show "Started: 22 Apr · planned 30 Apr" when Expand is used. */
+  actualStartDate: string | null;
+  actualEndDate: string | null;
   status: string;
   assignedToId: string | null;
   createdAt: string;
@@ -258,6 +262,14 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
   const toast = useToast();
   const [job, setJob] = useState(initialJob);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+
+  // Keep local `job` state in sync with server re-renders. Without this,
+  // `router.refresh()` refetches the server component data and repasses
+  // it as the `initialJob` prop, but useState's initialiser only fires
+  // once so the UI keeps showing the stale copy. Smoke test found this
+  // after Delay: the dialog closed, the server updated, but Start/End
+  // dates stayed stuck until a hard reload.
+  useEffect(() => { setJob(initialJob); }, [initialJob]);
 
   // Centralised pre-start / early-start flow
   const { triggerAction: triggerJobAction, isLoading: jobActionLoading, dialogs: jobActionDialogs } = useJobAction(
@@ -878,7 +890,13 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
             )}
           </CardContent>
         </Card>
-        {/* Start Date - editable */}
+        {/* Start Date - editable.
+            When the job has been Started early or late (Expand, Start-from-
+            original, etc.), `actualStartDate` diverges from the planned
+            `startDate`. In that case we show the actual above and the
+            planned as a small subtitle, so the user can see at a glance
+            that the job is running ahead of/behind plan. Previously only
+            the planned date was shown, and Expand looked like a no-op. */}
         <Card>
           <CardContent className="pt-4">
             <div className="flex items-center gap-2 text-muted-foreground">
@@ -900,15 +918,32 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
                   <X className="size-3" />
                 </Button>
               </div>
-            ) : (
-              <p
-                className="mt-1 flex items-center gap-2 text-sm font-medium cursor-pointer group"
-                onClick={() => { setEditDateValue(job.startDate?.split("T")[0] || ""); setEditingStartDate(true); }}
-              >
-                {job.startDate ? format(new Date(job.startDate), "dd MMM yyyy") : "\u2014"}
-                <Pencil className="size-3 opacity-0 group-hover:opacity-50 transition-opacity" />
-              </p>
-            )}
+            ) : (() => {
+              const plannedDate = job.startDate ? new Date(job.startDate) : null;
+              const actualDate = job.actualStartDate ? new Date(job.actualStartDate) : null;
+              // Compare date keys (not timestamps) so timezone drift doesn't
+              // create a false "they differ" render.
+              const datesDiverge = !!plannedDate && !!actualDate
+                && plannedDate.toDateString() !== actualDate.toDateString();
+              const shownDate = datesDiverge ? actualDate! : plannedDate;
+              return (
+                <div>
+                  <p
+                    className="mt-1 flex items-center gap-2 text-sm font-medium cursor-pointer group"
+                    onClick={() => { setEditDateValue(job.startDate?.split("T")[0] || ""); setEditingStartDate(true); }}
+                  >
+                    {shownDate ? format(shownDate, "dd MMM yyyy") : "\u2014"}
+                    <Pencil className="size-3 opacity-0 group-hover:opacity-50 transition-opacity" />
+                  </p>
+                  {datesDiverge && plannedDate && (
+                    <p className="mt-0.5 text-[11px] text-muted-foreground">
+                      {actualDate! < plannedDate ? "Started early" : "Started late"} ·
+                      {" "}planned {format(plannedDate, "dd MMM")}
+                    </p>
+                  )}
+                </div>
+              );
+            })()}
           </CardContent>
         </Card>
         {/* End Date - editable with cascade support */}

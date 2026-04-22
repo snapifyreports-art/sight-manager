@@ -180,8 +180,14 @@ export async function GET(
 
     // ── Earliest start ─────────────────────────────────────────────────
     // max(today, predecessor end date, each order's earliest delivery)
+    //
+    // "Earliest allowed start is today" reads more honestly than "Can't
+    // start in the past" — we're telling the user where the floor is,
+    // not accusing them of time travel. The message also appears mid-
+    // sentence after "can't be pulled forward —", so we phrase it in
+    // sentence form.
     const candidates: Array<{ date: Date; why: string }> = [
-      { date: today, why: "Can't start in the past" },
+      { date: today, why: "earliest allowed start is today" },
     ];
     if (predecessorEndDate) {
       candidates.push({

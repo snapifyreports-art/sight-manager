@@ -45,6 +45,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { getCurrentDateAtMidnight } from "@/lib/dev-date";
+import { toDateKey, parseServerDateToLocal } from "@/lib/dates";
 import { HelpTip } from "@/components/shared/HelpTip";
 
 export interface PullableJob {
@@ -168,7 +169,11 @@ export function usePullForwardDecision(onApplied?: () => void): Result {
 
   // ── Derived options ───────────────────────────────────────────────────
   const today = getCurrentDateAtMidnight();
-  const todayISO = today.toISOString().slice(0, 10);
+  // toDateKey reads LOCAL calendar parts. Previously we used
+  // `.toISOString().slice(0, 10)` which returns UTC — in BST (April) that
+  // shifts local midnight back to the previous day, and smoke tests found
+  // "Start Mon 27 Apr" storing 26 Apr (Sunday). See src/lib/dates.ts.
+  const todayISO = toDateKey(today);
   // Next Monday: if today is Mon, next Mon is 7 days away. If Sat, 2.
   // date-fns startOfWeek defaults to Sun=0; use weekStartsOn: 1 for Mon.
   const nextMonday = (() => {
@@ -178,10 +183,14 @@ export function usePullForwardDecision(onApplied?: () => void): Result {
       : addDays(thisWeekMon, 7);
     return candidate;
   })();
-  const nextMondayISO = nextMonday.toISOString().slice(0, 10);
+  const nextMondayISO = toDateKey(nextMonday);
 
-  const earliest = constraints ? new Date(constraints.earliestStart) : null;
-  const current = constraints?.currentStart ? new Date(constraints.currentStart) : null;
+  // Parse server dates to LOCAL midnight so we can compare them to `today`
+  // (also local midnight) via date-fns. Using `new Date(iso)` directly would
+  // leave them at UTC midnight = +1h vs client today in BST, which falsely
+  // blocks "Start today" as "in the past" (off-by-one-hour).
+  const earliest = constraints ? parseServerDateToLocal(constraints.earliestStart) : null;
+  const current = constraints?.currentStart ? parseServerDateToLocal(constraints.currentStart) : null;
 
   // Is a given candidate date valid given the constraints?
   function validateDate(candidate: Date): { ok: boolean; reason?: string } {
@@ -238,7 +247,10 @@ export function usePullForwardDecision(onApplied?: () => void): Result {
         ) : !constraints ? null : !constraints.canBePulledForward ? (
           <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
             <AlertTriangle className="inline mr-2 size-4 align-text-bottom" />
-            This job can&apos;t be pulled forward — {constraints.earliestStartReason.toLowerCase()}.
+            {/* Don't lowercase — server-side reason includes the
+                supplier's proper name ("Jewson hasn't been ordered yet")
+                which should stay capitalised. */}
+            This job can&apos;t be pulled forward — {constraints.earliestStartReason}.
           </div>
         ) : (
           <div className="space-y-2">
@@ -300,8 +312,8 @@ export function usePullForwardDecision(onApplied?: () => void): Result {
                   type="date"
                   value={pickedDate}
                   onChange={(e) => setPickedDate(e.target.value)}
-                  min={earliest ? earliest.toISOString().slice(0, 10) : undefined}
-                  max={current ? current.toISOString().slice(0, 10) : undefined}
+                  min={earliest ? toDateKey(earliest) : undefined}
+                  max={current ? toDateKey(current) : undefined}
                   className="text-sm"
                 />
                 <p className="mt-1 text-[11px] text-muted-foreground">

@@ -58,6 +58,7 @@ import type { StageDefinition } from "@/lib/stage-library";
 import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 import { HelpTip } from "@/components/shared/HelpTip";
 import { useReviewSupplierMaterials } from "@/hooks/useReviewSupplierMaterials";
+import { formatWeekRange } from "@/lib/week-format";
 
 interface MaterialSuggestion {
   name: string;
@@ -128,6 +129,13 @@ export function TemplateEditor({
   const [customSubJobs, setCustomSubJobs] = useState<
     Array<{ name: string; code: string; duration: number; unit: "weeks" | "days" }>
   >([]);
+  // Atomic-stage duration (working days). Used when the user creates a
+  // custom stage with NO sub-jobs — the stage itself is the unit of
+  // work, and we need a duration for it. Pre-filled to 5 (= 1 week).
+  // Smoke test Apr 2026: previously the only way to set this was to
+  // save a 1-week stub, then open Edit, tick "This job has no sub-jobs",
+  // and fill in a duration — 5 clicks deep for a routine action.
+  const [customStageAtomicDays, setCustomStageAtomicDays] = useState(5);
 
   // Add Sub-Job dialog — subJobDurationUnit toggle lets user pick days
   // or weeks. Days wins at apply time (see apply-template-helpers).
@@ -559,6 +567,7 @@ export function TemplateEditor({
     setCustomStageName("");
     setCustomStageCode("");
     setCustomSubJobs([]);
+    setCustomStageAtomicDays(5);
     setStageDialogOpen(true);
   }
 
@@ -600,16 +609,24 @@ export function TemplateEditor({
           template.jobs.length > 0
             ? Math.max(...template.jobs.map((j) => j.endWeek))
             : 0;
-        // Parent stage's total span: each sub-job occupies at least 1 week
-        // in the programme grid. Days-unit sub-jobs compress into 1 week
-        // (actual duration lives in durationDays on the child); week-unit
-        // sub-jobs occupy their full N weeks.
-        const totalDuration = customSubJobs.reduce(
-          (sum, sj) => sum + (sj.unit === "days" ? 1 : sj.duration),
-          0
-        );
+
+        // Two paths:
+        //   - Atomic stage (no sub-jobs) — the stage itself IS the
+        //     unit of work, duration comes from the Duration field.
+        //     Save durationDays so the apply-template cascade uses
+        //     exact working-day maths.
+        //   - With sub-jobs — the stage's grid span is the sum of
+        //     children's widths (days-unit children compress to 1
+        //     grid week each).
+        const isAtomic = customSubJobs.length === 0;
+        const totalDurationWeeks = isAtomic
+          ? Math.max(1, Math.ceil(customStageAtomicDays / 5))
+          : customSubJobs.reduce(
+              (sum, sj) => sum + (sj.unit === "days" ? 1 : sj.duration),
+              0,
+            );
         const startWeek = maxEndWeek + 1;
-        const endWeek = startWeek + (totalDuration > 0 ? totalDuration : 1) - 1;
+        const endWeek = startWeek + (totalDurationWeeks > 0 ? totalDurationWeeks : 1) - 1;
 
         const res = await fetch(
           `/api/plot-templates/${template.id}/jobs`,
@@ -622,7 +639,13 @@ export function TemplateEditor({
               sortOrder: template.jobs.length,
               startWeek,
               endWeek,
-              durationWeeks: totalDuration || null,
+              // Atomic stages carry the day-precise duration so the
+              // cascade computes the exact working-day end date at
+              // apply time. Parent-with-sub-jobs stages use weeks (sum
+              // of children's grid span) and leave days null.
+              ...(isAtomic
+                ? { durationDays: customStageAtomicDays, durationWeeks: null }
+                : { durationWeeks: totalDurationWeeks || null }),
             }),
           }
         );
@@ -770,6 +793,19 @@ export function TemplateEditor({
         if (isSubJob && editingJob.parentId) {
           await fetch(
             `/api/plot-templates/${template.id}/jobs/${editingJob.parentId}/recalculate`,
+            { method: "POST" }
+          );
+        }
+
+        // If the edited job is a TOP-LEVEL ATOMIC stage (no children, no
+        // parent), a durationDays change means all downstream siblings
+        // need to shift. The PUT above only updates THIS stage's row;
+        // without this call the Timeline Preview keeps showing stale
+        // Wk 2-2 when the user picked 15 working days. Smoke test found
+        // this in Apr 2026.
+        if (!hasChildren && !isSubJob && jobIsAtomic) {
+          await fetch(
+            `/api/plot-templates/${template.id}/recalculate-stages`,
             { method: "POST" }
           );
         }
@@ -1595,7 +1631,7 @@ export function TemplateEditor({
                             variant="outline"
                             className="text-[10px]"
                           >
-                            Wk {job.startWeek}–{job.endWeek}
+                            {formatWeekRange(job.startWeek, job.endWeek)}
                           </Badge>
                           {job.orders.length > 0 && (
                             <span className="flex items-center gap-1 text-xs text-muted-foreground">
@@ -1823,7 +1859,7 @@ export function TemplateEditor({
                           variant="outline"
                           className="text-[10px]"
                         >
-                          Wk {job.startWeek}–{job.endWeek}
+                          {formatWeekRange(job.startWeek, job.endWeek)}
                         </Badge>
                         {job.orders.length > 0 && (
                           <span className="flex items-center gap-1 text-xs text-muted-foreground">
@@ -2153,6 +2189,43 @@ export function TemplateEditor({
                     />
                   </div>
                 </div>
+
+                {/* Atomic duration — only visible while the user hasn't
+                    added any sub-jobs. Once a sub-job is added, that
+                    sub-job (and its siblings) drives the stage's total
+                    duration, so this field would be misleading. */}
+                {customSubJobs.length === 0 && (
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">
+                      Duration{" "}
+                      <span className="text-[11px] font-normal text-muted-foreground">
+                        (working days — Mon-Fri only)
+                      </span>
+                    </Label>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        type="number"
+                        min={1}
+                        max={260}
+                        value={customStageAtomicDays}
+                        onChange={(e) =>
+                          setCustomStageAtomicDays(
+                            Math.max(1, parseInt(e.target.value) || 1),
+                          )
+                        }
+                        className="w-24"
+                      />
+                      <span className="text-xs text-muted-foreground">
+                        = {Math.ceil(customStageAtomicDays / 5)} week
+                        {Math.ceil(customStageAtomicDays / 5) !== 1 ? "s" : ""}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">
+                      Leave this as-is and add sub-jobs below if the stage
+                      breaks down further.
+                    </p>
+                  </div>
+                )}
 
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">

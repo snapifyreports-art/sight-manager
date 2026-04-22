@@ -380,10 +380,21 @@ function PlotOverview({
     // Skip real parent Jobs (they're derived rollups) — identify them as jobs
     // that appear as parentId on other jobs. We group by parentStage for children
     // and by name for flat top-level jobs (no parent AND no children).
+    //
+    // Atomic top-level jobs (no parentId, no children) don't carry a
+    // parentStage — their OWN name is the stage name. Falling back to
+    // "Ungrouped" (old behaviour) lumped them all under one row, hiding
+    // the actual stage structure. Smoke test Apr 2026 caught this on the
+    // Flat Conversion template which has Strip-out + Refurbishment as
+    // two atomic top-level stages.
     const parentJobIds = new Set(jobs.filter((j) => j.parentId).map((j) => j.parentId!));
     for (const job of jobs) {
       if (parentJobIds.has(job.id)) continue; // skip real parent Jobs
-      const stage = job.parentStage || "Ungrouped";
+      // Preference order:
+      //   1. parentStage — set when this job is a child of a proper stage
+      //   2. job.name    — atomic top-level job IS its own stage
+      //   3. "Ungrouped" — genuinely orphaned (shouldn't normally happen)
+      const stage = job.parentStage || job.name || "Ungrouped";
       if (!groups[stage]) {
         groups[stage] = { name: stage, jobs: [] };
       }

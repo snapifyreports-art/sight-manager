@@ -98,35 +98,102 @@ export function useReviewSupplierMaterials(): UseReviewSupplierMaterialsResult {
     setLoading(true);
     setOpen(true);
     try {
-      const res = await fetch(`/api/suppliers/${args.supplierId}/pricelist`);
-      if (!res.ok) {
-        toast.error(await fetchErrorMessage(res, "Could not load supplier pricelist"));
+      // Fetch both endpoints in parallel:
+      //   /pricelist  — formal SupplierMaterial rows (updatable)
+      //   /materials  — union of pricelist + historical order items
+      //                 (what the "Materials from supplier" bubbles in
+      //                 the order dialog show)
+      //
+      // Smoke test Apr 2026 surfaced a confusing pattern: a user clicks
+      // a bubble like "Hardcore Type 1" which shows a price, saves the
+      // order, and the review dialog asks them to "add to price list".
+      // That happens when the bubble came from historical orders rather
+      // than the formal pricelist. Purely pricelist-based diffing misses
+      // the "I already order this from them" mental model. We diff
+      // against the union, but use the pricelist row (if present) for
+      // any "update" action since only pricelist rows are updatable.
+      const [pricelistRes, materialsRes] = await Promise.all([
+        fetch(`/api/suppliers/${args.supplierId}/pricelist`),
+        fetch(`/api/suppliers/${args.supplierId}/materials`).catch(() => null),
+      ]);
+      if (!pricelistRes.ok) {
+        toast.error(await fetchErrorMessage(pricelistRes, "Could not load supplier pricelist"));
         setOpen(false);
         return;
       }
-      const rows = (await res.json()) as PricelistRow[];
+      const rows = (await pricelistRes.json()) as PricelistRow[];
       setPricelist(rows);
 
-      // Diff items against pricelist. Name match is case-insensitive
-      // + trimmed so "Decorator Caulk" and "decorator caulk  " match.
-      const byName = new Map<string, PricelistRow>();
-      for (const r of rows) byName.set(r.name.trim().toLowerCase(), r);
+      // Historical/materials rows — include pricelist + anything seen in
+      // past orders. Missing id means we can't "update" it; we'll treat
+      // a conflict there as "add a new pricelist row with the trade price"
+      // on save.
+      type HistoricalRow = { name: string; unit: string; unitCost: number };
+      let historical: HistoricalRow[] = [];
+      if (materialsRes && materialsRes.ok) {
+        try {
+          historical = (await materialsRes.json()) as HistoricalRow[];
+        } catch {
+          /* tolerate — historical is best-effort */
+        }
+      }
+
+      // Build lookup by lowercased+trimmed name. Pricelist takes precedence
+      // so an update-action lands on the real row.
+      const byNamePricelist = new Map<string, PricelistRow>();
+      for (const r of rows) byNamePricelist.set(r.name.trim().toLowerCase(), r);
+      const byNameHistorical = new Map<string, HistoricalRow>();
+      for (const h of historical) byNameHistorical.set(h.name.trim().toLowerCase(), h);
 
       const computed: ItemState[] = args.items
         .filter((it) => it.name.trim())
         .map((item) => {
-          const existing = byName.get(item.name.trim().toLowerCase());
-          if (!existing) return { kind: "new", item, add: true };
-          // Tolerate floating-point pence — compare to 2dp.
-          const matches = Math.abs(existing.unitCost - item.unitCost) < 0.005;
-          if (matches) return { kind: "exact-match", item, pricelistRow: existing };
-          return {
-            kind: "conflict",
-            item,
-            pricelistRow: existing,
-            action: "skip",
-            variantName: "",
-          };
+          const key = item.name.trim().toLowerCase();
+          const existingPricelist = byNamePricelist.get(key);
+          const existingHistorical = byNameHistorical.get(key);
+
+          // 1. Formal pricelist match?
+          if (existingPricelist) {
+            const matches = Math.abs(existingPricelist.unitCost - item.unitCost) < 0.005;
+            if (matches) return { kind: "exact-match", item, pricelistRow: existingPricelist };
+            return {
+              kind: "conflict",
+              item,
+              pricelistRow: existingPricelist,
+              action: "skip",
+              variantName: "",
+            };
+          }
+
+          // 2. Historical-only match. Same price → EXACT display. Different
+          //    price → the user has ordered this before but the price has
+          //    changed — show as NEW (default ticked) so they can add the
+          //    new price to the formal pricelist for future reference.
+          //    We don't use the CONFLICT UI here because there's no
+          //    pricelist row to update.
+          if (existingHistorical) {
+            const matches = Math.abs(existingHistorical.unitCost - item.unitCost) < 0.005;
+            if (matches) {
+              return {
+                kind: "exact-match",
+                item,
+                // Synthesise a PricelistRow shape for display — id is "" so
+                // the apply step won't try to PUT against it.
+                pricelistRow: {
+                  id: "",
+                  name: existingHistorical.name,
+                  unit: existingHistorical.unit,
+                  unitCost: existingHistorical.unitCost,
+                },
+              };
+            }
+            // Seen before at a different price — add as NEW (the current
+            // entry will become the first pricelist row for this name).
+            return { kind: "new", item, add: true };
+          }
+
+          // 3. Nothing matches → NEW, default ticked.
+          return { kind: "new", item, add: true };
         });
 
       // If every item is an exact-match, nothing to review — close.

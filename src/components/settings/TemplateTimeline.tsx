@@ -3,6 +3,7 @@
 import { useState, useRef, useCallback, useMemo } from "react";
 import { ChevronRight, ChevronDown, Package } from "lucide-react";
 import type { TemplateJobData } from "./types";
+import { formatWeekRange } from "@/lib/week-format";
 
 const WEEK_WIDTH = 48;
 // Day view: each working day = 1 column, 5 days per week. Narrower per
@@ -128,7 +129,7 @@ export function TemplateTimeline({ jobs, onJobUpdate, expandedJobIds, onToggleEx
           stageCode: parentJob.stageCode ?? undefined,
           parentJob,
           groupIndex: groupIdx,
-          weekRange: `Wk ${parentJob.startWeek}–${parentJob.endWeek}`,
+          weekRange: formatWeekRange(parentJob.startWeek, parentJob.endWeek),
           collapsed: !isExpanded,
           orderDots,
         });
@@ -417,7 +418,7 @@ export function TemplateTimeline({ jobs, onJobUpdate, expandedJobIds, onToggleEx
                       {row.label}
                     </span>
                     <span className="text-[10px] text-muted-foreground">
-                      Wk {sw}–{ew}
+                      {formatWeekRange(sw, ew)}
                       {job.durationWeeks && ` (${job.durationWeeks}wk)`}
                     </span>
                   </div>
