@@ -45,13 +45,14 @@ export async function POST(
     );
   }
 
-  // 50MB cap (matches the advertised limit in the UI). Supabase's default
-  // bucket file-size limit is 50MB too, so larger would reject at storage
-  // level anyway.
-  const MAX_BYTES = 50 * 1024 * 1024;
+  // 500MB safety cap — construction drawings (CAD) occasionally hit
+  // 100-200MB. Supabase bucket limit controls the hard ceiling; we just
+  // prevent obviously-abusive uploads. If Supabase rejects, its error
+  // message bubbles back through the register step.
+  const MAX_BYTES = 500 * 1024 * 1024;
   if (fileSize > MAX_BYTES) {
     return NextResponse.json(
-      { error: `File too large (${Math.round(fileSize / (1024 * 1024))}MB) — max 50MB` },
+      { error: `File too large (${Math.round(fileSize / (1024 * 1024))}MB) — max 500MB` },
       { status: 413 }
     );
   }

@@ -431,7 +431,7 @@ export function TemplateExtras({ templateId, templateName }: { templateId: strin
                 multiple
                 onChange={(e) => handleFilesPicked(e.target.files)}
               />
-              <p className="mt-1 text-[11px] text-muted-foreground">PDF, images, or DWG · 50MB per file max · select multiple with Ctrl/Cmd-click</p>
+              <p className="mt-1 text-[11px] text-muted-foreground">PDF, images, or DWG · up to 500MB per file · select multiple with Ctrl/Cmd-click</p>
             </div>
             {pendingDocs.length > 0 && (
               <div className="space-y-1.5 rounded-lg border bg-slate-50/40 p-2">
