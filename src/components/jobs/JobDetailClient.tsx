@@ -303,9 +303,13 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
         toast.error(await fetchErrorMessage(res, "Failed to add note"));
         return;
       }
-      const newAction = await res.json();
-      setJob((prev) => ({ ...prev, actions: [newAction, ...prev.actions] }));
+      // The endpoint returns the updated JOB, not a JobAction. Previously we
+      // were spreading the job into `actions` which caused a crash downstream
+      // when the render code tried to do `action.action.charAt(0)` on what
+      // was actually a job object (no `.action` field). Just refresh from
+      // the server instead.
       setNoteText("");
+      router.refresh();
     } finally {
       setSubmittingNote(false);
     }
@@ -1118,15 +1122,19 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
             ) : (
               <div className="space-y-0">
                 {job.actions.map((action, index) => {
+                  // Defensive: `action.action` has historically been undefined
+                  // on rare race conditions (e.g. optimistic updates that put
+                  // the wrong shape into state). Default to "note" so we
+                  // never crash the whole page for a bad row.
+                  const actionKey = action.action ?? "note";
                   const actionConfig =
-                    ACTION_ICON_MAP[action.action] ?? {
+                    ACTION_ICON_MAP[actionKey] ?? {
                       icon: Briefcase,
                       color: "text-muted-foreground",
                     };
                   const ActionIcon = actionConfig.icon;
                   const actionLabel =
-                    action.action.charAt(0).toUpperCase() +
-                    action.action.slice(1);
+                    actionKey.charAt(0).toUpperCase() + actionKey.slice(1);
 
                   return (
                     <div
