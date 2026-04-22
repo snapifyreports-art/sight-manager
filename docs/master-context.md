@@ -4,88 +4,265 @@
 
 ---
 
-## 0.0 STATE-OF-PLAY — LATE APR 2026 SESSION (GO-LIVE TOMORROW)
+## 0.0 STATE-OF-PLAY — POST-LAUNCH WEEK (22 Apr 2026)
 
 **Read this section first. Everything below it is historical; this is right now.**
 
 ### What Keith is doing
-Going live with the app tomorrow (20 Apr 2026 in dev-date terms). He's actively stress-testing — clicking through, spotting bugs, demanding fixes. He is frustrated with me for missing UX bugs that a proper browser test would have caught. He is right. "tsc passing ≠ UX passing" is the lesson.
 
-### What's shipped in this session (most recent first)
+App launched 20 Apr 2026. Since go-live, Keith has been stress-testing live on real sites (Old Hall Village, Keith's Site, Ryan's Site, Paul's Site). He's filed ~35 bugs/refinements across the session — most fixed inline, shipped to Vercel, hard-refreshed, re-tested. **No rollbacks.** State machine + cascade integrity preserved through every change (59/59 cascade invariants still green).
+
+### What's shipped since launch (35 commits, most recent first)
+
 ```
-135fddc  fix(budget): render availableTemplates section (was loaded, not shown)
-b3bcd05  fix(daily-brief): show ALL pills incl. missing ones; 0-values dimmed
-a4d52c2  fix(site-header): hide Raise Snag button when already on Snags tab
-4efa45c  fix(email-dialog): wider on desktop, scrollable body, footer pinned
-e95300d  Tasks → Daily Brief merge (Keith Q1=b)
-fbeb6ec  Send Orders grouping: one batch per supplier + dateOfOrder (JIT)
-144a216  Contacts → Contractors + Suppliers/Contractors blue/amber + deliveries stacked by day
-5f64551  nav: remove duplicated global Daily Brief + Orders entries
-8e0e35b  share page parity with Contractor Comms + collapse Mini Programme default
-5ac0bc0  UX audit fixes: proper contact page, nav, links, inline priority, clone templates, share-page actions
-754076a  RAMS + perf audit (27-41% speedup via indexes) + photo test plan
-cd874ad  Contractor Comms tabs (3 of 4 shipped) + report exports + handover update
-2c88bfa  walkthrough UX sharpening (Keith's Apr 2026 asks)
-e7d0cd8  clearing batch 2: unlimited hierarchy render + report drill-throughs
-f2349e4  clearing batch: HelpTips, Walkthrough unification, 2 audits resolved
-cd35409  spot-check sweep: fix handover inaccuracies + clear Priority 1 items
-fbdee5f  docs: triple-check handover — add Quick Start + Workflow + complete Deferred table
+2f898f2  feat(orders): after save, offer to add items to supplier pricelist
+04801ee  fix(HelpTip): bigger icon + no longer overlaps the Dialog close X
+4a41bd4  fix(uploads): lift template drawing cap 50MB → 500MB
+9eecac1  feat(template-timeline): Weeks / Days toggle
+d0d0e7f  fix(template-orders): preview weeks now skip Week 0 (industry convention)
+5dfddd6  feat(template-orders): clearer preview + lead-time only in Arrive mode
+9ba00fc  feat(template-editor): jobs calculated from sub-jobs, atomic toggle, sub-job D&D, drop Start/End Week
+8d6ad53  fix(cascade-client): the OTHER toISOString — multiline version missed
+3b253cf  chore(script): recompute-plot-dates — repair bad existing plot dates (69 plots, 1270 leaf + 549 parent)
+8722872  fix(cascade-client): toISOString() bug sent yesterday's date to server
+7562f28  fix(cascade): parents derived from children, not independently shifted
+b8f8b88  fix(early-start): timezone bug + consolidate pull-forward section
+0579609  feat(early-start): working-day label + preflight + custom date picker
+5bbfcbf  fix(daily-brief): alerts + pills were doing nothing on click
+61afa31  fix(qa): two bugs surfaced during full-system verification pass (FormData upload + JobWeekPanel stop dialog)
+57f4f24  fix(mobile+print): walkthrough stack on mobile, report controls hide on print
+b91553c  chore(cron): explain daily-email failures in the event log
+e2b1821  fix(uploads): signed URLs to bypass Vercel 4.5MB body cap
+6ac3961  feat(stage-dialog): inline errors + per-sub-job days/weeks toggle
+83bd56b  feat(site-wizard): custom plot numbers + mixed range input
+47a034d  fix(orders): PENDING→DELIVERED silently 400'd — auto-bridge instead
+28dba21  fix(mobile): bigger touch targets + clearer button labels
+b76e926  fix(errors): surface the remaining silent-failure paths
+d53c524  feat(stop-job): capture reason on every stop via shared dialog
+ca11b11  fix(programme): Today overlay was eating clicks on everything below it
+e4c8422  fix(sidebar): site-scoped nav works without a site, collapse persists
+cf9475f  fix(programme): Monday-morning off-by-one + clickable dots
+48f229b  chore(seed): launch-day site + plot seeder (60 plots across 3 sites)
+300e0f6  fix(print): hide interactive controls, force-expand Budget plots
+ba4a482  fix(errors): surface API failures as toasts, not silent no-ops
+db4ceb7  fix(mobile): overflow, touch targets, context loss at 375px
+f3e3386  feat(walkthrough): inline snag + order quick-flips on site
+e2cfe0f  feat(action-parity): Pull Forward + inline flips on every surface
+c19bfc8  fix(upload-label): DocumentUpload says "max 50MB" not 10MB
+0ef2341  nav: add missing "Day Sheets" to site sidebar (Site Reporting group)
 ```
 
-### Honest testing state
+### Major themes of this post-launch session
 
-| Area | State | Notes |
-|---|---|---|
-| `tsc --noEmit` | ✅ clean | |
-| `scripts/test-cascade.ts` | ✅ 59/59 | |
-| `npm run lint` | ✅ 0 errors | 126 warnings (unused imports) |
-| `npx next build` | ✅ clean (last full run at `4efa45c`) | |
-| DB integrity (`scripts/audit-integrity.ts`) | ✅ 13/14 checks clean | 1 soft historical (3 IN_PROGRESS jobs without actualStartDate — pre-existing) |
-| Analytics vs Brief reconciliation | ✅ clean (72/72 matches) | |
-| Contact dedup | ✅ clean (26 contacts, no dupes) | |
-| API endpoints return 200 | ✅ all 27 spot-checked | |
-| HTTP perf under 500ms | ⚠️ DB-level yes; HTTP 2–5s on heavy endpoints | Parallelisation of /api/tasks + /api/analytics done; still noisy |
-| E2E test harness ran | ✅ 22 PASS / 0 FAIL / 1 WARN (test harness bug, not app) | `scripts/e2e-full-test.ts` — creates QA_E2E site + templates |
-| **Full browser click-through of every view** | ❌ **NOT DONE** | Keith has caught multiple bugs I missed. This is the known gap. |
+#### 1. Cascade integrity — four distinct bugs found and fixed
 
-### Known fragile — for tomorrow's go-live
+The cascade engine was the single most-tested part of the codebase pre-launch (59 invariants, all passing) — but every bug found post-launch exposed a case those tests didn't cover:
 
-1. **Daily Brief pills** — just fixed (`b3bcd05`). Every pill now always shows, 0-values dimmed. Missing pills added to all 3 rows. If you see a pill row with nothing visible, check that the data field name matches the API.
-2. **Budget Report** — just fixed (`135fddc`). `availableTemplates` now renders as "Template Budgets" card. **Pattern: other reports likely have the same bug of API-loaded-but-not-rendered fields. Running sweep now.**
-3. **Raise Snag on site header** — just fixed. Was duplicating with the tab's own button. Now hidden when `activeTab === "snags"`.
-4. **Email dialog overflow** — just fixed. Previously `sm:max-w-lg` + no max-height → footer off-screen on long bodies. Now `max-h-[90vh]` + internal scroll + `lg:max-w-3xl`.
-5. **Tasks / Daily Brief merge** — Tasks page retired, `/tasks` redirects to `/daily-brief`. Sidebar "Daily Brief" entry now points at the global view. DailySiteBrief renders for picked site; TasksClient (relabelled) renders for "All Sites".
-6. **Send Orders batching** — per-supplier + per-dateOfOrder (not per-supplier lumped). Each batch is one JIT email.
-7. **Contact detail page** — new route at `/contacts/[id]`. Replaces the `?highlight=id` hack. 5 places fixed to link through.
-8. **Contractor share page parity** — Mini Programme / Day Sheets / Drawings / RAMS / Messages Log all added.
-9. **RAMS upload** — new route per contractor. Schema: `SiteDocument.contactId` was added.
+- **`cf9475f`** — Programme's "Today" column math was one week off every Monday. `isWithinInterval(now, {start, end})` from date-fns is inclusive on BOTH ends, so Monday midnight matched both the old and new week columns. `findIndex` returned the first match → wrong. Replaced with half-open `[start, end)` check.
+- **`7562f28`** — Cascade engine was treating parent stages as INDEPENDENTLY shiftable. Pulling a child job forward would shift the parent by the same delta, landing the parent's stored startDate in the past even when every child was still in the future. Fix: parents excluded from the shift loop; after children are moved, parents re-derived as `min(child.newStart)` / `max(child.newEnd)`. Required adding `parentId` to the `CascadeJob` type + the route's job projection.
+- **`8722872` + `8d6ad53`** — Two separate occurrences of the SAME client-side timezone bug in cascade calls. Pattern: `addWorkingDays(date, -N).toISOString().split("T")[0]` where the `Date` has had `setHours(0,0,0,0)` applied. In BST (UTC+1) local midnight = UTC 23:00 of previous day, so `toISOString().split("T")[0]` returned YESTERDAY's date. The single-line version was fixed first (`8722872`); a multi-line version in `previewPullForward` + `executePullForward` was missed and fixed in `8d6ad53`. Root cause class: any place formatting a Date to YYYY-MM-DD must use `toLocaleDateString("en-CA")` (local) not `toISOString()` (UTC).
+- **`47a034d`** — `PUT /api/orders/[id]` rejected `PENDING → DELIVERED` transitions with a 400. But the UI showed "Confirm Delivery" buttons on PENDING orders throughout. Users clicked, got a silent 400, order stayed PENDING, "awaiting delivery" stat forever 0. Fixed by auto-bridging: PENDING → DELIVERED now sets both `dateOfOrder` and `deliveredDate` to now. DB audit before the fix: Keith's Site had 380 orders, 1 delivered, 379 silently stuck.
 
-### Session scripts added (keep around, useful for re-runs)
+**Recompute migration** (`3b253cf`): because historical plots had been created by the OLD apply-template logic (positional startWeek/endWeek → overlapping children + Sunday starts + parent startDate ≠ min(children startDate)), a one-off script re-laid every NOT_STARTED job sequentially by sortOrder, preserving each child's working-day duration. Applied with `TZ=UTC` to avoid local-tz drift. 69 plots, 1270 leaf jobs, 549 parent aggregates corrected. Run via `npx tsx scripts/recompute-plot-dates.ts --apply` (dry-run by default).
 
-- `scripts/e2e-full-test.ts` — creates a throwaway test site with 2 templates + 3 plots + exercises every action. Re-run any time to regenerate QA fixtures.
-- `scripts/audit-performance.ts` — times 12 representative Prisma queries, flags >500ms.
-- `scripts/audit-integrity.ts` — 14 DB invariant checks (orphans, rollup, weekend-dates, etc.).
-- `scripts/audit-contact-dedup.ts` — Contact email/phone/name collisions.
-- `scripts/audit-analytics-vs-brief.ts` — same-metric comparison across Brief vs Analytics.
-- `scripts/check-contact-split.ts` — Contact-type-SUPPLIER vs Supplier-table inspection.
-- `scripts/list-db-indexes.ts` — lists every `@@index` actually applied.
+#### 2. Template-editor redesign — "jobs are calculated from sub-jobs"
 
-### Active test site (seeded this session)
+Keith's core insight: **a job's duration = sum of its sub-job durations. You shouldn't manually set startWeek/endWeek on a job that has sub-jobs.**
 
-- Site: `QA_E2E_TEST__2026-04-19T20-01` (id `cmo66yr69000gph0ohelwq5gy`)
-- Template A: `QA_E2E__TPL_A__2026-04-19T20-01` — simple 3-stage build with order on Brickwork
-- Template B: `QA_E2E__TPL_B__2026-04-19T20-01` — parent stage Groundworks + 3 sub-jobs
-- 3 plots created, every action exercised (start / complete / signoff / delay / pull-forward attempted / note / snag raise+resolve / order PENDING→ORDERED→DELIVERED / doc upload / RAMS upload / photo)
-- Invariants checked: I6 rollup ✓, I2 weekend alignment ✓, I4 immovable completed ✓, order state machine ✓
+Two behaviour changes landed together (`9ba00fc`):
 
-Safe to delete via site-delete UI or `DELETE FROM "Site" WHERE name LIKE 'QA_E2E_TEST__%'`.
+- **apply-template-helpers.ts**: children now cascade SEQUENTIALLY in sortOrder. Parent anchor = `plotStart + parent.startWeek - 1` (snapped forward). First child starts at anchor, each subsequent child starts the next working day after the previous child's end. Parent span = first-child-start → last-child-end. Old logic used each child's own startWeek which allowed overlap/gaps.
+- **TemplateEditor Edit Job dialog**:
+  - Job has sub-jobs → read-only "Duration auto-calculated — N sub-jobs · M working days total"
+  - Sub-job → single "Duration (working days)" input only (no Start/End Week)
+  - Top-level leaf job → "This job has no sub-jobs" tickbox; ticked → Duration input shows
+  - Save payload omits startWeek/endWeek entirely; for atomic jobs sends `{durationDays: N, durationWeeks: null}`
 
-### What's NOT done yet — in this session's TODO
+- **Sub-job rows** — now display in working days ("d" not "wk"), have a `GripVertical` drag handle, and support HTML5 drag-and-drop reordering within the same parent. Cross-parent drag rejected with toast. New order persists via per-child sortOrder PUT + parent recalculate.
 
-- [ ] Exhaustive browser click-through of every view. Keith said "automatically start on B but don't skip corners". This is B.
-- [ ] For each view: API-vs-render diff (catch "data loaded, not shown" bugs like the Budget/DailyBrief ones).
-- [ ] Click every button, check states (0 / 1 / many / overflow / error).
-- [ ] Visual consistency at common breakpoints.
+**Migration** (`scripts/migrate-subjob-duration-to-days.ts`): converted every sub-job's stored `durationWeeks: N` → `durationDays: N × 5`. 114 sub-jobs migrated at launch time. Idempotent — re-running is a no-op.
+
+#### 3. Template timeline — Weeks / Days toggle + order-dot labels (`9eecac1`, `5dfddd6`)
+
+- `TemplateTimeline.tsx` gained a `viewMode: "weeks" | "days"` toggle top-right. Days view: each week expands into 5 day-columns (`DAY_WIDTH = 28px`, header shows "M T W T F" per week with alternating bg). Week mode unchanged.
+- Maths refactor: all bar widths / dot offsets use `weekPixels = colWidth × colsPerWeek` so both modes render identically from the same math.
+- Order/delivery dots: bumped from 8px to 12px, added inline "W-1 / W3" labels in matching colour, white ring + shadow for contrast. Legend updated.
+- **Week 0 skipped everywhere** — construction-industry convention: `..., -3, -2, -1, 1, 2, 3, ...` (no zero). `displayWeek()` helper in both TemplateEditor + TemplateTimeline applies `raw <= 0 ? raw - 1 : raw`.
+
+#### 4. Order-timing UX rewrite (`5dfddd6`)
+
+The order Add/Edit dialog's timing section was confusing:
+- Lead time input showed in both Order and Arrive modes (irrelevant in Order mode — the user is setting the order date directly)
+- Preview text was dense: `Order 2 weeks before Brickwork → Order Wk -1 → Delivery Wk 3`
+- No warning when lead-time-back-calc put delivery AFTER the anchor job starts
+
+Now:
+- **Lead time only visible in Arrive mode** — in Order mode, the user is setting order date; supplier lead time is their problem.
+- **Preview shows anchor phrase + absolute week**:
+  - Order mode: `Order Wk -2 · 2 weeks before Brickwork`
+  - Arrive mode: `Arrive Wk -2 · 2 weeks before Brickwork` + `Order Wk -6 · 4 weeks earlier (lead time)`
+- **Red warning when delivery > anchor.startWeek** in Arrive mode — catches impossible lead-time configurations.
+
+#### 5. Starting Early dialog rewrite (`0579609`, `b8f8b88`)
+
+The dialog that fires when user clicks Start on a job with a future startDate. Old version had three separate buttons (Pull Programme Forward / Pull to Specific Date / Pull to Next Event) with confusing defaults and a preflight that ran AFTER click. New version:
+
+- **Single unified "Pull Programme Forward" section** with an embedded date picker defaulting to today.
+- **Live preflight** on every date change — dialog calls `POST /api/jobs/[id]/cascade` (preview) and shows `✓ Safe to pull to this date` or `Shift blocked — X would start in the past. Try a later date.` BEFORE the user clicks Apply.
+- **"Reset to today" shortcut** if the user bumped the date.
+- **Label change**: "7 days" → "7 working days" throughout the dialog (always was working-day math; just the label was ambiguous).
+- **Expand This Job** + **Pull to Next Event** retained as separate options (genuinely different actions).
+
+#### 6. Alerts + pills scroll on Daily Brief (`5bbfcbf`)
+
+Every pill and every alert row was a native `<a href="#id">`. Browser default: scroll the WINDOW. But `body` has `overflow-hidden` and `<main>` is the actual scroll container, so clicks silently did nothing (hash updated, nothing scrolled). Fix: single `scrollToSection()` helper using `scrollIntoView()` + auto-expand the target's collapsible section if closed + flash a blue ring for 1.5s so the user sees where they landed. Wired into both pill handlers and alert handlers. Also caught 5 broken pill anchors pointing to IDs that didn't exist (`section-active`, `section-delayed`, `section-tomorrow`, `section-upcoming-orders`, `section-overdue-deliveries`) — added the missing IDs or repointed the pills.
+
+#### 7. Stop-reason dialog (`d53c524`)
+
+Keith's "flow of decision" rule: every stop captures a reason. Before: Tasks hardcoded a note ("Stopped from tasks — overdue"); Jobs/JobDetail/JobWeekPanel just POST'd with no note. Now: `useJobAction.triggerAction(job, "stop")` opens a shared reason-capture dialog unless notes are pre-supplied. Required in all surfaces:
+- TasksClient — migrated off its inline `handleStopJob` fetcher (−24 lines).
+- JobsClient dropdown — switched from `runSimpleAction` to `triggerAction`.
+- JobDetailClient — already used `triggerAction` so picked up the dialog automatically.
+- JobWeekPanel (both `handleJobAction` + `handleChildJobAction`) — were calling `fireJobAction` directly with no notes → silently bypassed the dialog. Routed through `triggerAction` when no notes supplied.
+
+#### 8. Today overlay pointer-events (`ca11b11`)
+
+Programme's "Today" highlight stack (40px-wide translucent column + vertical line + label) had no `pointer-events-none`. The highlight column at `z-[5]` covered every job block and dot in the current week column → silently unclickable. Fixed: `pointer-events-none` on all three overlay divs; also on gridlines for good measure. **This was the worst UX bug of the session** — users most want to interact with TODAY, and that's exactly what was broken.
+
+#### 9. Sidebar + dead-link bugs (`e4c8422`)
+
+- Stale `localStorage` site ID from before the launch-day site reset: sidebar kept building links to deleted sites → 404 on every click. Fix: on `/api/sites` fetch, if stored fallback ID isn't in the returned list, clear it + `localStorage.removeItem`.
+- Site groups (Manage Site / Site Reporting / Site Admin) were only rendered when a site was selected → new users had no way to discover Programme/Plots/Orders. Now: always rendered; when no site is selected, sub-items link to `/sites?pickFor=<tab>`. The SitesClient reads `pickFor` and shows a banner ("Pick a site to view its Programme"), then forwards the click straight to the chosen site's tab.
+- Collapse button was `useState(false)` per render — reset every navigation. Now persisted via `localStorage`.
+
+#### 10. Upload signed URLs for large drawings (`e2b1821`, `4a41bd4`)
+
+Vercel caps serverless function request body at 4.5MB on all plans. Template drawings routinely exceed 10MB; CAD files hit 100MB+. Fix: 3-step signed-upload flow.
+- `POST /api/plot-templates/[id]/documents/sign` → Supabase `createSignedUploadUrl()` returns `{signedUrl, token, storagePath}`.
+- Client `PUT` directly to `signedUrl` (with FormData wrapping per Supabase's expected format — see `61afa31`).
+- `POST /api/plot-templates/[id]/documents/register` → verifies the file landed in storage, creates the DB row.
+
+Server cap: 50MB → 500MB. UI label updated. **Site docs + plot drawings still use the legacy direct-POST flow** — they 413 at ~4.5MB. Flagged to Keith; not ported yet.
+
+#### 11. Mobile breakpoint sweep (`db4ceb7`, `28dba21`, `57f4f24`)
+
+Site managers use this on phones. 375px iPhone audit caught:
+- JobsClient 9-column table → wrapped in `overflow-x-auto`
+- TasksClient overdue rows → `flex-wrap` so action buttons drop to next line
+- Walkthrough snag / order quick-flip buttons → `min-h-[32px] px-3 text-xs` (was `py-0.5 text-[10px]`, below Apple/Material minimums)
+- `hidden sm:inline` removed from contractor/assignee/due-date context across Daily Brief + PlotTodoList (mobile rows were showing just "Job Name · Phil" with no company or deadline)
+- TasksClient icon-only mobile buttons (`Mail` for Chase, `Mail` for Send Order) → always show labels
+
+#### 12. Silent failure sweep (`ba4a482`, `b76e926`)
+
+12 mutation paths were swallowing errors. Fixed:
+- JobsClient create/edit/delete + confirm()
+- SuppliersListClient.handleCreate
+- TasksClient.handleStopJob + handleMarkGroupSent
+- PostCompletionDialog.decide
+- SiteDetailClient.handleDeletePlot (replaced `alert()` with toast) + site edit
+- PlotMaterialsSection POST + DELETE
+- SiteQuantsClient manual material + one-off order POST
+
+Remaining silent paths listed in section 8.
+
+#### 13. Print output + email diagnostics (`300e0f6`, `b91553c`)
+
+- DailySiteBrief action strips on every job row: `print:hidden` (were bleeding into the PDF)
+- BudgetReport + CriticalPath collapsed plots: rendered always-in-DOM with `hidden print:block` so prints include every plot regardless of on-screen expansion state
+- DelayReport filter, CashFlowReport date-mode toggle, ContractorDaySheets date-nav buttons: `print:hidden`
+- Daily email cron was logging "3 failed" every morning with no explanation. Root cause: `RESEND_API_KEY=""` in env. Now early-exits with a clear SKIPPED log; actual send failures include the first error message truncated to 140 chars.
+
+#### 14. Notification infrastructure audit
+
+Verified (not fixed — already working):
+- Web-push VAPID keys set; service worker registered; usePush hook correct.
+- Subscriptions stored per-device with proper cleanup on 410/404.
+- Cron jobs fire `sendPushToAll` for 9 notification types daily at 05:30 UTC.
+- Ryan subscribed on Safari/iOS at launch — receiving pushes correctly.
+- Toast system wired correctly via `ToastProvider` at app-layout level (`z-[9999]`, 5-10s auto-dismiss).
+
+Email is the ONLY broken path — needs `RESEND_API_KEY` set in Vercel dashboard.
+
+#### 15. Plot numbering in Site Wizard (`83bd56b`)
+
+Site creation wizard's "Add Plots" section used to take two numeric inputs (From / To) and generate consecutive integer plot numbers. Keith: "the plot numbers may be customised". Replaced with a single free-form text input that accepts:
+- Ranges: `1-20`
+- Comma lists: `47-A, 47-B, 50`
+- Mixed: `1-5, 10, 12-14`
+- Pure alphanumeric: `BLK-A-01, BLK-A-02`
+
+Integer-integer ranges expand; anything else treated literally (preserves hyphens in "47-A"). Live preview shows "X plots parsed" or a red error. Dedupe within batch + across batches. Unique constraint respected. `Plot.plotNumber` schema column is `String?` — already handles any text.
+
+#### 16. Stage dialog validation (`6ac3961`)
+
+Custom Stage form in "Add Stage" dialog:
+- Inline amber warning banner appears when the Add button is disabled, listing exactly what's missing ("Stage Code is required", "Sub-job 3 is missing name, code, or duration")
+- Sub-job rows gained a "d" / "w" unit toggle (per-row, inside the grid)
+- Stage Code input strips non-A-Z0-9 chars (`BW"` bug with stray quote)
+- Save path: days-unit sub-jobs post `{durationDays: N, durationWeeks: 1}` (1 as grid-slot placeholder); weeks-unit post `{durationWeeks: N, durationDays: null}`
+
+#### 17. Custom items → supplier pricelist (`2f898f2`)
+
+New hook `useReviewSupplierMaterials` — after an order save, opens a review dialog diffing the order's items against the supplier's `SupplierMaterial` rows. Three per-item states:
+- **NEW** (not in pricelist) — checkbox "Add to [supplier] price list" (default ticked)
+- **EXACT MATCH** — info only ("already in list")
+- **PRICE CONFLICT** — radio group: Update list / Add as separate item (user types distinguishing name) / Leave list alone
+
+If every item is an exact match, dialog never opens. Wired into both TemplateEditor's order save AND SiteQuantsClient's one-off order save. Uses existing `POST /api/suppliers/[id]/pricelist` (create) + `PUT /api/suppliers/[id]/pricelist/[itemId]` (update).
+
+#### 18. HelpTip fix (`04801ee`)
+
+Two bugs in one component. Icon was `size-5` (20px, muted grey) — too small, easy to miss. **And** the default absolute positioning `right-2 top-2` collided exactly with DialogContent's close X (28px button also at `right-2 top-2`). Every Dialog using a default (non-inline) HelpTip was stacking two buttons on top of each other. Fix: icon size-5 → size-6 with blue bg/border for prominence. Position `right-2 top-2` → `right-10 top-2.5` so the ? sits LEFT of the X with a 4px gap. No call-site changes needed.
+
+### Post-launch data state
+
+- **Users:** Keith (CEO), Ryan (CEO), Paul (SITE_MANAGER).
+- **Sites created (real, not test):**
+  - Keith's Site — 20 plots, 600 jobs, assigned to Keith (seeded via `scripts/seed-launch-sites.ts`)
+  - Ryan's Site — 20 plots, 600 jobs, assigned to Ryan
+  - Paul's Site — 20 plots, 600 jobs, assigned to Paul (Paul also has UserSite grant for this site only)
+  - Old Hall Village — 20 plots, created by Ryan via UI using template "1047 v12"
+- **Templates in use:** The Briarwood (38 jobs, 27 orders), The Oakwood (28), The Riverside (26), The Willow (28), plus "1047 v12" (Ryan's custom — had malformed sub-job data, cleaned up by the recompute migration).
+- **Total leaf jobs across all plots:** ~2400. All date-normalised post `3b253cf`.
+
+### Known fragile / just-shipped (re-browser-verify before touching)
+
+1. **Template Editor UI** — the full redesign (`9ba00fc`) is the biggest behavioural change since launch. Edit Job dialog's conditional rendering (auto-calc banner vs atomic-toggle vs duration input) has three branches; test all three.
+2. **Sub-job drag-and-drop** — HTML5 native drag, not a library. Mobile Safari's drag-and-drop support on `draggable` elements is unreliable. If Keith reports "drag doesn't work on iPad", this is why.
+3. **Pull Forward preflight + cascade parent fix** — both landed the same day. Cascade invariants still 59/59 but those tests don't exercise parent/child hierarchies explicitly.
+4. **Signed upload flow** — only wired for template drawings. Site + plot drawings still use the legacy flow (4.5MB Vercel cap).
+
+### What's NOT done yet — post-launch outstanding
+
+- [ ] **TasksClient icon ambiguity** (Mail icon = Chase in one row, Send Order in another — ambiguous on mobile when labels are hidden).
+- [ ] **Walkthrough `grid-cols-3` at 1075** (no sm: prefix — tight at 375px but not broken).
+- [ ] **JobWeekPanel + Walkthrough using inline note POSTs** instead of `useAddNote` hook. Works, just divergent.
+- [ ] **ContractorComms.handleSubmit** fires two POSTs back-to-back (photos + request-signoff); neither checked.
+- [ ] **useOrderEmail + useJobAction cascade** failures: `console.error` only in 5 spots — should toast.
+- [ ] **TemplateEditor timeline update** silent fail on error.
+- [ ] **Site + plot drawing uploads** still legacy direct-POST (413 above 4.5MB).
+- [ ] **`RESEND_API_KEY` not set in Vercel** — daily email digest is SKIPPED every morning. Keith to set in Vercel dashboard.
+- [ ] **Paul's UserSite restriction end-to-end browser verification** — tested at API level, not browser-clicked.
+- [ ] **Full browser click-through test** — just being kicked off by Keith; see todo below.
+
+### Session scripts added post-launch
+
+- **`scripts/seed-launch-sites.ts`** — one-shot idempotent seed. Deletes all existing sites, creates Ryan/Keith/Paul sites with 20 plots each staggered weekly from a given start Monday. Rotates through 4 templates per batch for house-type variety. Can re-run any time to reset.
+- **`scripts/migrate-subjob-duration-to-days.ts`** — one-off migration converting sub-job `durationWeeks: N` → `durationDays: N × 5`. Idempotent.
+- **`scripts/recompute-plot-dates.ts`** — repair script for plots with bad dates (Sunday starts, parent/child misalignment, gaps). Dry-run by default; `--apply` writes. **Run with `TZ=UTC`** to avoid local-tz drift (working-days.ts utility does local-midnight setHours which gives different results in BST vs UTC).
+
+### Active browser test — in progress
+
+Keith has kicked off a browser-only end-to-end test (22 Apr 2026). Process:
+1. Create 2 plot templates manually through the browser (no DB seeding).
+2. Create a staggered site with 6 plots using those templates.
+3. Exercise: Pull Forward, Expand, Delay, Early Order, Custom Order, Walkthrough, Adding Notes.
+4. Fix display / small UX bugs inline.
+5. Write a refinement plan for larger issues.
+6. Critically viewing from the perspective of a site manager who hates apps.
+
+**This test is IN PROGRESS — check the session log for current status.**
 
 ---
 
@@ -404,27 +581,40 @@ Every action flows through one of these — never duplicate. Before adding any b
 
 ### Repo state
 
-- Latest commits (most recent first):
-  - `754076a` RAMS + perf audit (27-41% speedup via indexes) + photo test plan
-  - `cd874ad` Contractor Comms tabs (Day Sheets + Messages + Snags rename) + report exports + handover update
-  - `2c88bfa` walkthrough UX sharpening (6 items: hide Pull Forward when greyed, contractor→comms link, orders popup, quick-note presets, etc.)
-  - `e7d0cd8` clearing batch 2: unlimited hierarchy render + report drill-throughs
-  - `f2349e4` clearing batch: HelpTips + Walkthrough unification + 2 audits resolved
-  - `cd35409` spot-check sweep: fix handover inaccuracies + clear Priority 1 items
-  - `fbdee5f` docs: triple-check handover — add Quick Start + Workflow + complete Deferred table
-  - `4284152` HelpTip on ContactsClient Add/Edit dialog
-  - `d7611f8` HelpTip on OrderDetailSheet explaining order lifecycle
-  - `513d1f9` HelpTip on JobDetailClient sign-off dialog
-  - `e206661` HelpTip on SnagDialog explaining snag lifecycle
-  - `d8ab7ec` Migrate PlotTodoList.tsx to useOrderEmail hook
-  - `39fc911` Gantt partial-week fills for day-granularity jobs
-  - `c7aeadc` Migrate OrderDetailSheet.tsx to useOrderEmail hook
-  - `80751a3` Migrate DailySiteBrief.tsx to useOrderEmail hook
-  - `9311ca1` Contractor Comms mini-Gantt (Keith's idea)
-  - `94576ea` Option A: email templates unified on rich `buildOrderEmailBody`
-  - (Many more — see `git log --oneline`)
+- Latest commits (most recent first, post-launch session):
+  - `2f898f2` feat(orders): after save, offer to add items to supplier pricelist
+  - `04801ee` fix(HelpTip): bigger icon + no longer overlaps the Dialog close X
+  - `4a41bd4` fix(uploads): lift template drawing cap 50MB → 500MB
+  - `9eecac1` feat(template-timeline): Weeks / Days toggle
+  - `d0d0e7f` fix(template-orders): preview weeks now skip Week 0 (industry convention)
+  - `5dfddd6` feat(template-orders): clearer preview + lead-time only in Arrive mode
+  - `9ba00fc` feat(template-editor): jobs calculated from sub-jobs, atomic toggle, sub-job D&D, drop Start/End Week
+  - `8d6ad53` fix(cascade-client): the OTHER toISOString — multiline version missed
+  - `3b253cf` chore(script): recompute-plot-dates — repair bad existing plot dates (1270 leaf + 549 parent)
+  - `8722872` fix(cascade-client): toISOString() bug sent yesterday's date to server
+  - `7562f28` fix(cascade): parents derived from children, not independently shifted
+  - `b8f8b88` fix(early-start): timezone bug + consolidate pull-forward section
+  - `0579609` feat(early-start): working-day label + preflight + custom date picker
+  - `5bbfcbf` fix(daily-brief): alerts + pills were doing nothing on click
+  - `61afa31` fix(qa): FormData upload + JobWeekPanel stop dialog
+  - `57f4f24` fix(mobile+print): walkthrough + report controls
+  - `e2b1821` fix(uploads): signed URLs to bypass Vercel 4.5MB body cap
+  - `6ac3961` feat(stage-dialog): inline errors + per-sub-job days/weeks toggle
+  - `83bd56b` feat(site-wizard): custom plot numbers + mixed range input
+  - `47a034d` fix(orders): PENDING→DELIVERED silently 400'd — auto-bridge instead
+  - (See full list in section 0.0 above — 35 post-launch commits)
 
-- **No in-flight background agents.** The email-migrations + HelpTip rollout agent completed its run (last commit `4284152`). If a new session sees a similar "bg agent running" note, verify via `git log` before assuming anything is still live.
+- **No in-flight background agents.** All committed work is visible in `git log`.
+
+### New hooks added this session
+
+- **`useReviewSupplierMaterials`** — after-order-save dialog: diffs items against supplier pricelist, lets user choose add-new / update-existing / add-as-variant / skip per item. Wired into TemplateEditor + SiteQuantsClient.
+
+### New scripts added this session
+
+- `scripts/seed-launch-sites.ts` — idempotent launch seeder
+- `scripts/migrate-subjob-duration-to-days.ts` — one-off sub-job weeks→days
+- `scripts/recompute-plot-dates.ts` — repair bad plot dates (dry-run / --apply)
 
 ---
 
