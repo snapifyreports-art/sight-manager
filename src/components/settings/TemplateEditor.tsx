@@ -1595,7 +1595,7 @@ export function TemplateEditor({
                             variant="outline"
                             className="text-[10px]"
                           >
-                            Wk {job.startWeek}--{job.endWeek}
+                            Wk {job.startWeek}–{job.endWeek}
                           </Badge>
                           {job.orders.length > 0 && (
                             <span className="flex items-center gap-1 text-xs text-muted-foreground">
@@ -1823,7 +1823,7 @@ export function TemplateEditor({
                           variant="outline"
                           className="text-[10px]"
                         >
-                          Wk {job.startWeek}--{job.endWeek}
+                          Wk {job.startWeek}–{job.endWeek}
                         </Badge>
                         {job.orders.length > 0 && (
                           <span className="flex items-center gap-1 text-xs text-muted-foreground">
