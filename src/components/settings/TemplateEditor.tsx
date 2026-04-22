@@ -950,6 +950,15 @@ export function TemplateEditor({
   }
 
   // Helper: compute orderWeekOffset and deliveryWeekOffset from natural language fields
+  // Week numbers skip 0 per construction-industry convention:
+  // ..., -3, -2, -1, 1, 2, 3, ...  (no Week 0)
+  //
+  // Going back from a positive week across the boundary requires an extra
+  // -1 to jump over the missing 0. e.g. Wk 1 minus 2 weeks = Wk -2 (not -1).
+  // Display-only — doesn't affect stored offsets or date maths.
+  const displayWeek = (rawWeek: number): number =>
+    rawWeek <= 0 ? rawWeek - 1 : rawWeek;
+
   function computeOffsets(ownerJobStartWeek: number) {
     const allJobs = getAllJobsFlat();
     const refJob = allJobs.find((j) => j.id === anchorRefJobId);
@@ -2779,11 +2788,16 @@ export function TemplateEditor({
                 // usually a mistake (materials arrive too late).
                 const deliveryAfterJob = deliveryWeek > ownerStartWeek;
 
+                // Display weeks skip 0 (construction convention). Raw
+                // weeks are preserved for storage + date maths.
+                const dOrderWeek = displayWeek(orderWeek);
+                const dDeliveryWeek = displayWeek(deliveryWeek);
+
                 if (anchorType === "order") {
                   return (
                     <div className="space-y-1">
                       <p className="text-xs text-muted-foreground">
-                        <strong className="font-semibold text-foreground">Order Wk {orderWeek}</strong>
+                        <strong className="font-semibold text-foreground">Order Wk {dOrderWeek}</strong>
                         <span className="italic"> · {amountLabel} {refLabel}</span>
                       </p>
                     </div>
@@ -2795,11 +2809,11 @@ export function TemplateEditor({
                 return (
                   <div className="space-y-1">
                     <p className="text-xs text-muted-foreground">
-                      <strong className="font-semibold text-foreground">Arrive Wk {deliveryWeek}</strong>
+                      <strong className="font-semibold text-foreground">Arrive Wk {dDeliveryWeek}</strong>
                       <span className="italic"> · {amountLabel} {refLabel}</span>
                     </p>
                     <p className="text-xs text-muted-foreground">
-                      <strong className="font-semibold text-foreground">Order Wk {orderWeek}</strong>
+                      <strong className="font-semibold text-foreground">Order Wk {dOrderWeek}</strong>
                       <span className="italic"> · {leadTimeAmount} {leadTimeUnit} earlier (lead time)</span>
                     </p>
                     {deliveryAfterJob && (
