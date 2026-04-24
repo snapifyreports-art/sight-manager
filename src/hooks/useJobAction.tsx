@@ -80,12 +80,12 @@ export function useJobAction(
   // would need placing in the past), we disable the button + explain why
   // instead of letting the user click and get a toast error.
   const [pullForwardFeasibility, setPullForwardFeasibility] = useState<
-    { status: "checking" | "ok" | "conflict"; reason?: string } | null
+    { status: "checking" | "ok" | "conflict"; reason?: string; earliestStart?: Date | null } | null
   >(null);
   // User-picked custom start date for "Pull to specific date" option.
   const [customPullDate, setCustomPullDate] = useState<string>("");
   const [customPullFeasibility, setCustomPullFeasibility] = useState<
-    { status: "checking" | "ok" | "conflict"; reason?: string } | null
+    { status: "checking" | "ok" | "conflict"; reason?: string; earliestStart?: Date | null } | null
   >(null);
   const [cascadeLoading, setCascadeLoading] = useState(false);
 
@@ -254,7 +254,7 @@ export function useJobAction(
   // Returns ok:true if safe, or ok:false with a human-readable reason.
   const previewPullForward = useCallback(
     async (jobId: string, endDate: string, daysEarly: number):
-      Promise<{ ok: boolean; reason?: string }> => {
+      Promise<{ ok: boolean; reason?: string; shiftGapDays?: number }> => {
       try {
         const newEnd = addWorkingDays(new Date(endDate), -daysEarly)
           .toLocaleDateString("en-CA");
@@ -273,7 +273,23 @@ export function useJobAction(
               : first.kind === "order_in_past"
                 ? `Shift blocked — an order would need placing in the past.`
                 : "Programme conflict";
-          return { ok: false, reason };
+
+          // How much of the shift was "too much"? For every offending date
+          // (order placement or downstream job start) that landed before
+          // `today`, compute the working-day gap between today and that
+          // proposed date. The largest gap across all conflicts is the
+          // binding constraint — the shift needs to be *reduced* by at least
+          // that many working days. Caller uses this to quote an
+          // "Earliest allowed: <date>" instead of vague "Try a later date."
+          let shiftGapDays = 0;
+          for (const c of data.conflicts) {
+            if (!c.proposedDate || !c.today) continue;
+            const proposed = new Date(c.proposedDate);
+            const today = new Date(c.today);
+            const gap = differenceInWorkingDays(today, proposed);
+            if (gap > shiftGapDays) shiftGapDays = gap;
+          }
+          return { ok: false, reason, shiftGapDays };
         }
         return { ok: true };
       } catch (e) {
@@ -299,7 +315,9 @@ export function useJobAction(
     // toISOString() converts to UTC and in BST (UTC+1) "today 00:00 local"
     // is "yesterday 23:00 UTC" → picker defaulted to yesterday. Bug report
     // filed by Keith while testing the dialog.
-    setCustomPullDate(format(new Date(), "yyyy-MM-dd"));
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    setCustomPullDate(format(today, "yyyy-MM-dd"));
     // Use outer async function so React cleanup works cleanly.
     let cancelled = false;
     (async () => {
@@ -309,9 +327,20 @@ export function useJobAction(
         earlyStartDialog.daysEarly
       );
       if (cancelled) return;
-      setPullForwardFeasibility(
-        result.ok ? { status: "ok" } : { status: "conflict", reason: result.reason }
-      );
+      if (result.ok) {
+        setPullForwardFeasibility({ status: "ok" });
+      } else {
+        // If we know the gap, convert it to an absolute date the user can
+        // type into the picker: today + gap working days.
+        const earliestStart = result.shiftGapDays && result.shiftGapDays > 0
+          ? addWorkingDays(today, result.shiftGapDays)
+          : null;
+        setPullForwardFeasibility({
+          status: "conflict",
+          reason: result.reason,
+          earliestStart,
+        });
+      }
     })();
     return () => { cancelled = true; };
   }, [earlyStartDialog, activeJob, previewPullForward]);
@@ -429,9 +458,22 @@ export function useJobAction(
     (async () => {
       const result = await previewPullForward(activeJob.id, activeJob.endDate!, delta);
       if (cancelled) return;
-      setCustomPullFeasibility(
-        result.ok ? { status: "ok" } : { status: "conflict", reason: result.reason }
-      );
+      if (result.ok) {
+        setCustomPullFeasibility({ status: "ok" });
+      } else {
+        // Earliest feasible START given THIS attempt: the user's chosen
+        // date + the working-day gap that made the shift too aggressive.
+        // (The server already anchors the gap at its own "today", which
+        // matches our dev-date cookie.)
+        const earliestStart = result.shiftGapDays && result.shiftGapDays > 0
+          ? addWorkingDays(chosen, result.shiftGapDays)
+          : null;
+        setCustomPullFeasibility({
+          status: "conflict",
+          reason: result.reason,
+          earliestStart,
+        });
+      }
     })();
     return () => { cancelled = true; };
   }, [customPullDate, earlyStartDialog, activeJob, previewPullForward]);
@@ -1406,7 +1448,27 @@ export function useJobAction(
                         )}
                         {customPullFeasibility?.status === "conflict" && (
                           <p className="mt-1.5 text-[11px] font-medium text-red-600">
-                            {customPullFeasibility.reason} Try a later date.
+                            {customPullFeasibility.reason}{" "}
+                            {customPullFeasibility.earliestStart ? (
+                              <>
+                                Earliest allowed:{" "}
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setCustomPullDate(
+                                      format(customPullFeasibility.earliestStart!, "yyyy-MM-dd")
+                                    )
+                                  }
+                                  className="font-semibold underline hover:text-red-800"
+                                  title="Click to use this date"
+                                >
+                                  {format(customPullFeasibility.earliestStart, "EEE d MMM")}
+                                </button>
+                                .
+                              </>
+                            ) : (
+                              "Try a later date."
+                            )}
                           </p>
                         )}
                       </div>
