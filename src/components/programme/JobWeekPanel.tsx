@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { format } from "date-fns";
 import { addWorkingDays, differenceInWorkingDays, isWorkingDay, snapToWorkingDay } from "@/lib/working-days";
+import { toDateKey } from "@/lib/dates";
 import { useJobAction } from "@/hooks/useJobAction";
 import Link from "next/link";
 import {
@@ -966,8 +967,13 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
       const deltaWD = -daysDeviation;
       const nextJobData = await fetch(`/api/jobs/${nextJob.id}`, { cache: "no-store" }).then((r) => r.json());
       const updates: Record<string, string> = {};
-      if (nextJobData.endDate) updates.endDate = addWorkingDays(new Date(nextJobData.endDate), deltaWD).toISOString().slice(0, 10);
-      if (nextJobData.startDate) updates.startDate = addWorkingDays(new Date(nextJobData.startDate), deltaWD).toISOString().slice(0, 10);
+      // Use toDateKey() (local calendar) rather than .toISOString().slice(0,10).
+      // addWorkingDays internally calls setHours(0,0,0,0) which produces a
+      // LOCAL midnight; .toISOString() then converts to UTC and the slice
+      // reads the UTC day — in BST that's "yesterday". Same class of bug we
+      // fixed in usePullForwardDecision after the April smoke test.
+      if (nextJobData.endDate) updates.endDate = toDateKey(addWorkingDays(new Date(nextJobData.endDate), deltaWD));
+      if (nextJobData.startDate) updates.startDate = toDateKey(addWorkingDays(new Date(nextJobData.startDate), deltaWD));
       if (Object.keys(updates).length > 0) {
         const res = await fetch(`/api/jobs/${nextJob.id}`, {
           method: "PUT",

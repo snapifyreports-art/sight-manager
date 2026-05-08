@@ -6,6 +6,7 @@ import { getServerCurrentDate } from "@/lib/dev-date";
 import { sessionHasPermission } from "@/lib/permissions";
 import type { JobStatus } from "@prisma/client";
 import { canAccessSite } from "@/lib/site-access";
+import { snapToWorkingDay } from "@/lib/working-days";
 
 export const dynamic = "force-dynamic";
 
@@ -216,6 +217,11 @@ export async function POST(
                     ? to.leadTimeAmount * 7
                     : to.leadTimeAmount;
                 expectedDelivery.setDate(expectedDelivery.getDate() + days);
+                // Snap result to a working day — same as
+                // apply-template-helpers / actions/route.ts auto-reorder.
+                // Suppliers don't deliver on weekends regardless of
+                // lead-time arithmetic.
+                expectedDelivery = snapToWorkingDay(expectedDelivery, "forward");
               }
 
               await prisma.materialOrder.create({

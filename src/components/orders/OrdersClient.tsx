@@ -366,6 +366,7 @@ function CreateOrderDialog({
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<OrderFormData>(EMPTY_FORM);
   const [submitting, setSubmitting] = useState(false);
+  const toast = useToast();
 
   async function handleCreate() {
     if (!form.supplierId || !form.jobId) return;
@@ -383,7 +384,14 @@ function CreateOrderDialog({
         onCreated(order);
         setForm(EMPTY_FORM);
         setOpen(false);
+      } else {
+        // Was previously a silent failure — button just re-enabled with no
+        // feedback, user clicks again and risks duplicates. Surface the
+        // error and leave form values intact so they can adjust + retry.
+        toast.error(await fetchErrorMessage(res, "Failed to create order"));
       }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to create order");
     } finally {
       setSubmitting(false);
     }

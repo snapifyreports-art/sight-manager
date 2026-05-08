@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canAccessSite } from "@/lib/site-access";
-import { isWorkingDay, differenceInWorkingDays, addWorkingDays } from "@/lib/working-days";
+import { isWorkingDay, differenceInWorkingDays, addWorkingDays, snapToWorkingDay } from "@/lib/working-days";
 import { apiError } from "@/lib/api-errors";
 import { getServerCurrentDate } from "@/lib/dev-date";
 
@@ -156,10 +156,15 @@ export async function GET(
         reason = `${o.supplier.name} delivery due ${o.expectedDeliveryDate.toISOString().slice(0, 10)}`;
       } else if (o.status === "PENDING" && o.leadTimeDays && o.leadTimeDays > 0) {
         // The earliest we could get this delivered is today + leadTimeDays
-        // (assumes the order is placed today).
+        // (assumes the order is placed today). leadTimeDays is calendar
+        // days (suppliers don't differentiate weekends), so we add via
+        // setDate. Snap forward to a working day so the constraint
+        // doesn't pretend a Sat/Sun delivery is feasible.
         const target = new Date(today);
         target.setDate(target.getDate() + o.leadTimeDays);
-        earliestDelivery = target;
+        earliestDelivery = isWorkingDay(target)
+          ? target
+          : snapToWorkingDay(target, "forward");
         reason = `${o.supplier.name} hasn't been ordered yet — ${o.leadTimeDays} day lead time`;
       } else if (o.status === "PENDING") {
         // No lead time set, use dateOfOrder (when it was first expected to be placed)

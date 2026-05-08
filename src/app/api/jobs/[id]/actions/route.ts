@@ -6,6 +6,7 @@ import { getServerCurrentDate } from "@/lib/dev-date";
 import { sessionHasPermission } from "@/lib/permissions";
 import { recomputeParentOf } from "@/lib/parent-job";
 import { canAccessSite } from "@/lib/site-access";
+import { snapToWorkingDay } from "@/lib/working-days";
 import { apiError } from "@/lib/api-errors";
 import type { EventType, JobStatus } from "@prisma/client";
 
@@ -264,6 +265,13 @@ export async function POST(
           if (leadTimeDays) {
             expectedDelivery = new Date(now.getTime());
             expectedDelivery.setDate(expectedDelivery.getDate() + leadTimeDays);
+            // Calendar-day arithmetic for supplier lead time is intentional
+            // (a 7-day lead time means 7 calendar days, weekends included),
+            // BUT we don't want a delivery date stored on a Sat/Sun. Snap
+            // forward to next working day. Matches apply-template-helpers
+            // resolveOrderDates which also calls snapToWorkingDay(...,
+            // "forward") for the expectedDeliveryDate.
+            expectedDelivery = snapToWorkingDay(expectedDelivery, "forward");
           }
           return prisma.materialOrder.create({
             data: {
