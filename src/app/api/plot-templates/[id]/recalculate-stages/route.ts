@@ -65,21 +65,20 @@ export async function POST(
   function weeksForStage(stage: NonNullable<typeof template>["jobs"][number]): number {
     const childCount = stage.children.length;
     if (childCount > 0) {
-      // Sum children grid weeks. days-unit children: round their durationDays
-      // up to whole weeks. Previously these were collapsed to 1-week slots
-      // ("the actual cascade honours durationDays at plot creation time"),
-      // but Keith pointed out (May 2026) that the preview then lies — a 20-
-      // working-day Foundations shows as 1 grid week in the editor and
-      // 4 weeks on the actual plot. Make the preview honest.
-      return stage.children.reduce((acc, c) => {
-        const w =
+      // Sum children DAYS (not weeks each), then round up to whole weeks.
+      // Previously each child was forced to a minimum 1 grid week, so
+      // 6 × 3-day sub-jobs claimed 6 weeks; in reality 6 × 3 = 18 working
+      // days = 4 weeks. days-unit children share weeks freely.
+      const totalDays = stage.children.reduce((acc, c) => {
+        const days =
           c.durationDays && c.durationDays > 0
-            ? Math.max(1, Math.ceil(c.durationDays / 5))
+            ? c.durationDays
             : c.durationWeeks && c.durationWeeks > 0
-              ? c.durationWeeks
-              : 1;
-        return acc + w;
+              ? c.durationWeeks * 5
+              : 5;
+        return acc + days;
       }, 0);
+      return Math.max(1, Math.ceil(totalDays / 5));
     }
     if (stage.durationDays && stage.durationDays > 0) {
       return Math.max(1, Math.ceil(stage.durationDays / 5));
@@ -106,26 +105,30 @@ export async function POST(
           data: { startWeek, endWeek },
         });
 
-        // If the stage has children, also recompute child windows so they
-        // slot into the stage's new position. Same days→grid-weeks rule as
-        // weeksForStage: durationDays rounded up to whole weeks beats
-        // durationWeeks beats 1.
+        // If the stage has children, recompute child windows by packing
+        // them via a *day cursor* — same logic as /jobs/[jobId]/recalculate.
+        // Each child consumes its durationDays (or durationWeeks*5)
+        // starting from the parent's first day. Multiple sub-jobs share
+        // weeks freely; the editor's Timeline renders them at day-level
+        // positions. Avoid the "one grid week per sub-job" trap that made
+        // 6 × 3-day sub-jobs eat 6 weeks instead of 3-4.
         if (stage.children.length > 0) {
-          let childWeek = startWeek;
+          let dayCursor = 0;
           for (const child of stage.children) {
-            const childSpan =
+            const days =
               child.durationDays && child.durationDays > 0
-                ? Math.max(1, Math.ceil(child.durationDays / 5))
+                ? child.durationDays
                 : child.durationWeeks && child.durationWeeks > 0
-                  ? child.durationWeeks
-                  : 1;
-            const childStart = childWeek;
-            const childEnd = childStart + childSpan - 1;
-            childWeek = childEnd + 1;
+                  ? child.durationWeeks * 5
+                  : 5;
+            const childStart = startWeek + Math.floor(dayCursor / 5);
+            const childEnd =
+              startWeek + Math.floor((dayCursor + days - 1) / 5);
             await tx.templateJob.update({
               where: { id: child.id },
               data: { startWeek: childStart, endWeek: childEnd },
             });
+            dayCursor += days;
           }
         }
       }
