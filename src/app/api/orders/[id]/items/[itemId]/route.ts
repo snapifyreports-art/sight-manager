@@ -25,13 +25,22 @@ export async function PUT(
     return NextResponse.json({ error: "Item not found" }, { status: 404 });
   }
 
+  // parseFloat returns NaN for empty / non-numeric input. Without these
+  // guards a "1.2.3" body would propagate NaN into the DB and silently
+  // corrupt every cost downstream. Same guards in the POST handler.
   const data: Record<string, unknown> = {};
   if (body.name !== undefined) data.name = body.name;
-  if (body.quantity !== undefined) data.quantity = parseFloat(body.quantity);
+  if (body.quantity !== undefined) {
+    const q = parseFloat(String(body.quantity));
+    data.quantity = Number.isFinite(q) && q >= 0 ? q : item.quantity;
+  }
   if (body.unit !== undefined) data.unit = body.unit;
-  if (body.unitCost !== undefined) data.unitCost = parseFloat(body.unitCost);
+  if (body.unitCost !== undefined) {
+    const c = parseFloat(String(body.unitCost));
+    data.unitCost = Number.isFinite(c) && c >= 0 ? c : item.unitCost;
+  }
 
-  // Recalculate totalCost
+  // Recalculate totalCost from the sanitised values.
   const qty = (data.quantity as number) ?? item.quantity;
   const cost = (data.unitCost as number) ?? item.unitCost;
   data.totalCost = qty * cost;

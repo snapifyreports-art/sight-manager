@@ -142,9 +142,14 @@ export async function PUT(
       : null;
   }
   if (body.leadTimeDays !== undefined) {
-    data.leadTimeDays = body.leadTimeDays
-      ? parseInt(body.leadTimeDays, 10)
-      : null;
+    if (!body.leadTimeDays) {
+      data.leadTimeDays = null;
+    } else {
+      // Guard NaN — a malformed body shouldn't poison the DB. parseInt
+      // coerces "" → NaN; falsy check above handles "" but not "abc".
+      const n = parseInt(String(body.leadTimeDays), 10);
+      data.leadTimeDays = Number.isFinite(n) && n >= 0 ? n : null;
+    }
   }
   if (body.itemsDescription !== undefined) data.itemsDescription = body.itemsDescription || null;
 

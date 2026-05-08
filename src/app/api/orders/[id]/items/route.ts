@@ -62,8 +62,14 @@ export async function POST(
     return NextResponse.json({ error: "Order not found" }, { status: 404 });
   }
 
-  const qty = quantity ? parseFloat(quantity) : 1;
-  const cost = unitCost ? parseFloat(unitCost) : 0;
+  // parseFloat returns NaN for non-numeric input — propagating NaN into
+  // the DB pollutes every downstream cost/totalCost calculation. Coerce
+  // any non-finite result back to a sensible default. Same defence in
+  // /api/orders/[id]/items/[itemId] PUT.
+  const qtyRaw = quantity ? parseFloat(String(quantity)) : 1;
+  const costRaw = unitCost ? parseFloat(String(unitCost)) : 0;
+  const qty = Number.isFinite(qtyRaw) && qtyRaw >= 0 ? qtyRaw : 1;
+  const cost = Number.isFinite(costRaw) && costRaw >= 0 ? costRaw : 0;
   const totalCost = qty * cost;
 
   try {

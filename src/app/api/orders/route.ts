@@ -108,7 +108,11 @@ export async function POST(req: NextRequest) {
         expectedDeliveryDate: expectedDeliveryDate
           ? new Date(expectedDeliveryDate)
           : null,
-        leadTimeDays: leadTimeDays ? parseInt(String(leadTimeDays), 10) : null,
+        leadTimeDays: (() => {
+          if (!leadTimeDays) return null;
+          const n = parseInt(String(leadTimeDays), 10);
+          return Number.isFinite(n) && n >= 0 ? n : null;
+        })(),
         itemsDescription: itemsDescription || null,
         ...(items && items.length > 0
           ? {
