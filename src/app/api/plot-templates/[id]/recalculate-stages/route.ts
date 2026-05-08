@@ -91,6 +91,12 @@ export async function POST(
     return Math.max(1, stage.endWeek - stage.startWeek + 1);
   }
 
+  // SSOT model (May 2026 audit): for parent stages we still write
+  // startWeek/endWeek because the editor's collapsed-stage rendering
+  // uses them to position the bar. For sub-jobs, the Timeline now
+  // computes day-level positions from durationDays + sortOrder
+  // directly — so we skip per-child writes and let the data stay
+  // canonical at durationDays. One source of truth.
   try {
     await prisma.$transaction(async (tx) => {
       let currentWeek = 1;
@@ -104,33 +110,6 @@ export async function POST(
           where: { id: stage.id },
           data: { startWeek, endWeek },
         });
-
-        // If the stage has children, recompute child windows by packing
-        // them via a *day cursor* — same logic as /jobs/[jobId]/recalculate.
-        // Each child consumes its durationDays (or durationWeeks*5)
-        // starting from the parent's first day. Multiple sub-jobs share
-        // weeks freely; the editor's Timeline renders them at day-level
-        // positions. Avoid the "one grid week per sub-job" trap that made
-        // 6 × 3-day sub-jobs eat 6 weeks instead of 3-4.
-        if (stage.children.length > 0) {
-          let dayCursor = 0;
-          for (const child of stage.children) {
-            const days =
-              child.durationDays && child.durationDays > 0
-                ? child.durationDays
-                : child.durationWeeks && child.durationWeeks > 0
-                  ? child.durationWeeks * 5
-                  : 5;
-            const childStart = startWeek + Math.floor(dayCursor / 5);
-            const childEnd =
-              startWeek + Math.floor((dayCursor + days - 1) / 5);
-            await tx.templateJob.update({
-              where: { id: child.id },
-              data: { startWeek: childStart, endWeek: childEnd },
-            });
-            dayCursor += days;
-          }
-        }
       }
     });
 
