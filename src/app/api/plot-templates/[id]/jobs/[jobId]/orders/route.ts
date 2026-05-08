@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { apiError } from "@/lib/api-errors";
+import { deriveOrderOffsets } from "@/lib/template-order-offsets";
 
 export const dynamic = "force-dynamic";
 
@@ -19,8 +20,8 @@ export async function POST(
   const body = await request.json();
   const {
     itemsDescription,
-    orderWeekOffset,
-    deliveryWeekOffset,
+    orderWeekOffset: clientOrderWeekOffset,
+    deliveryWeekOffset: clientDeliveryWeekOffset,
     supplierId,
     items,
     anchorType,
@@ -42,14 +43,31 @@ export async function POST(
     );
   }
 
+  // Derive legacy offsets from anchor fields server-side. Source of truth
+  // for new templates is the anchor fields; offsets stay in the DB as a
+  // computed cache so legacy readers don't break. Falls back to client-
+  // supplied values only if anchor fields aren't present (legacy clients).
+  const offsets = await deriveOrderOffsets(prisma, {
+    ownerJobId: jobId,
+    anchorType,
+    anchorAmount,
+    anchorUnit,
+    anchorDirection,
+    anchorJobId,
+    leadTimeAmount,
+    leadTimeUnit,
+    fallbackOrderWeekOffset: clientOrderWeekOffset,
+    fallbackDeliveryWeekOffset: clientDeliveryWeekOffset,
+  });
+
   try {
     const order = await prisma.templateOrder.create({
       data: {
         templateJobId: jobId,
         supplierId: supplierId || null,
         itemsDescription: itemsDescription?.trim() || null,
-        orderWeekOffset: orderWeekOffset ?? -2,
-        deliveryWeekOffset: deliveryWeekOffset ?? 0,
+        orderWeekOffset: offsets.orderWeekOffset,
+        deliveryWeekOffset: offsets.deliveryWeekOffset,
         anchorType: anchorType || null,
         anchorAmount: anchorAmount ?? null,
         anchorUnit: anchorUnit || null,

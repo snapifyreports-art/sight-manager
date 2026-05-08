@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { apiError } from "@/lib/api-errors";
+import { deriveOrderOffsets } from "@/lib/template-order-offsets";
 
 export const dynamic = "force-dynamic";
 
@@ -17,12 +18,12 @@ export async function PUT(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { orderId } = await params;
+  const { jobId, orderId } = await params;
   const body = await request.json();
   const {
     itemsDescription,
-    orderWeekOffset,
-    deliveryWeekOffset,
+    orderWeekOffset: clientOrderWeekOffset,
+    deliveryWeekOffset: clientDeliveryWeekOffset,
     supplierId,
     items,
     anchorType,
@@ -44,6 +45,35 @@ export async function PUT(
     );
   }
 
+  // Derive offsets from anchor fields whenever the client touched any of
+  // them. This keeps the legacy offset cache in lock-step with the
+  // canonical anchor fields. If the client only sent itemsDescription/
+  // supplierId etc. we leave the existing offsets alone.
+  const touchedAnchor =
+    anchorType !== undefined ||
+    anchorAmount !== undefined ||
+    anchorUnit !== undefined ||
+    anchorDirection !== undefined ||
+    anchorJobId !== undefined ||
+    leadTimeAmount !== undefined ||
+    leadTimeUnit !== undefined;
+  const computedOffsets = touchedAnchor
+    ? await deriveOrderOffsets(prisma, {
+        ownerJobId: jobId,
+        anchorType: anchorType ?? existing.anchorType,
+        anchorAmount: anchorAmount ?? existing.anchorAmount,
+        anchorUnit: anchorUnit ?? existing.anchorUnit,
+        anchorDirection: anchorDirection ?? existing.anchorDirection,
+        anchorJobId: anchorJobId ?? existing.anchorJobId,
+        leadTimeAmount: leadTimeAmount ?? existing.leadTimeAmount,
+        leadTimeUnit: leadTimeUnit ?? existing.leadTimeUnit,
+        fallbackOrderWeekOffset:
+          clientOrderWeekOffset ?? existing.orderWeekOffset,
+        fallbackDeliveryWeekOffset:
+          clientDeliveryWeekOffset ?? existing.deliveryWeekOffset,
+      })
+    : null;
+
   try {
     // If items are provided, delete existing and recreate
     if (items) {
@@ -59,8 +89,22 @@ export async function PUT(
           itemsDescription: itemsDescription?.trim() || null,
         }),
         ...(supplierId !== undefined && { supplierId: supplierId || null }),
-        ...(orderWeekOffset !== undefined && { orderWeekOffset }),
-        ...(deliveryWeekOffset !== undefined && { deliveryWeekOffset }),
+        // Offsets: prefer the value derived from anchor fields when the
+        // client touched the anchor; otherwise honour the explicit field
+        // they sent (legacy offsets-only path); otherwise leave alone.
+        ...(computedOffsets !== null
+          ? {
+              orderWeekOffset: computedOffsets.orderWeekOffset,
+              deliveryWeekOffset: computedOffsets.deliveryWeekOffset,
+            }
+          : {
+              ...(clientOrderWeekOffset !== undefined && {
+                orderWeekOffset: clientOrderWeekOffset,
+              }),
+              ...(clientDeliveryWeekOffset !== undefined && {
+                deliveryWeekOffset: clientDeliveryWeekOffset,
+              }),
+            }),
         ...(anchorType !== undefined && { anchorType: anchorType || null }),
         ...(anchorAmount !== undefined && { anchorAmount: anchorAmount ?? null }),
         ...(anchorUnit !== undefined && { anchorUnit: anchorUnit || null }),
