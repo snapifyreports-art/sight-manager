@@ -189,3 +189,81 @@ Update `docs/master-context.md` and `docs/cascade-spec.md` to declare the canoni
 3. Confirm "one source of truth" means **`durationDays` for durations, anchor fields for order timing** (Option A) — or override.
 
 Once you say go, I execute. Won't make schema changes without explicit nod.
+
+---
+
+## 10. Self-review pass — bugs caught after Steps 1-7 shipped
+
+Keith asked: "double-check this work — when we change something at the
+start of the journey it breaks everything else." Re-read every commit
+and traced every consumer. Two real bugs surfaced and were fixed in
+commit `41d3cbe`:
+
+### Bug A — per-child `startWeek`/`endWeek` cache went stale
+
+Step 2 (commit `c3519ac`) stopped the recalculate endpoints from writing
+per-child startWeek/endWeek, on the assumption that only the
+TemplateTimeline read them and the Timeline now derives positions from
+`durationDays + sortOrder` directly.
+
+Wrong. Other readers still consulted `child.startWeek`:
+
+- `getAllJobsFlat()` in TemplateEditor — anchor-job dropdown labels
+  + the editor's `computeOffsets` math
+- Collapsed-stage order-dot positioning in TemplateTimeline (lines
+  127-132): `child.startWeek + orderWeekOffset`
+- `normaliseTemplateParentDates()` in template-includes.ts — derives
+  parent startWeek/endWeek from children
+- `deriveOrderOffsets()` in template-order-offsets.ts — reads owner
+  job's `startWeek` to compute `orderWeekOffset = orderWeek - ownerStart`
+
+Each of these silently drifted as soon as a sub-job's duration changed.
+
+**Fix:** new shared helper `src/lib/template-pack-children.ts:packChildrenAndUpdateParent()`
+that recomputes per-child `startWeek`/`endWeek` from canonical
+`durationDays + sortOrder` via day-cursor packing, plus the parent's
+`endWeek`. Both `/jobs/[id]/recalculate` and `/recalculate-stages` now
+use it. The cache exists again, but it's recomputed on every save —
+it can never disagree with the canonical fields.
+
+### Bug B — clone-template dropped `leadTimeAmount` + `leadTimeUnit`
+
+`src/app/api/plot-templates/[id]/clone/route.ts` copied `anchorType`,
+`anchorAmount`, `anchorUnit`, `anchorDirection`, `anchorJobId` — but
+forgot the two lead-time fields. Cloned templates lost their order
+lead time and apply silently fell back to the legacy
+`deliveryWeekOffset` path.
+
+**Fix:** clone now copies `leadTimeAmount` and `leadTimeUnit` too.
+
+### Verifications run after the remediation
+
+1. Recalculate on `SMOKE_TEST — Simple Semi` Groundworks: children pack
+   correctly (FND 10d → wks 1-2; DPC 5d → wk 3; OG 5d → wk 4;
+   DRN 5d → wk 5). Parent wks 1-5. ✓
+2. PUT FND `durationDays: 20` then recalculate: FND wks 1-4, DPC wks
+   5, OG wk 6, DRN wk 7, parent wks 1-7. ✓ (Reset to 10d after.)
+3. Recalculate the `1047 v12` Brickwork stage (10 sub-jobs at 3+2+3+
+   1+2+3+1+2+1+1=19 working days, previously each in its own week →
+   "Wk 1-10"): now packs into 4 weeks with sub-jobs sharing weeks
+   (1st-lift wk 1, scaff-baseout wk 1, 2nd-lift wk 2, joist crosses
+   wks 2-3, etc.). Parent Wk 1-4. ✓
+4. Apply `1047 v12` to a fresh plot starting Mon 01 Jun 2026:
+   Brickwork sub-jobs land on exact working days — 1st-lift Mon-Wed,
+   scaff Thu-Fri, 2nd-lift next Mon-Wed, weekend-aware joist crossing
+   Fri/Mon, etc. Parent ends Thu 25 Jun = 19 working days. ✓
+5. Cascade engine reviewed: `lib/cascade.ts` and `lib/parent-job.ts`
+   reference no template fields. They operate purely on `Job` and
+   `MaterialOrder` rows, both of which carry concrete dates. Live
+   plots remain insulated from template bugs. ✓
+6. Legacy template path: zero sub-jobs in the database currently lack
+   `durationDays`. The fallback to `durationWeeks * 5` is still
+   present in code (defensive) but no live data exercises it.
+7. Apply-template-batch reviewed: shares the same `createJobsFromTemplate`
+   helper as single-plot apply, so any apply-time fix lands in both. ✓
+
+Status: SSOT model holds end-to-end. The five places that previously
+re-encoded durations/offsets independently now have a single canonical
+source per concept (`durationDays + sortOrder` for layout; anchor
+fields for order timing). Caches are recomputed from canonical on
+every save; readers never see stale data.
