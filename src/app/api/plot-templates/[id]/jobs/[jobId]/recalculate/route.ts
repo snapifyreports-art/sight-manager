@@ -44,13 +44,29 @@ export async function POST(
     );
   }
 
-  // Recalculate: sub-jobs are sequential starting from parent's startWeek
+  // Recalculate: sub-jobs are sequential starting from parent's startWeek.
+  //
+  // Bug history (May 2026): the inline working-days duration field on the
+  // editor sets `durationDays: <N>, durationWeeks: null` and then calls this
+  // endpoint. Previously we did `child.durationWeeks ?? 1` which collapsed
+  // EVERY days-unit child to a 1-week grid slot — Foundations 20d showed as
+  // 1 grid week (Stage Wk 1-4) instead of 4 grid weeks (Stage Wk 1-7). Now
+  // we derive grid weeks from durationDays when present so the Timeline
+  // Preview matches the actual programme footprint.
   let currentWeek = parent.startWeek;
 
   try {
     await prisma.$transaction(async (tx) => {
       for (const child of parent.children) {
-        const duration = child.durationWeeks ?? 1;
+        // durationDays wins when set — round up to whole grid weeks (we
+        // can't display a 0.6-week slot). Falls back to durationWeeks for
+        // legacy / week-unit sub-jobs, then 1 as a last resort.
+        const duration =
+          child.durationDays && child.durationDays > 0
+            ? Math.max(1, Math.ceil(child.durationDays / 5))
+            : child.durationWeeks && child.durationWeeks > 0
+              ? child.durationWeeks
+              : 1;
         const startWeek = currentWeek;
         const endWeek = startWeek + duration - 1;
         currentWeek = endWeek + 1;

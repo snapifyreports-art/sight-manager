@@ -65,11 +65,21 @@ export async function POST(
   function weeksForStage(stage: NonNullable<typeof template>["jobs"][number]): number {
     const childCount = stage.children.length;
     if (childCount > 0) {
-      // Sum children weeks. Children use durationWeeks for grid span even if
-      // their durationDays is set (days-unit subjobs occupy 1-week slots at
-      // template-editing time — the actual cascade at plot creation honours
-      // durationDays).
-      return stage.children.reduce((acc, c) => acc + (c.durationWeeks ?? 1), 0);
+      // Sum children grid weeks. days-unit children: round their durationDays
+      // up to whole weeks. Previously these were collapsed to 1-week slots
+      // ("the actual cascade honours durationDays at plot creation time"),
+      // but Keith pointed out (May 2026) that the preview then lies — a 20-
+      // working-day Foundations shows as 1 grid week in the editor and
+      // 4 weeks on the actual plot. Make the preview honest.
+      return stage.children.reduce((acc, c) => {
+        const w =
+          c.durationDays && c.durationDays > 0
+            ? Math.max(1, Math.ceil(c.durationDays / 5))
+            : c.durationWeeks && c.durationWeeks > 0
+              ? c.durationWeeks
+              : 1;
+        return acc + w;
+      }, 0);
     }
     if (stage.durationDays && stage.durationDays > 0) {
       return Math.max(1, Math.ceil(stage.durationDays / 5));
@@ -97,11 +107,18 @@ export async function POST(
         });
 
         // If the stage has children, also recompute child windows so they
-        // slot into the stage's new position.
+        // slot into the stage's new position. Same days→grid-weeks rule as
+        // weeksForStage: durationDays rounded up to whole weeks beats
+        // durationWeeks beats 1.
         if (stage.children.length > 0) {
           let childWeek = startWeek;
           for (const child of stage.children) {
-            const childSpan = child.durationWeeks ?? 1;
+            const childSpan =
+              child.durationDays && child.durationDays > 0
+                ? Math.max(1, Math.ceil(child.durationDays / 5))
+                : child.durationWeeks && child.durationWeeks > 0
+                  ? child.durationWeeks
+                  : 1;
             const childStart = childWeek;
             const childEnd = childStart + childSpan - 1;
             childWeek = childEnd + 1;
