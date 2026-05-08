@@ -210,6 +210,15 @@ export async function POST(
   // Previously this loop issued 1 findFirst per template order (N+1) and 1
   // sequential create per new order. Now we fetch existing orders once, skip
   // the ones we already have, and create the rest in parallel.
+  //
+  // SSOT note (May 2026): the order's lead-time math now mirrors the apply-
+  // template path. Order date = job start (today, since the job is starting
+  // now), delivery date = today + leadTimeDays. We deliberately don't try to
+  // use anchor fields here — the auto-reorder fires when the job has
+  // actually started (today), so the order CANNOT be placed `dateOfOrder
+  // weeks before job-start` retrospectively. Place it now, deliver it as
+  // soon as the supplier can after lead time. Apply-time uses anchor-fields
+  // to backdate orders into the future; this path lives in the present.
   if (action === "start" && existing.stageCode) {
     try {
       const [templateJobs, existingAutomatedOrders] = await Promise.all([
@@ -240,13 +249,21 @@ export async function POST(
 
       await Promise.all(
         ordersToCreate.map((to) => {
-          let expectedDelivery: Date | null = null;
+          // Lead-time precedence: anchor-era leadTimeAmount/leadTimeUnit
+          // first, legacy deliveryWeekOffset second. Same precedence as
+          // apply-template-helpers.resolveOrderDates.
           let leadTimeDays: number | null = null;
           if (to.leadTimeAmount && to.leadTimeUnit) {
-            const days = to.leadTimeUnit === "weeks" ? to.leadTimeAmount * 7 : to.leadTimeAmount;
+            leadTimeDays = to.leadTimeUnit === "weeks"
+              ? to.leadTimeAmount * 7
+              : to.leadTimeAmount;
+          } else if (to.deliveryWeekOffset && to.deliveryWeekOffset > 0) {
+            leadTimeDays = to.deliveryWeekOffset * 7;
+          }
+          let expectedDelivery: Date | null = null;
+          if (leadTimeDays) {
             expectedDelivery = new Date(now.getTime());
-            expectedDelivery.setDate(expectedDelivery.getDate() + days);
-            leadTimeDays = days;
+            expectedDelivery.setDate(expectedDelivery.getDate() + leadTimeDays);
           }
           return prisma.materialOrder.create({
             data: {
