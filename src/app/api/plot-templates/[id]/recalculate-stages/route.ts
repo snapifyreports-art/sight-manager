@@ -3,6 +3,10 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { templateJobsInclude, normaliseTemplateParentDates } from "@/lib/template-includes";
 import { apiError } from "@/lib/api-errors";
+import {
+  packChildrenAndUpdateParent,
+  childDurationDays,
+} from "@/lib/template-pack-children";
 
 export const dynamic = "force-dynamic";
 
@@ -66,18 +70,12 @@ export async function POST(
     const childCount = stage.children.length;
     if (childCount > 0) {
       // Sum children DAYS (not weeks each), then round up to whole weeks.
-      // Previously each child was forced to a minimum 1 grid week, so
-      // 6 × 3-day sub-jobs claimed 6 weeks; in reality 6 × 3 = 18 working
-      // days = 4 weeks. days-unit children share weeks freely.
-      const totalDays = stage.children.reduce((acc, c) => {
-        const days =
-          c.durationDays && c.durationDays > 0
-            ? c.durationDays
-            : c.durationWeeks && c.durationWeeks > 0
-              ? c.durationWeeks * 5
-              : 5;
-        return acc + days;
-      }, 0);
+      // Days-unit children share weeks freely so e.g. six 3-day sub-jobs
+      // = 18 working days = 4 weeks (not 6).
+      const totalDays = stage.children.reduce(
+        (acc, c) => acc + childDurationDays(c),
+        0,
+      );
       return Math.max(1, Math.ceil(totalDays / 5));
     }
     if (stage.durationDays && stage.durationDays > 0) {
@@ -91,12 +89,12 @@ export async function POST(
     return Math.max(1, stage.endWeek - stage.startWeek + 1);
   }
 
-  // SSOT model (May 2026 audit): for parent stages we still write
-  // startWeek/endWeek because the editor's collapsed-stage rendering
-  // uses them to position the bar. For sub-jobs, the Timeline now
-  // computes day-level positions from durationDays + sortOrder
-  // directly — so we skip per-child writes and let the data stay
-  // canonical at durationDays. One source of truth.
+  // SSOT model (corrected May 2026): durationDays + sortOrder is canonical
+  // for layout. We update each top-level stage's startWeek/endWeek AND
+  // re-pack each stage's children's startWeek/endWeek as a derived cache
+  // (so order-dialog dropdowns, collapsed-stage dot positioning, etc. see
+  // current values). Cache is computed from canonical fields here, not
+  // independently maintained — it can never drift.
   try {
     await prisma.$transaction(async (tx) => {
       let currentWeek = 1;
@@ -110,6 +108,18 @@ export async function POST(
           where: { id: stage.id },
           data: { startWeek, endWeek },
         });
+
+        // Re-pack the stage's children (if any) inside its new window.
+        // packChildrenAndUpdateParent updates child.startWeek/endWeek and
+        // ALSO writes parent.endWeek again — slight overwrite of what we
+        // just wrote, harmless because both should agree (same math).
+        if (stage.children.length > 0) {
+          await packChildrenAndUpdateParent(
+            tx,
+            { id: stage.id, startWeek },
+            stage.children,
+          );
+        }
       }
     });
 

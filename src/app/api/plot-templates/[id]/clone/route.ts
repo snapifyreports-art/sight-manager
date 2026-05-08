@@ -98,6 +98,11 @@ export async function POST(
     }
 
     // Third pass: orders (remap templateJobId + anchorJobId).
+    // SSOT note: anchor fields + lead-time fields are canonical for order
+    // timing — copy them all. Earlier this loop forgot leadTimeAmount /
+    // leadTimeUnit which meant cloned orders silently lost their lead
+    // time and apply-template fell back to the legacy deliveryWeekOffset
+    // fallback. Caught during the May 2026 SSOT-audit re-review.
     for (const job of source.jobs) {
       for (const order of job.orders) {
         const newJobId = jobIdMap.get(order.templateJobId);
@@ -115,6 +120,8 @@ export async function POST(
             anchorUnit: order.anchorUnit,
             anchorDirection: order.anchorDirection,
             anchorJobId: newAnchorJobId,
+            leadTimeAmount: order.leadTimeAmount,
+            leadTimeUnit: order.leadTimeUnit,
             items: {
               create: order.items.map((it) => ({
                 name: it.name,

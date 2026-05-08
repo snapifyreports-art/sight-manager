@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { templateJobsInclude, normaliseTemplateParentDates } from "@/lib/template-includes";
 import { apiError } from "@/lib/api-errors";
+import { packChildrenAndUpdateParent } from "@/lib/template-pack-children";
 
 export const dynamic = "force-dynamic";
 
@@ -44,35 +45,21 @@ export async function POST(
     );
   }
 
-  // Recalculate the PARENT'S endWeek only.
+  // SSOT model: durationDays + sortOrder is canonical. We REWRITE each
+  // child's startWeek/endWeek + the parent's endWeek as a derived cache,
+  // computed from the canonical fields by `packChildrenAndUpdateParent`.
   //
-  // SSOT model (May 2026 audit): durationDays + sortOrder is the canonical
-  // source for sub-job layout. The Timeline Preview reads those fields
-  // directly and computes day-level positions on the fly. We deliberately
-  // STOP writing per-child startWeek/endWeek here — those writes used to
-  // cause drift (V1: collapsed days to 1 week; V2: each child wasted a
-  // grid week; V3: shared weeks but still redundant). Less data, fewer
-  // ways for it to disagree.
-  //
-  // Apply-time cascade in src/lib/apply-template-helpers.ts already reads
-  // durationDays + sortOrder, never per-child startWeek/endWeek for
-  // hierarchical templates. Legacy flat (no-children) templates aren't
-  // affected by this endpoint. Safe to drop.
-  const totalDays = parent.children.reduce((acc, c) => {
-    const d =
-      c.durationDays && c.durationDays > 0
-        ? c.durationDays
-        : c.durationWeeks && c.durationWeeks > 0
-          ? c.durationWeeks * 5
-          : 5;
-    return acc + d;
-  }, 0);
-  const totalWeeks = Math.max(1, Math.ceil(totalDays / 5));
-
+  // History: an earlier version of this code (commit c3519ac) tried to
+  // skip per-child writes entirely on the assumption "the Timeline reads
+  // durationDays + sortOrder directly anyway". That was right for the
+  // Timeline but broke other readers — order-dialog dropdowns, collapsed-
+  // stage dot positioning, server-side offset derivation in
+  // template-order-offsets.ts, and normaliseTemplateParentDates() — all
+  // of which consult `child.startWeek` directly. Re-introducing the
+  // writes as a fresh-from-canonical cache.
   try {
-    await prisma.templateJob.update({
-      where: { id: jobId },
-      data: { endWeek: parent.startWeek + totalWeeks - 1 },
+    await prisma.$transaction(async (tx) => {
+      await packChildrenAndUpdateParent(tx, parent, parent.children);
     });
 
     // Return updated template
