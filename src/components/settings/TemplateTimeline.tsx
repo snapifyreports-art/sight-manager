@@ -45,6 +45,18 @@ interface TimelineRow {
   orders?: TemplateJobData["orders"];
   orderDots?: OrderDot[]; // precomputed absolute week positions
   collapsed?: boolean; // true when this group-header is collapsed (show bar)
+  // Day-level layout for sub-jobs.
+  // `dayOffsetFromParent` = cumulative working days since parent's startWeek
+  //   day 0 (Monday of the parent stage's first week).
+  // `dayDuration` = this sub-job's working-day length.
+  // Both populated only for "sub-job" rows whose parent uses days-mode
+  // (canonical: durationDays drives layout). Bar rendering uses these
+  // when present so a 3-day sub-job actually spans 3 columns in Days
+  // view, not a full week. Falls back to startWeek/endWeek for legacy
+  // week-mode rows.
+  dayOffsetFromParent?: number;
+  dayDuration?: number;
+  parentStartWeek?: number; // for day-level positioning anchor
 }
 
 interface TemplateTimelineProps {
@@ -133,9 +145,20 @@ export function TemplateTimeline({ jobs, onJobUpdate, expandedJobIds, onToggleEx
           collapsed: !isExpanded,
           orderDots,
         });
-        // Sub-job rows — only when expanded
+        // Sub-job rows — only when expanded.
+        // Walk children in sortOrder accumulating a day cursor, so each
+        // sub-job knows its day-offset within the parent. Days-mode rows
+        // render at day-level granularity; week-mode rows fall back to
+        // startWeek/endWeek positioning.
         if (isExpanded) {
+          let dayCursor = 0;
           parentJob.children.forEach((child) => {
+            const days =
+              child.durationDays && child.durationDays > 0
+                ? child.durationDays
+                : child.durationWeeks && child.durationWeeks > 0
+                  ? child.durationWeeks * 5
+                  : 5;
             result.push({
               type: "sub-job",
               label: child.name,
@@ -144,7 +167,11 @@ export function TemplateTimeline({ jobs, onJobUpdate, expandedJobIds, onToggleEx
               groupIndex: groupIdx,
               orders: child.orders,
               orderDots: [],
+              dayOffsetFromParent: dayCursor,
+              dayDuration: days,
+              parentStartWeek: parentJob.startWeek,
             });
+            dayCursor += days;
           });
         }
       } else {
@@ -419,7 +446,16 @@ export function TemplateTimeline({ jobs, onJobUpdate, expandedJobIds, onToggleEx
                     </span>
                     <span className="text-[10px] text-muted-foreground">
                       {formatWeekRange(sw, ew)}
-                      {job.durationWeeks && ` (${job.durationWeeks}wk)`}
+                      {/* Show working-day duration as the primary label
+                          (canonical) — falls back to a weeks figure only
+                          for legacy week-mode rows. */}
+                      {row.dayDuration != null
+                        ? ` (${row.dayDuration}d)`
+                        : job.durationDays != null
+                          ? ` (${job.durationDays}d)`
+                          : job.durationWeeks
+                            ? ` (${job.durationWeeks}wk)`
+                            : ""}
                     </span>
                   </div>
                   {row.orders && row.orders.length > 0 && (
@@ -597,8 +633,29 @@ export function TemplateTimeline({ jobs, onJobUpdate, expandedJobIds, onToggleEx
                 const colorSet =
                   GROUP_COLORS[row.groupIndex % GROUP_COLORS.length];
 
-                const left = weekToLeft(sw);
-                const width = (ew - sw + 1) * weekPixels - 4;
+                // Day-level positioning for sub-jobs (canonical:
+                // durationDays + sortOrder drives layout). Walks the
+                // parent's day cursor, so a 3-day sub-job spans 3 day
+                // columns in Days view (or 0.6 of a week column in
+                // Weeks view) instead of being inflated to a full week.
+                // Drag-preview still uses week-level snapping; once
+                // released, the durationDays update flows through and
+                // the day-level layout takes back over.
+                const useDayLevel =
+                  row.type === "sub-job" &&
+                  !preview &&
+                  row.dayDuration != null &&
+                  row.dayOffsetFromParent != null &&
+                  row.parentStartWeek != null;
+
+                const dayPixels = weekPixels / DAYS_PER_WEEK;
+                const left = useDayLevel
+                  ? weekToLeft(row.parentStartWeek!) +
+                    row.dayOffsetFromParent! * dayPixels
+                  : weekToLeft(sw);
+                const width = useDayLevel
+                  ? row.dayDuration! * dayPixels - 4
+                  : (ew - sw + 1) * weekPixels - 4;
                 const top =
                   rowYPositions[idx] +
                   (ROW_HEIGHT - BAR_HEIGHT) / 2;
