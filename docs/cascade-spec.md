@@ -6,6 +6,69 @@ this spec. Every endpoint implementation must match.
 
 ---
 
+## Canonical model — Single Source of Truth (May 2026)
+
+These are the SSOT rules. Every other field that represents the same concept
+is a **derived cache** updated from these — never the other way round.
+
+| Concept | Canonical field | Derived caches (write at save, never read for math) |
+|---|---|---|
+| Sub-job duration | `TemplateJob.durationDays` | `durationWeeks` (= `durationDays / 5`), `startWeek`/`endWeek` (positions on the editor grid, recomputed on layout) |
+| Atomic stage duration | `TemplateJob.durationDays` | same as above |
+| Sub-job ordering within a parent | `TemplateJob.sortOrder` | nothing — sortOrder is the single source |
+| Stage span (parent w/ children) | derived = sum of children's `durationDays`, ceil to weeks | `startWeek`/`endWeek` on the parent row (cache only — recomputed on every save) |
+| Order timing | `TemplateOrder.{anchorType, anchorAmount, anchorUnit, anchorDirection, anchorJobId, leadTimeAmount, leadTimeUnit}` | `orderWeekOffset`/`deliveryWeekOffset` (server derives via `lib/template-order-offsets.ts` on every POST/PUT) |
+| Plot-job dates | `Job.startDate`/`Job.endDate` (concrete dates set at apply time, mutated by cascade) | `originalStartDate`/`originalEndDate` (snapshot at apply, never mutated) |
+| Plot-order dates | `MaterialOrder.dateOfOrder`/`expectedDeliveryDate` (concrete dates) | none |
+
+### Apply-time data flow
+
+When a `PlotTemplate` is applied to a `Plot`:
+
+1. `apply-template-helpers.computeTemplateDateMap(plotStart, jobs)` walks the
+   template tree once and returns `Map<templateJobId, {start, end}>`. This map
+   is the single source for "where each template job lands on this plot".
+2. `createJobsFromTemplate` writes real `Job` rows using values from the map.
+   Sub-job sequencing comes from `sortOrder + durationDays`. Parent dates are
+   derived from children (min/max).
+3. `resolveOrderDates(templateOrder, ownerStart, dateMap)` computes each
+   order's `dateOfOrder` and `expectedDeliveryDate` from the anchor fields:
+   - `anchorType="arrive"`: delivery = anchor's start ± offset (working days);
+     order = delivery − leadTime working days.
+   - `anchorType="order"`: order = anchor's start ± offset; delivery =
+     order + leadTime.
+   - Falls back to legacy `orderWeekOffset`/`deliveryWeekOffset` only if no
+     anchor fields are set (for templates predating the rework).
+
+### Auto-reorder on job-start
+
+When a `Job` is started, the matching `TemplateOrder.leadTimeAmount /
+leadTimeUnit` are read to compute `expectedDeliveryDate = today + leadTime`.
+`dateOfOrder` is set to today (the order is being placed now — anchor offsets
+don't apply retrospectively). Lead-time precedence matches apply-time: anchor-
+era fields first, then `deliveryWeekOffset` legacy fallback.
+
+### Editor display
+
+`TemplateTimeline` renders sub-jobs at **day-level granularity** by walking
+the parent's children in `sortOrder` and accumulating a day cursor:
+
+  bar.left  = weekToLeft(parent.startWeek) + (dayCursor / 5) × weekPixels
+  bar.width = (durationDays / 5) × weekPixels
+
+This means a 3-day sub-job spans Mon-Wed in Days view (or 0.6 of a week
+column in Weeks view). The stored `startWeek`/`endWeek` on a sub-job is no
+longer consulted for layout — it's a legacy cache only.
+
+### Recalculate endpoints
+
+`/api/plot-templates/[id]/jobs/[jobId]/recalculate` and
+`/api/plot-templates/[id]/recalculate-stages` only update the **parent stage's**
+`endWeek` to span its children. They do NOT write per-child `startWeek`/
+`endWeek` — that data is dead. The Timeline computes positions on the fly.
+
+---
+
 ## Universal invariants (hold after every action)
 
 These are the non-negotiable rules. Any action that violates them is a bug.

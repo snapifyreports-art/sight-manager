@@ -4,6 +4,45 @@
 
 ---
 
+## 0.A SINGLE SOURCE OF TRUTH — TEMPLATES (May 2026)
+
+After a chain of template-editor bugs in May 2026, the data model was
+rewritten so each piece of business information has **one canonical home**.
+Every other field representing the same concept is a derived cache, written
+on save and never read for math.
+
+### Sub-job and atomic-stage duration
+
+- **Canonical:** `TemplateJob.durationDays` (working days, 1 = one Mon–Fri day).
+- **Derived caches** (write-only, never trust for math):
+  - `durationWeeks` = `durationDays / 5`
+  - `startWeek` / `endWeek` on individual sub-jobs (no longer maintained — recalculate endpoints stopped writing them; a one-shot backfill on 8 May 2026 populated `durationDays` for every legacy week-only sub-job).
+- **Layout:** Editor's TemplateTimeline computes sub-job bar positions on the fly from `sortOrder + durationDays` (a "day cursor" walked through each parent's children). A 3-day sub-job spans 3 day columns in Days view, 0.6 of a week column in Weeks view.
+
+### Order timing
+
+- **Canonical:** the seven anchor fields on `TemplateOrder`:
+  - `anchorType` (`"order"` / `"arrive"`)
+  - `anchorAmount` + `anchorUnit` (`"weeks"` / `"days"`)
+  - `anchorDirection` (`"before"` / `"after"`)
+  - `anchorJobId` (which job the order timing is anchored to)
+  - `leadTimeAmount` + `leadTimeUnit`
+- **Derived cache** (server computes on every POST/PUT via `lib/template-order-offsets.ts`):
+  - `orderWeekOffset` / `deliveryWeekOffset` — kept in lock-step with anchor fields.
+- **Apply-time:** `apply-template-helpers.resolveOrderDates` reads anchor fields, looks up the anchor job's start in the pre-computed `templateDateMap`, and produces concrete `dateOfOrder` + `expectedDeliveryDate`. Falls back to legacy offsets only if `anchorType` is null (templates predating the rework).
+- **Auto-reorder on job-start:** uses anchor-era `leadTimeAmount`/`leadTimeUnit` (then `deliveryWeekOffset` legacy fallback) to compute `expectedDeliveryDate = today + leadTime`. `dateOfOrder` = today.
+
+### Plot-side data
+
+- **Canonical:** `Job.startDate` / `Job.endDate` and `MaterialOrder.dateOfOrder` / `expectedDeliveryDate`. Concrete `Date` values, set at apply time, mutated by the cascade engine. Once a plot exists, downstream consumers (Daily Brief, Programme, Orders, Analytics, Notifications, Contractor Comms, Cash-Flow) read these directly. **Template-editor bugs cannot affect already-applied plots.**
+- **Snapshots:** `Job.originalStartDate` / `originalEndDate` capture the apply-time plan. Never mutated.
+
+### Audit trail
+
+Full trace of how this model was reached (consumers audit, SSOT proposal, execution plan): `docs/template-ssot-audit-2026-05-08.md`. The seven-step execution shipped in commits `8bc65a2` → `678da74`. Smoke verified end-to-end via API: a fresh plot from `SMOKE_TEST — Simple Semi` produced exactly the dates the canonical model predicted.
+
+---
+
 ## 0.0 STATE-OF-PLAY — POST-LAUNCH WEEK (22 Apr 2026)
 
 **Read this section first. Everything below it is historical; this is right now.**
