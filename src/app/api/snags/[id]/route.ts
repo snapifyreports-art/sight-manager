@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getSupabase, PHOTOS_BUCKET } from "@/lib/supabase";
 import { getServerCurrentDate } from "@/lib/dev-date";
+import { canAccessSite } from "@/lib/site-access";
 import { addDays, format } from "date-fns";
 import { apiError } from "@/lib/api-errors";
 
@@ -37,6 +38,18 @@ export async function GET(
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
+  // Site-access guard. Returning a 404 instead of 403 deliberately so the
+  // existence of the snag isn't leaked to a caller without rights.
+  if (
+    !(await canAccessSite(
+      session.user.id,
+      (session.user as { role: string }).role,
+      snag.plot.siteId,
+    ))
+  ) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
   return NextResponse.json(snag);
 }
 
@@ -61,6 +74,18 @@ export async function PATCH(
   });
 
   if (!existing) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
+  // Site-access guard — same pattern as GET. 404 not 403 so we don't leak
+  // existence of the snag to an unprivileged caller.
+  if (
+    !(await canAccessSite(
+      session.user.id,
+      (session.user as { role: string }).role,
+      existing.plot.siteId,
+    ))
+  ) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
@@ -198,10 +223,24 @@ export async function DELETE(
 
   const snag = await prisma.snag.findUnique({
     where: { id },
-    include: { photos: true },
+    include: {
+      photos: true,
+      plot: { select: { siteId: true } },
+    },
   });
 
   if (!snag) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
+  // Site-access guard. Same 404-not-403 pattern as GET/PATCH.
+  if (
+    !(await canAccessSite(
+      session.user.id,
+      (session.user as { role: string }).role,
+      snag.plot.siteId,
+    ))
+  ) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 

@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { auth } from "@/lib/auth";
 import { getServerCurrentDate } from "@/lib/dev-date";
 import { sessionHasPermission } from "@/lib/permissions";
+import { canAccessSite, getUserSiteIds } from "@/lib/site-access";
 import { apiError } from "@/lib/api-errors";
 
 export const dynamic = "force-dynamic";
@@ -36,6 +37,24 @@ export async function GET(
     return NextResponse.json({ error: "Order not found" }, { status: 404 });
   }
 
+  // Site-access guard. Orders are bound to a site either via the job's
+  // plot or directly (for plot-less / site-level orders). Either way the
+  // caller must be able to see that site. 404 not 403 so we don't leak
+  // existence of the order.
+  const orderSiteId = order.job?.plot.siteId ?? order.siteId ?? null;
+  if (!orderSiteId) {
+    return NextResponse.json({ error: "Order not found" }, { status: 404 });
+  }
+  if (
+    !(await canAccessSite(
+      session.user.id,
+      (session.user as { role: string }).role,
+      orderSiteId,
+    ))
+  ) {
+    return NextResponse.json({ error: "Order not found" }, { status: 404 });
+  }
+
   return NextResponse.json(order);
 }
 
@@ -63,7 +82,27 @@ export async function PUT(
     return NextResponse.json({ error: "Order not found" }, { status: 404 });
   }
 
-  // Guard cross-site job reassignment — same class as job PUT
+  // Site-access guard for the SOURCE order. Previously only checked on
+  // cross-site jobId reassignment, so a same-job PUT (status flip,
+  // supplier change, dates edit) bypassed access checks entirely. 404
+  // instead of 403 so we don't leak existence to a caller without
+  // rights.
+  const sourceSiteId = existing.job?.plot.siteId ?? existing.siteId ?? null;
+  if (!sourceSiteId) {
+    return NextResponse.json({ error: "Order not found" }, { status: 404 });
+  }
+  if (
+    !(await canAccessSite(
+      session.user.id,
+      (session.user as { role: string }).role,
+      sourceSiteId,
+    ))
+  ) {
+    return NextResponse.json({ error: "Order not found" }, { status: 404 });
+  }
+
+  // Guard cross-site job reassignment — separate concern, must also be
+  // able to reach the TARGET site.
   if (body.jobId !== undefined && body.jobId !== existing.jobId) {
     const targetJob = await prisma.job.findUnique({
       where: { id: body.jobId },
@@ -72,12 +111,15 @@ export async function PUT(
     if (!targetJob) {
       return NextResponse.json({ error: "Target job not found" }, { status: 404 });
     }
-    const { getUserSiteIds } = await import("@/lib/site-access");
-    const accessibleSites = await getUserSiteIds(session.user.id, (session.user as { role: string }).role);
+    const accessibleSites = await getUserSiteIds(
+      session.user.id,
+      (session.user as { role: string }).role,
+    );
     if (accessibleSites !== null) {
-      // Source site: for job-based orders use job.plot.siteId; for one-offs use existing.siteId/plotId→siteId
-      const sourceSiteId = existing.job?.plot.siteId ?? existing.siteId ?? null;
-      if (!sourceSiteId || !accessibleSites.includes(sourceSiteId) || !accessibleSites.includes(targetJob.plot.siteId)) {
+      if (
+        !accessibleSites.includes(sourceSiteId) ||
+        !accessibleSites.includes(targetJob.plot.siteId)
+      ) {
         return NextResponse.json(
           { error: "You do not have access to both the source and target site" },
           { status: 403 }
