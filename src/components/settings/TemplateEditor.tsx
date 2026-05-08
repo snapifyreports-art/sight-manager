@@ -2841,31 +2841,33 @@ export function TemplateEditor({
                 </Select>
               </div>
 
-              {/* Lead time — only relevant in Arrive mode (working
-                  backwards from desired delivery date). In Order mode
-                  the user is setting the order date directly; supplier
-                  lead time is their problem to communicate separately. */}
-              {anchorType === "arrive" && (
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-muted-foreground">Lead time:</span>
-                  <Input
-                    type="number"
-                    min={0}
-                    className="w-[70px]"
-                    value={leadTimeAmount}
-                    onChange={(e) => setLeadTimeAmount(parseInt(e.target.value) || 0)}
-                  />
-                  <Select value={leadTimeUnit} onValueChange={(v) => setLeadTimeUnit(v as "days" | "weeks")}>
-                    <SelectTrigger className="w-[100px]">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="weeks">Weeks</SelectItem>
-                      <SelectItem value="days">Days</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
+              {/* Lead time. Used in BOTH modes:
+                    - Arrive mode: works backward from delivery to order date
+                    - Order mode: works forward from order date to delivery
+                  Previously hidden in Order mode "because lead time is the
+                  supplier's problem", but Keith pointed out (May 2026) we
+                  then can't show a delivery week on the Timeline Preview's
+                  green dot — without lead time it's just an order date with
+                  no idea when materials land on site. */}
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-muted-foreground">Lead time:</span>
+                <Input
+                  type="number"
+                  min={0}
+                  className="w-[70px]"
+                  value={leadTimeAmount}
+                  onChange={(e) => setLeadTimeAmount(parseInt(e.target.value) || 0)}
+                />
+                <Select value={leadTimeUnit} onValueChange={(v) => setLeadTimeUnit(v as "days" | "weeks")}>
+                  <SelectTrigger className="w-[100px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="weeks">Weeks</SelectItem>
+                    <SelectItem value="days">Days</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
 
               {/* Preview — shows the user's chosen anchor phrase AND the
                   absolute week number so you can see at a glance whether
@@ -2892,12 +2894,26 @@ export function TemplateEditor({
                 const dDeliveryWeek = displayWeek(deliveryWeek);
 
                 if (anchorType === "order") {
+                  // Show order week (the user's anchor) AND the resulting
+                  // delivery week derived from lead time. Used to be just
+                  // the order line — Keith pointed out you couldn't tell
+                  // when materials would actually arrive on site without
+                  // the lead-time-driven delivery readout.
                   return (
                     <div className="space-y-1">
                       <p className="text-xs text-muted-foreground">
                         <strong className="font-semibold text-foreground">Order Wk {dOrderWeek}</strong>
                         <span className="italic"> · {amountLabel} {refLabel}</span>
                       </p>
+                      <p className="text-xs text-muted-foreground">
+                        <strong className="font-semibold text-foreground">Arrive Wk {dDeliveryWeek}</strong>
+                        <span className="italic"> · {leadTimeAmount} {leadTimeUnit} later (lead time)</span>
+                      </p>
+                      {deliveryAfterJob && (
+                        <p className="text-xs font-medium text-red-600">
+                          ⚠ Delivery is AFTER {ownerName} starts. Check your dates.
+                        </p>
+                      )}
                     </div>
                   );
                 }
