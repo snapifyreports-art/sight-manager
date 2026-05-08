@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getServerCurrentDate } from "@/lib/dev-date";
-import { addWeeks, differenceInCalendarDays } from "date-fns";
-import { addWorkingDays, snapToWorkingDay } from "@/lib/working-days";
+import { addWeeks } from "date-fns";
+import { addWorkingDays, differenceInWorkingDays, snapToWorkingDay } from "@/lib/working-days";
 import { getNextMonday } from "@/lib/schedule";
 import { apiError } from "@/lib/api-errors";
 
@@ -103,21 +103,28 @@ export async function POST(
     return NextResponse.json({ error: "Invalid decision" }, { status: 400 });
   }
 
-  // Preserve job duration
-  const durationDays =
-    nextJob.startDate && nextJob.endDate
-      ? Math.max(1, differenceInCalendarDays(nextJob.endDate, nextJob.startDate))
-      : 7;
-
-  // Snap target start to working day
+  // Snap target start to working day BEFORE measuring delta — otherwise
+  // a Sun→Mon snap added phantom days to the cascade.
   targetStart = snapToWorkingDay(targetStart, "forward");
-  // Duration stays calendar days
-  const targetEnd = new Date(targetStart);
-  targetEnd.setDate(targetEnd.getDate() + durationDays);
 
-  // Delta to apply to all subsequent jobs
+  // Preserve job duration in WORKING days (canonical unit across the
+  // app — see docs/cascade-spec.md). Previously this used
+  // differenceInCalendarDays, which silently changed the working-day
+  // count when the shift crossed weekends asymmetrically (e.g. a
+  // 10-WD job stored as Mon→Fri = 11 calendar days; if we shifted
+  // start to Wed, end would land on Sun, and the working-day count
+  // would silently collapse to 8).
+  const nextJobDurationWD =
+    nextJob.startDate && nextJob.endDate
+      ? Math.max(1, differenceInWorkingDays(nextJob.endDate, nextJob.startDate))
+      : 5;
+
+  const targetEnd = addWorkingDays(targetStart, nextJobDurationWD);
+
+  // Delta to apply to all subsequent jobs — also in working days, so
+  // it matches `addWorkingDays(...)` calls below.
   const delta = nextJob.startDate
-    ? differenceInCalendarDays(targetStart, nextJob.startDate)
+    ? differenceInWorkingDays(targetStart, nextJob.startDate)
     : 0;
 
   try {
@@ -147,10 +154,15 @@ export async function POST(
           preserveOriginals.originalStartDate = job.startDate;
           preserveOriginals.originalEndDate = job.endDate;
         }
+        // Working-day cascade: shift start by delta WD, preserve the
+        // job's working-day duration (not calendar — see comment up
+        // top). Result is always on a working day by construction.
         const newJobStart = snapToWorkingDay(addWorkingDays(job.startDate, delta), "forward");
-        const jobDuration = differenceInCalendarDays(job.endDate, job.startDate);
-        const newJobEnd = new Date(newJobStart);
-        newJobEnd.setDate(newJobEnd.getDate() + jobDuration);
+        const jobDurationWD = Math.max(
+          1,
+          differenceInWorkingDays(job.endDate, job.startDate),
+        );
+        const newJobEnd = addWorkingDays(newJobStart, jobDurationWD);
         await tx.job.update({
           where: { id: job.id },
           data: {

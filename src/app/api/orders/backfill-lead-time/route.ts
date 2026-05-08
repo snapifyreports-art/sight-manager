@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { snapToWorkingDay } from "@/lib/working-days";
 
 export const dynamic = "force-dynamic";
 
@@ -9,6 +10,14 @@ export async function POST() {
   const session = await auth();
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  // Role guard. This is a destructive DB-wide write — only ADMIN/CEO
+  // should be able to run it. Previously any authenticated user could
+  // trigger it, which is fine for a single-tenant deployment but should
+  // not stay open as we add users. P2 from the May 2026 audit.
+  const role = (session.user as { role?: string }).role;
+  if (role !== "ADMIN" && role !== "CEO") {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   // 1. Fix template orders: set leadTimeAmount where missing
@@ -57,14 +66,15 @@ export async function POST() {
         ordersFixed++;
       } else {
         // dateOfOrder === expectedDeliveryDate — set default 14 days
-        // and push expectedDeliveryDate forward
+        // and push expectedDeliveryDate forward. Snap to a working day
+        // so we don't backfill a Sat/Sun delivery.
         const newExpected = new Date(order.dateOfOrder);
         newExpected.setDate(newExpected.getDate() + 14);
         await prisma.materialOrder.update({
           where: { id: order.id },
           data: {
             leadTimeDays: 14,
-            expectedDeliveryDate: newExpected,
+            expectedDeliveryDate: snapToWorkingDay(newExpected, "forward"),
           },
         });
         ordersFixed++;
