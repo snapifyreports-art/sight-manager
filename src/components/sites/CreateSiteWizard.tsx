@@ -975,11 +975,18 @@ export function CreateSiteWizard({
               {/* Programme preview — only shows when there's at least
                   one template-based batch. Sits between the batch list
                   and the Add Plot Group button so the user can eyeball
-                  the timeline before committing. */}
+                  the timeline before committing.
+
+                  Cast: the wizard's local Template type is a TS subset of
+                  what /api/plot-templates returns at runtime (the API
+                  yields full TemplateData via templateJobsInclude). The
+                  preview reads the full job tree which IS in the response,
+                  TypeScript just doesn't know via the lean Template alias. */}
               {plotBatches.some((b) => b.mode === "template") && (
                 <BatchProgrammePreview
                   batches={plotBatches}
-                  templates={templates}
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  templates={templates as any}
                 />
               )}
 
