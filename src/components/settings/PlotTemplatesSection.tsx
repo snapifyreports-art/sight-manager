@@ -479,19 +479,24 @@ export function PlotTemplatesSection({
             return (
               <Card
                 key={template.id}
-                className={`cursor-pointer overflow-hidden border-border/50 bg-white shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md ${template.isDraft ? "ring-1 ring-amber-200" : ""}`}
+                className={`group cursor-pointer overflow-hidden border-border/50 bg-white shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md ${template.isDraft ? "ring-1 ring-amber-200" : ""}`}
                 onClick={() => setEditingTemplate(template)}
               >
-                <CardHeader>
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0 flex-1">
-                      <CardTitle className="flex items-center gap-2 truncate">
-                        <LayoutTemplate className="size-4 shrink-0 text-blue-600" />
-                        {template.name}
-                      </CardTitle>
-                    </div>
-                    <div className="flex shrink-0 flex-wrap items-center justify-end gap-1">
-                      {template.isDraft && (
+                <CardHeader className="space-y-2 p-4 sm:p-6">
+                  {/* Title row — can wrap to 2 lines on long names without
+                      squeezing the badge row below. */}
+                  <CardTitle className="flex items-start gap-2 text-sm leading-snug sm:text-base">
+                    <LayoutTemplate className="mt-0.5 size-4 shrink-0 text-blue-600" />
+                    <span className="line-clamp-2 break-words">
+                      {template.name}
+                    </span>
+                  </CardTitle>
+
+                  {/* Badge row — own line, wraps freely so a long
+                      typeLabel can't get clipped by the card edge. */}
+                  {(template.isDraft || template.typeLabel) && (
+                    <div className="flex flex-wrap items-center gap-1">
+                      {template.isDraft ? (
                         <Badge
                           variant="outline"
                           className="border-amber-300 bg-amber-50 text-[10px] font-medium text-amber-800"
@@ -499,22 +504,34 @@ export function PlotTemplatesSection({
                         >
                           Draft
                         </Badge>
+                      ) : (
+                        <Badge
+                          variant="outline"
+                          className="border-emerald-300 bg-emerald-50 text-[10px] font-medium text-emerald-800"
+                          title="Available in the apply-to-plot picker"
+                        >
+                          Live
+                        </Badge>
                       )}
                       {template.typeLabel && (
-                        <Badge variant="secondary" className="text-xs">
-                          {template.typeLabel}
+                        <Badge
+                          variant="secondary"
+                          className="max-w-full text-xs"
+                        >
+                          <span className="truncate">{template.typeLabel}</span>
                         </Badge>
                       )}
                     </div>
-                  </div>
+                  )}
+
                   {template.description && (
-                    <CardDescription className="line-clamp-2">
+                    <CardDescription className="line-clamp-2 text-xs sm:text-sm">
                       {template.description}
                     </CardDescription>
                   )}
                 </CardHeader>
-                <CardContent>
-                  <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                <CardContent className="p-4 pt-0 sm:p-6 sm:pt-0">
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground sm:text-sm">
                     <span className="flex items-center gap-1">
                       <Briefcase className="size-3.5" />
                       {template.jobs.length}{" "}
@@ -552,9 +569,9 @@ export function PlotTemplatesSection({
                     </div>
                   )}
 
-                  <div className="mt-3 flex items-center justify-between">
-                    <span className="text-xs text-muted-foreground">
-                      Click to edit
+                  <div className="mt-3 flex items-center justify-between gap-2">
+                    <span className="text-[11px] text-muted-foreground sm:text-xs">
+                      Tap to edit
                     </span>
                     <div className="flex items-center gap-1">
                       <button
@@ -563,13 +580,14 @@ export function PlotTemplatesSection({
                           handleClone(template.id, template.name);
                         }}
                         disabled={cloningId === template.id}
-                        className="rounded p-1 text-muted-foreground transition-colors hover:bg-blue-50 hover:text-blue-600 disabled:opacity-50"
+                        className="flex size-8 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-blue-50 hover:text-blue-600 disabled:opacity-50 sm:size-7"
                         title="Clone this template"
+                        aria-label="Clone template"
                       >
                         {cloningId === template.id ? (
-                          <Loader2 className="size-3.5 animate-spin" />
+                          <Loader2 className="size-4 animate-spin" />
                         ) : (
-                          <Copy className="size-3.5" />
+                          <Copy className="size-4" />
                         )}
                       </button>
                       <button
@@ -577,9 +595,11 @@ export function PlotTemplatesSection({
                           e.stopPropagation();
                           handleOpenDelete(template.id, template.name);
                         }}
-                        className="rounded p-1 text-muted-foreground transition-colors hover:bg-red-50 hover:text-red-600"
+                        className="flex size-8 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-red-50 hover:text-red-600 sm:size-7"
+                        title="Delete template"
+                        aria-label="Delete template"
                       >
-                        <Trash2 className="size-3.5" />
+                        <Trash2 className="size-4" />
                       </button>
                     </div>
                   </div>
