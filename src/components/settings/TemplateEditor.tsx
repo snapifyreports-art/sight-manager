@@ -47,7 +47,6 @@ import { TemplateTimeline } from "./TemplateTimeline";
 import { DurationCell } from "./DurationCell";
 import { TemplateValidationPanel } from "./TemplateValidationPanel";
 import { TemplateCostFooter } from "./TemplateCostFooter";
-import { TemplateOrderTimeline } from "./TemplateOrderTimeline";
 import { ApplyTemplatePreview } from "./ApplyTemplatePreview";
 import { TemplateMobileSummary } from "./TemplateMobileSummary";
 import { TemplateOrdersTableDialog } from "./TemplateOrdersTableDialog";
@@ -746,7 +745,7 @@ export function TemplateEditor({
               name: sj.name,
               stageCode: sj.code,
               ...(isDays
-                ? { durationDays: sj.duration, durationWeeks: 1 }
+                ? { durationDays: sj.duration, durationWeeks: null }
                 : { durationWeeks: sj.duration, durationDays: null }),
               parentId: stageData.id,
               startWeek: subStart,
@@ -949,7 +948,7 @@ export function TemplateEditor({
           name: subJobName,
           stageCode: subJobCode,
           ...(isDays
-            ? { durationDays: subJobDuration, durationWeeks: 1 }
+            ? { durationDays: subJobDuration, durationWeeks: null }
             : { durationWeeks: subJobDuration, durationDays: null }),
           parentId: subJobParentId,
           contactId: subJobContractorId && subJobContractorId !== "__none__" ? subJobContractorId : null,
@@ -1714,11 +1713,6 @@ export function TemplateEditor({
       {/* Per-template order cost — sum of every TemplateOrderItem.
           Materials cost is summed in TemplateExtras separately. */}
       <TemplateCostFooter template={template} />
-
-      {/* Order schedule strip — visualises every order's place + arrive
-          weeks against the same scale as the Gantt above. Surfaces
-          delivery collisions before the template ships. */}
-      <TemplateOrderTimeline template={template} />
 
       {/* Jobs List */}
       <div className="space-y-3">

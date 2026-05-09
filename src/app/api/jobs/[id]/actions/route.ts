@@ -273,6 +273,10 @@ export async function POST(
             // "forward") for the expectedDeliveryDate.
             expectedDelivery = snapToWorkingDay(expectedDelivery, "forward");
           }
+          // SSOT alignment with apply-template-helpers.resolveOrderDates:
+          // dateOfOrder is snapped back to the previous working day when
+          // we're firing on a weekend. Default(now()) on the column would
+          // otherwise stamp Sat/Sun, drifting from the apply-time path.
           return prisma.materialOrder.create({
             data: {
               supplierId: to.supplierId!,
@@ -280,6 +284,7 @@ export async function POST(
               automated: true,
               status: "PENDING",
               itemsDescription: to.itemsDescription,
+              dateOfOrder: snapToWorkingDay(new Date(), "back"),
               expectedDeliveryDate: expectedDelivery,
               leadTimeDays,
               orderItems: {

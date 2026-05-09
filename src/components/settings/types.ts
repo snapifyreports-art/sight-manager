@@ -68,12 +68,15 @@ export interface TemplateVariantData {
   name: string;
   description: string | null;
   sortOrder: number;
-  jobOverrides: Array<{
+  // Deprecated post-May-2026 rework — variants now own full data
+  // (jobs/materials/documents with variantId set), not overrides.
+  // Fields kept optional for any straggling consumer.
+  jobOverrides?: Array<{
     id: string;
     templateJobId: string;
     durationDays: number | null;
   }>;
-  materialOverrides: Array<{
+  materialOverrides?: Array<{
     id: string;
     templateMaterialId: string;
     quantity: number | null;

@@ -15,13 +15,14 @@ export async function GET(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { id } = await params;
+  // Variant content (jobs/materials/documents) is fetched via
+  // /variants/[variantId]/full, not via this list endpoint. The
+  // jobOverrides + materialOverrides relations are deprecated post
+  // May-2026 full-fat rework — they're left in the schema for safety
+  // but no longer read.
   const variants = await prisma.templateVariant.findMany({
     where: { templateId: id },
     orderBy: { sortOrder: "asc" },
-    include: {
-      jobOverrides: true,
-      materialOverrides: true,
-    },
   });
   return NextResponse.json(variants);
 }
@@ -61,10 +62,6 @@ export async function POST(
         name: name.trim(),
         description: description?.trim() || null,
         sortOrder: nextOrder,
-      },
-      include: {
-        jobOverrides: true,
-        materialOverrides: true,
       },
     });
 

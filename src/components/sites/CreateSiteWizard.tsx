@@ -86,7 +86,11 @@ interface PlotBatch {
   plotNumbers: string[];
   startDate: string;
   templateId: string;
+  /** Optional variant id — when set, the variant's full template is
+   *  applied per plot rather than the base. Empty = base template. */
+  variantId: string;
   templateName: string;
+  variantName?: string;
 }
 
 /**
@@ -219,6 +223,10 @@ export function CreateSiteWizard({
   // Parsed via parsePlotNumbers() into batch.plotNumbers.
   const [batchPlotNumbersInput, setBatchPlotNumbersInput] = useState("");
   const [batchTemplateId, setBatchTemplateId] = useState("");
+  const [batchVariantId, setBatchVariantId] = useState("");
+  const [batchVariants, setBatchVariants] = useState<
+    Array<{ id: string; name: string; description: string | null }>
+  >([]);
   const [batchStartDate, setBatchStartDate] = useState("");
   const [batchError, setBatchError] = useState("");
 
@@ -289,6 +297,8 @@ export function CreateSiteWizard({
     setBatchMode("template");
     setBatchPlotNumbersInput("");
     setBatchTemplateId("");
+    setBatchVariantId("");
+    setBatchVariants([]);
     setBatchStartDate("");
     setBatchError("");
   }
@@ -333,6 +343,9 @@ export function CreateSiteWizard({
     }
 
     const tpl = templates.find((t) => t.id === batchTemplateId);
+    const variantName = batchVariantId
+      ? batchVariants.find((v) => v.id === batchVariantId)?.name
+      : undefined;
 
     setPlotBatches((prev) => [
       ...prev,
@@ -342,7 +355,9 @@ export function CreateSiteWizard({
         plotNumbers: numbers,
         startDate: batchStartDate,
         templateId: batchTemplateId,
+        variantId: batchVariantId,
         templateName: tpl?.name ?? "",
+        variantName,
       },
     ]);
 
@@ -404,13 +419,18 @@ export function CreateSiteWizard({
     }
 
     const tpl = templates.find((t) => t.id === batchTemplateId);
+    const variantName = batchVariantId
+      ? batchVariants.find((v) => v.id === batchVariantId)?.name
+      : undefined;
     return {
       id: crypto.randomUUID(),
       mode: batchMode,
       plotNumbers: numbers,
       startDate: batchStartDate,
       templateId: batchTemplateId,
+      variantId: batchVariantId,
       templateName: tpl?.name ?? "",
+      variantName,
     };
   }
 
@@ -504,6 +524,7 @@ export function CreateSiteWizard({
             const res = await createBatchFromTemplate({
               siteId: createdSite.id,
               templateId: batch.templateId,
+              variantId: batch.variantId || null,
               startDate: batch.startDate,
               supplierMappings,
               plots,
@@ -731,7 +752,10 @@ export function CreateSiteWizard({
                             {batch.mode === "template" ? (
                               <>
                                 <LayoutTemplate className="size-3" />
-                                <span>{batch.templateName}</span>
+                                <span>
+                                  {batch.templateName}
+                                  {batch.variantName ? ` · ${batch.variantName}` : ""}
+                                </span>
                                 <span>&middot;</span>
                                 <Calendar className="size-3" />
                                 <span>
@@ -833,9 +857,23 @@ export function CreateSiteWizard({
                             <Label className="text-xs">Template</Label>
                             <Select
                               value={batchTemplateId}
-                              onValueChange={(v) =>
-                                v !== null && setBatchTemplateId(v)
-                              }
+                              onValueChange={(v) => {
+                                if (v === null) return;
+                                setBatchTemplateId(v);
+                                setBatchVariantId("");
+                                setBatchVariants([]);
+                                // Lazy-fetch variants for this template
+                                void fetch(
+                                  `/api/plot-templates/${v}/variants`,
+                                  { cache: "no-store" },
+                                ).then(async (r) => {
+                                  if (!r.ok) return;
+                                  const data = await r.json();
+                                  setBatchVariants(
+                                    Array.isArray(data) ? data : [],
+                                  );
+                                });
+                              }}
                             >
                               <SelectTrigger className="h-8 w-full text-sm">
                                 <SelectValue placeholder="Select a template">
@@ -854,6 +892,41 @@ export function CreateSiteWizard({
                               </SelectContent>
                             </Select>
                           </div>
+                          {/* Variant picker — only when the chosen template
+                              has variants. Defaults to "base" (no variant). */}
+                          {batchTemplateId && batchVariants.length > 0 && (
+                            <div className="space-y-1.5">
+                              <Label className="text-xs">
+                                Variant{" "}
+                                <span className="text-[10px] font-normal text-muted-foreground">
+                                  ({batchVariants.length} available)
+                                </span>
+                              </Label>
+                              <Select
+                                value={batchVariantId || "__base__"}
+                                onValueChange={(v) =>
+                                  setBatchVariantId(
+                                    v === "__base__" ? "" : (v ?? ""),
+                                  )
+                                }
+                              >
+                                <SelectTrigger className="h-8 w-full text-sm">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="__base__">
+                                    Use base template (no variant)
+                                  </SelectItem>
+                                  {batchVariants.map((v) => (
+                                    <SelectItem key={v.id} value={v.id}>
+                                      {v.name}
+                                      {v.description ? ` — ${v.description}` : ""}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          )}
 
                           {selectedBatchTemplate && (
                             <div className="rounded-md border bg-white/50 px-2.5 py-1.5">

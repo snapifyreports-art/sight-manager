@@ -100,7 +100,10 @@ export async function POST(
           },
         });
 
-        // Create sub-jobs (same scope as parent)
+        // Create sub-jobs (same scope as parent). durationDays is the
+        // canonical SSOT field; durationWeeks is the legacy fallback.
+        // Stage library defaults are weeks → multiply by 5 to land
+        // canonical days. Both written so old readers keep working.
         for (const sj of subJobsWithWeeks) {
           await tx.templateJob.create({
             data: {
@@ -112,6 +115,7 @@ export async function POST(
               sortOrder: sj.sortOrder,
               startWeek: sj.startWeek,
               endWeek: sj.endWeek,
+              durationDays: sj.duration * 5,
               durationWeeks: sj.duration,
             },
           });

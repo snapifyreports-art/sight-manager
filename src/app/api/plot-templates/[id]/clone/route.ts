@@ -29,17 +29,24 @@ export async function POST(
     const body = await req.json().catch(() => ({}));
     const newName = (body.name as string | undefined)?.trim();
 
+    // Clone is base-scoped only — only TemplateJob/TemplateMaterial/
+    // TemplateDocument rows where variantId IS NULL (the base template's
+    // own content). Variants under the source template are NOT carried
+    // through; the user can re-add variants on the clone using the
+    // "Copy from base / Copy from X" seed flow. This avoids accidentally
+    // ballooning a clone with N variants worth of duplicated rows.
     const source = await prisma.plotTemplate.findUnique({
       where: { id },
       include: {
         jobs: {
+          where: { variantId: null },
           orderBy: { sortOrder: "asc" },
           include: {
             orders: { include: { items: true } },
           },
         },
-        materials: true,
-        documents: true,
+        materials: { where: { variantId: null } },
+        documents: { where: { variantId: null } },
       },
     });
     if (!source) return NextResponse.json({ error: "Template not found" }, { status: 404 });
