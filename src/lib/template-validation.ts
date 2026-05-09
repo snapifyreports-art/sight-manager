@@ -306,10 +306,12 @@ export function validateTemplate(
     });
   }
   if (ordersNoItems.length > 0) {
+    // No bulk action — line items live only in the per-order dialog
+    // (multi-line UX doesn't fit a row), so a "Bulk edit" button
+    // would mislead. Drill-in via Show N + per-row Edit only.
     issues.push({
       severity: "warning",
       message: `${ordersNoItems.length} order${ordersNoItems.length === 1 ? "" : "s"} have a description but no priced items (e.g. ${truncateList(ordersNoItems)}). Costs won't roll up.`,
-      action: { kind: "open-orders-table", label: "Bulk edit" },
       affectedItems: ordersNoItemsItems,
     });
   }
