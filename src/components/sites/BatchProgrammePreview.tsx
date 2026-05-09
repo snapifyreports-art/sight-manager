@@ -4,17 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import { format } from "date-fns";
 import { Truck } from "lucide-react";
 import { previewTemplateApply } from "@/lib/template-preview";
+import { addWorkingDays } from "@/lib/working-days";
 import type { TemplateData, TemplateJobData } from "@/components/settings/types";
-
-/**
- * Relaxed shape — wizard's local `Template` type lacks a couple of
- * TemplateData fields (isDraft, timestamps) that the preview helper
- * doesn't actually use. Only the jobs tree matters.
- */
-interface TemplateLike {
-  id: string;
-  jobs: TemplateJobData[];
-}
 
 interface BatchPlot {
   plotNumber: string;
@@ -31,39 +22,59 @@ interface Batch {
   plots: BatchPlot[];
 }
 
-interface PlotPreview {
+interface TemplateLike {
+  id: string;
+  name: string;
+  jobs: TemplateJobData[];
+}
+
+interface PlotPreviewSegment {
+  /** Stage name for hover tooltip + label. */
+  name: string;
+  /** Calendar offset (days) from the plot's startDate. */
+  offsetDays: number;
+  /** Calendar width (days) of this stage. */
+  widthDays: number;
+  /** Index used for the colour palette. */
+  stageIndex: number;
+}
+
+interface PlotRow {
   plotNumber: string;
   batchIndex: number;
+  templateName: string;
   variantLabel: string | null;
   startDate: Date;
   endDate: Date;
-  totalWeeks: number;
-  orders: Array<{
-    id: string;
-    label: string;
-    deliveryDate: Date;
-  }>;
+  segments: PlotPreviewSegment[];
+  orders: Array<{ id: string; label: string; deliveryDate: Date }>;
 }
 
+const STAGE_COLORS = [
+  "bg-blue-500",
+  "bg-indigo-500",
+  "bg-violet-500",
+  "bg-cyan-500",
+  "bg-teal-500",
+  "bg-emerald-500",
+  "bg-amber-500",
+  "bg-rose-500",
+];
+
 /**
- * Horizontal Gantt-style preview of every plot's build window across
- * the whole site timeline. Sits below the batch list in Step 2 of
- * CreateSiteWizard.
+ * Programme preview that mirrors TemplateTimeline's stage-breakdown
+ * style. Each plot row shows its variant's stages as butted-up coloured
+ * blocks (back-to-back, no gaps unless the variant data itself has
+ * gaps — which is a separate bug to fix). Hover any segment for stage
+ * name + working-day length. Truck markers float above the bar at
+ * each order's delivery date.
  *
- * Accuracy (May 2026 follow-up): the preview now uses the SELECTED
- * variant's own jobs/orders to compute per-plot durations and order
- * delivery dates, not the base template's. Falls back to base only
- * when no variant was picked. Variant /full data is fetched lazily
- * and cached the first time a variantId is seen.
+ * Plots are sorted chronologically by start date — earliest at the
+ * top — rather than by batch order, so the user sees the build
+ * sequence at a glance.
  *
- * What the strip shows:
- *   - One row per plot.
- *   - Bar = build window, length matches the variant's actual span.
- *   - Per-batch colour so groups are visually clustered.
- *   - Truck markers on each bar at every order's computed arrival
- *     date — eyeball "are 4 deliveries landing the same week across
- *     5 plots? supplier is gonna struggle".
- *   - Hover any bar / marker for exact details.
+ * Each row is also labelled with template + variant so it's clear
+ * which flavour each plot was assigned.
  */
 export function BatchProgrammePreview({
   batches,
@@ -72,15 +83,12 @@ export function BatchProgrammePreview({
   batches: Batch[];
   templates: TemplateLike[];
 }) {
-  // Cache variant /full data by variantId. Hits the new
-  // /api/plot-templates/[id]/variants/[variantId]/full endpoint which
-  // returns variant data shaped like a TemplateData.
+  // Variant /full data cache — keyed by variantId.
   const [variantData, setVariantData] = useState<Record<string, TemplateData>>(
     {},
   );
   const [loadingVariants, setLoadingVariants] = useState(false);
 
-  // Find every (templateId, variantId) pair that needs fetching.
   const variantsNeeded = useMemo(() => {
     const seen = new Set<string>();
     const list: Array<{ templateId: string; variantId: string }> = [];
@@ -113,9 +121,7 @@ export function BatchProgrammePreview({
         if (cancelled) return;
         setVariantData((prev) => {
           const next = { ...prev };
-          for (const r of results) {
-            if (r) next[r.variantId] = r.data;
-          }
+          for (const r of results) if (r) next[r.variantId] = r.data;
           return next;
         });
       })
@@ -127,35 +133,61 @@ export function BatchProgrammePreview({
     };
   }, [variantsNeeded, variantData]);
 
-  // Build the per-plot preview rows once we have all the data we need.
-  const rows = useMemo<PlotPreview[]>(() => {
-    const out: PlotPreview[] = [];
+  // Build per-plot rows with stage segments + orders + chronological sort.
+  const rows = useMemo<PlotRow[]>(() => {
+    const out: PlotRow[] = [];
     batches.forEach((batch, batchIdx) => {
       if (batch.mode !== "template") return;
-      // Resolve the right TemplateData for this batch's scope.
       const baseTpl = templates.find((t) => t.id === batch.templateId);
-      const variantTpl = batch.variantId
-        ? variantData[batch.variantId]
-        : null;
-      // Cast to TemplateData for previewTemplateApply — only `.jobs`
-      // is read so the missing TemplateData-only fields don't matter.
-      const tplForCompute = (variantTpl ?? baseTpl) as TemplateData | undefined;
-      // Variant chosen but its /full hasn't loaded yet — skip rather
-      // than draw a misleading base-template-shaped bar.
+      const variantTpl = batch.variantId ? variantData[batch.variantId] : null;
+      // Variant chosen but its /full hasn't loaded yet — skip the row
+      // rather than draw a misleading base-shaped bar.
       if (batch.variantId && !variantTpl) return;
+      const tplForCompute = (variantTpl ?? baseTpl) as TemplateData | undefined;
       if (!tplForCompute) return;
 
       for (const p of batch.plots) {
         if (!p.startDate) continue;
         const startDate = new Date(p.startDate + "T00:00:00");
         const preview = previewTemplateApply(tplForCompute, startDate);
+
+        // Walk top-level stages, day-cursor-packed (mirrors the
+        // TemplateTimeline logic). Each stage's width is its
+        // children's total working days, OR the stage's own
+        // durationDays if atomic. This keeps stages back-to-back
+        // even when the cached startWeek/endWeek on the variant has
+        // drifted (the cache doesn't drive layout here — the
+        // canonical durationDays does).
+        const segments: PlotPreviewSegment[] = [];
+        let dayCursor = 0;
+        tplForCompute.jobs.forEach((stage, stageIdx) => {
+          const days = stageWorkingDays(stage);
+          if (days <= 0) return;
+          // Convert working-day offset to calendar-day offset using
+          // addWorkingDays so weekends are accounted for the same way
+          // the cascade engine treats them at apply time.
+          const segStart = addWorkingDays(startDate, dayCursor);
+          const segEnd = addWorkingDays(startDate, dayCursor + days - 1);
+          const offsetDays = dayDiff(startDate, segStart);
+          const widthDays = Math.max(1, dayDiff(segStart, segEnd) + 1);
+          segments.push({
+            name: stage.name,
+            offsetDays,
+            widthDays,
+            stageIndex: stageIdx,
+          });
+          dayCursor += days;
+        });
+
+        const variantLabel = batch.variantName ?? null;
         out.push({
           plotNumber: p.plotNumber,
           batchIndex: batchIdx,
-          variantLabel: batch.variantName ?? null,
+          templateName: batch.templateName,
+          variantLabel,
           startDate: preview.startDate,
           endDate: preview.endDate,
-          totalWeeks: preview.totalWeeks,
+          segments,
           orders: preview.orders.map((o) => ({
             id: o.id,
             label: `${o.itemsDescription} → ${o.jobName}`,
@@ -164,21 +196,28 @@ export function BatchProgrammePreview({
         });
       }
     });
+    // Chronological order: earliest start first; tie-break by plot
+    // number for deterministic rendering.
+    out.sort((a, b) => {
+      const t = a.startDate.getTime() - b.startDate.getTime();
+      if (t !== 0) return t;
+      return a.plotNumber.localeCompare(b.plotNumber, undefined, {
+        numeric: true,
+        sensitivity: "base",
+      });
+    });
     return out;
   }, [batches, templates, variantData]);
 
-  // Site-level timeline window.
+  // Site-level window — earliest start (or earliest order arrival,
+  // for orders anchored before site activity) to latest end.
   const range = useMemo(() => {
     if (rows.length === 0) return null;
     let earliestMs = Infinity;
     let latestMs = -Infinity;
     for (const r of rows) {
-      const start = r.startDate.getTime();
-      const end = r.endDate.getTime();
-      if (start < earliestMs) earliestMs = start;
-      if (end > latestMs) latestMs = end;
-      // Order arrivals can fall before the build start (anchored
-      // BEFORE the first job) — extend the window to cover them.
+      earliestMs = Math.min(earliestMs, r.startDate.getTime());
+      latestMs = Math.max(latestMs, r.endDate.getTime());
       for (const o of r.orders) {
         const od = o.deliveryDate.getTime();
         if (od < earliestMs) earliestMs = od;
@@ -209,23 +248,22 @@ export function BatchProgrammePreview({
     );
   }
 
-  // Tick marks across the top — every ~1/12th of the window.
-  const tickIntervalDays = Math.max(7, Math.ceil(range.totalDays / 12));
+  // Tick marks at calendar-week intervals when the window is short,
+  // monthly when it's long, so labels stay readable.
+  const tickIntervalDays =
+    range.totalDays <= 90 ? 7 : range.totalDays <= 365 ? 28 : 90;
   const ticks: Array<{ day: number; label: string }> = [];
   for (let d = 0; d <= range.totalDays; d += tickIntervalDays) {
     const tickDate = new Date(range.earliest);
     tickDate.setDate(tickDate.getDate() + d);
-    ticks.push({ day: d, label: format(tickDate, "d MMM") });
+    ticks.push({
+      day: d,
+      label:
+        tickIntervalDays >= 28
+          ? format(tickDate, "MMM yy")
+          : format(tickDate, "d MMM"),
+    });
   }
-
-  const BATCH_COLORS = [
-    { bar: "bg-blue-500", border: "border-blue-600" },
-    { bar: "bg-emerald-500", border: "border-emerald-600" },
-    { bar: "bg-amber-500", border: "border-amber-600" },
-    { bar: "bg-violet-500", border: "border-violet-600" },
-    { bar: "bg-rose-500", border: "border-rose-600" },
-    { bar: "bg-cyan-500", border: "border-cyan-600" },
-  ];
 
   return (
     <div className="space-y-2 rounded-lg border bg-white p-3">
@@ -240,10 +278,11 @@ export function BatchProgrammePreview({
         </p>
         <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
           <Truck className="size-3 text-emerald-600" />
-          deliveries shown per plot
+          deliveries shown per plot · sorted chronologically
         </span>
       </div>
 
+      {/* Tick row */}
       <div className="relative h-4 text-[9px] text-muted-foreground">
         {ticks.map((t) => (
           <span
@@ -256,60 +295,117 @@ export function BatchProgrammePreview({
         ))}
       </div>
 
-      <div className="space-y-1">
-        {rows.map((r) => {
-          const offsetDays = dayDiff(range.earliest, r.startDate);
-          const widthDays = Math.max(1, dayDiff(r.startDate, r.endDate) + 1);
-          const left = (offsetDays / range.totalDays) * 100;
-          const width = (widthDays / range.totalDays) * 100;
-          const color = BATCH_COLORS[r.batchIndex % BATCH_COLORS.length];
-
-          return (
+      {/* Vertical grid behind the rows for visual rhythm */}
+      <div className="relative">
+        <div className="absolute inset-0 pointer-events-none">
+          {ticks.map((t) => (
             <div
-              key={`${r.batchIndex}-${r.plotNumber}`}
-              className="flex items-center gap-2 text-[10px]"
-            >
-              <span className="w-12 shrink-0 truncate text-muted-foreground">
-                Plot {r.plotNumber}
-              </span>
-              <div className="relative h-4 flex-1 rounded-sm bg-slate-100">
-                {/* Build-window bar */}
-                <div
-                  className={`absolute top-0 h-full rounded-sm ${color.bar}/80`}
-                  style={{
-                    left: `${left}%`,
-                    width: `${width}%`,
-                    minWidth: "2px",
-                  }}
-                  title={`Plot ${r.plotNumber}${r.variantLabel ? ` (${r.variantLabel})` : ""} — ${format(r.startDate, "d MMM yyyy")} → ${format(r.endDate, "d MMM yyyy")} (${r.totalWeeks} wk)`}
-                />
-                {/* Order delivery markers — small green truck dots
-                    sitting above the bar at each delivery date. */}
-                {r.orders.map((o) => {
-                  const dOffset = dayDiff(range.earliest, o.deliveryDate);
-                  const dLeft = (dOffset / range.totalDays) * 100;
-                  return (
-                    <span
-                      key={o.id}
-                      className="absolute top-0.5 -translate-x-1/2"
-                      style={{ left: `${dLeft}%` }}
-                      title={`${format(o.deliveryDate, "d MMM yyyy")} — ${o.label}`}
-                    >
-                      <Truck className="size-3 text-emerald-700" strokeWidth={2.5} />
-                    </span>
-                  );
-                })}
+              key={t.day}
+              className="absolute top-0 bottom-0 w-px bg-slate-100"
+              style={{ left: `${(t.day / range.totalDays) * 100}%` }}
+            />
+          ))}
+        </div>
+
+        <div className="relative space-y-1">
+          {rows.map((r) => {
+            const offsetDays = dayDiff(range.earliest, r.startDate);
+            const widthDays = Math.max(1, dayDiff(r.startDate, r.endDate) + 1);
+            const left = (offsetDays / range.totalDays) * 100;
+            const width = (widthDays / range.totalDays) * 100;
+
+            return (
+              <div
+                key={`${r.batchIndex}-${r.plotNumber}`}
+                className="flex items-center gap-2 text-[10px]"
+              >
+                <span className="w-12 shrink-0 truncate text-muted-foreground">
+                  Plot {r.plotNumber}
+                </span>
+                <div className="relative h-5 flex-1 rounded-sm bg-slate-50">
+                  {/* Stage segments — each one is a coloured block
+                      rendered at its working-day offset within the
+                      plot's window. Adjacent stages butt right up
+                      against each other. Half-blocks for short
+                      stages happen automatically because widthDays
+                      is in calendar days, not whole weeks. */}
+                  <div
+                    className="absolute top-0 h-full"
+                    style={{ left: `${left}%`, width: `${width}%` }}
+                  >
+                    {r.segments.map((seg, i) => {
+                      const segLeft = (seg.offsetDays / widthDays) * 100;
+                      const segWidth = (seg.widthDays / widthDays) * 100;
+                      const color =
+                        STAGE_COLORS[seg.stageIndex % STAGE_COLORS.length];
+                      return (
+                        <div
+                          key={i}
+                          className={`absolute top-0 h-full border-r border-white/60 ${color}/85 first:rounded-l-sm last:rounded-r-sm last:border-r-0`}
+                          style={{
+                            left: `${segLeft}%`,
+                            width: `${segWidth}%`,
+                            minWidth: "2px",
+                          }}
+                          title={`${seg.name} · ${seg.widthDays} day${seg.widthDays === 1 ? "" : "s"}`}
+                        />
+                      );
+                    })}
+                  </div>
+                  {/* Order delivery markers */}
+                  {r.orders.map((o) => {
+                    const dOffset = dayDiff(range.earliest, o.deliveryDate);
+                    const dLeft = (dOffset / range.totalDays) * 100;
+                    return (
+                      <span
+                        key={o.id}
+                        className="absolute -top-0.5 -translate-x-1/2"
+                        style={{ left: `${dLeft}%` }}
+                        title={`${format(o.deliveryDate, "d MMM yyyy")} — ${o.label}`}
+                      >
+                        <Truck
+                          className="size-3 text-emerald-700"
+                          strokeWidth={2.5}
+                        />
+                      </span>
+                    );
+                  })}
+                </div>
+                <span
+                  className="w-32 shrink-0 truncate text-[9px] text-muted-foreground"
+                  title={`${r.templateName}${r.variantLabel ? ` · ${r.variantLabel}` : ""}`}
+                >
+                  {format(r.startDate, "d MMM")}
+                  {" · "}
+                  <span className="text-foreground/70">
+                    {r.variantLabel ?? "base"}
+                  </span>
+                </span>
               </div>
-              <span className="w-20 shrink-0 truncate text-[9px] text-muted-foreground">
-                {format(r.startDate, "d MMM")}
-                {r.variantLabel ? ` · ${r.variantLabel}` : ""}
-              </span>
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
       </div>
     </div>
   );
+}
+
+function stageWorkingDays(stage: TemplateJobData): number {
+  const kids = stage.children ?? [];
+  if (kids.length > 0) {
+    return kids.reduce((sum, c) => sum + childDays(c), 0);
+  }
+  // Atomic stage — use its own duration field.
+  if (stage.durationDays && stage.durationDays > 0) return stage.durationDays;
+  if (stage.durationWeeks && stage.durationWeeks > 0)
+    return stage.durationWeeks * 5;
+  return 0;
+}
+
+function childDays(c: TemplateJobData): number {
+  if (c.durationDays && c.durationDays > 0) return c.durationDays;
+  if (c.durationWeeks && c.durationWeeks > 0) return c.durationWeeks * 5;
+  return 0;
 }
 
 function dayDiff(a: Date, b: Date): number {
