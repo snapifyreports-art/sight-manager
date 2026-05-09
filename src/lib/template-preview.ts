@@ -102,7 +102,15 @@ export function previewTemplateApply(
   const totalWeeks = Math.max(1, Math.ceil(totalDays / 5));
   const endDate = totalDays > 0 ? addWorkingDays(start, totalDays - 1) : start;
 
-  // Order rows
+  // Build a CANONICAL week map for every job (May 2026 — same fix as
+  // apply-template-helpers: stages cascade sequentially from week 1
+  // by their canonical durationDays, NOT by the cached startWeek
+  // which can drift when resequence didn't run after an edit).
+  // Order anchor lookups read from this map instead of the cached
+  // startWeek field, so order delivery dates stay accurate even when
+  // the template's cache is stale.
+  const canonicalWeek = computeCanonicalWeekMap(template);
+
   const allJobMap = new Map<string, TemplateJobData>();
   for (const j of allJobs(template)) allJobMap.set(j.id, j);
 
@@ -113,6 +121,7 @@ export function previewTemplateApply(
         order,
         job,
         allJobMap,
+        canonicalWeek,
       );
       // Convert week → working-day cursor → calendar date.
       const orderDay = (orderWeek - 1) * 5;
@@ -171,11 +180,18 @@ function computeOrderWeek(
   order: TemplateOrderData,
   ownerJob: TemplateJobData,
   allJobMap: Map<string, TemplateJobData>,
+  canonicalWeek: Map<string, { startWeek: number; endWeek: number }>,
 ): { orderWeek: number; deliveryWeek: number } {
   const refJob = order.anchorJobId
     ? allJobMap.get(order.anchorJobId) ?? ownerJob
     : ownerJob;
-  const refStart = refJob.startWeek;
+  // Prefer the canonical cascade week — falls back to the cached
+  // value only if the canonical map didn't include this job (very
+  // defensive; should never happen for normal templates).
+  const refStart =
+    canonicalWeek.get(refJob.id)?.startWeek ?? refJob.startWeek;
+  const ownerStart =
+    canonicalWeek.get(ownerJob.id)?.startWeek ?? ownerJob.startWeek;
   const amountWeeks = unitsToWeeks(order.anchorAmount, order.anchorUnit);
   const leadWeeks = unitsToWeeks(order.leadTimeAmount, order.leadTimeUnit);
   const sign = order.anchorDirection === "after" ? 1 : -1;
@@ -183,7 +199,7 @@ function computeOrderWeek(
   let orderWeek: number;
   let deliveryWeek: number;
   if (!order.anchorType) {
-    orderWeek = ownerJob.startWeek + (order.orderWeekOffset ?? -2);
+    orderWeek = ownerStart + (order.orderWeekOffset ?? -2);
     deliveryWeek = orderWeek + (order.deliveryWeekOffset ?? 0);
   } else if (
     order.anchorType === "order" ||
@@ -200,6 +216,61 @@ function computeOrderWeek(
     orderWeek: Math.max(1, orderWeek),
     deliveryWeek: Math.max(1, deliveryWeek),
   };
+}
+
+/**
+ * Build a canonical (templateJob.id → { startWeek, endWeek }) map by
+ * cascading stages and their children sequentially from week 1.
+ * Mirrors the apply-template stage cascade so the preview shows what
+ * apply will actually produce, ignoring cached startWeek/endWeek
+ * fields that could be stale.
+ */
+function computeCanonicalWeekMap(
+  template: TemplateData,
+): Map<string, { startWeek: number; endWeek: number }> {
+  const map = new Map<string, { startWeek: number; endWeek: number }>();
+  // Working-day cursor — week 1 starts at day 0.
+  let dayCursor = 0;
+  const sortedStages = [...template.jobs].sort(
+    (a, b) => a.sortOrder - b.sortOrder,
+  );
+  for (const stage of sortedStages) {
+    const stageStartDay = dayCursor;
+    if (stage.children && stage.children.length > 0) {
+      const sortedChildren = [...stage.children].sort(
+        (a, b) => a.sortOrder - b.sortOrder,
+      );
+      let childCursor = dayCursor;
+      for (const c of sortedChildren) {
+        const days =
+          c.durationDays && c.durationDays > 0
+            ? c.durationDays
+            : c.durationWeeks && c.durationWeeks > 0
+              ? c.durationWeeks * 5
+              : 5;
+        const cStartWeek = Math.floor(childCursor / 5) + 1;
+        const cEndWeek = Math.floor((childCursor + days - 1) / 5) + 1;
+        map.set(c.id, { startWeek: cStartWeek, endWeek: cEndWeek });
+        childCursor += days;
+      }
+      dayCursor = childCursor;
+    } else {
+      const days =
+        stage.durationDays && stage.durationDays > 0
+          ? stage.durationDays
+          : stage.durationWeeks && stage.durationWeeks > 0
+            ? stage.durationWeeks * 5
+            : 5;
+      dayCursor += days;
+    }
+    const stageStartWeek = Math.floor(stageStartDay / 5) + 1;
+    const stageEndWeek = Math.max(
+      stageStartWeek,
+      Math.floor((dayCursor - 1) / 5) + 1,
+    );
+    map.set(stage.id, { startWeek: stageStartWeek, endWeek: stageEndWeek });
+  }
+  return map;
 }
 
 /** Format a cost as £-prefixed string. */

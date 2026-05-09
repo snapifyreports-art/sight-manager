@@ -41,6 +41,7 @@ interface TemplateJobWithChildren {
   startWeek: number;
   endWeek: number;
   durationDays?: number | null;
+  durationWeeks?: number | null;
   weatherAffected?: boolean;
   weatherAffectedType?: string | null;
   parentId: string | null;
@@ -97,12 +98,28 @@ function computeTemplateDateMap(
 ): Map<string, { start: Date; end: Date }> {
   const map = new Map<string, { start: Date; end: Date }>();
 
-  for (const job of templateJobs) {
+  // SSOT-CANONICAL stage cascade (May 2026 — Keith caught gaps when
+  // applying a template whose cached startWeek/endWeek had drifted
+  // from the true durationDays sum):
+  //
+  // Stages are positioned by SEQUENTIAL CASCADE FROM plotStartDate,
+  // not by the cached startWeek field. First stage anchors at
+  // plotStartDate. Each subsequent stage anchors at the working day
+  // after the previous stage ends. Within each stage, children
+  // already cascade canonically from their parent's anchor (existing
+  // logic). End result: stages are guaranteed back-to-back even when
+  // resequenceTopLevelStages didn't run after a duration edit.
+  //
+  // Cached startWeek/endWeek on the template are now PURELY a UI
+  // hint — never consulted at apply time.
+  const sortedStages = [...templateJobs].sort(
+    (a, b) => a.sortOrder - b.sortOrder,
+  );
+  let stageCursor = plotStartDate;
+
+  for (const job of sortedStages) {
     if (job.children && job.children.length > 0) {
-      const parentAnchor = snapToWorkingDay(
-        addWeeks(plotStartDate, job.startWeek - 1),
-        "forward",
-      );
+      const parentAnchor = snapToWorkingDay(stageCursor, "forward");
       const sortedChildren = [...job.children].sort(
         (a, b) => a.sortOrder - b.sortOrder,
       );
@@ -123,22 +140,22 @@ function computeTemplateDateMap(
         lastChildEnd = cEnd;
         cursor = addWorkingDays(cEnd, 1);
       }
-      map.set(job.id, {
-        start: firstChildStart ?? parentAnchor,
-        end: lastChildEnd ?? parentAnchor,
-      });
+      const stageStart = firstChildStart ?? parentAnchor;
+      const stageEnd = lastChildEnd ?? parentAnchor;
+      map.set(job.id, { start: stageStart, end: stageEnd });
+      stageCursor = addWorkingDays(stageEnd, 1);
     } else {
-      const start = snapToWorkingDay(
-        addWeeks(plotStartDate, job.startWeek - 1),
-        "forward",
-      );
-      const end = computeJobEndDate(
-        plotStartDate,
-        job.startWeek,
-        job.endWeek,
-        job.durationDays ?? null,
-      );
+      // Atomic stage — use its own durationDays / durationWeeks.
+      const days =
+        job.durationDays && job.durationDays > 0
+          ? job.durationDays
+          : job.durationWeeks && job.durationWeeks > 0
+            ? job.durationWeeks * 5
+            : 5;
+      const start = snapToWorkingDay(stageCursor, "forward");
+      const end = addWorkingDays(start, days - 1);
       map.set(job.id, { start, end });
+      stageCursor = addWorkingDays(end, 1);
     }
   }
 
@@ -176,47 +193,49 @@ export async function createJobsFromTemplate(
   // lives in a different stage that hasn't been written to the DB yet.
   // Single source of truth for "when does template job X land on this
   // plot" — both the apply loop below and the order date-resolver read
-  // from this map.
+  // from this map. Critically, the map already cascades stages
+  // sequentially from plotStartDate (May 2026 fix), so re-reading
+  // from it here keeps the apply loop in lock-step with order anchors.
   const templateDateMap = computeTemplateDateMap(plotStartDate, templateJobs);
 
-  for (const templateJob of templateJobs) {
+  // Iterate stages in canonical order (sortOrder), not the order
+  // they happen to arrive in. The DB include ought to already sort
+  // by sortOrder but defensive doesn't hurt.
+  const sortedStages = [...templateJobs].sort(
+    (a, b) => a.sortOrder - b.sortOrder,
+  );
+  for (const templateJob of sortedStages) {
     if (templateJob.children && templateJob.children.length > 0) {
       // HIERARCHICAL: create a REAL parent Job row, then children with parentId set.
       //
-      // Keith Apr 2026 model: children cascade SEQUENTIALLY in sortOrder.
-      // Previously each child's startWeek/endWeek on the template dictated
-      // its position, which let templates author overlapping or gapped
-      // children — confusing and not what users want. Now:
-      //   - Anchor point = plot-start + parent.startWeek-1 (parent offset)
-      //   - First child starts at the anchor (snapped to working day)
-      //   - Each subsequent child starts the working day after the prev
-      //     child ends
-      //   - Child duration = durationDays (or durationWeeks × 5 fallback)
-      //   - Parent span = first child start → last child end
-      const parentAnchor = snapToWorkingDay(
-        addWeeks(plotStartDate, templateJob.startWeek - 1),
-        "forward",
-      );
+      // Stage start/end + per-child windows already computed canonically
+      // by computeTemplateDateMap (sequential cascade from plotStartDate,
+      // ignoring cached startWeek). Read from the map so the apply
+      // loop and the order date-resolver always agree.
       const sortedChildren = [...templateJob.children].sort(
         (a, b) => a.sortOrder - b.sortOrder
       );
-      const childWindows: Array<{ start: Date; end: Date }> = [];
-      let cursor = parentAnchor;
-      for (const c of sortedChildren) {
-        const durationDays =
-          c.durationDays && c.durationDays > 0
-            ? c.durationDays
-            : c.durationWeeks && c.durationWeeks > 0
-              ? c.durationWeeks * 5
-              : 5; // fallback: one working week
-        const jobStart = snapToWorkingDay(cursor, "forward");
-        const jobEnd = addWorkingDays(jobStart, durationDays - 1);
-        childWindows.push({ start: jobStart, end: jobEnd });
-        // Next child starts one working day after this one ends.
-        cursor = addWorkingDays(jobEnd, 1);
-      }
-      const parentStart = childWindows[0].start;
-      const parentEnd = childWindows[childWindows.length - 1].end;
+      const childWindows = sortedChildren.map((c) => {
+        const w = templateDateMap.get(c.id);
+        if (!w) {
+          // Defensive: should never happen — map covers every leaf.
+          // Fall back to ad-hoc compute so a missing entry can't
+          // crash the apply.
+          const days =
+            c.durationDays && c.durationDays > 0
+              ? c.durationDays
+              : c.durationWeeks && c.durationWeeks > 0
+                ? c.durationWeeks * 5
+                : 5;
+          const fallbackStart = snapToWorkingDay(plotStartDate, "forward");
+          return { start: fallbackStart, end: addWorkingDays(fallbackStart, days - 1) };
+        }
+        return w;
+      });
+      const stageWindow = templateDateMap.get(templateJob.id);
+      const parentStart = stageWindow?.start ?? childWindows[0].start;
+      const parentEnd =
+        stageWindow?.end ?? childWindows[childWindows.length - 1].end;
 
       const parentJob = await tx.job.create({
         data: {
@@ -306,17 +325,26 @@ export async function createJobsFromTemplate(
         );
       }
     } else {
-      // FLAT (legacy): create Job directly from template job
-      const jobStartDate = snapToWorkingDay(
-        addWeeks(plotStartDate, templateJob.startWeek - 1),
-        "forward"
-      );
-      const jobEndDate = computeJobEndDate(
-        plotStartDate,
-        templateJob.startWeek,
-        templateJob.endWeek,
-        templateJob.durationDays ?? null,
-      );
+      // ATOMIC stage / flat legacy job — read its window from the
+      // canonical date-map (May 2026: cascades sequentially from
+      // plotStartDate, NOT from cached startWeek). Map fallback uses
+      // the legacy week-based compute as a last resort so a malformed
+      // entry can't crash apply.
+      const win = templateDateMap.get(templateJob.id);
+      const jobStartDate =
+        win?.start ??
+        snapToWorkingDay(
+          addWeeks(plotStartDate, templateJob.startWeek - 1),
+          "forward",
+        );
+      const jobEndDate =
+        win?.end ??
+        computeJobEndDate(
+          plotStartDate,
+          templateJob.startWeek,
+          templateJob.endWeek,
+          templateJob.durationDays ?? null,
+        );
 
       const job = await tx.job.create({
         data: {
