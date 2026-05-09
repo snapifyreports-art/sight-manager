@@ -1293,15 +1293,40 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
                           }
                         </button>
                         {!isSigningOff && (childStatus === "NOT_STARTED" || childStatus === "ON_HOLD") && (
-                          <Button
-                            size="sm"
-                            className="w-full bg-blue-600 hover:bg-blue-700 text-white"
-                            disabled={childLoading}
-                            onClick={() => handleChildJobAction(child.id, "start")}
-                          >
-                            {childLoading ? <Loader2 className="size-3.5 animate-spin mr-1" /> : <Play className="size-3.5 mr-1" />}
-                            Start
-                          </Button>
+                          <div className="flex gap-1.5">
+                            <Button
+                              size="sm"
+                              className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
+                              disabled={childLoading}
+                              onClick={() => handleChildJobAction(child.id, "start")}
+                            >
+                              {childLoading ? <Loader2 className="size-3.5 animate-spin mr-1" /> : <Play className="size-3.5 mr-1" />}
+                              Start
+                            </Button>
+                            {/* Delay button — pushes this sub-job (and
+                                everything downstream via the cascade)
+                                forward by N working days. Opens the
+                                same unified delay dialog the rest of
+                                the app uses (with weather suggestion
+                                + reason capture). */}
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="flex-1 border-amber-300 text-amber-700 hover:bg-amber-50"
+                              disabled={childLoading}
+                              onClick={() =>
+                                openDelayDialog({
+                                  id: child.id,
+                                  name: child.name,
+                                  startDate: child.startDate ?? null,
+                                  endDate: child.endDate ?? null,
+                                })
+                              }
+                            >
+                              <Clock className="size-3.5 mr-1" />
+                              Delay
+                            </Button>
+                          </div>
                         )}
                         {!isSigningOff && childStatus === "IN_PROGRESS" && (
                           <div className="flex gap-1.5">
