@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { format } from "date-fns";
 import { addWorkingDays } from "@/lib/working-days";
+import { BatchProgrammePreview } from "./BatchProgrammePreview";
 import {
   Plus,
   Trash2,
@@ -753,11 +754,11 @@ export function CreateSiteWizard({
           <p><strong>Step 3 — Suppliers:</strong> only shown if a template you picked has orders with supplier placeholders. Assign real suppliers so orders are ready from day one.</p>
           <p><strong>You can close and come back:</strong> site creation isn&apos;t final until you hit Create on the last step. Nothing is saved until then.</p>
         </HelpTip>
-        {/* Step indicator. `pr-10` keeps the rightmost StepDot clear of
-            the dialog's absolute-positioned close (✕) button + the
-            HelpTip (?) icon at top-right. Without it, "Suppliers" /
-            "Plots" labels overlap those icons on narrow dialogs. */}
-        <div className="flex items-center gap-2 pb-1 pr-10">
+        {/* Step indicator. `pr-20` keeps the rightmost StepDot clear
+            of BOTH the close (✕) button at right-2 and the HelpTip (?)
+            at right-10. Combined hit area runs ~64px from the right
+            edge, so 80px clearance is the safe bet. */}
+        <div className="flex items-center gap-2 pb-1 pr-20">
           <StepDot
             num={1}
             label="Site"
@@ -889,7 +890,10 @@ export function CreateSiteWizard({
               </DialogDescription>
             </DialogHeader>
 
-            <div className="space-y-3 py-2">
+            {/* max-h cap + scroll so a tall form (template + variant +
+                stagger + per-plot rows) doesn't push the footer below
+                the viewport. ~70vh leaves room for header + footer. */}
+            <div className="max-h-[70vh] space-y-3 overflow-y-auto py-2 pr-1">
               {/* Batch list */}
               {plotBatches.length > 0 && (
                 <div className="max-h-[30vh] space-y-2 overflow-y-auto">
@@ -966,6 +970,17 @@ export function CreateSiteWizard({
                     );
                   })}
                 </div>
+              )}
+
+              {/* Programme preview — only shows when there's at least
+                  one template-based batch. Sits between the batch list
+                  and the Add Plot Group button so the user can eyeball
+                  the timeline before committing. */}
+              {plotBatches.some((b) => b.mode === "template") && (
+                <BatchProgrammePreview
+                  batches={plotBatches}
+                  templates={templates}
+                />
               )}
 
               {/* Inline add form */}
