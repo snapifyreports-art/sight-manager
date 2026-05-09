@@ -13,6 +13,7 @@ import {
   Loader2,
   Search,
   X,
+  ArrowLeftRight,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -46,6 +47,8 @@ import {
 import { TemplateEditor } from "./TemplateEditor";
 import { TemplateExtras } from "./TemplateExtras";
 import { TemplateVariantsSection } from "./TemplateVariantsSection";
+import { TemplateCompareDialog } from "./TemplateCompareDialog";
+import { TemplateAuditLog } from "./TemplateAuditLog";
 import type { TemplateData } from "./types";
 import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 import { useConfirmAction } from "@/hooks/useConfirmAction";
@@ -119,6 +122,7 @@ export function PlotTemplatesSection({
   const [draftFilter, setDraftFilter] = useState<"all" | "live" | "drafts">(
     "all",
   );
+  const [compareOpen, setCompareOpen] = useState(false);
 
   // Distinct typeLabels for the filter dropdown. Trim + dedupe so
   // "2 STOREY" / "2 storey" don't both appear; we keep the first
@@ -288,6 +292,7 @@ export function PlotTemplatesSection({
         />
         <TemplateVariantsSection template={editingTemplate} />
         <TemplateExtras templateId={editingTemplate.id} templateName={editingTemplate.name} />
+        <TemplateAuditLog templateId={editingTemplate.id} />
       </div>
     );
   }
@@ -301,10 +306,22 @@ export function PlotTemplatesSection({
             Create reusable templates for standard plot builds
           </p>
         </div>
-        <Button onClick={() => setCreateDialogOpen(true)}>
-          <Plus className="size-4" />
-          New Template
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          {templates.length >= 2 && (
+            <Button
+              variant="outline"
+              onClick={() => setCompareOpen(true)}
+              title="Pick two templates and see what's different"
+            >
+              <ArrowLeftRight className="size-4" />
+              Compare
+            </Button>
+          )}
+          <Button onClick={() => setCreateDialogOpen(true)}>
+            <Plus className="size-4" />
+            New Template
+          </Button>
+        </div>
       </div>
 
       {templates.length === 0 ? (
@@ -627,6 +644,13 @@ export function PlotTemplatesSection({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Compare templates */}
+      <TemplateCompareDialog
+        open={compareOpen}
+        onClose={() => setCompareOpen(false)}
+        templates={templates}
+      />
 
       {/* Shared confirm-delete dialog (useConfirmAction) */}
       {confirmDialogs}

@@ -50,6 +50,7 @@ import { TemplateCostFooter } from "./TemplateCostFooter";
 import { TemplateOrderTimeline } from "./TemplateOrderTimeline";
 import { ApplyTemplatePreview } from "./ApplyTemplatePreview";
 import { TemplateMobileSummary } from "./TemplateMobileSummary";
+import { TemplateOrdersTableDialog } from "./TemplateOrdersTableDialog";
 import type {
   TemplateData,
   TemplateJobData,
@@ -100,6 +101,7 @@ export function TemplateEditor({
   const [savingMeta, setSavingMeta] = useState(false);
   const [togglingDraft, setTogglingDraft] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [ordersTableOpen, setOrdersTableOpen] = useState(false);
 
   // Job edit dialog (used for both stages and sub-jobs)
   const [jobDialogOpen, setJobDialogOpen] = useState(false);
@@ -1586,6 +1588,15 @@ export function TemplateEditor({
               <Button
                 variant="outline"
                 size="sm"
+                onClick={() => setOrdersTableOpen(true)}
+                title="Spreadsheet view of every order — quick-edit anchors and lead times in one place"
+              >
+                <Package className="size-3.5" />
+                All Orders
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
                 onClick={() => setPreviewOpen(true)}
                 disabled={template.jobs.length === 0}
                 title="Dry-run: see what applying this template would create on a plot starting today"
@@ -1625,6 +1636,21 @@ export function TemplateEditor({
           )}
         </div>
       </div>
+
+      {/* Side-by-side orders table */}
+      <TemplateOrdersTableDialog
+        open={ordersTableOpen}
+        onClose={() => setOrdersTableOpen(false)}
+        template={template}
+        onChanged={async () => {
+          // Pull the latest template after a quick-edit so the table
+          // reflects what was actually saved.
+          const res = await fetch(`/api/plot-templates/${template.id}`, {
+            cache: "no-store",
+          });
+          if (res.ok) onUpdate(await res.json());
+        }}
+      />
 
       {/* Apply preview modal — pure dry-run, no DB writes. */}
       <ApplyTemplatePreview
