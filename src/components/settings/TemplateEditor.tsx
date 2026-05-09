@@ -519,10 +519,15 @@ export function TemplateEditor({
           : null;
         const job = topJob || subJob;
 
-        // For sub-jobs, also update durationWeeks so recalculate uses correct value
-        const durationWeeks = endWeek - startWeek + 1;
+        // SSOT: durationDays is canonical, durationWeeks is the legacy
+        // fallback. Drag-resize previously only wrote durationWeeks,
+        // which the recalculate then ignored (childDurationDays() reads
+        // durationDays first) — the bar visually moved, "Saving…" fired,
+        // but the new width silently reverted. Write canonical days.
+        const widthInWeeks = endWeek - startWeek + 1;
+        const durationDays = widthInWeeks * 5;
         const body = subJob
-          ? { startWeek, endWeek, durationWeeks }
+          ? { startWeek, endWeek, durationDays, durationWeeks: null }
           : { startWeek, endWeek };
 
         const res = await fetch(

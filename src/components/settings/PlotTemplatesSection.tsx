@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   Plus,
   LayoutTemplate,
@@ -76,9 +76,24 @@ export function PlotTemplatesSection({
   initialTemplates: TemplateData[];
 }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const toast = useToast();
   const [templates, setTemplates] = useState(initialTemplates);
   const [cloningId, setCloningId] = useState<string | null>(null);
+
+  // URL state — `?tpl=X` opens that template in the editor on mount.
+  // `?tpl=X&v=Y` opens the variant editor. Keeping them in the URL
+  // means a refresh (or a deep link) restores the same view instead
+  // of bouncing the user back to the templates list.
+  function setUrlScope(templateId: string | null, variantId: string | null) {
+    const params = new URLSearchParams(searchParams?.toString() ?? "");
+    if (templateId) params.set("tpl", templateId);
+    else params.delete("tpl");
+    if (variantId) params.set("v", variantId);
+    else params.delete("v");
+    const qs = params.toString();
+    router.replace(qs ? `?${qs}` : window.location.pathname, { scroll: false });
+  }
 
   const handleClone = async (id: string, name: string) => {
     setCloningId(id);
@@ -108,6 +123,51 @@ export function PlotTemplatesSection({
     null,
   );
   const [loadingVariant, setLoadingVariant] = useState(false);
+
+  // Restore from URL on mount (and on subsequent ?tpl/?v changes from
+  // browser nav). When `?tpl=X` is set, look it up in the list and
+  // open it. When `?tpl=X&v=Y`, also fetch the variant and open it.
+  useEffect(() => {
+    const tplId = searchParams?.get("tpl") ?? null;
+    const varId = searchParams?.get("v") ?? null;
+
+    if (!tplId) {
+      // No params — make sure we're not stuck in editor mode if the
+      // user hit Back to clear the query.
+      if (editingTemplate || editingVariant) {
+        setEditingTemplate(null);
+        setEditingVariant(null);
+      }
+      return;
+    }
+
+    // Find template if we don't already have it open.
+    const match = templates.find((t) => t.id === tplId);
+    if (!match) return; // unknown id — ignore
+
+    if (!editingTemplate || editingTemplate.id !== tplId) {
+      setEditingTemplate(match);
+    }
+
+    // Variant restore: fetch the full variant data on demand.
+    if (varId) {
+      if (!editingVariant || editingVariant.variantId !== varId) {
+        setLoadingVariant(true);
+        fetch(`/api/plot-templates/${tplId}/variants/${varId}/full`, {
+          cache: "no-store",
+        })
+          .then((r) => (r.ok ? r.json() : null))
+          .then((v) => {
+            if (v) setEditingVariant(v);
+          })
+          .finally(() => setLoadingVariant(false));
+      }
+    } else if (editingVariant) {
+      // ?v= dropped — leave the variant editor.
+      setEditingVariant(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, templates]);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const { confirmAction, dialogs: confirmDialogs } = useConfirmAction();
@@ -246,8 +306,9 @@ export function PlotTemplatesSection({
       setNewDescription("");
       setNewTypeLabel("");
       setCreateDialogOpen(false);
-      // Open the editor for the new template
+      // Open the editor for the new template (and reflect in URL).
       setEditingTemplate(created);
+      setUrlScope(created.id, null);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to create template");
     } finally {
@@ -298,6 +359,7 @@ export function PlotTemplatesSection({
       }
       const variant = await res.json();
       setEditingVariant(variant);
+      setUrlScope(editingTemplate.id, variantId);
     } finally {
       setLoadingVariant(false);
     }
@@ -310,7 +372,10 @@ export function PlotTemplatesSection({
       <div className="space-y-6">
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <button
-            onClick={() => setEditingVariant(null)}
+            onClick={() => {
+              setEditingVariant(null);
+              setUrlScope(editingTemplate.id, null);
+            }}
             className="rounded px-2 py-1 hover:bg-muted hover:text-foreground"
           >
             ← {editingTemplate.name}
@@ -322,7 +387,10 @@ export function PlotTemplatesSection({
         </div>
         <TemplateEditor
           template={editingVariant}
-          onBack={() => setEditingVariant(null)}
+          onBack={() => {
+            setEditingVariant(null);
+            setUrlScope(editingTemplate.id, null);
+          }}
           onUpdate={(t) => setEditingVariant(t)}
         />
         <TemplateExtras
@@ -342,6 +410,7 @@ export function PlotTemplatesSection({
           template={editingTemplate}
           onBack={() => {
             setEditingTemplate(null);
+            setUrlScope(null, null);
             router.refresh();
           }}
           onUpdate={handleTemplateUpdated}
@@ -548,7 +617,10 @@ export function PlotTemplatesSection({
               <Card
                 key={template.id}
                 className={`group cursor-pointer overflow-hidden border-border/50 bg-white shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md ${template.isDraft ? "ring-1 ring-amber-200" : ""}`}
-                onClick={() => setEditingTemplate(template)}
+                onClick={() => {
+                  setEditingTemplate(template);
+                  setUrlScope(template.id, null);
+                }}
               >
                 <CardHeader className="space-y-2 p-4 sm:p-6">
                   {/* Title row — can wrap to 2 lines on long names without
