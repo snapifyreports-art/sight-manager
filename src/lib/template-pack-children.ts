@@ -84,3 +84,69 @@ export async function packChildrenAndUpdateParent(
   });
   return newEndWeek;
 }
+
+/**
+ * Re-sequence every top-level stage in a template so they sit
+ * end-to-end with no gaps and no overlaps.
+ *
+ * Why: when one stage's duration changes (e.g. user edits a sub-job
+ * inline → its parent stage shrinks/grows), the stages downstream
+ * need to slide. Previously /jobs/[id]/recalculate only updated the
+ * triggering parent's endWeek; siblings stayed where they were and
+ * gaps appeared in the Timeline. Reported by Keith on the
+ * SMOKE_TEST — Simple Semi template (May 2026).
+ *
+ * Run this AFTER `packChildrenAndUpdateParent` for the parent that
+ * just changed. It walks every top-level stage in sortOrder, sets
+ * its startWeek to the previous stage's endWeek + 1, and re-packs
+ * its children inside the new window.
+ */
+export async function resequenceTopLevelStages(
+  tx: PrismaClient | Prisma.TransactionClient,
+  templateId: string,
+): Promise<void> {
+  const stages = await tx.templateJob.findMany({
+    where: { templateId, parentId: null },
+    orderBy: { sortOrder: "asc" },
+    include: { children: { orderBy: { sortOrder: "asc" } } },
+  });
+
+  let cursor = 1;
+  for (const stage of stages) {
+    let weeks: number;
+    if (stage.children.length > 0) {
+      const totalDays = stage.children.reduce(
+        (sum, c) => sum + childDurationDays(c),
+        0,
+      );
+      weeks = Math.max(1, Math.ceil(totalDays / 5));
+    } else if (stage.durationDays && stage.durationDays > 0) {
+      weeks = Math.max(1, Math.ceil(stage.durationDays / 5));
+    } else if (stage.durationWeeks && stage.durationWeeks > 0) {
+      weeks = stage.durationWeeks;
+    } else {
+      weeks = Math.max(1, stage.endWeek - stage.startWeek + 1);
+    }
+
+    const startWeek = cursor;
+    const endWeek = startWeek + weeks - 1;
+    cursor = endWeek + 1;
+
+    // Always update — even if the values match, this is the cheapest
+    // way to keep the cache fresh after a downstream change.
+    await tx.templateJob.update({
+      where: { id: stage.id },
+      data: { startWeek, endWeek },
+    });
+
+    // Re-pack the stage's children inside the new window so per-child
+    // startWeek/endWeek caches stay consistent.
+    if (stage.children.length > 0) {
+      await packChildrenAndUpdateParent(
+        tx,
+        { id: stage.id, startWeek },
+        stage.children,
+      );
+    }
+  }
+}

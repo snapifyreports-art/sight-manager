@@ -3,7 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { templateJobsInclude, normaliseTemplateParentDates } from "@/lib/template-includes";
 import { apiError } from "@/lib/api-errors";
-import { packChildrenAndUpdateParent } from "@/lib/template-pack-children";
+import { resequenceTopLevelStages } from "@/lib/template-pack-children";
 
 export const dynamic = "force-dynamic";
 
@@ -47,19 +47,19 @@ export async function POST(
 
   // SSOT model: durationDays + sortOrder is canonical. We REWRITE each
   // child's startWeek/endWeek + the parent's endWeek as a derived cache,
-  // computed from the canonical fields by `packChildrenAndUpdateParent`.
-  //
-  // History: an earlier version of this code (commit c3519ac) tried to
-  // skip per-child writes entirely on the assumption "the Timeline reads
-  // durationDays + sortOrder directly anyway". That was right for the
-  // Timeline but broke other readers — order-dialog dropdowns, collapsed-
-  // stage dot positioning, server-side offset derivation in
-  // template-order-offsets.ts, and normaliseTemplateParentDates() — all
-  // of which consult `child.startWeek` directly. Re-introducing the
-  // writes as a fresh-from-canonical cache.
+  // and ALSO re-sequence all top-level sibling stages so they sit
+  // end-to-end with no gaps. Without that re-sequence, shrinking a
+  // stage's children left a gap in the Timeline (Keith caught this on
+  // SMOKE_TEST — Simple Semi: Groundworks ended week 4, Brickwork
+  // didn't slide back from week 6).
   try {
     await prisma.$transaction(async (tx) => {
-      await packChildrenAndUpdateParent(tx, parent, parent.children);
+      // We can't call packChildrenAndUpdateParent then resequence as
+      // separate steps — the resequence rewrites every stage's
+      // startWeek anyway, and re-packs each stage's children inside
+      // its new window. So just trigger the full template re-sequence;
+      // the parent we were called for gets handled in the loop.
+      await resequenceTopLevelStages(tx, id);
     });
 
     // Return updated template

@@ -5,6 +5,7 @@ import { AuthProvider } from "@/components/providers/SessionProvider";
 import { ServiceWorkerRegistrar } from "@/components/providers/ServiceWorkerProvider";
 import { DevDateProvider } from "@/lib/dev-date-context";
 import { FetchPatchProvider } from "@/components/providers/FetchPatchProvider";
+import { GlobalLoadingBar } from "@/components/layout/GlobalLoadingBar";
 import { ToastProvider } from "@/components/ui/toast";
 
 export const metadata: Metadata = {
@@ -39,6 +40,7 @@ export default function RootLayout({
           </DevDateProvider>
         </AuthProvider>
         <FetchPatchProvider />
+        <GlobalLoadingBar />
         <ServiceWorkerRegistrar />
       </body>
     </html>
