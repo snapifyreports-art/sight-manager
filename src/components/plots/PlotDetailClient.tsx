@@ -3,7 +3,7 @@
 import { useState, useMemo, useCallback } from "react";
 import { useRefreshOnFocus } from "@/hooks/useRefreshOnFocus";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { format, differenceInCalendarDays } from "date-fns";
 import { getCurrentDateAtMidnight } from "@/lib/dev-date";
 import { useDevDate } from "@/lib/dev-date-context";
@@ -865,7 +865,23 @@ export function PlotDetailClient({
   snagSummary?: Record<string, number>;
 }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { devDate } = useDevDate();
+
+  // Tab persistence — same pattern as Settings/Suppliers. `?tab=X`
+  // restores on refresh / deep link. Default "overview" if absent.
+  const VALID_TABS = useMemo(
+    () => new Set(["overview", "gantt", "todo", "jobs", "history", "materials", "drawings"]),
+    [],
+  );
+  const tabFromUrl = searchParams?.get("tab") ?? "";
+  const activeTab = VALID_TABS.has(tabFromUrl) ? tabFromUrl : "overview";
+  function handleTabChange(next: string) {
+    const params = new URLSearchParams(searchParams?.toString() ?? "");
+    params.set("tab", next);
+    const qs = params.toString();
+    router.replace(qs ? `?${qs}` : window.location.pathname, { scroll: false });
+  }
 
   // Auto-refresh when user navigates back or tab regains focus
   const refreshPlot = useCallback(() => { router.refresh(); }, [router]);
@@ -968,8 +984,12 @@ export function PlotDetailClient({
         </div>
       </div>
 
-      {/* Tabs */}
-      <Tabs defaultValue="overview">
+      {/* Tabs — URL-backed via ?tab=X so refresh keeps the user where
+          they are. Same pattern as Settings + Suppliers. */}
+      <Tabs
+        value={activeTab}
+        onValueChange={(v) => v !== null && handleTabChange(v)}
+      >
         <TabsList>
           <TabsTrigger value="overview">
             <LayoutDashboard className="size-4" />

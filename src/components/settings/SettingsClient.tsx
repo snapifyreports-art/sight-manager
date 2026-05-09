@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   Card,
   CardContent,
@@ -51,7 +52,49 @@ function formatRole(role: string) {
 }
 
 export function SettingsClient({ user, templates, users, currentUserId, sites, initialTab }: SettingsClientProps) {
-  const [activeTab, setActiveTab] = useState(initialTab || "general");
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  // Initial tab resolves from a few sources:
+  //   1. ?tab=X if present (refresh / deep link)
+  //   2. "templates" if ?tpl=X is set (the user is editing a template,
+  //      so they should land on that tab even if ?tab wasn't in the URL)
+  //   3. The server-passed `initialTab` (legacy fallback, mirrors #1)
+  //   4. "general" default
+  const resolveInitialTab = () => {
+    const fromUrl = searchParams?.get("tab");
+    if (fromUrl) return fromUrl;
+    if (searchParams?.get("tpl")) return "templates";
+    return initialTab || "general";
+  };
+  const [activeTab, setActiveTab] = useState(resolveInitialTab);
+
+  // Sync URL → activeTab on browser back / forward / direct nav.
+  useEffect(() => {
+    const fromUrl = searchParams?.get("tab");
+    const wantTplTab = !!searchParams?.get("tpl");
+    const desired = fromUrl ?? (wantTplTab ? "templates" : null);
+    if (desired && desired !== activeTab) {
+      setActiveTab(desired);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
+  // Sync activeTab → URL when the user changes tabs. Preserves other
+  // params (?tpl=X, ?v=Y) so editor state survives the navigation.
+  function changeTab(next: string) {
+    setActiveTab(next);
+    const params = new URLSearchParams(searchParams?.toString() ?? "");
+    params.set("tab", next);
+    // Switching tabs implicitly leaves the editor — drop the editor
+    // params if we're navigating away from templates.
+    if (next !== "templates") {
+      params.delete("tpl");
+      params.delete("v");
+    }
+    const qs = params.toString();
+    router.replace(qs ? `?${qs}` : window.location.pathname, { scroll: false });
+  }
 
   return (
     <div className="space-y-6">
@@ -67,7 +110,7 @@ export function SettingsClient({ user, templates, users, currentUserId, sites, i
 
       <Tabs
         value={activeTab}
-        onValueChange={(v) => v !== null && setActiveTab(v)}
+        onValueChange={(v) => v !== null && changeTab(v)}
       >
         <TabsList variant="line">
           <TabsTrigger value="general">
