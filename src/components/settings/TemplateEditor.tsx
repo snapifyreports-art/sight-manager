@@ -49,6 +49,7 @@ import { TemplateValidationPanel } from "./TemplateValidationPanel";
 import { TemplateCostFooter } from "./TemplateCostFooter";
 import { TemplateOrderTimeline } from "./TemplateOrderTimeline";
 import { ApplyTemplatePreview } from "./ApplyTemplatePreview";
+import { TemplateMobileSummary } from "./TemplateMobileSummary";
 import type {
   TemplateData,
   TemplateJobData,
@@ -1642,15 +1643,21 @@ export function TemplateEditor({
         }}
       />
 
-      {/* Timeline Preview - now interactive */}
+      {/* Mobile summary — read-only, replaces the Gantt below md. */}
+      <TemplateMobileSummary template={template} />
+
+      {/* Timeline Preview - hidden on mobile (200px-fixed-left + horizontal
+          scroll is unusable on phones). */}
       {template.jobs.length > 0 && (
-        <TemplateTimeline
-          jobs={template.jobs}
-          onJobUpdate={handleTimelineJobUpdate}
-          expandedJobIds={expandedJobs}
-          onToggleExpand={toggleJobExpand}
-          onBarClick={handleBarClick}
-        />
+        <div className="hidden md:block">
+          <TemplateTimeline
+            jobs={template.jobs}
+            onJobUpdate={handleTimelineJobUpdate}
+            expandedJobIds={expandedJobs}
+            onToggleExpand={toggleJobExpand}
+            onBarClick={handleBarClick}
+          />
+        </div>
       )}
 
       {/* Validation panel — flags missing durations, orphaned anchors,

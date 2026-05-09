@@ -301,6 +301,74 @@ export async function POST(
     }
   }
 
+  // Materials consumption logging — May 2026.
+  // When a job starts and its stageCode matches a TemplateMaterial's
+  // linkedStageCode that's been applied to this plot (PlotMaterial), bump
+  // PlotMaterial.consumed by the expected qty AND log a
+  // TemplateMaterialConsumption event so the Quants Burn-Down report can
+  // show "expected vs actual" by plot.
+  //
+  // Pure side-effect — wrapped in try/catch so a logging failure can't
+  // break the job-start action.
+  if (action === "start" && existing.stageCode) {
+    try {
+      // Find PlotMaterial rows on this plot that link to this stage code
+      // and haven't already been auto-consumed (we use consumed >=
+      // quantity as the "already done" sentinel).
+      const matchingMaterials = await prisma.plotMaterial.findMany({
+        where: {
+          plotId: existing.plotId,
+          linkedStageCode: existing.stageCode,
+        },
+      });
+
+      for (const m of matchingMaterials) {
+        // Don't double-consume: if consumed already covers expected, skip.
+        if (m.consumed >= m.quantity) continue;
+
+        // Find the source TemplateMaterial so we can log against the
+        // canonical row (this powers per-template consumption reports).
+        // Match by name + plot's sourceTemplateId — best we can do
+        // without a direct FK from PlotMaterial → TemplateMaterial.
+        const plot = await prisma.plot.findUnique({
+          where: { id: existing.plotId },
+          select: { sourceTemplateId: true },
+        });
+        let templateMaterialId: string | null = null;
+        if (plot?.sourceTemplateId) {
+          const tm = await prisma.templateMaterial.findFirst({
+            where: { templateId: plot.sourceTemplateId, name: m.name },
+            select: { id: true },
+          });
+          templateMaterialId = tm?.id ?? null;
+        }
+
+        // Bump consumed to expected (assumption: starting the linked
+        // job means all the expected qty is now in play). User can
+        // adjust manually after if reality differs.
+        await prisma.plotMaterial.update({
+          where: { id: m.id },
+          data: { consumed: m.quantity },
+        });
+
+        // Log audit row if we found the template source — keeps the
+        // burn-down report clean (rows tied to template, not plot).
+        if (templateMaterialId) {
+          await prisma.templateMaterialConsumption.create({
+            data: {
+              templateMaterialId,
+              plotId: existing.plotId,
+              jobId: id,
+              quantity: m.quantity,
+            },
+          });
+        }
+      }
+    } catch (e) {
+      console.error("Auto-consume materials error:", e);
+    }
+  }
+
   // If this job has a parent (is a sub-job), recompute parent's dates/status
   // so the parent stretches with its children and its status follows theirs
   await recomputeParentOf(prisma, id);
