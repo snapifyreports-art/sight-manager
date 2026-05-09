@@ -45,6 +45,7 @@ import {
 } from "@/components/ui/select";
 import { TemplateEditor } from "./TemplateEditor";
 import { TemplateExtras } from "./TemplateExtras";
+import { TemplateVariantsSection } from "./TemplateVariantsSection";
 import type { TemplateData } from "./types";
 import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 import { useConfirmAction } from "@/hooks/useConfirmAction";
@@ -285,6 +286,7 @@ export function PlotTemplatesSection({
           }}
           onUpdate={handleTemplateUpdated}
         />
+        <TemplateVariantsSection template={editingTemplate} />
         <TemplateExtras templateId={editingTemplate.id} templateName={editingTemplate.name} />
       </div>
     );

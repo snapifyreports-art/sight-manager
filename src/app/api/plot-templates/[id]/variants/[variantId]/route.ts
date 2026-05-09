@@ -1,0 +1,67 @@
+import { NextRequest, NextResponse } from "next/server";
+import { auth } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
+import { apiError } from "@/lib/api-errors";
+
+export const dynamic = "force-dynamic";
+
+// PATCH — rename / re-describe a variant
+export async function PATCH(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string; variantId: string }> },
+) {
+  const session = await auth();
+  if (!session)
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const { id: templateId, variantId } = await params;
+  const body = await req.json();
+  const { name, description } = body;
+
+  try {
+    const updated = await prisma.templateVariant.update({
+      where: { id: variantId, templateId },
+      data: {
+        ...(name !== undefined && { name: String(name).trim() }),
+        ...(description !== undefined && {
+          description: description ? String(description).trim() : null,
+        }),
+      },
+    });
+    return NextResponse.json(updated);
+  } catch (err) {
+    return apiError(err, "Failed to update variant");
+  }
+}
+
+// DELETE — drop a variant (cascades to overrides)
+export async function DELETE(
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string; variantId: string }> },
+) {
+  const session = await auth();
+  if (!session)
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const { id: templateId, variantId } = await params;
+  try {
+    const variant = await prisma.templateVariant.findUnique({
+      where: { id: variantId },
+    });
+    await prisma.templateVariant.delete({ where: { id: variantId } });
+    if (variant) {
+      await prisma.templateAuditEvent.create({
+        data: {
+          templateId,
+          userId: session.user?.id ?? null,
+          userName: session.user?.name ?? session.user?.email ?? null,
+          action: "variant_removed",
+          detail: `Removed variant "${variant.name}"`,
+        },
+      });
+    }
+    return NextResponse.json({ success: true });
+  } catch (err) {
+    return apiError(err, "Failed to delete variant");
+  }
+}

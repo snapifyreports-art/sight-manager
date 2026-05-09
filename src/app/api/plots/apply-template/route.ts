@@ -19,6 +19,7 @@ export async function POST(request: NextRequest) {
     plotName,
     plotDescription,
     templateId,
+    variantId,
     startDate,
     supplierMappings,
     plotNumber,
@@ -65,6 +66,49 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // Variant overrides — if a variantId was passed, load its job +
+  // material overrides and mutate the template payload BEFORE the apply
+  // helper runs. createJobsFromTemplate reads `durationDays` directly,
+  // so injecting the variant value here is the simplest splice point.
+  let resolvedVariantId: string | null = null;
+  if (variantId) {
+    const variant = await prisma.templateVariant.findUnique({
+      where: { id: variantId },
+      include: { jobOverrides: true, materialOverrides: true },
+    });
+    if (!variant || variant.templateId !== templateId) {
+      return NextResponse.json(
+        { error: "Variant not found or doesn't belong to this template" },
+        { status: 400 },
+      );
+    }
+    resolvedVariantId = variant.id;
+    const jobOverrides = new Map(
+      variant.jobOverrides.map((o) => [o.templateJobId, o.durationDays]),
+    );
+    const materialOverrides = new Map(
+      variant.materialOverrides.map((o) => [o.templateMaterialId, o]),
+    );
+    // Walk every job (and child) and replace durationDays where the
+    // variant has an override. Loosely typed because the templateJobs
+    // include is nested and the inferred Prisma type is awkward.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const applyJobOverride = (j: any) => {
+      const v = jobOverrides.get(j.id);
+      if (v != null) j.durationDays = v;
+      if (Array.isArray(j.children)) j.children.forEach(applyJobOverride);
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (template.jobs as any[]).forEach((j) => applyJobOverride(j));
+    // Materials
+    for (const m of template.materials) {
+      const override = materialOverrides.get(m.id);
+      if (!override) continue;
+      if (override.quantity != null) m.quantity = override.quantity;
+      if (override.unitCost != null) m.unitCost = override.unitCost;
+    }
+  }
+
   const plotStartDate = new Date(startDate);
 
   // Create everything in a transaction — complex templates can have 20+ jobs + many orders,
@@ -83,6 +127,7 @@ export async function POST(request: NextRequest) {
         houseType: template.typeLabel || null,
         // Snapshot link back to the template — informational, no auto-sync.
         sourceTemplateId: template.id,
+        sourceVariantId: resolvedVariantId,
       },
     });
 
