@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, AlertCircle, ChevronDown, ChevronRight, Check } from "lucide-react";
 import {
   validateTemplate,
@@ -16,13 +16,57 @@ import type { TemplateData } from "./types";
  * pill that takes up almost no vertical space. Auto-expands the first
  * time errors appear so users notice (subsequent renders preserve
  * whatever the user set explicitly).
+ *
+ * Materials + documents counts are fetched separately (they don't ride
+ * along with the template payload) so completeness checks for "no
+ * drawings" / "no quants" can fire as warnings.
  */
 export function TemplateValidationPanel({
   template,
 }: {
   template: TemplateData;
 }) {
-  const issues = useMemo(() => validateTemplate(template), [template]);
+  const tplBaseId = template.templateId ?? template.id;
+  const variantId = template.variantId ?? null;
+  const variantQ = variantId ? `?variantId=${variantId}` : "";
+
+  const [materialCount, setMaterialCount] = useState<number | undefined>(
+    undefined,
+  );
+  const [documentCount, setDocumentCount] = useState<number | undefined>(
+    undefined,
+  );
+
+  // Fetch counts on mount + when scope changes. The /materials and
+  // /documents endpoints already exist and are cheap (just rows in
+  // the template's scope).
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([
+      fetch(`/api/plot-templates/${tplBaseId}/materials${variantQ}`, {
+        cache: "no-store",
+      }).then((r) => (r.ok ? r.json() : [])),
+      fetch(`/api/plot-templates/${tplBaseId}/documents${variantQ}`, {
+        cache: "no-store",
+      }).then((r) => (r.ok ? r.json() : [])),
+    ]).then(([mats, docs]) => {
+      if (cancelled) return;
+      setMaterialCount(Array.isArray(mats) ? mats.length : 0);
+      setDocumentCount(Array.isArray(docs) ? docs.length : 0);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [tplBaseId, variantQ]);
+
+  const issues = useMemo(
+    () =>
+      validateTemplate(template, {
+        materialCount,
+        documentCount,
+      }),
+    [template, materialCount, documentCount],
+  );
   const { errorCount, warningCount } = summariseIssues(issues);
   const total = issues.length;
 

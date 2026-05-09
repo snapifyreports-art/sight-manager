@@ -65,7 +65,20 @@ function* allOrders(
   }
 }
 
-export function validateTemplate(template: TemplateData): TemplateIssue[] {
+/** Optional context for completeness checks that need data living
+ *  outside `TemplateData` itself (materials + documents are fetched
+ *  separately from the template payload). */
+export interface ValidationContext {
+  /** Number of TemplateMaterial rows for this template / variant. */
+  materialCount?: number;
+  /** Number of TemplateDocument rows for this template / variant. */
+  documentCount?: number;
+}
+
+export function validateTemplate(
+  template: TemplateData,
+  ctx: ValidationContext = {},
+): TemplateIssue[] {
   const issues: TemplateIssue[] = [];
 
   // --- Stage-level checks -------------------------------------------------
@@ -125,11 +138,33 @@ export function validateTemplate(template: TemplateData): TemplateIssue[] {
     }
   }
 
+  // --- Sub-job-level completeness checks (aggregated) ---------------------
+  // Aggregated so a 30-sub-job template doesn't dump 30 individual rows
+  // when contractors aren't assigned yet — that just drowns the panel.
+  const subJobsWithoutContractor: string[] = [];
+  for (const stage of template.jobs) {
+    for (const child of stage.children ?? []) {
+      if (!child.contactId) {
+        subJobsWithoutContractor.push(`${stage.name} › ${child.name}`);
+      }
+    }
+  }
+  if (subJobsWithoutContractor.length > 0) {
+    issues.push({
+      severity: "warning",
+      message: `${subJobsWithoutContractor.length} sub-job${subJobsWithoutContractor.length === 1 ? "" : "s"} have no contractor assigned (e.g. ${truncateList(subJobsWithoutContractor)}).`,
+    });
+  }
+
   // --- Order-level checks -------------------------------------------------
 
   // Build a set of valid job IDs so we can detect orphaned anchorJobId.
   const validJobIds = new Set<string>();
   for (const job of allJobs(template)) validJobIds.add(job.id);
+
+  // Aggregated lists for completeness checks
+  const ordersNoSupplier: string[] = [];
+  const ordersNoItems: string[] = [];
 
   for (const { order, job } of allOrders(template)) {
     // Anchor points at a job that no longer exists (was deleted).
@@ -163,12 +198,21 @@ export function validateTemplate(template: TemplateData): TemplateIssue[] {
       });
     }
 
-    // No items and no description — order will arrive on site with no
-    // detail of what's expected. Not fatal, but easily fixed.
-    if (
-      (!order.items || order.items.length === 0) &&
-      (!order.itemsDescription || order.itemsDescription.trim() === "")
-    ) {
+    // No supplier — order can't be auto-fired on apply or on job-start.
+    if (!order.supplierId) {
+      ordersNoSupplier.push(`${job.name} (${order.itemsDescription ?? "no description"})`);
+    }
+
+    // No items at all — even if itemsDescription is set, no quantities/
+    // line items means the supplier can't price or pack it. We split
+    // this into two separate aggregated warnings (no items vs no items
+    // AND no description) so the messaging is clearer.
+    const hasItems = order.items && order.items.length > 0;
+    const hasDescription =
+      order.itemsDescription && order.itemsDescription.trim() !== "";
+    if (!hasItems && hasDescription) {
+      ordersNoItems.push(`${job.name} (${order.itemsDescription})`);
+    } else if (!hasItems && !hasDescription) {
       issues.push({
         severity: "warning",
         message: `Order on "${job.name}" has no items or description. The supplier won't know what to send.`,
@@ -188,12 +232,55 @@ export function validateTemplate(template: TemplateData): TemplateIssue[] {
     }
   }
 
+  if (ordersNoSupplier.length > 0) {
+    issues.push({
+      severity: "warning",
+      message: `${ordersNoSupplier.length} order${ordersNoSupplier.length === 1 ? "" : "s"} have no supplier assigned (e.g. ${truncateList(ordersNoSupplier)}).`,
+    });
+  }
+  if (ordersNoItems.length > 0) {
+    issues.push({
+      severity: "warning",
+      message: `${ordersNoItems.length} order${ordersNoItems.length === 1 ? "" : "s"} have a description but no priced items (e.g. ${truncateList(ordersNoItems)}). Costs won't roll up.`,
+    });
+  }
+
+  // --- Template-wide completeness checks ----------------------------------
+  // Only flag these if we've actually been given the count via context
+  // (the panel fetches them separately). If ctx is empty we just skip,
+  // so the validation function stays useful in tests / non-UI contexts.
+  if (template.jobs.length > 0) {
+    if (ctx.materialCount === 0) {
+      issues.push({
+        severity: "warning",
+        message:
+          "No quants / materials added yet. Plots applied from this template won't have any tracked materials.",
+      });
+    }
+    if (ctx.documentCount === 0) {
+      issues.push({
+        severity: "warning",
+        message:
+          "No drawings uploaded yet. Plots applied from this template won't have any drawings linked.",
+      });
+    }
+  }
+
   // Sort errors first, warnings second. Stable order within each
   // severity so the panel doesn't reshuffle on every render.
   return issues.sort((a, b) => {
     if (a.severity === b.severity) return 0;
     return a.severity === "error" ? -1 : 1;
   });
+}
+
+/**
+ * Truncate an aggregated list to keep messages readable. Shows the
+ * first three names verbatim, then "+ N more".
+ */
+function truncateList(items: string[]): string {
+  if (items.length <= 3) return items.join(", ");
+  return `${items.slice(0, 3).join(", ")} + ${items.length - 3} more`;
 }
 
 export function summariseIssues(issues: TemplateIssue[]): {
