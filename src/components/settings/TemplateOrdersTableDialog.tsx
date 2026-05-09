@@ -209,6 +209,30 @@ export function TemplateOrdersTableDialog({
           </DialogDescription>
         </DialogHeader>
 
+        {/* Quick-assign supplier bar — pick once, applies to every row
+            that doesn't already have a supplier. Overwrite-all toggle
+            for the case where you've changed suppliers across the
+            board. Same pattern the Contractors dialog uses per stage. */}
+        {rows.length > 0 && (
+          <QuickAssignSupplierBar
+            suppliers={suppliers}
+            onApply={(supplierId, overwriteAll) => {
+              setDrafts((prev) => {
+                const next = { ...prev };
+                for (const r of rows) {
+                  if (overwriteAll || !next[r.order.id].supplierId) {
+                    next[r.order.id] = {
+                      ...next[r.order.id],
+                      supplierId,
+                    };
+                  }
+                }
+                return next;
+              });
+            }}
+          />
+        )}
+
         <div className="max-h-[60vh] overflow-auto rounded border">
           {rows.length === 0 ? (
             <p className="p-6 text-center text-sm text-muted-foreground">
@@ -436,6 +460,76 @@ export function TemplateOrdersTableDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/**
+ * Quick-assign supplier bar shown above the orders table. Picks one
+ * supplier and applies it to every row in the dialog with one click.
+ * Overwrite checkbox controls whether already-set suppliers get
+ * replaced (default: only fill the empty ones — safer).
+ */
+function QuickAssignSupplierBar({
+  suppliers,
+  onApply,
+}: {
+  suppliers: SupplierData[];
+  onApply: (supplierId: string | null, overwriteAll: boolean) => void;
+}) {
+  const [picked, setPicked] = useState<string>("__pick__");
+  const [overwrite, setOverwrite] = useState(false);
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-blue-50/40 px-3 py-2 text-xs">
+      <span className="font-medium text-blue-900">Quick assign supplier:</span>
+      <Select
+        value={picked}
+        onValueChange={(v) => setPicked(v ?? "__pick__")}
+      >
+        <SelectTrigger className="h-7 w-56 text-xs">
+          <SelectValue placeholder="Pick a supplier…">
+            {picked === "__pick__"
+              ? <span className="text-muted-foreground">Pick a supplier…</span>
+              : picked === "__none__"
+                ? "None (clear)"
+                : suppliers.find((s) => s.id === picked)?.name ?? picked}
+          </SelectValue>
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="__none__">None (clear)</SelectItem>
+          {suppliers.map((s) => (
+            <SelectItem key={s.id} value={s.id}>
+              {s.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <label className="flex items-center gap-1 text-[11px] text-muted-foreground">
+        <input
+          type="checkbox"
+          checked={overwrite}
+          onChange={(e) => setOverwrite(e.target.checked)}
+          className="size-3"
+        />
+        Overwrite already-set
+      </label>
+      <Button
+        size="sm"
+        variant="outline"
+        disabled={picked === "__pick__"}
+        onClick={() => {
+          const id = picked === "__none__" ? null : picked;
+          onApply(id, overwrite);
+          setPicked("__pick__");
+        }}
+        className="h-7 text-xs"
+      >
+        Apply{overwrite ? " to all" : " to empty rows"}
+      </Button>
+      <span className="ml-auto text-[10px] text-muted-foreground">
+        Doesn&apos;t save automatically — review then hit Save.
+      </span>
+    </div>
   );
 }
 
