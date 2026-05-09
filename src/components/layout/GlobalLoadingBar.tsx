@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Loader2 } from "lucide-react";
 import { subscribeInFlight } from "@/lib/global-loading";
+import { HouseBuildingAnimation } from "./HouseBuildingAnimation";
 
 /**
  * Global "something's happening" indicator. Two pieces:
@@ -94,7 +94,10 @@ export function GlobalLoadingBar() {
           className="flex items-center gap-3 rounded-2xl border border-blue-200 bg-white/95 px-6 py-4 text-base font-medium text-blue-900 shadow-2xl backdrop-blur-sm transition-transform duration-200"
           style={{ transform: active ? "scale(1)" : "scale(0.92)" }}
         >
-          <Loader2 className="size-6 animate-spin text-blue-600" />
+          {/* House-building line animation — Keith Nov 2026: a generic
+              spinner felt off-brand for a construction-site app, swap
+              for a tiny vector house drawing itself piece by piece. */}
+          <HouseBuildingAnimation className="size-8" />
           {/* "Working" rather than "Saving" — the indicator fires on
               both writes AND no-store reads (post-write data refresh
               + variant context fetches), so "Saving" was misleading
