@@ -207,7 +207,8 @@ export async function POST(
   const jobMap = new Map(allPlotJobs.map((j) => [j.id, j]));
 
   try {
-  await prisma.$transaction(async (tx) => {
+  await prisma.$transaction(
+    async (tx) => {
     // The cascade library returns the trigger job in jobUpdates along with
     // downstream jobs — apply them uniformly. No separate trigger handling.
     for (const update of cascade.jobUpdates) {
@@ -254,7 +255,12 @@ export async function POST(
         delayReasonType,
       },
     });
-  });
+  },
+    // Default 5s tx timeout was tripping on big delays (50 days
+    // shifting dozens of jobs + orders on a multi-plot site). Bump
+    // to 30s — same envelope as recalculate-stages.
+    { timeout: 30_000, maxWait: 10_000 },
+  );
 
   // Recompute every affected parent job's dates/status from its shifted children.
   // jobMap already has parentId for every job on this plot — no extra queries.

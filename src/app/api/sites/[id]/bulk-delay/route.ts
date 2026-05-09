@@ -190,7 +190,12 @@ export async function POST(
       await Promise.all(
         Array.from(parentIds).map((pid) => recomputeParentFromChildren(tx, pid))
       );
-    });
+    },
+    // Same envelope as single-job delay — bulk delays cascade lots of
+    // jobs + orders + run parent recomputes inside the tx, easy to
+    // exceed the 5s default.
+    { timeout: 30_000, maxWait: 10_000 },
+    );
 
     results.push({
       plotId,
