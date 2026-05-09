@@ -158,20 +158,62 @@ function ApprovalDot({ approved }: { approved: boolean }) {
 
 // ---------- Export helpers ----------
 
+// Status priority for picking a "dominant" job when multiple overlap
+// the same cell. IN_PROGRESS wins so the cell colour reflects what's
+// actually happening on site; ON_HOLD next so problems aren't hidden;
+// then NOT_STARTED before COMPLETED so an upcoming stage shows over a
+// finished one in cells where a long-tail job overlaps with new work.
+const STATUS_PRIORITY: Record<string, number> = {
+  IN_PROGRESS: 0,
+  ON_HOLD: 1,
+  NOT_STARTED: 2,
+  COMPLETED: 3,
+};
+
 function getJobStageForCell(
   jobs: ProgrammeJob[],
   cellDate: Date,
   cellEnd: Date
 ): { code: string; status: string } | null {
+  // Find EVERY overlapping job, not just the first. Sub-jobs run in
+  // parallel inside the same parent stage all the time — the old
+  // first-match logic silently dropped every job after the first,
+  // which made PDF/Excel cells diverge from the on-screen render
+  // (Keith May 2026: "the download pdf doesnt match the programme").
+  const overlaps: ProgrammeJob[] = [];
   for (const job of jobs) {
     if (!job.startDate || !job.endDate) continue;
     const jobStart = new Date(job.startDate);
     const jobEnd = new Date(job.endDate);
     if (jobStart < cellEnd && jobEnd >= cellDate) {
-      return { code: getStageCode(job), status: job.status };
+      overlaps.push(job);
     }
   }
-  return null;
+  if (overlaps.length === 0) return null;
+
+  // Sort by status priority so cell colour reflects the most-active
+  // job. Within the same priority, lower sortOrder wins (stable
+  // ordering — same as on-screen bar stacking).
+  overlaps.sort((a, b) => {
+    const pa = STATUS_PRIORITY[a.status] ?? 99;
+    const pb = STATUS_PRIORITY[b.status] ?? 99;
+    if (pa !== pb) return pa - pb;
+    return (a.sortOrder ?? 0) - (b.sortOrder ?? 0);
+  });
+
+  // Concatenate up to 3 unique codes joined by "/". Two parallel
+  // sub-jobs => "BRI/SCA"; more than three => "BRI/SCA/+2" so the
+  // cell stays readable. Cell colour comes from the dominant job.
+  const dominant = overlaps[0];
+  const codes: string[] = [];
+  for (const j of overlaps) {
+    const c = getStageCode(j);
+    if (c && !codes.includes(c)) codes.push(c);
+  }
+  let code = codes.slice(0, 3).join("/");
+  if (codes.length > 3) code = `${codes.slice(0, 3).join("/")}+${codes.length - 3}`;
+
+  return { code: code || getStageCode(dominant), status: dominant.status };
 }
 
 function getActiveStageLabel(plot: ProgrammePlot): string {
