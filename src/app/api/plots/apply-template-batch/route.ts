@@ -18,9 +18,13 @@ export async function POST(request: NextRequest) {
     siteId: string;
     templateId: string;
     variantId?: string | null;
+    /** Batch-level fallback date — used when a plot row has no own
+     *  startDate. Required so existing legacy callers without per-plot
+     *  dates keep working. */
     startDate: string;
     supplierMappings: Record<string, string>;
-    plots: Array<{ plotNumber: string; plotName: string }>;
+    /** Per-plot rows. `startDate` is optional; falls back to body.startDate. */
+    plots: Array<{ plotNumber: string; plotName: string; startDate?: string }>;
   };
 
   if (!siteId || !templateId || !startDate || !plots || plots.length === 0) {
@@ -147,7 +151,7 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  const plotStartDate = new Date(startDate);
+  const fallbackStartDate = new Date(startDate);
 
   // Create each plot in its own transaction to avoid timeout on large batches
   const createdPlots: string[] = [];
@@ -155,6 +159,13 @@ export async function POST(request: NextRequest) {
   const warningsByPlot: Record<string, { templateJobName: string; itemsDescription: string | null }[]> = {};
 
   for (const plotInput of plots) {
+    // Per-plot start date (May 2026): each plot row may carry its own
+    // startDate from the wizard's stagger / per-plot override flow. Fall
+    // back to the batch-level date for legacy callers that don't pass
+    // per-row dates.
+    const perPlotStart = plotInput.startDate
+      ? new Date(plotInput.startDate)
+      : fallbackStartDate;
     try {
       const { plotId, warnings } = await prisma.$transaction(async (tx) => {
         const plot = await tx.plot.create({
@@ -172,7 +183,7 @@ export async function POST(request: NextRequest) {
         const w = await createJobsFromTemplate(
           tx,
           plot.id,
-          plotStartDate,
+          perPlotStart,
           scopedJobs as any,
           supplierMappings || null,
           site.assignedToId

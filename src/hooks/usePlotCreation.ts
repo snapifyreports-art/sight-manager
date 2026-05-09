@@ -28,7 +28,14 @@ import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 // Keep in sync with /api/plots/apply-template-batch's expected shape.
 type SupplierMappings = Record<string, string>;
 
-interface PlotRange { plotNumber: string; plotName: string }
+interface PlotRange {
+  plotNumber: string;
+  plotName: string;
+  /** Optional per-plot start date (yyyy-mm-dd). When set, this plot
+   *  uses its own date instead of the batch-level startDate. Added
+   *  May 2026 for the per-plot stagger flow in CreateSiteWizard. */
+  startDate?: string;
+}
 
 interface BlankInput {
   siteId: string;

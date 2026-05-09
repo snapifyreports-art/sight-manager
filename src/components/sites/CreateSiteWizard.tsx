@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { format } from "date-fns";
+import { addWorkingDays } from "@/lib/working-days";
 import {
   Plus,
   Trash2,
@@ -78,13 +79,21 @@ interface Supplier {
   name: string;
 }
 
+interface PlotBatchPlot {
+  plotNumber: string;
+  /** Per-plot start date (ISO yyyy-mm-dd). Computed from the batch
+   *  start date + stagger by default; user can override per row. */
+  startDate: string;
+}
+
 interface PlotBatch {
   id: string;
   mode: "blank" | "template";
-  /** Parsed list of plot numbers — may be consecutive integers ("1","2","3")
-   *  from a "1-3" range shortcut, or custom alphanumeric ("47-A", "Block 2"). */
-  plotNumbers: string[];
-  startDate: string;
+  /** Per-plot rows with their own start dates. Replaces the May 2026
+   *  flat (plotNumbers + single startDate) shape — Keith hit the
+   *  limitation when staggering brickwork crew across plots and when
+   *  mixing pre-sold + on-contract plots in one logical group. */
+  plots: PlotBatchPlot[];
   templateId: string;
   /** Optional variant id — when set, the variant's full template is
    *  applied per plot rather than the base. Empty = base template. */
@@ -146,6 +155,131 @@ function parsePlotNumbers(input: string): { numbers: string[]; errors: string[] 
 }
 
 /** Compact label for a batch row. Collapses long consecutive-integer runs. */
+/**
+ * Compute per-plot start dates for a batch.
+ *
+ *   - Plot 1 always = batchStartDate (raw, no snap — the apply-template
+ *     endpoint snaps to a working day on commit if needed).
+ *   - Each subsequent plot is offset by `staggerDays` working days from
+ *     the previous plot's date. 0 = all plots same date.
+ *   - Pinned overrides (rows the user manually edited) take precedence
+ *     over the computed value.
+ */
+function deriveBatchPlotDates(
+  numbers: string[],
+  batchStartDate: string,
+  staggerDays: number,
+  overrides: Record<string, string>,
+): PlotBatchPlot[] {
+  return numbers.map((num, idx) => {
+    if (overrides[num]) {
+      return { plotNumber: num, startDate: overrides[num] };
+    }
+    if (!batchStartDate) {
+      return { plotNumber: num, startDate: "" };
+    }
+    if (idx === 0 || staggerDays <= 0) {
+      return { plotNumber: num, startDate: batchStartDate };
+    }
+    // Working-day offset from plot 1 (idx * staggerDays).
+    const baseDate = new Date(batchStartDate + "T00:00:00");
+    const shifted = addWorkingDays(baseDate, idx * staggerDays);
+    return { plotNumber: num, startDate: format(shifted, "yyyy-MM-dd") };
+  });
+}
+
+/**
+ * Per-plot date editor — a small table that shows once the user has
+ * entered both plot numbers and a batch start date. Each row's date
+ * defaults to (batchStart + plotIndex × stagger) but can be manually
+ * overridden. Manually-set rows are "pinned" until cleared via Reset.
+ *
+ * Pinning + auto-fill:
+ *   - Plot 1 always tracks batchStart unless pinned.
+ *   - Subsequent plots track (batchStart + idx × stagger) unless pinned.
+ *   - Editing the start date or stagger clears all pins (handled in
+ *     the parent so the auto-filled column resets predictably).
+ */
+function PerPlotDateEditor({
+  input,
+  startDate,
+  staggerDays,
+  overrides,
+  onOverrideChange,
+  onResetAll,
+}: {
+  input: string;
+  startDate: string;
+  staggerDays: number;
+  overrides: Record<string, string>;
+  onOverrideChange: (plotNumber: string, date: string) => void;
+  onResetAll: () => void;
+}) {
+  const { numbers, errors } = parsePlotNumbers(input);
+  if (errors.length > 0 || numbers.length === 0 || !startDate) return null;
+
+  const plots = deriveBatchPlotDates(numbers, startDate, staggerDays, overrides);
+  const pinnedCount = Object.keys(overrides).length;
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between">
+        <Label className="text-xs">
+          Per-plot start dates{" "}
+          <span className="text-[10px] font-normal text-muted-foreground">
+            ({plots.length} plot{plots.length === 1 ? "" : "s"}
+            {pinnedCount > 0 ? ` · ${pinnedCount} pinned` : ""})
+          </span>
+        </Label>
+        {pinnedCount > 0 && (
+          <button
+            type="button"
+            onClick={onResetAll}
+            className="text-[10px] font-medium text-blue-600 hover:underline"
+          >
+            Reset all to auto
+          </button>
+        )}
+      </div>
+      <div className="max-h-[180px] space-y-1 overflow-y-auto rounded border bg-white/60 p-1.5">
+        {plots.map((p) => {
+          const pinned = !!overrides[p.plotNumber];
+          return (
+            <div
+              key={p.plotNumber}
+              className={`flex items-center gap-2 rounded px-1.5 py-0.5 text-xs ${
+                pinned ? "bg-blue-50/60" : ""
+              }`}
+            >
+              <span className="w-12 shrink-0 font-medium">
+                Plot {p.plotNumber}
+              </span>
+              <Input
+                type="date"
+                value={p.startDate}
+                onChange={(e) =>
+                  onOverrideChange(p.plotNumber, e.target.value)
+                }
+                className="h-7 flex-1 text-xs"
+              />
+              {pinned && (
+                <button
+                  type="button"
+                  onClick={() => onOverrideChange(p.plotNumber, "")}
+                  className="text-[10px] text-muted-foreground hover:text-blue-600"
+                  title="Clear pin and auto-fill"
+                >
+                  ↺
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function batchLabel(nums: string[]): string {
   if (nums.length === 0) return "No plots";
   if (nums.length === 1) return `Plot ${nums[0]}`;
@@ -228,6 +362,17 @@ export function CreateSiteWizard({
     Array<{ id: string; name: string; description: string | null }>
   >([]);
   const [batchStartDate, setBatchStartDate] = useState("");
+  // Stagger between consecutive plots in a batch (working days).
+  // 0 = all plots start on batchStartDate. 5 = each plot is 1 working
+  // week after the previous. Plot 1 always = batchStartDate.
+  const [batchStaggerDays, setBatchStaggerDays] = useState<number>(0);
+  // Per-plot date overrides — when the user edits a specific row's
+  // date, that row is "pinned" here. Keyed by plot number. Computed
+  // dates ignore pinned rows; only unpinned rows recompute when
+  // start-date or stagger changes.
+  const [batchPlotDates, setBatchPlotDates] = useState<Record<string, string>>(
+    {},
+  );
   const [batchError, setBatchError] = useState("");
 
   // Templates & suppliers
@@ -300,13 +445,15 @@ export function CreateSiteWizard({
     setBatchVariantId("");
     setBatchVariants([]);
     setBatchStartDate("");
+    setBatchStaggerDays(0);
+    setBatchPlotDates({});
     setBatchError("");
   }
 
   // Plot numbers already claimed by other batches — string-level uniqueness
   // since plot numbers can be alphanumeric ("47-A", "Block 2").
   const claimedNumbers = new Set<string>(
-    plotBatches.flatMap((b) => b.plotNumbers)
+    plotBatches.flatMap((b) => b.plots.map((p) => p.plotNumber))
   );
 
   function handleAddBatch() {
@@ -347,13 +494,19 @@ export function CreateSiteWizard({
       ? batchVariants.find((v) => v.id === batchVariantId)?.name
       : undefined;
 
+    const plots = deriveBatchPlotDates(
+      numbers,
+      batchStartDate,
+      batchStaggerDays,
+      batchPlotDates,
+    );
+
     setPlotBatches((prev) => [
       ...prev,
       {
         id: crypto.randomUUID(),
         mode: batchMode,
-        plotNumbers: numbers,
-        startDate: batchStartDate,
+        plots,
         templateId: batchTemplateId,
         variantId: batchVariantId,
         templateName: tpl?.name ?? "",
@@ -370,7 +523,7 @@ export function CreateSiteWizard({
   }
 
   // Compute total plots
-  const totalPlots = plotBatches.reduce((sum, b) => sum + b.plotNumbers.length, 0);
+  const totalPlots = plotBatches.reduce((sum, b) => sum + b.plots.length, 0);
 
   // Check if any template batch has orders (needs supplier mapping)
   const templateBatchesWithOrders = plotBatches.filter((b) => {
@@ -392,7 +545,7 @@ export function CreateSiteWizard({
       seen.add(batch.templateId);
       const labels = plotBatches
         .filter((b) => b.templateId === batch.templateId)
-        .map((b) => batchLabel(b.plotNumbers));
+        .map((b) => batchLabel(b.plots.map((p) => p.plotNumber)));
       result.push({ template: tpl, batchLabels: labels });
     }
     return result;
@@ -422,11 +575,16 @@ export function CreateSiteWizard({
     const variantName = batchVariantId
       ? batchVariants.find((v) => v.id === batchVariantId)?.name
       : undefined;
+    const plots = deriveBatchPlotDates(
+      numbers,
+      batchStartDate,
+      batchStaggerDays,
+      batchPlotDates,
+    );
     return {
       id: crypto.randomUUID(),
       mode: batchMode,
-      plotNumbers: numbers,
-      startDate: batchStartDate,
+      plots,
       templateId: batchTemplateId,
       variantId: batchVariantId,
       templateName: tpl?.name ?? "",
@@ -502,16 +660,19 @@ export function CreateSiteWizard({
 
       for (let i = 0; i < batches.length; i++) {
         const batch = batches[i];
-        const rangeLabel = batchLabel(batch.plotNumbers);
+        const numbers = batch.plots.map((p) => p.plotNumber);
+        const rangeLabel = batchLabel(numbers);
         setSubmitProgress(`Creating ${rangeLabel}...`);
 
         try {
-          // Use the batch's custom plot numbers verbatim — they may be
-          // alphanumeric ("47-A", "Block 2") from user input, not just
-          // auto-expanded integer sequences.
-          const plots = batch.plotNumbers.map((pn) => ({
-            plotNumber: pn,
-            plotName: `Plot ${pn}`,
+          // Per-plot dates: each plot now carries its own startDate
+          // (computed from batch start + stagger, or manually pinned).
+          // The legacy single-date path still works on the server when
+          // a plot row has no startDate — it falls back to body.startDate.
+          const plots = batch.plots.map((p) => ({
+            plotNumber: p.plotNumber,
+            plotName: `Plot ${p.plotNumber}`,
+            startDate: p.startDate || undefined,
           }));
 
           if (batch.mode === "blank") {
@@ -521,11 +682,13 @@ export function CreateSiteWizard({
             if (!res.ok) throw new Error(res.error ?? "Failed to create plots");
           } else {
             // Template batch via shared hook — one call to apply-template-batch.
+            // First plot's date is the batch-level fallback for any plot
+            // row that didn't carry its own.
             const res = await createBatchFromTemplate({
               siteId: createdSite.id,
               templateId: batch.templateId,
               variantId: batch.variantId || null,
-              startDate: batch.startDate,
+              startDate: batch.plots[0]?.startDate ?? "",
               supplierMappings,
               plots,
             }, { silent: true });
@@ -731,7 +894,20 @@ export function CreateSiteWizard({
               {plotBatches.length > 0 && (
                 <div className="max-h-[30vh] space-y-2 overflow-y-auto">
                   {plotBatches.map((batch) => {
-                    const count = batch.plotNumbers.length;
+                    const count = batch.plots.length;
+                    const numbers = batch.plots.map((p) => p.plotNumber);
+                    // Date range: earliest → latest start across the batch.
+                    const dates = batch.plots
+                      .map((p) => p.startDate)
+                      .filter(Boolean)
+                      .sort();
+                    const firstDate = dates[0] ?? "";
+                    const lastDate = dates[dates.length - 1] ?? "";
+                    const dateLabel = !firstDate
+                      ? "no date"
+                      : firstDate === lastDate
+                        ? format(new Date(firstDate + "T00:00:00"), "d MMM yyyy")
+                        : `${format(new Date(firstDate + "T00:00:00"), "d MMM")} → ${format(new Date(lastDate + "T00:00:00"), "d MMM yyyy")}`;
                     return (
                       <div
                         key={batch.id}
@@ -740,15 +916,15 @@ export function CreateSiteWizard({
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2 text-sm font-medium">
                             <Layers className="size-3.5 text-muted-foreground" />
-                            {batchLabel(batch.plotNumbers)}
+                            {batchLabel(numbers)}
                             <span className="text-xs font-normal text-muted-foreground">
                               ({count} {count === 1 ? "plot" : "plots"})
                             </span>
                           </div>
                           {/* Show all plot numbers on hover/expand if not collapsed. */}
-                          {count > 4 && batchLabel(batch.plotNumbers).includes("more") && (
-                            <div className="mt-0.5 truncate text-[10px] text-muted-foreground/70" title={batch.plotNumbers.join(", ")}>
-                              {batch.plotNumbers.join(", ")}
+                          {count > 4 && batchLabel(numbers).includes("more") && (
+                            <div className="mt-0.5 truncate text-[10px] text-muted-foreground/70" title={numbers.join(", ")}>
+                              {numbers.join(", ")}
                             </div>
                           )}
                           <div className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
@@ -761,15 +937,21 @@ export function CreateSiteWizard({
                                 </span>
                                 <span>&middot;</span>
                                 <Calendar className="size-3" />
-                                <span>
-                                  {format(
-                                    new Date(batch.startDate + "T00:00:00"),
-                                    "d MMM yyyy"
-                                  )}
+                                <span title={firstDate !== lastDate ? "Plots staggered across this range" : undefined}>
+                                  {dateLabel}
                                 </span>
                               </>
                             ) : (
-                              <span className="italic">Blank plots</span>
+                              <>
+                                <span className="italic">Blank plots</span>
+                                {firstDate && (
+                                  <>
+                                    <span>&middot;</span>
+                                    <Calendar className="size-3" />
+                                    <span>{dateLabel}</span>
+                                  </>
+                                )}
+                              </>
                             )}
                           </div>
                         </div>
@@ -956,15 +1138,66 @@ export function CreateSiteWizard({
                             </div>
                           )}
 
-                          <div className="space-y-1.5">
-                            <Label className="text-xs">Start Date</Label>
-                            <Input
-                              type="date"
-                              value={batchStartDate}
-                              onChange={(e) => setBatchStartDate(e.target.value)}
-                              className="h-8 text-sm"
-                            />
+                          <div className="grid grid-cols-2 gap-2">
+                            <div className="space-y-1.5">
+                              <Label className="text-xs">Start Date</Label>
+                              <Input
+                                type="date"
+                                value={batchStartDate}
+                                onChange={(e) => {
+                                  setBatchStartDate(e.target.value);
+                                  // Editing the batch start clears any per-plot pins
+                                  // so the staggered/auto-filled column resets
+                                  // around the new date. Less surprising than
+                                  // leaving stale pins behind.
+                                  setBatchPlotDates({});
+                                }}
+                                className="h-8 text-sm"
+                              />
+                            </div>
+                            <div className="space-y-1.5">
+                              <Label
+                                className="text-xs"
+                                title="Working-day gap between consecutive plots in this batch. 0 = all plots same date. 5 = each plot one working week after the previous."
+                              >
+                                Stagger (working days)
+                              </Label>
+                              <Input
+                                type="number"
+                                min={0}
+                                max={365}
+                                value={batchStaggerDays}
+                                onChange={(e) => {
+                                  const v = parseInt(e.target.value, 10);
+                                  setBatchStaggerDays(Number.isFinite(v) && v >= 0 ? v : 0);
+                                  setBatchPlotDates({});
+                                }}
+                                placeholder="0"
+                                className="h-8 text-sm"
+                              />
+                            </div>
                           </div>
+
+                          {/* Per-plot date editor — visible once we have
+                              numbers + a start date. Each row's date is
+                              auto-filled from start + stagger; editing a
+                              row pins it (won't auto-update if start or
+                              stagger changes). */}
+                          <PerPlotDateEditor
+                            input={batchPlotNumbersInput}
+                            startDate={batchStartDate}
+                            staggerDays={batchStaggerDays}
+                            overrides={batchPlotDates}
+                            onOverrideChange={(plotNumber, date) =>
+                              setBatchPlotDates((prev) => {
+                                const next = { ...prev };
+                                if (date) next[plotNumber] = date;
+                                else delete next[plotNumber];
+                                return next;
+                              })
+                            }
+                            onResetAll={() => setBatchPlotDates({})}
+                          />
                         </>
                       )}
                     </>
