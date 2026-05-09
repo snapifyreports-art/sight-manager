@@ -517,12 +517,16 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
     return { houseTypes, stageCodes };
   }, [site]);
 
-  // Apply filters
+  // Apply filters + chronological sort.
+  // Plots are ordered by their EARLIEST job's startDate (i.e. when
+  // building begins) so the programme reads top-to-bottom in build
+  // sequence. Plot number is a tie-break for plots that start the
+  // same day. Without this the row order followed DB insertion which
+  // could be arbitrary if plots were created out of sequence.
   const filteredPlots = useMemo(() => {
     if (!site) return [];
 
-    return site.plots.filter((plot) => {
-      // Search filter
+    const matched = site.plots.filter((plot) => {
       if (searchTerm) {
         const term = searchTerm.toLowerCase();
         const matchesPlot =
@@ -531,24 +535,45 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
         if (!matchesPlot) return false;
       }
 
-      // House type filter
       if (houseTypeFilter !== "all" && plot.houseType !== houseTypeFilter) {
         return false;
       }
 
-      // Stage filter
       if (stageFilter !== "all") {
         const activeStage = getActiveStageLabel(plot);
         if (activeStage !== stageFilter) return false;
       }
 
-      // Status filter
       if (statusFilter !== "all") {
         const plotStatus = getPlotStatus(plot);
         if (plotStatus !== statusFilter) return false;
       }
 
       return true;
+    });
+
+    function plotEarliestJobMs(p: typeof matched[number]): number {
+      let earliest = Infinity;
+      for (const j of p.jobs) {
+        if (!j.startDate) continue;
+        const t = new Date(j.startDate).getTime();
+        if (t < earliest) earliest = t;
+      }
+      return earliest;
+    }
+
+    return [...matched].sort((a, b) => {
+      const at = plotEarliestJobMs(a);
+      const bt = plotEarliestJobMs(b);
+      // Plots with no scheduled jobs sink to the bottom rather than
+      // floating above the dated ones (Infinity comparison handles this).
+      if (at !== bt) return at - bt;
+      const an = a.plotNumber ?? a.name;
+      const bn = b.plotNumber ?? b.name;
+      return an.localeCompare(bn, undefined, {
+        numeric: true,
+        sensitivity: "base",
+      });
     });
   }, [site, searchTerm, houseTypeFilter, stageFilter, statusFilter]);
 
