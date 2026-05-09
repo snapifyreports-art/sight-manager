@@ -136,9 +136,28 @@ function IssueRow({ issue }: { issue: TemplateIssue }) {
       <Icon
         className={`mt-0.5 size-3.5 shrink-0 ${isError ? "text-red-600" : "text-amber-600"}`}
       />
-      <span className={isError ? "text-red-900" : "text-amber-900"}>
-        {issue.message}
-      </span>
+      <div className={`flex flex-1 flex-wrap items-baseline gap-x-2 ${isError ? "text-red-900" : "text-amber-900"}`}>
+        <span className="flex-1">{issue.message}</span>
+        {issue.action && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              // Cross-component dispatch — TemplateEditor handles the
+              // "open-orders-table" / "scroll-to-jobs" cases inline,
+              // TemplateExtras handles "add-material" / "upload-drawing".
+              window.dispatchEvent(
+                new CustomEvent("template-action", {
+                  detail: { kind: issue.action!.kind },
+                }),
+              );
+            }}
+            className="shrink-0 rounded border border-current/30 bg-white/60 px-2 py-0.5 text-[11px] font-medium hover:bg-white"
+          >
+            {issue.action.label} →
+          </button>
+        )}
+      </div>
     </li>
   );
 }

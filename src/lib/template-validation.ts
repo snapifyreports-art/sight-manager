@@ -20,6 +20,24 @@ import type {
 
 export type TemplateIssueSeverity = "error" | "warning";
 
+/**
+ * Quick-fix routing for an issue. The validation panel renders a small
+ * button that, on click, dispatches a `template-action` window event
+ * with this kind. The relevant components (TemplateEditor for orders,
+ * TemplateExtras for materials/drawings) listen for the event and open
+ * the appropriate dialog.
+ */
+export type TemplateIssueActionKind =
+  | "open-orders-table"
+  | "scroll-to-jobs"
+  | "add-material"
+  | "upload-drawing";
+
+export interface TemplateIssueAction {
+  kind: TemplateIssueActionKind;
+  label: string;
+}
+
 export interface TemplateIssue {
   severity: TemplateIssueSeverity;
   message: string;
@@ -27,6 +45,8 @@ export interface TemplateIssue {
   jobId?: string;
   /** Order the issue is attached to, if any. */
   orderId?: string;
+  /** Quick-fix action surfaced on the panel as a small button. */
+  action?: TemplateIssueAction;
 }
 
 /**
@@ -153,6 +173,7 @@ export function validateTemplate(
     issues.push({
       severity: "warning",
       message: `${subJobsWithoutContractor.length} sub-job${subJobsWithoutContractor.length === 1 ? "" : "s"} have no contractor assigned (e.g. ${truncateList(subJobsWithoutContractor)}).`,
+      action: { kind: "scroll-to-jobs", label: "Open jobs" },
     });
   }
 
@@ -236,12 +257,14 @@ export function validateTemplate(
     issues.push({
       severity: "warning",
       message: `${ordersNoSupplier.length} order${ordersNoSupplier.length === 1 ? "" : "s"} have no supplier assigned (e.g. ${truncateList(ordersNoSupplier)}).`,
+      action: { kind: "open-orders-table", label: "Edit orders" },
     });
   }
   if (ordersNoItems.length > 0) {
     issues.push({
       severity: "warning",
       message: `${ordersNoItems.length} order${ordersNoItems.length === 1 ? "" : "s"} have a description but no priced items (e.g. ${truncateList(ordersNoItems)}). Costs won't roll up.`,
+      action: { kind: "open-orders-table", label: "Edit orders" },
     });
   }
 
@@ -255,6 +278,7 @@ export function validateTemplate(
         severity: "warning",
         message:
           "No quants / materials added yet. Plots applied from this template won't have any tracked materials.",
+        action: { kind: "add-material", label: "Add material" },
       });
     }
     if (ctx.documentCount === 0) {
@@ -262,6 +286,7 @@ export function validateTemplate(
         severity: "warning",
         message:
           "No drawings uploaded yet. Plots applied from this template won't have any drawings linked.",
+        action: { kind: "upload-drawing", label: "Upload drawing" },
       });
     }
   }

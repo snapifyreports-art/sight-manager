@@ -94,6 +94,27 @@ export function TemplateExtras({
 
   useEffect(() => { load(); }, [load]);
 
+  // Quick-fix listener — the validation panel emits `template-action`
+  // events with `kind: "add-material"` or `"upload-drawing"`. We open
+  // the right dialog and scroll the section into view.
+  useEffect(() => {
+    function handle(e: Event) {
+      const detail = (e as CustomEvent<{ kind?: string }>).detail;
+      if (!detail) return;
+      if (detail.kind === "add-material") {
+        const el = document.getElementById("template-extras-materials");
+        if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+        setMOpen(true);
+      } else if (detail.kind === "upload-drawing") {
+        const el = document.getElementById("template-extras-drawings");
+        if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+        setDOpen(true);
+      }
+    }
+    window.addEventListener("template-action", handle);
+    return () => window.removeEventListener("template-action", handle);
+  }, []);
+
   async function addMaterial() {
     if (!mName || !mQuantity) return;
     setMSubmitting(true);
@@ -290,8 +311,9 @@ export function TemplateExtras({
         <p className="text-[11px] text-muted-foreground">Materials + drawings copied to each plot on apply. Editing here only affects NEW plots; existing plots keep their original snapshot.</p>
       </div>
 
-      {/* Materials */}
-      <div>
+      {/* Materials — id used by the validation panel's quick-fix
+          "Add material" button. */}
+      <div id="template-extras-materials" className="scroll-mt-20">
         <div className="mb-2 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Package className="size-4 text-blue-600" />
@@ -383,8 +405,9 @@ export function TemplateExtras({
         )}
       </div>
 
-      {/* Drawings */}
-      <div>
+      {/* Drawings — id used by the validation panel's quick-fix
+          "Upload drawing" button. */}
+      <div id="template-extras-drawings" className="scroll-mt-20">
         <div className="mb-2 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <FileText className="size-4 text-blue-600" />

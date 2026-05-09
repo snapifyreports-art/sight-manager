@@ -123,6 +123,25 @@ export function TemplateEditor({
   const [previewOpen, setPreviewOpen] = useState(false);
   const [ordersTableOpen, setOrdersTableOpen] = useState(false);
 
+  // Quick-fix action listener — validation panel buttons emit a
+  // window event with a `kind` discriminator. We handle the actions
+  // that touch state local to this component (orders dialog + scroll
+  // to jobs); TemplateExtras listens for material/drawing actions.
+  useEffect(() => {
+    function handle(e: Event) {
+      const detail = (e as CustomEvent<{ kind?: string }>).detail;
+      if (!detail) return;
+      if (detail.kind === "open-orders-table") {
+        setOrdersTableOpen(true);
+      } else if (detail.kind === "scroll-to-jobs") {
+        const el = document.getElementById("template-jobs-list");
+        if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    }
+    window.addEventListener("template-action", handle);
+    return () => window.removeEventListener("template-action", handle);
+  }, []);
+
   // Job edit dialog (used for both stages and sub-jobs)
   const [jobDialogOpen, setJobDialogOpen] = useState(false);
   const [editingJob, setEditingJob] = useState<TemplateJobData | null>(null);
@@ -1730,8 +1749,9 @@ export function TemplateEditor({
           Materials cost is summed in TemplateExtras separately. */}
       <TemplateCostFooter template={template} />
 
-      {/* Jobs List */}
-      <div className="space-y-3">
+      {/* Jobs List — id used by the validation panel's
+          "scroll-to-jobs" quick-fix button. */}
+      <div id="template-jobs-list" className="space-y-3 scroll-mt-20">
         <div className="flex items-center justify-between">
           <h3 className="text-lg font-semibold">Jobs</h3>
           <Button
