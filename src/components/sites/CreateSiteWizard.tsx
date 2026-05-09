@@ -590,8 +590,11 @@ export function CreateSiteWizard({
           <p><strong>Step 3 — Suppliers:</strong> only shown if a template you picked has orders with supplier placeholders. Assign real suppliers so orders are ready from day one.</p>
           <p><strong>You can close and come back:</strong> site creation isn&apos;t final until you hit Create on the last step. Nothing is saved until then.</p>
         </HelpTip>
-        {/* Step indicator */}
-        <div className="flex items-center gap-2 pb-1">
+        {/* Step indicator. `pr-10` keeps the rightmost StepDot clear of
+            the dialog's absolute-positioned close (✕) button + the
+            HelpTip (?) icon at top-right. Without it, "Suppliers" /
+            "Plots" labels overlap those icons on narrow dialogs. */}
+        <div className="flex items-center gap-2 pb-1 pr-10">
           <StepDot
             num={1}
             label="Site"
@@ -1216,7 +1219,7 @@ function StepDot({
 }) {
   return (
     <div
-      className={`flex items-center gap-1.5 text-xs font-medium ${
+      className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap text-xs font-medium ${
         active
           ? "text-indigo-600"
           : done
@@ -1225,7 +1228,7 @@ function StepDot({
       }`}
     >
       <span
-        className={`flex size-5 items-center justify-center rounded-full text-[10px] font-bold ${
+        className={`flex size-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold ${
           active
             ? "bg-indigo-600 text-white"
             : done

@@ -84,7 +84,12 @@ function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="dialog-header"
-      className={cn("flex flex-col gap-2", className)}
+      // pr-10 ensures the title / description clears the absolute
+      // close (✕) button at top-2 right-2. Without it long titles
+      // overlap the X and any HelpTip placed alongside competes for
+      // the same airspace. System-wide so consumers don't have to
+      // remember per-dialog. Override with className if needed.
+      className={cn("flex flex-col gap-2 pr-10", className)}
       {...props}
     />
   )

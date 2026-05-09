@@ -240,7 +240,7 @@ export function TemplateOrdersTableDialog({
             </p>
           ) : (
             <table className="w-full text-xs">
-              <thead className="sticky top-0 z-10 border-b bg-muted/40 text-[10px] uppercase text-muted-foreground">
+              <thead className="sticky top-0 z-30 border-b bg-muted/40 text-[10px] uppercase text-muted-foreground">
                 <tr>
                   <th className="px-2 py-1.5 text-left"></th>
                   <th className="px-2 py-1.5 text-left">Items</th>

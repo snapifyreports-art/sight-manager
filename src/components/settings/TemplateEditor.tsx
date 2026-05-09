@@ -3042,7 +3042,7 @@ export function TemplateEditor({
             </div>
             {/* Timing: natural language row */}
             <div className="space-y-3">
-              <div className="flex items-center gap-2">
+              <div className="flex min-w-0 items-center gap-2">
                 <Label>Timing</Label>
                 <HelpTip inline title="About order timing anchors" anchor="below-right">
                   <p><strong>What this does:</strong> ties the order to a job&apos;s start so the dates stay correct when the programme shifts. No fixed calendar dates — the order moves with the job.</p>
