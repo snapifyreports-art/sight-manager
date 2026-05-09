@@ -1,21 +1,27 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Loader2 } from "lucide-react";
 import { subscribeInFlight } from "@/lib/global-loading";
 
 /**
- * Thin top-of-viewport progress bar that flashes whenever any same-origin
- * POST/PUT/PATCH/DELETE is in flight. Connected to the counter in
- * `src/lib/global-loading.ts`, which `patchFetchNoStore` increments
- * automatically.
+ * Global "something's happening" indicator. Two pieces:
  *
- * Keith's UX feedback (May 2026): "you don't have a clue if something's
- * being adjusted or not so you think it's broken and 10 seconds later
- * it does something". Bar makes the latency visible.
+ *   1. A 3px progress bar at the top of the viewport with an
+ *      indeterminate slide animation. Hard to miss but doesn't
+ *      block interaction.
+ *   2. A floating "Saving…" pill in the top-right that's IMPOSSIBLE
+ *      to miss when something is actually being persisted. Drops
+ *      after a 300ms tail so a quick burst of mutations doesn't
+ *      flicker the indicator.
  *
- * Visual: 2px-tall blue bar with an indeterminate slide animation. We
- * fade to invisible 200ms after the last mutation completes so a quick
- * burst of mutations doesn't flicker — the bar settles smoothly.
+ * Connected to the in-flight counter in `src/lib/global-loading.ts`,
+ * which `patchFetchNoStore` increments for any same-origin
+ * POST/PUT/PATCH/DELETE OR same-origin GET with `cache: "no-store"`.
+ *
+ * Keith's UX requirement (May 2026): "i'm still not seeing loading on
+ * some changes when its figuring stuff out — this needs to happen and
+ * be very clear because the user might think nothing is happening."
  */
 export function GlobalLoadingBar() {
   const [active, setActive] = useState(false);
@@ -32,36 +38,65 @@ export function GlobalLoadingBar() {
         setActive(true);
       } else {
         // Wait a beat before hiding so a burst of small mutations
-        // (e.g. saving a sub-job duration which fires PUT + recalc + GET)
-        // doesn't flicker the bar three times. The 200ms tail is below
-        // perceptual threshold for a "did that finish?" signal.
-        hideTimer = setTimeout(() => setActive(false), 200);
+        // (PUT + recalc + GET-refresh) doesn't flicker the indicator
+        // multiple times. 300ms is just below "did that finish?"
+        // perceptual threshold but well above network jitter.
+        hideTimer = setTimeout(() => setActive(false), 300);
       }
     });
   }, []);
 
   return (
-    <div
-      aria-hidden
-      className="pointer-events-none fixed inset-x-0 top-0 z-[9999] h-0.5 overflow-hidden transition-opacity duration-200"
-      style={{ opacity: active ? 1 : 0 }}
-    >
-      <div className="h-full bg-blue-500/15" />
+    <>
+      {/* Top-of-viewport progress bar — beefier than before so it's
+          actually visible. 3px tall with a darker base + brighter
+          slider. Animation kicks in only when active. */}
       <div
-        className="absolute inset-y-0 h-full w-1/3 bg-blue-500"
+        aria-hidden
+        className="pointer-events-none fixed inset-x-0 top-0 z-[9999] h-[3px] overflow-hidden transition-opacity duration-200"
+        style={{ opacity: active ? 1 : 0 }}
+      >
+        <div className="h-full bg-blue-500/20" />
+        <div
+          className="absolute inset-y-0 h-full w-1/3 bg-blue-600 shadow-[0_0_8px_rgba(37,99,235,0.6)]"
+          style={{
+            animation: active
+              ? "global-loading-slide 1.1s ease-in-out infinite"
+              : "none",
+          }}
+        />
+        <style jsx>{`
+          @keyframes global-loading-slide {
+            0% {
+              transform: translateX(-100%);
+            }
+            50% {
+              transform: translateX(180%);
+            }
+            100% {
+              transform: translateX(380%);
+            }
+          }
+        `}</style>
+      </div>
+
+      {/* "Saving…" pill — top-right floating indicator. Big enough to
+          be unmissable, small enough not to obstruct anything. Slides
+          in from the right when active. */}
+      <div
+        role="status"
+        aria-live="polite"
+        className="pointer-events-none fixed right-4 top-4 z-[9999] transition-all duration-200"
         style={{
-          animation: active
-            ? "global-loading-slide 1.1s ease-in-out infinite"
-            : "none",
+          opacity: active ? 1 : 0,
+          transform: active ? "translateX(0)" : "translateX(20px)",
         }}
-      />
-      <style jsx>{`
-        @keyframes global-loading-slide {
-          0% { transform: translateX(-100%); }
-          50% { transform: translateX(180%); }
-          100% { transform: translateX(380%); }
-        }
-      `}</style>
-    </div>
+      >
+        <div className="flex items-center gap-2 rounded-full border border-blue-200 bg-white px-3 py-1.5 text-xs font-medium text-blue-900 shadow-md">
+          <Loader2 className="size-3.5 animate-spin text-blue-600" />
+          <span>Saving…</span>
+        </div>
+      </div>
+    </>
   );
 }

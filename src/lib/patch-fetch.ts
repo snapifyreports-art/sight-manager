@@ -3,11 +3,18 @@
  *
  *   1. Always use cache: "no-store" for same-origin API requests, so
  *      browser-cached responses don't show stale data.
- *   2. Bump a shared "in-flight mutation" counter for any same-origin
- *      POST/PUT/PATCH/DELETE so the global loading bar can flash.
- *      GETs are excluded — every page navigation triggers GETs and
- *      we don't want the bar twitching constantly. The signal the
- *      user wants is "is my edit landing?" not "is the page polling?".
+ *   2. Bump a shared "in-flight" counter for any same-origin request
+ *      that's part of a "save chain" — POST/PUT/PATCH/DELETE OR a GET
+ *      with explicit `cache: "no-store"`. Routine page-navigation GETs
+ *      (which don't override cache) are excluded so the loading bar
+ *      doesn't twitch constantly during normal browsing.
+ *
+ * Why no-store GETs count: after a save, the editor refreshes its
+ * data with `fetch(url, { cache: "no-store" })`. The user is still
+ * waiting at that point — the bar should remain visible until that
+ * refresh completes. Pre May-2026, those GETs weren't tracked and
+ * the indicator went silent during the 100-500ms refresh phase,
+ * making it look like nothing was happening.
  *
  * Call once in a client-side provider at the app root.
  */
@@ -39,7 +46,16 @@ export function patchFetchNoStore() {
       url.startsWith("/") ||
       url.startsWith(window.location.origin);
 
-    const shouldTrack = isSameOrigin && MUTATING_METHODS.has(method);
+    const isMutation = MUTATING_METHODS.has(method);
+    // Caller explicitly asked for fresh data — almost always part of a
+    // save chain (post-save reload). Worth tracking so the indicator
+    // stays visible during the data-refresh phase too.
+    const isExplicitNoStore =
+      method === "GET" &&
+      (init?.cache === "no-store" ||
+        (input instanceof Request && input.cache === "no-store"));
+
+    const shouldTrack = isSameOrigin && (isMutation || isExplicitNoStore);
     const release = shouldTrack ? trackInFlight() : null;
 
     try {
