@@ -80,20 +80,21 @@ export function GlobalLoadingBar() {
         `}</style>
       </div>
 
-      {/* "Saving…" pill — top-right floating indicator. Big enough to
-          be unmissable, small enough not to obstruct anything. Slides
-          in from the right when active. */}
+      {/* "Saving…" indicator — dead-centre of the viewport so it's
+          impossible to miss. pointer-events-none so it doesn't block
+          clicks on whatever's underneath. Soft scale-in animation
+          rather than a hard pop, so it doesn't feel jarring. */}
       <div
         role="status"
         aria-live="polite"
-        className="pointer-events-none fixed right-4 top-4 z-[9999] transition-all duration-200"
-        style={{
-          opacity: active ? 1 : 0,
-          transform: active ? "translateX(0)" : "translateX(20px)",
-        }}
+        className="pointer-events-none fixed inset-0 z-[9999] flex items-center justify-center transition-opacity duration-200"
+        style={{ opacity: active ? 1 : 0 }}
       >
-        <div className="flex items-center gap-2 rounded-full border border-blue-200 bg-white px-3 py-1.5 text-xs font-medium text-blue-900 shadow-md">
-          <Loader2 className="size-3.5 animate-spin text-blue-600" />
+        <div
+          className="flex items-center gap-3 rounded-2xl border border-blue-200 bg-white/95 px-6 py-4 text-base font-medium text-blue-900 shadow-2xl backdrop-blur-sm transition-transform duration-200"
+          style={{ transform: active ? "scale(1)" : "scale(0.92)" }}
+        >
+          <Loader2 className="size-6 animate-spin text-blue-600" />
           <span>Saving…</span>
         </div>
       </div>
