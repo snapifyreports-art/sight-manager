@@ -22,6 +22,7 @@ import { differenceInWorkingDays } from "@/lib/working-days";
 import { Loader2, Columns3, ChevronRight, Download, FileText, Search, X, Camera, StickyNote, CalendarDays, Calendar, Layers, List, CheckSquare, Clock, ZoomIn, ZoomOut, Maximize2, Minimize2, Play } from "lucide-react";
 import Link from "next/link";
 import { getStageCode, getStageColor } from "@/lib/stage-codes";
+import { getCurrentStage } from "@/lib/plot-stage";
 import { Input } from "@/components/ui/input";
 import { JobWeekPanel } from "@/components/programme/JobWeekPanel";
 import {
@@ -217,10 +218,12 @@ function getJobStageForCell(
 }
 
 function getActiveStageLabel(plot: ProgrammePlot): string {
-  const activeJob = plot.jobs.find((j) => j.status === "IN_PROGRESS");
-  if (activeJob) return getStageCode(activeJob);
-  if (plot.jobs.length > 0) return getStageCode(plot.jobs[plot.jobs.length - 1]);
-  return "\u2014";
+  // (#23) Routes through the unified getCurrentStage helper so this
+  // matches Walkthrough, Daily Brief, and Plot Detail. Pre-fix,
+  // these four views could disagree on the same plot.
+  const stage = getCurrentStage(plot.jobs);
+  if (!stage) return "\u2014";
+  return getStageCode(stage);
 }
 
 function hexToRgb(hex: string): [number, number, number] {

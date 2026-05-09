@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { sessionHasPermission } from "@/lib/permissions";
 import { recomputeParentOf } from "@/lib/parent-job";
+import { recomputePlotPercent } from "@/lib/plot-percent";
 import { canAccessSite } from "@/lib/site-access";
 import { apiError } from "@/lib/api-errors";
 
@@ -148,6 +149,9 @@ export async function PUT(
 
     // If this job has a parent, let the parent's dates/status follow
     await recomputeParentOf(prisma, id);
+    // PUT can include status (via direct edit) — recompute the plot
+    // percent so the cached value never drifts from leaf statuses.
+    await recomputePlotPercent(prisma, job.plotId);
 
     await prisma.eventLog.create({
       data: {
@@ -209,6 +213,18 @@ export async function DELETE(
     });
 
     const parentIdToRecompute = existing.parentId;
+    const plotIdToRecompute = existing.plotId;
+
+    // (#32) If this was a parent stage with children, those children
+    // would otherwise become stranded leafs with stale `parentStage`
+    // strings — programme synthetic rendering groups by parentStage
+    // so phantom stages would appear. Clear parentStage on every
+    // child before deleting the parent.
+    await prisma.job.updateMany({
+      where: { parentId: id },
+      data: { parentStage: null },
+    });
+
     await prisma.job.delete({ where: { id } });
 
     // If this was a sub-job, parent's dates/status may need updating based on remaining siblings
@@ -216,6 +232,8 @@ export async function DELETE(
       const { recomputeParentFromChildren } = await import("@/lib/parent-job");
       await recomputeParentFromChildren(prisma, parentIdToRecompute);
     }
+    // Plot percent shifts when a job is removed.
+    await recomputePlotPercent(prisma, plotIdToRecompute);
 
     return NextResponse.json({ success: true });
   } catch (err) {

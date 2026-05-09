@@ -91,6 +91,18 @@ export async function POST(
         data: updateData,
       });
 
+      // (#9) Starting any job clears the plot's deferred state — the
+      // plot is back in motion. Mirrors single-job /actions/start.
+      if (action === "start") {
+        await prisma.plot.updateMany({
+          where: {
+            id: job.plotId,
+            OR: [{ awaitingRestart: true }, { awaitingContractorConfirmation: true }],
+          },
+          data: { awaitingRestart: false, awaitingContractorConfirmation: false },
+        });
+      }
+
       // Progress orders: start → ORDERED; complete+signoff → DELIVERED
       if (action === "start") {
         await prisma.materialOrder.updateMany({
@@ -107,7 +119,10 @@ export async function POST(
         });
       }
 
-      // Create job action record
+      // Create job action record. (#10) Bulk "complete" performs both
+      // complete + signoff in one shot — emit BOTH action records so
+      // any downstream report filtering on action="signoff" (Delay
+      // Report's signoff lookup) finds bulk completions too.
       await prisma.jobAction.create({
         data: {
           jobId,
@@ -115,6 +130,15 @@ export async function POST(
           action,
         },
       });
+      if (action === "complete") {
+        await prisma.jobAction.create({
+          data: {
+            jobId,
+            userId: session.user.id,
+            action: "signoff",
+          },
+        });
+      }
 
       // Create event log
       const eventType = action === "complete" ? "JOB_SIGNED_OFF" : "JOB_STARTED";
@@ -135,19 +159,13 @@ export async function POST(
         await recomputeParentOf(prisma, jobId);
       }
 
-      // Recalculate plot buildCompletePercent — mirrors /api/jobs/[id]/actions
-      // Only count LEAF jobs (children: none) — parents are derived, would double-count
-      const plotJobs = await prisma.job.findMany({
-        where: { plotId: job.plotId, children: { none: {} } },
-        select: { status: true },
-      });
-      const total = plotJobs.length;
-      const completed = plotJobs.filter((j) => j.status === "COMPLETED").length;
-      const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
-      await prisma.plot.update({
-        where: { id: job.plotId },
-        data: { buildCompletePercent: pct },
-      });
+      // Recalculate plot buildCompletePercent — centralised in
+      // recomputePlotPercent so every mutation site uses the same
+      // formula (May 2026 audit).
+      {
+        const { recomputePlotPercent } = await import("@/lib/plot-percent");
+        await recomputePlotPercent(prisma, job.plotId);
+      }
 
       // Fire-and-forget push notifications — mirrors /api/jobs/[id]/actions
       if (action === "start" && job.assignedToId && job.assignedToId !== session.user.id) {

@@ -5,6 +5,7 @@ import { useRefreshOnFocus } from "@/hooks/useRefreshOnFocus";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { format, differenceInCalendarDays } from "date-fns";
+import { getCurrentStage } from "@/lib/plot-stage";
 import { getCurrentDateAtMidnight } from "@/lib/dev-date";
 import { useDevDate } from "@/lib/dev-date-context";
 import {
@@ -410,16 +411,17 @@ function PlotOverview({
     [plot.jobs]
   );
 
-  // Current stage: from active jobs (or most recently started stage)
+  // Current stage label — routed through the unified `getCurrentStage`
+  // helper so this matches Site Programme, Walkthrough, and Daily
+  // Brief. Returns the parent stage name when the picked job has a
+  // parent (sub-job), or the job's own name when it's a top-level
+  // stage. (#23)
   const currentStage = useMemo(() => {
-    if (activeJobs.length > 0) {
-      // Use the stage of the first active job (they're sorted by sortOrder)
-      return activeJobs[0].parentStage || null;
-    }
-    // Fallback: find the last incomplete stage
-    const incomplete = plot.jobs.filter((j) => j.status !== "COMPLETED" && j.parentStage);
-    return incomplete.length > 0 ? incomplete[0].parentStage : null;
-  }, [activeJobs, plot.jobs]);
+    const stage = getCurrentStage(
+      plot.jobs.map((j) => ({ name: j.parentStage || j.name, status: j.status, sortOrder: j.sortOrder })),
+    );
+    return stage?.name ?? null;
+  }, [plot.jobs]);
 
   // Unique contractors across all active jobs
   const activeContractors = useMemo(() => {

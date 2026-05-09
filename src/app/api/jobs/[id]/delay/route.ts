@@ -276,6 +276,14 @@ export async function POST(
     );
   }
 
+  // (#1/#2) Plot percent — delay doesn't change status but recompute
+  // defensively in case the cascade triggered on/past today and a
+  // follow-up changes affect counts.
+  {
+    const { recomputePlotPercent } = await import("@/lib/plot-percent");
+    await recomputePlotPercent(prisma, job.plotId);
+  }
+
   // Notify assigned user about the delay
   if (job.assignedToId) {
     const { sendPushToUser } = await import("@/lib/push");

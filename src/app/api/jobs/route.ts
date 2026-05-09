@@ -39,6 +39,13 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // (#13/#14) originalStartDate/EndDate are NOT NULL — fall back to
+  // the planned date if provided, else creation time so the row stays
+  // in valid state even for unscheduled jobs.
+  const now = new Date();
+  const startDateD = startDate ? new Date(startDate) : null;
+  const endDateD = endDate ? new Date(endDate) : null;
+
   const job = await prisma.job.create({
     data: {
       plotId,
@@ -47,8 +54,10 @@ export async function POST(req: NextRequest) {
       assignedToId: assignedToId || null,
       location: location || null,
       address: address || null,
-      startDate: startDate ? new Date(startDate) : null,
-      endDate: endDate ? new Date(endDate) : null,
+      startDate: startDateD,
+      endDate: endDateD,
+      originalStartDate: startDateD ?? now,
+      originalEndDate: endDateD ?? now,
     },
     include: {
       plot: { include: { site: true } },

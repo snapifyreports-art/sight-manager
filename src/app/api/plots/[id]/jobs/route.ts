@@ -71,6 +71,13 @@ export async function POST(
   // Inherit assignedToId from site if not explicitly provided
   const resolvedAssignedToId = assignedToId || plot.site.assignedToId || null;
 
+  // (#13/#14) originalStartDate/EndDate are NOT NULL — fall back to
+  // the planned date if provided, else creation time so the row stays
+  // in valid state even for unscheduled jobs.
+  const now = new Date();
+  const startDateD = startDate ? new Date(startDate) : null;
+  const endDateD = endDate ? new Date(endDate) : null;
+
   try {
     const job = await prisma.job.create({
       data: {
@@ -78,8 +85,10 @@ export async function POST(
         description: description?.trim() || null,
         plotId,
         assignedToId: resolvedAssignedToId,
-        startDate: startDate ? new Date(startDate) : null,
-        endDate: endDate ? new Date(endDate) : null,
+        startDate: startDateD,
+        endDate: endDateD,
+        originalStartDate: startDateD ?? now,
+        originalEndDate: endDateD ?? now,
       },
       include: {
         assignedTo: {

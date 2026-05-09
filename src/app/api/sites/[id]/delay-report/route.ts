@@ -74,12 +74,20 @@ export async function GET(
               supplier: { select: { name: true } },
             },
           },
-          // Most recent delay event with a reason type
+          // (#18) Every delay event for this job, newest first. Old
+          // behaviour was take:1 — UI claimed "delay reason" but only
+          // ever saw the latest, hiding the fact that a job had been
+          // delayed multiple times for different reasons.
           events: {
             where: { type: "SCHEDULE_CASCADED", delayReasonType: { not: null } },
             orderBy: { createdAt: "desc" },
-            take: 1,
-            select: { delayReasonType: true },
+            select: {
+              id: true,
+              delayReasonType: true,
+              description: true,
+              createdAt: true,
+              user: { select: { name: true } },
+            },
           },
         },
         orderBy: { endDate: "asc" },
@@ -157,8 +165,18 @@ export async function GET(
         }).length
       : 0;
 
-    // Explicit reason from the most recent delay event (takes priority)
+    // Explicit reason from the most recent delay event (takes priority).
+    // Now `events` is the FULL history — pull the latest for the cause
+    // logic, but the API also returns the full array so the UI can
+    // show every prior reason on expand.
     const explicitReason = job.events?.[0]?.delayReasonType ?? null;
+    const allDelayEvents = (job.events ?? []).map((e) => ({
+      id: e.id,
+      delayReasonType: e.delayReasonType,
+      description: e.description,
+      createdAt: e.createdAt.toISOString(),
+      userName: e.user?.name ?? null,
+    }));
 
     // Determine if weather-excused: either explicitly recorded as weather delay,
     // or weather-affected job with overlapping weather impact days (inferred)
@@ -221,6 +239,7 @@ export async function GET(
       isWeatherExcused,
       weatherReasonType,
       explicitReason,
+      allDelayEvents,
       causes,
       plot: job.plot,
       assignedTo: job.assignedTo?.name ?? null,

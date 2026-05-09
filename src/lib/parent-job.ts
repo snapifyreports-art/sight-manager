@@ -36,7 +36,18 @@ export async function recomputeParentFromChildren(
 ): Promise<void> {
   const children = await tx.job.findMany({
     where: { parentId: parentJobId },
-    select: { startDate: true, endDate: true, status: true },
+    select: {
+      startDate: true,
+      endDate: true,
+      status: true,
+      // May 2026 audit (#5/#6/#25): rollup must include actuals + originals
+      // so the real parent row matches what synthetic parent rendering does
+      // live. Keeps Plot Detail Gantt + reports in sync with Programme.
+      actualStartDate: true,
+      actualEndDate: true,
+      originalStartDate: true,
+      originalEndDate: true,
+    },
   });
   if (children.length === 0) return;
 
@@ -68,12 +79,52 @@ export async function recomputeParentFromChildren(
   const minStart = starts.length ? new Date(Math.min(...starts.map((d) => d.getTime()))) : null;
   const maxEnd = ends.length ? new Date(Math.max(...ends.map((d) => d.getTime()))) : null;
 
+  // Actuals: min start across children that have started; end only when
+  // every child has actually finished (otherwise the parent isn't done).
+  const actualStarts = children
+    .map((c) => c.actualStartDate)
+    .filter((d): d is Date => d !== null);
+  const actualEnds = children
+    .map((c) => c.actualEndDate)
+    .filter((d): d is Date => d !== null);
+  const minActualStart = actualStarts.length
+    ? new Date(Math.min(...actualStarts.map((d) => d.getTime())))
+    : null;
+  // Parent only "actually finished" once every child finished — avoids
+  // claiming completion when one sub-job is still running.
+  const allChildrenComplete =
+    statuses.length > 0 && statuses.every((s) => s === "COMPLETED");
+  const maxActualEnd = allChildrenComplete && actualEnds.length
+    ? new Date(Math.max(...actualEnds.map((d) => d.getTime())))
+    : null;
+
+  // Originals: simple min/max across children — these are the planned
+  // baseline so they should reflect the earliest planned start and the
+  // latest planned end across the parent window.
+  const origStarts = children
+    .map((c) => c.originalStartDate)
+    .filter((d): d is Date => d !== null);
+  const origEnds = children
+    .map((c) => c.originalEndDate)
+    .filter((d): d is Date => d !== null);
+  const minOrigStart = origStarts.length
+    ? new Date(Math.min(...origStarts.map((d) => d.getTime())))
+    : null;
+  const maxOrigEnd = origEnds.length
+    ? new Date(Math.max(...origEnds.map((d) => d.getTime())))
+    : null;
+
   await tx.job.update({
     where: { id: parentJobId },
     data: {
       startDate: minStart,
       endDate: maxEnd,
       status,
+      actualStartDate: minActualStart,
+      actualEndDate: maxActualEnd,
+      // originals are NOT NULL on the schema — only update if we have values
+      ...(minOrigStart ? { originalStartDate: minOrigStart } : {}),
+      ...(maxOrigEnd ? { originalEndDate: maxOrigEnd } : {}),
     },
   });
 }

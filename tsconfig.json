@@ -30,5 +30,16 @@
     ".next/dev/types/**/*.ts",
     "**/*.mts"
   ],
-  "exclude": ["node_modules", "simulate-build.ts", "seed-riverside.ts", "seed-orders.ts"]
+  "exclude": [
+    "node_modules",
+    "simulate-build.ts",
+    "seed-riverside.ts",
+    "seed-orders.ts",
+    "scripts/test-audit-fixes.ts",
+    "scripts/test-permissions.ts",
+    "scripts/tighten-original-dates.ts",
+    "scripts/e2e-full-test.ts",
+    "prisma/seed.ts",
+    "prisma/seed-latest-site.ts"
+  ]
 }

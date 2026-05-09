@@ -550,7 +550,11 @@ export async function GET(
         awaitingRestart: true,
         awaitingContractorConfirmation: true,
         jobs: {
-          where: { status: { not: "COMPLETED" }, parentStage: { not: null } },
+          // (#15) Use leaf jobs (children: none) instead of the
+          // parentStage-not-null filter. The old filter missed plots
+          // built with flat (no parent) templates and missed orphaned
+          // children whose parent was deleted (parentStage cleared).
+          where: { status: { not: "COMPLETED" }, children: { none: {} } },
           orderBy: { startDate: "asc" },
           take: 1,
           select: {

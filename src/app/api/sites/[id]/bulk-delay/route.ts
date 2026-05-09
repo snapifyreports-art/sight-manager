@@ -197,6 +197,14 @@ export async function POST(
     { timeout: 30_000, maxWait: 10_000 },
     );
 
+    // (#1/#2) Plot percent recompute outside tx — defensive; bulk
+    // delay doesn't normally change status counts but a long shift
+    // may push a job past today.
+    {
+      const { recomputePlotPercent } = await import("@/lib/plot-percent");
+      await recomputePlotPercent(prisma, plotId);
+    }
+
     results.push({
       plotId,
       plotNumber: currentJob.plot.plotNumber,

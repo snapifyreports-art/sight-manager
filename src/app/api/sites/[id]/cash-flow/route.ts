@@ -84,16 +84,17 @@ export async function GET(
     { committed: number; forecast: number; actual: number }
   >();
 
-  // Helper: remap a date to original timeline if in original mode and job has original dates.
-  // For one-off orders, job is null — skip remap.
+  // Helper: remap a date to original timeline if in original mode and job
+  // has original dates. For one-off orders, job is null — skip remap.
+  // (#13) Originals are now NOT NULL on the schema (May 2026 audit) so
+  // jobs ALWAYS have them — the only fallback path is when there's no
+  // owning job (one-off orders) or the job has no live start/end yet.
   function resolveDate(date: Date, job: typeof orderValues[number]["job"]): Date {
     if (
       dateMode !== "original" ||
       !job ||
       !job.startDate ||
-      !job.endDate ||
-      !job.originalStartDate ||
-      !job.originalEndDate
+      !job.endDate
     ) {
       return date;
     }

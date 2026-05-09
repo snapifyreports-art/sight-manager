@@ -42,6 +42,16 @@ export async function DELETE(
       await getSupabase().storage.from(PHOTOS_BUCKET).remove([urlParts[1]]);
     }
 
+    // (#36) Auto-uncheck any HandoverChecklist row that referenced this
+    // document — schema is `documentId SetNull on delete`, but the
+    // checklist would otherwise keep its `checkedAt` / `checkedById`
+    // tick even though the cert is gone, making a plot look ready
+    // for handover when it isn't.
+    await prisma.handoverChecklist.updateMany({
+      where: { documentId: id },
+      data: { documentId: null, checkedAt: null, checkedById: null },
+    });
+
     await prisma.siteDocument.delete({ where: { id } });
 
     await prisma.eventLog.create({

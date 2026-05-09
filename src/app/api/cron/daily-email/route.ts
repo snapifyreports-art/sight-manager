@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/email";
 import { format } from "date-fns";
+import { getServerCurrentDate } from "@/lib/dev-date";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +15,10 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const now = new Date();
+  // (#42) Route through getServerCurrentDate so Dev Mode tests can
+  // simulate the morning email on a non-real date. Vercel cron sends
+  // no dev-date cookie so production matches the previous behaviour.
+  const now = getServerCurrentDate(req);
   const todayStr = format(now, "yyyy-MM-dd");
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 

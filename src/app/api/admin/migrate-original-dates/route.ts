@@ -35,13 +35,9 @@ export async function GET(req: NextRequest) {
         ADD COLUMN IF NOT EXISTS "awaitingContractorConfirmation" BOOLEAN NOT NULL DEFAULT false;
     `);
 
-    // Backfill: copy current startDate → originalStartDate (only where null)
-    const { count: jobsUpdated } = await prisma.job.updateMany({
-      where: { originalStartDate: null, startDate: { not: null } },
-      data: {}, // We need raw SQL for this — Prisma doesn't support field-to-field copy
-    });
-
-    // Raw backfill for field-to-field copy
+    // Raw backfill for any rows that somehow still have null originals.
+    // Since May 2026 audit the columns are NOT NULL on the schema so
+    // this is only useful for legacy databases pre-migration.
     await prisma.$executeRawUnsafe(`
       UPDATE "Job"
       SET "originalStartDate" = "startDate"
@@ -54,10 +50,7 @@ export async function GET(req: NextRequest) {
       WHERE "originalEndDate" IS NULL AND "endDate" IS NOT NULL;
     `);
 
-    // Count how many were backfilled
-    const backfilled = await prisma.job.count({
-      where: { originalStartDate: { not: null } },
-    });
+    const backfilled = await prisma.job.count();
 
     return NextResponse.json({
       success: true,

@@ -5,6 +5,7 @@ import { sendPushToUser } from "@/lib/push";
 import { getServerCurrentDate } from "@/lib/dev-date";
 import { sessionHasPermission } from "@/lib/permissions";
 import { recomputeParentOf } from "@/lib/parent-job";
+import { recomputePlotPercent } from "@/lib/plot-percent";
 import { canAccessSite } from "@/lib/site-access";
 import { snapToWorkingDay } from "@/lib/working-days";
 import { apiError } from "@/lib/api-errors";
@@ -378,21 +379,13 @@ export async function POST(
   // so the parent stretches with its children and its status follows theirs
   await recomputeParentOf(prisma, id);
 
-  // Auto-update plot buildCompletePercent when job status changes.
-  // Only count LEAF jobs (jobs with no children) — parent jobs are derived
-  // roll-ups, counting them would double-count the plot's true progress.
-  if (action === "complete" || action === "start") {
-    const plotJobs = await prisma.job.findMany({
-      where: { plotId: existing.plotId, children: { none: {} } },
-      select: { status: true },
-    });
-    const total = plotJobs.length;
-    const completed = plotJobs.filter((j) => j.status === "COMPLETED").length;
-    const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
-    await prisma.plot.update({
-      where: { id: existing.plotId },
-      data: { buildCompletePercent: pct },
-    });
+  // Auto-update plot buildCompletePercent on EVERY status-affecting action.
+  // Centralised in `recomputePlotPercent` so we can grep for it across
+  // every mutation site (May 2026 audit found this was running in only
+  // 2 of 7+ paths). Action types here that don't change status (e.g.
+  // "note", "photo") are filtered out before the call.
+  if (action === "complete" || action === "start" || action === "signoff" || action === "uncomplete") {
+    await recomputePlotPercent(prisma, existing.plotId);
   }
 
   // Fire-and-forget push notification for relevant actions

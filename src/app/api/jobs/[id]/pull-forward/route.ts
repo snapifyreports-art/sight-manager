@@ -369,7 +369,24 @@ export async function POST(
           userId: session.user.id,
         },
       });
-    });
+
+      // (#3) Parent rollup must follow the child shift — without this
+      // the parent's cached startDate/endDate go stale immediately on
+      // a sub-job pull-forward.
+      const { recomputeParentOf } = await import("@/lib/parent-job");
+      await recomputeParentOf(tx, id);
+    },
+    // Bumped to 30s in case a job has many pending orders to shift.
+    { timeout: 30_000, maxWait: 10_000 },
+    );
+
+    // Plot percent only shifts if status changes — pull-forward
+    // doesn't change status — but recompute defensively in case
+    // the shifted dates land on/past today and a follow-up runs.
+    {
+      const { recomputePlotPercent } = await import("@/lib/plot-percent");
+      await recomputePlotPercent(prisma, job.plotId);
+    }
 
     return NextResponse.json({
       jobId: id,

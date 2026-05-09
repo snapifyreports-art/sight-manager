@@ -129,13 +129,10 @@ export async function POST(
 
   try {
   await prisma.$transaction(async (tx) => {
-    // Preserve original dates before any shift
-    if (!nextJob.originalStartDate && nextJob.startDate) {
-      await tx.job.update({
-        where: { id: nextJobId },
-        data: { originalStartDate: nextJob.startDate, originalEndDate: nextJob.endDate },
-      });
-    }
+    // (#13/#14) originalStartDate/EndDate are NOT NULL since May 2026
+    // audit — every job has them stamped at creation. The previous
+    // "preserve on first shift" branch is now a no-op so it's been
+    // removed.
 
     // Update next job dates
     await tx.job.update({
@@ -148,12 +145,9 @@ export async function POST(
       const subsequent = allPlotJobs.filter((j) => j.sortOrder > nextJob.sortOrder);
       for (const job of subsequent) {
         if (!job.startDate || !job.endDate) continue;
-        // Preserve original dates on first shift
-        const preserveOriginals: Record<string, unknown> = {};
-        if (!job.originalStartDate) {
-          preserveOriginals.originalStartDate = job.startDate;
-          preserveOriginals.originalEndDate = job.endDate;
-        }
+        // Originals are NOT NULL since May 2026 — no need to preserve
+        // on first shift. The cached value already represents the
+        // baseline and we don't want to overwrite it on every cascade.
         // Working-day cascade: shift start by delta WD, preserve the
         // job's working-day duration (not calendar — see comment up
         // top). Result is always on a working day by construction.
@@ -168,7 +162,6 @@ export async function POST(
           data: {
             startDate: newJobStart,
             endDate: newJobEnd,
-            ...preserveOriginals,
           },
         });
       }
@@ -221,7 +214,32 @@ export async function POST(
       where: { id: plotId },
       data: { awaitingRestart: false, awaitingContractorConfirmation: false },
     });
-  });
+
+    // (#4) Recompute every parent rollup whose children just shifted.
+    // Without this, parent dates stay frozen on the old plan and Plot
+    // Detail Gantt + reports drift away from the actual cascade.
+    const { recomputeParentFromChildren } = await import("@/lib/parent-job");
+    const parentIds = new Set<string>();
+    for (const j of allPlotJobs) {
+      if (j.parentId && (j.id === nextJobId || j.sortOrder > nextJob.sortOrder)) {
+        parentIds.add(j.parentId);
+      }
+    }
+    await Promise.all(
+      Array.from(parentIds).map((pid) => recomputeParentFromChildren(tx, pid)),
+    );
+  },
+  // 30s envelope — restart-decision can shift many jobs + orders + run
+  // parent recomputes inside the tx, default 5s isn't enough.
+  { timeout: 30_000, maxWait: 10_000 },
+  );
+
+  // Plot percent recompute outside tx — status may have changed if
+  // we marked the next job IN_PROGRESS.
+  {
+    const { recomputePlotPercent } = await import("@/lib/plot-percent");
+    await recomputePlotPercent(prisma, plotId);
+  }
 
   return NextResponse.json({ success: true, decision, delta, targetStart });
   } catch (err) {

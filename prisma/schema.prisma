@@ -245,8 +245,12 @@ model Job {
   address             String?
   startDate           DateTime?
   endDate             DateTime?
-  originalStartDate   DateTime?
-  originalEndDate     DateTime?
+  // Original planned dates — NOT NULL since May 2026 audit. Every job
+  // creation site must stamp these alongside startDate/endDate so
+  // reports (cash-flow, daily-brief, delay-report) never fall back
+  // to current dates and silently mix "original" with "actual" data.
+  originalStartDate   DateTime
+  originalEndDate     DateTime
   status              JobStatus @default(NOT_STARTED)
   assignedToId        String?
   stageCode           String?
