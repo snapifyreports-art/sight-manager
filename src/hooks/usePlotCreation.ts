@@ -41,6 +41,8 @@ interface BlankInput {
 interface TemplateSingleInput {
   siteId: string;
   templateId: string;
+  /** Optional — when set, the variant's full template is applied instead of the base. */
+  variantId?: string | null;
   startDate: string;
   plotName: string;
   plotNumber: string | null;
@@ -51,6 +53,7 @@ interface TemplateSingleInput {
 interface TemplateBatchInput {
   siteId: string;
   templateId: string;
+  variantId?: string | null;
   startDate: string;
   supplierMappings?: SupplierMappings;
   plots: PlotRange[];
@@ -124,6 +127,7 @@ export function usePlotCreation() {
         body: JSON.stringify({
           siteId: input.siteId,
           templateId: input.templateId,
+          variantId: input.variantId ?? null,
           startDate: input.startDate,
           plotName: input.plotName,
           plotNumber: input.plotNumber,
@@ -152,6 +156,7 @@ export function usePlotCreation() {
         body: JSON.stringify({
           siteId: input.siteId,
           templateId: input.templateId,
+          variantId: input.variantId ?? null,
           startDate: input.startDate,
           supplierMappings: input.supplierMappings ?? {},
           plots: input.plots,

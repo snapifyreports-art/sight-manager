@@ -465,6 +465,12 @@ export function SiteDetailClient({
   const [templates, setTemplates] = useState<Template[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
+  // Variant picker — only set when the chosen template has variants and
+  // the user picks one. "" = "apply the base template directly".
+  const [selectedVariantId, setSelectedVariantId] = useState("");
+  const [templateVariants, setTemplateVariants] = useState<
+    Array<{ id: string; name: string; description: string | null }>
+  >([]);
   const [startDate, setStartDate] = useState("");
   const [plotCreateError, setPlotCreateError] = useState<string | null>(null);
   const [supplierMappings, setSupplierMappings] = useState<
@@ -624,6 +630,8 @@ export function SiteDetailClient({
     setPlotName("");
     setPlotDescription("");
     setSelectedTemplateId("");
+    setSelectedVariantId("");
+    setTemplateVariants([]);
     setStartDate("");
     setSupplierMappings({});
     setTemplateStep("config");
@@ -728,6 +736,7 @@ export function SiteDetailClient({
       const res = await createFromTemplate({
         siteId: site.id,
         templateId: selectedTemplateId,
+        variantId: selectedVariantId || null,
         startDate,
         plotName,
         plotNumber: plotName.match(/(\d+)/)?.[1] || null,
@@ -767,6 +776,7 @@ export function SiteDetailClient({
       const res = await createBatchFromTemplate({
         siteId: site.id,
         templateId: selectedTemplateId,
+        variantId: selectedVariantId || null,
         startDate,
         supplierMappings,
         plots: bulkPlots,
@@ -1079,9 +1089,23 @@ export function SiteDetailClient({
                             <Label>Template</Label>
                             <Select
                               value={selectedTemplateId}
-                              onValueChange={(v) =>
-                                v !== null && setSelectedTemplateId(v)
-                              }
+                              onValueChange={(v) => {
+                                if (v === null) return;
+                                setSelectedTemplateId(v);
+                                setSelectedVariantId("");
+                                setTemplateVariants([]);
+                                // Lazy-fetch variants for this template
+                                void fetch(
+                                  `/api/plot-templates/${v}/variants`,
+                                  { cache: "no-store" },
+                                ).then(async (r) => {
+                                  if (!r.ok) return;
+                                  const data = await r.json();
+                                  setTemplateVariants(
+                                    Array.isArray(data) ? data : [],
+                                  );
+                                });
+                              }}
                             >
                               <SelectTrigger className="w-full">
                                 {selectedTemplate ? (
@@ -1102,6 +1126,41 @@ export function SiteDetailClient({
                               </SelectContent>
                             </Select>
                           </div>
+                          {/* Variant picker — only shown when the chosen
+                              template has variants. Defaults to base. */}
+                          {selectedTemplateId && templateVariants.length > 0 && (
+                            <div className="space-y-2">
+                              <Label>
+                                Variant{" "}
+                                <span className="text-[11px] font-normal text-muted-foreground">
+                                  ({templateVariants.length} available)
+                                </span>
+                              </Label>
+                              <Select
+                                value={selectedVariantId || "__base__"}
+                                onValueChange={(v) =>
+                                  setSelectedVariantId(
+                                    v === "__base__" ? "" : (v ?? ""),
+                                  )
+                                }
+                              >
+                                <SelectTrigger className="w-full">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="__base__">
+                                    Use base template (no variant)
+                                  </SelectItem>
+                                  {templateVariants.map((v) => (
+                                    <SelectItem key={v.id} value={v.id}>
+                                      {v.name}
+                                      {v.description ? ` — ${v.description}` : ""}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          )}
 
                           {selectedTemplate && (
                             <div className="rounded-lg border bg-slate-50/50 p-3">
@@ -1351,9 +1410,23 @@ export function SiteDetailClient({
                             <Label>Template</Label>
                             <Select
                               value={selectedTemplateId}
-                              onValueChange={(v) =>
-                                v !== null && setSelectedTemplateId(v)
-                              }
+                              onValueChange={(v) => {
+                                if (v === null) return;
+                                setSelectedTemplateId(v);
+                                setSelectedVariantId("");
+                                setTemplateVariants([]);
+                                // Lazy-fetch variants for this template
+                                void fetch(
+                                  `/api/plot-templates/${v}/variants`,
+                                  { cache: "no-store" },
+                                ).then(async (r) => {
+                                  if (!r.ok) return;
+                                  const data = await r.json();
+                                  setTemplateVariants(
+                                    Array.isArray(data) ? data : [],
+                                  );
+                                });
+                              }}
                             >
                               <SelectTrigger className="w-full">
                                 {selectedTemplate ? (
@@ -1374,6 +1447,41 @@ export function SiteDetailClient({
                               </SelectContent>
                             </Select>
                           </div>
+                          {/* Variant picker — only shown when the chosen
+                              template has variants. Defaults to base. */}
+                          {selectedTemplateId && templateVariants.length > 0 && (
+                            <div className="space-y-2">
+                              <Label>
+                                Variant{" "}
+                                <span className="text-[11px] font-normal text-muted-foreground">
+                                  ({templateVariants.length} available)
+                                </span>
+                              </Label>
+                              <Select
+                                value={selectedVariantId || "__base__"}
+                                onValueChange={(v) =>
+                                  setSelectedVariantId(
+                                    v === "__base__" ? "" : (v ?? ""),
+                                  )
+                                }
+                              >
+                                <SelectTrigger className="w-full">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="__base__">
+                                    Use base template (no variant)
+                                  </SelectItem>
+                                  {templateVariants.map((v) => (
+                                    <SelectItem key={v.id} value={v.id}>
+                                      {v.name}
+                                      {v.description ? ` — ${v.description}` : ""}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          )}
 
                           {selectedTemplate && (
                             <div className="rounded-lg border bg-slate-50/50 p-3">
