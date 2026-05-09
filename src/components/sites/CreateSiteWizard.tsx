@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { format } from "date-fns";
 import { addWorkingDays } from "@/lib/working-days";
-import { BatchProgrammePreview } from "./BatchProgrammePreview";
+import { BatchProgrammePreviewDialog } from "./BatchProgrammePreviewDialog";
 import {
   Plus,
   Trash2,
@@ -11,6 +11,7 @@ import {
   ChevronLeft,
   Loader2,
   Calendar,
+  CalendarRange,
   Briefcase,
   Layers,
   LayoutTemplate,
@@ -353,6 +354,7 @@ export function CreateSiteWizard({
   // Step 2: Plot batches
   const [plotBatches, setPlotBatches] = useState<PlotBatch[]>([]);
   const [showAddForm, setShowAddForm] = useState(false);
+  const [showProgrammePreview, setShowProgrammePreview] = useState(false);
   const [batchMode, setBatchMode] = useState<"blank" | "template">("template");
   // Free-form plot numbers input — supports ranges, comma lists, alphanumeric.
   // Parsed via parsePlotNumbers() into batch.plotNumbers.
@@ -972,22 +974,21 @@ export function CreateSiteWizard({
                 </div>
               )}
 
-              {/* Programme preview — only shows when there's at least
-                  one template-based batch. Sits between the batch list
-                  and the Add Plot Group button so the user can eyeball
-                  the timeline before committing.
-
-                  Cast: the wizard's local Template type is a TS subset of
-                  what /api/plot-templates returns at runtime (the API
-                  yields full TemplateData via templateJobsInclude). The
-                  preview reads the full job tree which IS in the response,
-                  TypeScript just doesn't know via the lean Template alias. */}
+              {/* Preview-programme button — only shown when at least
+                  one template-based batch is committed. Opens a wide
+                  dialog with the full BatchProgrammePreview at proper
+                  Gantt scale; inline rendering inside the wizard form
+                  was cramped and confusing. */}
               {plotBatches.some((b) => b.mode === "template") && (
-                <BatchProgrammePreview
-                  batches={plotBatches}
-                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                  templates={templates as any}
-                />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full justify-center"
+                  onClick={() => setShowProgrammePreview(true)}
+                >
+                  <CalendarRange className="size-3.5" />
+                  Preview programme
+                </Button>
               )}
 
               {/* Inline add form */}
@@ -1455,6 +1456,19 @@ export function CreateSiteWizard({
           </>
         )}
       </DialogContent>
+
+      {/* Programme preview dialog — full-size Gantt of the planned
+          batches. Opened by the "Preview programme" button on
+          Step 2. Cast: see comment on the inline preview earlier;
+          wizard's lean Template type is a TS subset of the runtime
+          API response. */}
+      <BatchProgrammePreviewDialog
+        open={showProgrammePreview}
+        onClose={() => setShowProgrammePreview(false)}
+        batches={plotBatches}
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        templates={templates as any}
+      />
     </Dialog>
   );
 }

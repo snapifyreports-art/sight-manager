@@ -322,54 +322,64 @@ export function BatchProgrammePreview({
                 <span className="w-12 shrink-0 truncate text-muted-foreground">
                   Plot {r.plotNumber}
                 </span>
-                <div className="relative h-5 flex-1 rounded-sm bg-slate-50">
+                <div className="relative h-7 flex-1">
                   {/* Stage segments — each one is a coloured block
                       rendered at its working-day offset within the
                       plot's window. Adjacent stages butt right up
                       against each other. Half-blocks for short
                       stages happen automatically because widthDays
-                      is in calendar days, not whole weeks. */}
-                  <div
-                    className="absolute top-0 h-full"
-                    style={{ left: `${left}%`, width: `${width}%` }}
-                  >
-                    {r.segments.map((seg, i) => {
-                      const segLeft = (seg.offsetDays / widthDays) * 100;
-                      const segWidth = (seg.widthDays / widthDays) * 100;
-                      const color =
-                        STAGE_COLORS[seg.stageIndex % STAGE_COLORS.length];
-                      return (
-                        <div
-                          key={i}
-                          className={`absolute top-0 h-full border-r border-white/60 ${color}/85 first:rounded-l-sm last:rounded-r-sm last:border-r-0`}
-                          style={{
-                            left: `${segLeft}%`,
-                            width: `${segWidth}%`,
-                            minWidth: "2px",
-                          }}
-                          title={`${seg.name} · ${seg.widthDays} day${seg.widthDays === 1 ? "" : "s"}`}
-                        />
-                      );
-                    })}
+                      is in calendar days, not whole weeks.
+
+                      Two-row layout: bar on top, delivery markers
+                      below, so trucks don't overlap stage labels. */}
+                  <div className="absolute inset-x-0 top-0 h-4 rounded-sm bg-slate-50">
+                    <div
+                      className="absolute top-0 h-full"
+                      style={{ left: `${left}%`, width: `${width}%` }}
+                    >
+                      {r.segments.map((seg, i) => {
+                        const segLeft = (seg.offsetDays / widthDays) * 100;
+                        const segWidth = (seg.widthDays / widthDays) * 100;
+                        const color =
+                          STAGE_COLORS[seg.stageIndex % STAGE_COLORS.length];
+                        return (
+                          <div
+                            key={i}
+                            className={`absolute top-0 h-full border-r border-white/60 ${color}/85 first:rounded-l-sm last:rounded-r-sm last:border-r-0`}
+                            style={{
+                              left: `${segLeft}%`,
+                              width: `${segWidth}%`,
+                              minWidth: "2px",
+                            }}
+                            title={`${seg.name} · ${seg.widthDays} day${seg.widthDays === 1 ? "" : "s"}`}
+                          />
+                        );
+                      })}
+                    </div>
                   </div>
-                  {/* Order delivery markers */}
-                  {r.orders.map((o) => {
-                    const dOffset = dayDiff(range.earliest, o.deliveryDate);
-                    const dLeft = (dOffset / range.totalDays) * 100;
-                    return (
-                      <span
-                        key={o.id}
-                        className="absolute -top-0.5 -translate-x-1/2"
-                        style={{ left: `${dLeft}%` }}
-                        title={`${format(o.deliveryDate, "d MMM yyyy")} — ${o.label}`}
-                      >
-                        <Truck
-                          className="size-3 text-emerald-700"
-                          strokeWidth={2.5}
-                        />
-                      </span>
-                    );
-                  })}
+                  {/* Delivery markers in their own row beneath the
+                      bar so they never sit on top of stage segments. */}
+                  {r.orders.length > 0 && (
+                    <div className="absolute inset-x-0 bottom-0 h-3">
+                      {r.orders.map((o) => {
+                        const dOffset = dayDiff(range.earliest, o.deliveryDate);
+                        const dLeft = (dOffset / range.totalDays) * 100;
+                        return (
+                          <span
+                            key={o.id}
+                            className="absolute top-0 -translate-x-1/2"
+                            style={{ left: `${dLeft}%` }}
+                            title={`${format(o.deliveryDate, "d MMM yyyy")} — ${o.label}`}
+                          >
+                            <Truck
+                              className="size-2.5 text-emerald-700"
+                              strokeWidth={2.5}
+                            />
+                          </span>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
                 <span
                   className="w-32 shrink-0 truncate text-[9px] text-muted-foreground"
