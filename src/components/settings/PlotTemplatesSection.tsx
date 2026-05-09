@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Plus,
@@ -11,6 +11,8 @@ import {
   FolderOpen,
   Copy,
   Loader2,
+  Search,
+  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -34,11 +36,35 @@ import {
   DialogFooter,
   DialogClose,
 } from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { TemplateEditor } from "./TemplateEditor";
 import { TemplateExtras } from "./TemplateExtras";
 import type { TemplateData } from "./types";
 import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 import { useConfirmAction } from "@/hooks/useConfirmAction";
+
+type SortKey =
+  | "recent"
+  | "created"
+  | "name-asc"
+  | "name-desc"
+  | "jobs-desc"
+  | "weeks-desc";
+
+const SORT_LABELS: Record<SortKey, string> = {
+  recent: "Recently edited",
+  created: "Recently created",
+  "name-asc": "Name A → Z",
+  "name-desc": "Name Z → A",
+  "jobs-desc": "Most jobs",
+  "weeks-desc": "Longest build",
+};
 
 export function PlotTemplatesSection({
   initialTemplates,
@@ -80,6 +106,98 @@ export function PlotTemplatesSection({
   const [newName, setNewName] = useState("");
   const [newDescription, setNewDescription] = useState("");
   const [newTypeLabel, setNewTypeLabel] = useState("");
+
+  // List filters / sort
+  const [search, setSearch] = useState("");
+  const [typeFilter, setTypeFilter] = useState<string>("all");
+  const [sortBy, setSortBy] = useState<SortKey>("recent");
+
+  // Distinct typeLabels for the filter dropdown. Trim + dedupe so
+  // "2 STOREY" / "2 storey" don't both appear; we keep the first
+  // casing we see for display.
+  const typeOptions = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const t of templates) {
+      const raw = t.typeLabel?.trim();
+      if (!raw) continue;
+      const key = raw.toLowerCase();
+      if (!seen.has(key)) seen.set(key, raw);
+    }
+    return Array.from(seen.values()).sort((a, b) =>
+      a.localeCompare(b, undefined, { sensitivity: "base" }),
+    );
+  }, [templates]);
+
+  // Reset typeFilter if the chosen value disappears (e.g. last template
+  // of that type deleted). Avoids "filtered to a value that no longer
+  // exists, list mysteriously empty".
+  useEffect(() => {
+    if (typeFilter === "all") return;
+    const stillExists = typeOptions.some(
+      (t) => t.toLowerCase() === typeFilter.toLowerCase(),
+    );
+    if (!stillExists) setTypeFilter("all");
+  }, [typeFilter, typeOptions]);
+
+  const filteredTemplates = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    let list = templates.filter((t) => {
+      if (typeFilter !== "all") {
+        const tl = t.typeLabel?.trim().toLowerCase() ?? "";
+        if (tl !== typeFilter.toLowerCase()) return false;
+      }
+      if (!q) return true;
+      const haystack = [t.name, t.typeLabel ?? "", t.description ?? ""]
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(q);
+    });
+
+    const totalWeeksOf = (t: TemplateData) =>
+      t.jobs.length > 0 ? Math.max(...t.jobs.map((j) => j.endWeek)) : 0;
+
+    switch (sortBy) {
+      case "recent":
+        list = [...list].sort(
+          (a, b) =>
+            new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
+        );
+        break;
+      case "created":
+        list = [...list].sort(
+          (a, b) =>
+            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+        );
+        break;
+      case "name-asc":
+        list = [...list].sort((a, b) =>
+          a.name.localeCompare(b.name, undefined, { sensitivity: "base" }),
+        );
+        break;
+      case "name-desc":
+        list = [...list].sort((a, b) =>
+          b.name.localeCompare(a.name, undefined, { sensitivity: "base" }),
+        );
+        break;
+      case "jobs-desc":
+        list = [...list].sort((a, b) => b.jobs.length - a.jobs.length);
+        break;
+      case "weeks-desc":
+        list = [...list].sort((a, b) => totalWeeksOf(b) - totalWeeksOf(a));
+        break;
+    }
+
+    return list;
+  }, [templates, search, typeFilter, sortBy]);
+
+  const filtersActive =
+    search.trim() !== "" || typeFilter !== "all" || sortBy !== "recent";
+
+  function clearFilters() {
+    setSearch("");
+    setTypeFilter("all");
+    setSortBy("recent");
+  }
 
   async function handleCreate() {
     if (!newName.trim()) return;
@@ -195,8 +313,110 @@ export function PlotTemplatesSection({
           </CardContent>
         </Card>
       ) : (
+        <>
+          {/* Search + filters */}
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <div className="relative flex-1 sm:max-w-xs">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                placeholder="Search templates…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="pl-9 pr-8"
+              />
+              {search && (
+                <button
+                  type="button"
+                  onClick={() => setSearch("")}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                  aria-label="Clear search"
+                >
+                  <X className="size-3.5" />
+                </button>
+              )}
+            </div>
+
+            {typeOptions.length > 0 && (
+              <Select
+                value={typeFilter}
+                onValueChange={(v) => setTypeFilter((v as string) || "all")}
+              >
+                <SelectTrigger className="w-full sm:w-44">
+                  <SelectValue>
+                    {typeFilter === "all"
+                      ? <span className="text-muted-foreground">All types</span>
+                      : typeFilter}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All types</SelectItem>
+                  {typeOptions.map((t) => (
+                    <SelectItem key={t} value={t}>
+                      {t}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+
+            <Select
+              value={sortBy}
+              onValueChange={(v) => setSortBy((v as SortKey) || "recent")}
+            >
+              <SelectTrigger className="w-full sm:w-48">
+                <SelectValue>
+                  <span className="text-muted-foreground">Sort:</span>{" "}
+                  {SORT_LABELS[sortBy]}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {(Object.keys(SORT_LABELS) as SortKey[]).map((k) => (
+                  <SelectItem key={k} value={k}>
+                    {SORT_LABELS[k]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            {filtersActive && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={clearFilters}
+                className="text-muted-foreground"
+              >
+                Clear
+              </Button>
+            )}
+
+            <span className="ml-auto text-xs text-muted-foreground">
+              {filteredTemplates.length} of {templates.length}
+            </span>
+          </div>
+
+          {filteredTemplates.length === 0 ? (
+            <Card>
+              <CardContent className="flex flex-col items-center justify-center py-12 text-center">
+                <div className="mb-3 rounded-full bg-muted p-3">
+                  <Search className="size-6 text-muted-foreground" />
+                </div>
+                <h3 className="text-base font-semibold">No matching templates</h3>
+                <p className="mt-1 max-w-sm text-sm text-muted-foreground">
+                  Try a different search term or clear the filters.
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="mt-4"
+                  onClick={clearFilters}
+                >
+                  Clear filters
+                </Button>
+              </CardContent>
+            </Card>
+          ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {templates.map((template) => {
+          {filteredTemplates.map((template) => {
             const totalWeeks =
               template.jobs.length > 0
                 ? Math.max(...template.jobs.map((j) => j.endWeek))
@@ -306,6 +526,8 @@ export function PlotTemplatesSection({
             );
           })}
         </div>
+          )}
+        </>
       )}
 
       {/* Create Template Dialog */}
