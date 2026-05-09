@@ -32,11 +32,27 @@ export type TemplateIssueActionKind =
   | "open-contractors-table"
   | "scroll-to-jobs"
   | "add-material"
-  | "upload-drawing";
+  | "upload-drawing"
+  | "edit-order"
+  | "edit-job";
 
 export interface TemplateIssueAction {
   kind: TemplateIssueActionKind;
   label: string;
+}
+
+/** A single affected row inside an aggregated warning. Surfaced as a
+ *  drill-down list under the warning so the user can click straight
+ *  into the per-item edit dialog. */
+export interface TemplateIssueAffectedItem {
+  /** Action fired when the user clicks the row. */
+  kind: "edit-order" | "edit-job";
+  /** Display text for the row (e.g. "Brickwork 1st lift — Lintels"). */
+  label: string;
+  /** Order id for "edit-order"; sub-job id for "edit-job". */
+  itemId: string;
+  /** For orders, the parent sub-job (needed by openEditOrder). */
+  jobId?: string;
 }
 
 export interface TemplateIssue {
@@ -48,6 +64,10 @@ export interface TemplateIssue {
   orderId?: string;
   /** Quick-fix action surfaced on the panel as a small button. */
   action?: TemplateIssueAction;
+  /** Affected items the warning applies to. When present, the panel
+   *  renders a "show N items" toggle that expands the list inline so
+   *  the user can drill into each one. */
+  affectedItems?: TemplateIssueAffectedItem[];
 }
 
 /**
@@ -162,19 +182,28 @@ export function validateTemplate(
   // --- Sub-job-level completeness checks (aggregated) ---------------------
   // Aggregated so a 30-sub-job template doesn't dump 30 individual rows
   // when contractors aren't assigned yet — that just drowns the panel.
-  const subJobsWithoutContractor: string[] = [];
+  // affectedItems lets the panel expand to show the full list with
+  // drill-down click-to-edit per row.
+  const subJobsNoContractorLabels: string[] = [];
+  const subJobsNoContractorItems: TemplateIssueAffectedItem[] = [];
   for (const stage of template.jobs) {
     for (const child of stage.children ?? []) {
       if (!child.contactId) {
-        subJobsWithoutContractor.push(`${stage.name} › ${child.name}`);
+        subJobsNoContractorLabels.push(`${stage.name} › ${child.name}`);
+        subJobsNoContractorItems.push({
+          kind: "edit-job",
+          label: `${stage.name} › ${child.name}`,
+          itemId: child.id,
+        });
       }
     }
   }
-  if (subJobsWithoutContractor.length > 0) {
+  if (subJobsNoContractorLabels.length > 0) {
     issues.push({
       severity: "warning",
-      message: `${subJobsWithoutContractor.length} sub-job${subJobsWithoutContractor.length === 1 ? "" : "s"} have no contractor assigned (e.g. ${truncateList(subJobsWithoutContractor)}).`,
-      action: { kind: "open-contractors-table", label: "Assign contractors" },
+      message: `${subJobsNoContractorLabels.length} sub-job${subJobsNoContractorLabels.length === 1 ? "" : "s"} have no contractor assigned (e.g. ${truncateList(subJobsNoContractorLabels)}).`,
+      action: { kind: "open-contractors-table", label: "Bulk assign" },
+      affectedItems: subJobsNoContractorItems,
     });
   }
 
@@ -186,7 +215,9 @@ export function validateTemplate(
 
   // Aggregated lists for completeness checks
   const ordersNoSupplier: string[] = [];
+  const ordersNoSupplierItems: TemplateIssueAffectedItem[] = [];
   const ordersNoItems: string[] = [];
+  const ordersNoItemsItems: TemplateIssueAffectedItem[] = [];
 
   for (const { order, job } of allOrders(template)) {
     // Anchor points at a job that no longer exists (was deleted).
@@ -223,6 +254,12 @@ export function validateTemplate(
     // No supplier — order can't be auto-fired on apply or on job-start.
     if (!order.supplierId) {
       ordersNoSupplier.push(`${job.name} (${order.itemsDescription ?? "no description"})`);
+      ordersNoSupplierItems.push({
+        kind: "edit-order",
+        label: `${job.name} — ${order.itemsDescription ?? "no description"}`,
+        itemId: order.id,
+        jobId: job.id,
+      });
     }
 
     // No items at all — even if itemsDescription is set, no quantities/
@@ -234,6 +271,12 @@ export function validateTemplate(
       order.itemsDescription && order.itemsDescription.trim() !== "";
     if (!hasItems && hasDescription) {
       ordersNoItems.push(`${job.name} (${order.itemsDescription})`);
+      ordersNoItemsItems.push({
+        kind: "edit-order",
+        label: `${job.name} — ${order.itemsDescription}`,
+        itemId: order.id,
+        jobId: job.id,
+      });
     } else if (!hasItems && !hasDescription) {
       issues.push({
         severity: "warning",
@@ -258,14 +301,16 @@ export function validateTemplate(
     issues.push({
       severity: "warning",
       message: `${ordersNoSupplier.length} order${ordersNoSupplier.length === 1 ? "" : "s"} have no supplier assigned (e.g. ${truncateList(ordersNoSupplier)}).`,
-      action: { kind: "open-orders-table", label: "Edit orders" },
+      action: { kind: "open-orders-table", label: "Bulk assign" },
+      affectedItems: ordersNoSupplierItems,
     });
   }
   if (ordersNoItems.length > 0) {
     issues.push({
       severity: "warning",
       message: `${ordersNoItems.length} order${ordersNoItems.length === 1 ? "" : "s"} have a description but no priced items (e.g. ${truncateList(ordersNoItems)}). Costs won't roll up.`,
-      action: { kind: "open-orders-table", label: "Edit orders" },
+      action: { kind: "open-orders-table", label: "Bulk edit" },
+      affectedItems: ordersNoItemsItems,
     });
   }
 

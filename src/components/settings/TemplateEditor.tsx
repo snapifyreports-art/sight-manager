@@ -75,6 +75,37 @@ interface MaterialSuggestion {
   unitCost: number;
 }
 
+// ---------- Tree-walk helpers used by the validation drill-in actions.
+// Walk parents → children → grandchildren looking for a job/order id.
+
+function findJobById(
+  jobs: TemplateJobData[],
+  id: string,
+): TemplateJobData | null {
+  for (const j of jobs) {
+    if (j.id === id) return j;
+    if (j.children) {
+      const found = findJobById(j.children, id);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+function findOrderById(
+  jobs: TemplateJobData[],
+  id: string,
+): TemplateOrderData | null {
+  for (const j of jobs) {
+    for (const o of j.orders ?? []) if (o.id === id) return o;
+    if (j.children) {
+      const found = findOrderById(j.children, id);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
 // ---------- Main Editor ----------
 
 interface TemplateEditorProps {
@@ -129,11 +160,13 @@ export function TemplateEditor({
   // Quick-fix action listener — validation panel buttons emit a
   // window event with a `kind` discriminator. We handle the actions
   // that touch state local to this component (orders + contractors
-  // dialogs + scroll to jobs); TemplateExtras listens for material/
-  // drawing actions.
+  // dialogs + scroll to jobs + per-item drill-ins); TemplateExtras
+  // listens for material/drawing actions.
   useEffect(() => {
     function handle(e: Event) {
-      const detail = (e as CustomEvent<{ kind?: string }>).detail;
+      const detail = (
+        e as CustomEvent<{ kind?: string; itemId?: string; jobId?: string }>
+      ).detail;
       if (!detail) return;
       if (detail.kind === "open-orders-table") {
         setOrdersTableOpen(true);
@@ -142,11 +175,23 @@ export function TemplateEditor({
       } else if (detail.kind === "scroll-to-jobs") {
         const el = document.getElementById("template-jobs-list");
         if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+      } else if (detail.kind === "edit-order" && detail.itemId && detail.jobId) {
+        // Find the order by walking the template tree.
+        const order = findOrderById(template.jobs, detail.itemId);
+        if (order) {
+          openEditOrder(detail.jobId, order);
+        }
+      } else if (detail.kind === "edit-job" && detail.itemId) {
+        const job = findJobById(template.jobs, detail.itemId);
+        if (job) {
+          openEditJob(job);
+        }
       }
     }
     window.addEventListener("template-action", handle);
     return () => window.removeEventListener("template-action", handle);
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [template]);
 
   // Job edit dialog (used for both stages and sub-jobs)
   const [jobDialogOpen, setJobDialogOpen] = useState(false);

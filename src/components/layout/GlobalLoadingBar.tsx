@@ -95,7 +95,11 @@ export function GlobalLoadingBar() {
           style={{ transform: active ? "scale(1)" : "scale(0.92)" }}
         >
           <Loader2 className="size-6 animate-spin text-blue-600" />
-          <span>Saving…</span>
+          {/* "Working" rather than "Saving" — the indicator fires on
+              both writes AND no-store reads (post-write data refresh
+              + variant context fetches), so "Saving" was misleading
+              when the user was just loading data. */}
+          <span>Working…</span>
         </div>
       </div>
     </>

@@ -131,33 +131,77 @@ export function TemplateValidationPanel({
 function IssueRow({ issue }: { issue: TemplateIssue }) {
   const isError = issue.severity === "error";
   const Icon = isError ? AlertCircle : AlertTriangle;
+  const [expanded, setExpanded] = useState(false);
+  const hasItems = !!(issue.affectedItems && issue.affectedItems.length > 0);
+
   return (
-    <li className="flex items-start gap-2">
-      <Icon
-        className={`mt-0.5 size-3.5 shrink-0 ${isError ? "text-red-600" : "text-amber-600"}`}
-      />
-      <div className={`flex flex-1 flex-wrap items-baseline gap-x-2 ${isError ? "text-red-900" : "text-amber-900"}`}>
-        <span className="flex-1">{issue.message}</span>
-        {issue.action && (
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              // Cross-component dispatch — TemplateEditor handles the
-              // "open-orders-table" / "scroll-to-jobs" cases inline,
-              // TemplateExtras handles "add-material" / "upload-drawing".
-              window.dispatchEvent(
-                new CustomEvent("template-action", {
-                  detail: { kind: issue.action!.kind },
-                }),
-              );
-            }}
-            className="shrink-0 rounded border border-current/30 bg-white/60 px-2 py-0.5 text-[11px] font-medium hover:bg-white"
-          >
-            {issue.action.label} →
-          </button>
-        )}
+    <li className={isError ? "text-red-900" : "text-amber-900"}>
+      <div className="flex items-start gap-2">
+        <Icon
+          className={`mt-0.5 size-3.5 shrink-0 ${isError ? "text-red-600" : "text-amber-600"}`}
+        />
+        <div className="flex flex-1 flex-wrap items-baseline gap-x-2">
+          <span className="flex-1">{issue.message}</span>
+          {hasItems && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setExpanded((v) => !v);
+              }}
+              className="shrink-0 rounded border border-current/30 bg-white/60 px-2 py-0.5 text-[11px] font-medium hover:bg-white"
+            >
+              {expanded ? "Hide" : `Show ${issue.affectedItems!.length}`}
+            </button>
+          )}
+          {issue.action && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                // Cross-component dispatch — TemplateEditor handles the
+                // "open-*-table" / "scroll-to-jobs" / "edit-*" cases,
+                // TemplateExtras handles "add-material" / "upload-drawing".
+                window.dispatchEvent(
+                  new CustomEvent("template-action", {
+                    detail: { kind: issue.action!.kind },
+                  }),
+                );
+              }}
+              className="shrink-0 rounded border border-current/30 bg-white/60 px-2 py-0.5 text-[11px] font-medium hover:bg-white"
+            >
+              {issue.action.label} →
+            </button>
+          )}
+        </div>
       </div>
+      {hasItems && expanded && (
+        <ul className="ml-5 mt-1 max-h-[280px] space-y-0.5 overflow-y-auto rounded border border-current/20 bg-white/40 p-1.5">
+          {issue.affectedItems!.map((it) => (
+            <li key={it.itemId}>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  window.dispatchEvent(
+                    new CustomEvent("template-action", {
+                      detail: {
+                        kind: it.kind,
+                        itemId: it.itemId,
+                        jobId: it.jobId,
+                      },
+                    }),
+                  );
+                }}
+                className="flex w-full items-center justify-between gap-2 rounded px-1.5 py-0.5 text-left text-[11px] hover:bg-white"
+              >
+                <span className="truncate">{it.label}</span>
+                <span className="shrink-0 text-muted-foreground">Edit →</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
     </li>
   );
 }
