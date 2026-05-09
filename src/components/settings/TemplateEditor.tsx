@@ -43,6 +43,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { TemplateTimeline } from "./TemplateTimeline";
+import { DurationCell } from "./DurationCell";
 import type {
   TemplateData,
   TemplateJobData,
@@ -187,10 +188,9 @@ export function TemplateEditor({
   // Expanded jobs
   const [expandedJobs, setExpandedJobs] = useState<Set<string>>(new Set());
 
-  // Inline duration editing
-  const [editingDurations, setEditingDurations] = useState<
-    Record<string, number>
-  >({});
+  // Inline duration editing now lives inside DurationCell — each cell
+  // owns its own draft + saving state. The shared editingDurations
+  // map was removed May 2026 alongside the click-to-edit refactor.
 
   // Delete states
   const [deletingJobId, setDeletingJobId] = useState<string | null>(null);
@@ -908,57 +908,47 @@ export function TemplateEditor({
 
   // ---------- Inline duration save ----------
 
-  async function handleDurationBlur(
+  /**
+   * Persist a sub-job duration change in working days and trigger a
+   * template-wide recalculate so siblings slide. Throws on failure so
+   * DurationCell can revert visual state.
+   */
+  async function saveSubJobDuration(
     subJob: TemplateJobData,
-    parentId: string
-  ) {
-    const newVal = editingDurations[subJob.id];
+    parentId: string,
+    newDays: number,
+  ): Promise<void> {
     // Sub-jobs are measured in working days — persist durationDays, null
     // durationWeeks so the days value is the single source of truth.
-    const currentDays =
-      subJob.durationDays != null && subJob.durationDays > 0
-        ? subJob.durationDays
-        : (subJob.durationWeeks ?? 1) * 5;
-    if (newVal === undefined || newVal === currentDays) {
-      setEditingDurations((prev) => {
-        const next = { ...prev };
-        delete next[subJob.id];
-        return next;
-      });
-      return;
+    const res = await fetch(
+      `/api/plot-templates/${template.id}/jobs/${subJob.id}`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ durationDays: newDays, durationWeeks: null }),
+      },
+    );
+    if (!res.ok) {
+      const msg = await fetchErrorMessage(res, "Failed to update duration");
+      toast.error(msg);
+      throw new Error(msg);
     }
 
-    try {
-      const res = await fetch(
-        `/api/plot-templates/${template.id}/jobs/${subJob.id}`,
-        {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ durationDays: newVal, durationWeeks: null }),
-        }
-      );
-      if (!res.ok) {
-        toast.error(await fetchErrorMessage(res, "Failed to update duration"));
-        return;
-      }
+    // recalculate fires resequenceTopLevelStages so downstream siblings
+    // slide to close any gap created by the duration change.
+    await fetch(
+      `/api/plot-templates/${template.id}/jobs/${parentId}/recalculate`,
+      { method: "POST" },
+    );
 
-      await fetch(
-        `/api/plot-templates/${template.id}/jobs/${parentId}/recalculate`,
-        { method: "POST" }
-      );
-
-      const tplRes = await fetch(`/api/plot-templates/${template.id}`, { cache: "no-store" });
-      const updated = await tplRes.json();
-      onUpdate(updated);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to update duration");
-    } finally {
-      setEditingDurations((prev) => {
-        const next = { ...prev };
-        delete next[subJob.id];
-        return next;
-      });
+    const tplRes = await fetch(`/api/plot-templates/${template.id}`, {
+      cache: "no-store",
+    });
+    if (!tplRes.ok) {
+      throw new Error("Failed to reload template after duration change");
     }
+    const updated = await tplRes.json();
+    onUpdate(updated);
   }
 
   // ---------- Order CRUD ----------
@@ -1281,10 +1271,6 @@ export function TemplateEditor({
       child.durationDays != null && child.durationDays > 0
         ? child.durationDays
         : (child.durationWeeks ?? 1) * 5;
-    const durationValue =
-      editingDurations[child.id] !== undefined
-        ? editingDurations[child.id]
-        : durationInDays;
     const isChildExpanded = expandedJobs.has(child.id);
     const hasGrandchildren = !!(child.children && child.children.length > 0);
     const isDraggedSub = draggedJobId === child.id;
@@ -1332,26 +1318,17 @@ export function TemplateEditor({
               {child.orders.length}
             </span>
           )}
-          <div className="hidden shrink-0 items-center gap-1 sm:flex">
-            <Input
-              type="number"
-              min={1}
-              value={durationValue}
-              onClick={(e) => e.stopPropagation()}
-              onChange={(e) => {
-                const val = parseInt(e.target.value) || 1;
-                setEditingDurations((prev) => ({
-                  ...prev,
-                  [child.id]: val,
-                }));
-              }}
-              onBlur={() => handleDurationBlur(child, child.parentId ?? "")}
-              className="h-7 w-16 text-center text-xs"
-              title="Duration in working days"
+          <div
+            className="hidden shrink-0 sm:flex"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <DurationCell
+              value={durationInDays}
+              onSave={(newDays) =>
+                saveSubJobDuration(child, child.parentId ?? "", newDays)
+              }
+              title="Duration in working days — click to edit"
             />
-            <span className="text-xs text-muted-foreground">
-              d
-            </span>
           </div>
           <div className="flex shrink-0 items-center gap-0.5">
             <button
