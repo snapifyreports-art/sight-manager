@@ -127,6 +127,7 @@ model User {
   snagsResolved           Snag[]                   @relation("SnagResolved")
   uploadedDocuments       SiteDocument[]           @relation("UploadedDocuments")
   checkedHandovers        HandoverChecklist[]      @relation("CheckedHandoverItems")
+  plotJournalEntries      PlotJournalEntry[]       @relation("PlotJournalAuthor")
 }
 
 model Site {
@@ -190,6 +191,13 @@ model Plot {
   // Optional pointer to the variant chosen at apply time. Captured for
   // reporting / drift detection; not used at runtime by the cascade.
   sourceVariantId                String?
+  // Customer share token — unguessable random string used in the public
+  // /share/<token> URL. Generated lazily the first time admin clicks
+  // "Get share link" on the Customer view tab. Rotating regenerates;
+  // disabling clears `shareEnabled` (token retained so re-enable
+  // restores the same link).
+  shareToken                     String?   @unique
+  shareEnabled                   Boolean   @default(true)
   createdAt                      DateTime  @default(now())
   updatedAt                      DateTime  @updatedAt
 
@@ -203,9 +211,29 @@ model Plot {
   handoverChecklist HandoverChecklist[]
   materials         PlotMaterial[]
   oneOffOrders      MaterialOrder[] // back-relation for MaterialOrder.plotId (plot-level one-off)
+  journalEntries    PlotJournalEntry[]
 
   @@unique([siteId, plotNumber])
   @@index([siteId]) // hot path: every site page loads plots
+}
+
+// Customer-facing journal — short story-style updates the admin posts
+// against a plot, surfaced on the public /share/<token> page intermixed
+// chronologically with shared photos. Plain text; no dates rendered to
+// the customer (they see "1 week ago" / sequence only). Soft-deletable
+// by clearing the row entirely (no soft delete to keep the public read
+// path narrow).
+model PlotJournalEntry {
+  id          String   @id @default(cuid())
+  plotId      String
+  body        String
+  createdById String?
+  createdAt   DateTime @default(now())
+
+  plot      Plot  @relation(fields: [plotId], references: [id], onDelete: Cascade)
+  createdBy User? @relation("PlotJournalAuthor", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([plotId, createdAt])
 }
 
 model Job {
@@ -288,10 +316,17 @@ model JobPhoto {
   caption      String?
   tag          String? // "before", "after", "progress"
   uploadedById String?
+  // Per-photo opt-in for the customer-facing /share/<token> page. Off
+  // by default — admin must explicitly tick a photo to share. Default
+  // false is the contractually safe choice: a wonky-brick photo never
+  // leaks to a buyer because someone forgot to untick it.
+  sharedWithCustomer Boolean @default(false)
   createdAt    DateTime @default(now())
 
   job        Job   @relation(fields: [jobId], references: [id], onDelete: Cascade)
   uploadedBy User? @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
+
+  @@index([jobId, sharedWithCustomer])
 }
 
 model Supplier {

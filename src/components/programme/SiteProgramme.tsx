@@ -91,6 +91,12 @@ interface ProgrammePlot {
   approvalW: boolean;
   approvalKCO: boolean;
   buildCompletePercent: number;
+  // Source template + variant captured at apply time. Surfaced in the
+  // expanded left panel "House" column so it's clear which template /
+  // variant a plot came from. SetNull on relation, so either may be
+  // null if the source was deleted (or for manually-created plots).
+  sourceTemplate: { id: string; name: string } | null;
+  sourceVariant: { id: string; name: string } | null;
   jobs: ProgrammeJob[];
 }
 
@@ -1486,8 +1492,31 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                         <div className="w-[48px] truncate px-1 text-muted-foreground">
                           {plot.reservationType?.slice(0, 4) || "\u2014"}
                         </div>
-                        <div className="w-[68px] truncate px-1 text-muted-foreground">
-                          {plot.houseType || "\u2014"}
+                        {/* House column shows: top = manual houseType
+                            (e.g. "2 STOREY"), bottom = source variant
+                            name (or template name if no variant chosen
+                            at apply time). Tooltip carries the full
+                            "Template / Variant" string for when the
+                            cell truncates. Keith May 2026: "I thought
+                            that the variants and the plot template
+                            that this was build from would be
+                            referenced in this section of each plot?" */}
+                        <div
+                          className="w-[68px] flex flex-col justify-center px-1 leading-tight text-muted-foreground"
+                          title={
+                            plot.sourceTemplate || plot.sourceVariant
+                              ? `${plot.sourceTemplate?.name ?? "\u2014"}${plot.sourceVariant ? ` / ${plot.sourceVariant.name}` : ""}`
+                              : undefined
+                          }
+                        >
+                          <span className="truncate">
+                            {plot.houseType || "\u2014"}
+                          </span>
+                          {(plot.sourceTemplate || plot.sourceVariant) && (
+                            <span className="truncate text-[8px] text-slate-400">
+                              {plot.sourceVariant?.name ?? plot.sourceTemplate?.name}
+                            </span>
+                          )}
                         </div>
                         <div className="w-[44px] px-1 text-muted-foreground">
                           {shortDate(plot.reservationDate)}

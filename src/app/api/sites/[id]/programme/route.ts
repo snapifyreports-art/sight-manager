@@ -27,6 +27,13 @@ export async function GET(
       plots: {
         orderBy: [{ plotNumber: "asc" }, { createdAt: "asc" }],
         include: {
+          // Surfaces template + variant on each plot row in the programme
+          // view so users can see at a glance "this plot was built from
+          // 2-Storey / variant 765" — Keith May 2026: "I thought that the
+          // variants and the plot template that this was build from would
+          // be referenced in this section of each plot?"
+          sourceTemplate: { select: { id: true, name: true } },
+          sourceVariant: { select: { id: true, name: true } },
           jobs: {
             orderBy: { sortOrder: "asc" },
             // Only fetch what the grid needs — panel fetches full data on demand

@@ -33,6 +33,7 @@ import {
   Copy,
   Check,
   HardHat,
+  Heart,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Breadcrumbs } from "@/components/ui/breadcrumbs";
@@ -65,6 +66,7 @@ import { PlotHistoryTab } from "@/components/plots/PlotHistoryTab";
 import { HandoverChecklist } from "@/components/handover/HandoverChecklist";
 import { PlotMaterialsSection } from "@/components/plots/PlotMaterialsSection";
 import { PlotDrawingsSection } from "@/components/plots/PlotDrawingsSection";
+import { PlotCustomerViewTab } from "@/components/plots/PlotCustomerViewTab";
 import { JobStatusBadge, JOB_STATUS_CONFIG } from "@/components/shared/StatusBadge";
 import { useCopyToClipboard } from "@/hooks/useCopyToClipboard";
 
@@ -1023,6 +1025,10 @@ export function PlotDetailClient({
             <FileCheck className="size-4" />
             Handover
           </TabsTrigger>
+          <TabsTrigger value="customer">
+            <Heart className="size-4" />
+            Customer view
+          </TabsTrigger>
         </TabsList>
 
         {/* Overview Tab */}
@@ -1167,6 +1173,13 @@ export function PlotDetailClient({
 
         <TabsContent value="handover">
           <HandoverChecklist plotId={plot.id} />
+        </TabsContent>
+
+        {/* Customer view — manage /progress/<token> link, journal,
+            curated photos. Hard-locked to never show dates / snags /
+            orders / contractors to the buyer. */}
+        <TabsContent value="customer">
+          <PlotCustomerViewTab plotId={plot.id} />
         </TabsContent>
       </Tabs>
 
