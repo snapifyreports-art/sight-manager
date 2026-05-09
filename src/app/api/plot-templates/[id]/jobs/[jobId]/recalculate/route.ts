@@ -54,15 +54,25 @@ export async function POST(
   // SMOKE_TEST — Simple Semi: Groundworks ended week 4, Brickwork
   // didn't slide back from week 6).
   try {
-    await prisma.$transaction(async (tx) => {
-      // We can't call packChildrenAndUpdateParent then resequence as
-      // separate steps — the resequence rewrites every stage's
-      // startWeek anyway, and re-packs each stage's children inside
-      // its new window. So just trigger the full re-sequence scoped to
-      // the parent's variant (or base); the parent gets handled in the
-      // loop.
-      await resequenceTopLevelStages(tx, id, parent.variantId);
-    });
+    // Transaction timeout: the default 5s isn't enough when a template
+    // has 10+ stages with children — every stage's children get
+    // re-packed (1 update each), every stage's startWeek/endWeek gets
+    // rewritten, and the pooled connection latency compounds. Bumped
+    // to 30s so the resequence can complete on big templates. Without
+    // this, the transaction silently rolls back and the user sees
+    // stale cached startWeek/endWeek (Keith reported May 2026).
+    await prisma.$transaction(
+      async (tx) => {
+        // We can't call packChildrenAndUpdateParent then resequence as
+        // separate steps — the resequence rewrites every stage's
+        // startWeek anyway, and re-packs each stage's children inside
+        // its new window. So just trigger the full re-sequence scoped
+        // to the parent's variant (or base); the parent gets handled
+        // in the loop.
+        await resequenceTopLevelStages(tx, id, parent.variantId);
+      },
+      { timeout: 30_000 },
+    );
 
     // Return updated template (or variant) so the client can swap it in.
     if (parent.variantId) {

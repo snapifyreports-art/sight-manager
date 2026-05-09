@@ -52,9 +52,15 @@ export async function POST(
   }
 
   try {
-    await prisma.$transaction(async (tx) => {
-      await resequenceTopLevelStages(tx, id, variantId);
-    });
+    // Transaction timeout: see comment in /jobs/[jobId]/recalculate —
+    // big templates exceed the 5s default and the rollback leaves
+    // stale cached startWeek/endWeek.
+    await prisma.$transaction(
+      async (tx) => {
+        await resequenceTopLevelStages(tx, id, variantId);
+      },
+      { timeout: 30_000 },
+    );
 
     // Return the refreshed template (or variant) so the client can swap it in.
     if (variantId) {

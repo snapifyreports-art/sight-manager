@@ -1008,11 +1008,22 @@ export function TemplateEditor({
     }
 
     // recalculate fires resequenceTopLevelStages so downstream siblings
-    // slide to close any gap created by the duration change.
-    await fetch(
+    // slide to close any gap created by the duration change. Throw on
+    // failure so the user knows the slide didn't land — silent failures
+    // here previously left stale cached startWeek/endWeek (Keith caught
+    // this when a big template hit the transaction timeout).
+    const recalcRes = await fetch(
       apiUrl(`/jobs/${parentId}/recalculate`),
       { method: "POST" },
     );
+    if (!recalcRes.ok) {
+      const msg = await fetchErrorMessage(
+        recalcRes,
+        "Duration saved but the timeline didn't refresh — try editing it again.",
+      );
+      toast.error(msg);
+      throw new Error(msg);
+    }
 
     const tplRes = await fetch(apiUrl(""), {
       cache: "no-store",
