@@ -17,6 +17,7 @@ import {
   GitBranch,
   AlertTriangle,
   Calendar,
+  HardHat,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -50,6 +51,7 @@ import { TemplateCostFooter } from "./TemplateCostFooter";
 import { ApplyTemplatePreview } from "./ApplyTemplatePreview";
 import { TemplateMobileSummary } from "./TemplateMobileSummary";
 import { TemplateOrdersTableDialog } from "./TemplateOrdersTableDialog";
+import { TemplateContractorsTableDialog } from "./TemplateContractorsTableDialog";
 import type {
   TemplateData,
   TemplateJobData,
@@ -122,17 +124,21 @@ export function TemplateEditor({
   const [togglingDraft, setTogglingDraft] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [ordersTableOpen, setOrdersTableOpen] = useState(false);
+  const [contractorsTableOpen, setContractorsTableOpen] = useState(false);
 
   // Quick-fix action listener — validation panel buttons emit a
   // window event with a `kind` discriminator. We handle the actions
-  // that touch state local to this component (orders dialog + scroll
-  // to jobs); TemplateExtras listens for material/drawing actions.
+  // that touch state local to this component (orders + contractors
+  // dialogs + scroll to jobs); TemplateExtras listens for material/
+  // drawing actions.
   useEffect(() => {
     function handle(e: Event) {
       const detail = (e as CustomEvent<{ kind?: string }>).detail;
       if (!detail) return;
       if (detail.kind === "open-orders-table") {
         setOrdersTableOpen(true);
+      } else if (detail.kind === "open-contractors-table") {
+        setContractorsTableOpen(true);
       } else if (detail.kind === "scroll-to-jobs") {
         const el = document.getElementById("template-jobs-list");
         if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -1644,10 +1650,19 @@ export function TemplateEditor({
                 variant="outline"
                 size="sm"
                 onClick={() => setOrdersTableOpen(true)}
-                title="Spreadsheet view of every order — quick-edit anchors and lead times in one place"
+                title="Spreadsheet view of every order — quick-edit suppliers, anchors and lead times in one place"
               >
                 <Package className="size-3.5" />
                 All Orders
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setContractorsTableOpen(true)}
+                title="Assign contractors to every sub-job in one go"
+              >
+                <HardHat className="size-3.5" />
+                Contractors
               </Button>
               <Button
                 variant="outline"
@@ -1703,6 +1718,17 @@ export function TemplateEditor({
           const res = await fetch(apiUrl(""), {
             cache: "no-store",
           });
+          if (res.ok) onUpdate(await res.json());
+        }}
+      />
+
+      {/* Bulk contractor assignment table */}
+      <TemplateContractorsTableDialog
+        open={contractorsTableOpen}
+        onClose={() => setContractorsTableOpen(false)}
+        template={template}
+        onChanged={async () => {
+          const res = await fetch(apiUrl(""), { cache: "no-store" });
           if (res.ok) onUpdate(await res.json());
         }}
       />

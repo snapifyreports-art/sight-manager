@@ -29,6 +29,7 @@ export type TemplateIssueSeverity = "error" | "warning";
  */
 export type TemplateIssueActionKind =
   | "open-orders-table"
+  | "open-contractors-table"
   | "scroll-to-jobs"
   | "add-material"
   | "upload-drawing";
@@ -173,7 +174,7 @@ export function validateTemplate(
     issues.push({
       severity: "warning",
       message: `${subJobsWithoutContractor.length} sub-job${subJobsWithoutContractor.length === 1 ? "" : "s"} have no contractor assigned (e.g. ${truncateList(subJobsWithoutContractor)}).`,
-      action: { kind: "scroll-to-jobs", label: "Open jobs" },
+      action: { kind: "open-contractors-table", label: "Assign contractors" },
     });
   }
 
