@@ -7,102 +7,105 @@
  * being built in line style. On-brand with what the app actually
  * does.
  *
- * How it works: each piece of the house is a line / polyline /
- * rectangle drawn with a stroke-dash trick — strokeDasharray equals
- * the path's length so the whole stroke is "missing" at offset =
- * length, then we animate dashoffset to 0 to make it "draw in". The
- * pieces are sequenced via animation-delay so the foundation appears
- * first, then walls, roof, door, window. Then it holds for a beat
- * and "erases" by sweeping the offset the other way for the loop.
+ * Each piece of the house is a line / polyline / rectangle drawn
+ * with a stroke-dash trick. We set strokeDasharray to the path's
+ * pixel length so the whole stroke is "missing" at offset = length,
+ * then animate dashoffset to 0 so the line draws in. Pieces are
+ * sequenced via animation-delay so the foundation appears first,
+ * then walls, roof, door, window. Hold for a beat, then sweep back
+ * out for a continuous loop.
  *
- * Strokes are sized for a 64px viewBox; the wrapper component picks
- * the rendered size via Tailwind classes.
+ * Implementation note (Nov 2026): originally used styled-jsx for
+ * the keyframes but the scoping rules don't reliably reach SVG
+ * children — animation just didn't fire. Switched to inline `style`
+ * attributes on each element + a single `<style>` tag (not scoped)
+ * for the @keyframes. The keyframe name is unique enough not to
+ * collide with anything global.
  */
 export function HouseBuildingAnimation({
   className = "size-8",
 }: {
   className?: string;
 }) {
-  // Total cycle = 3.6s. Stages animate over this:
-  //   0.0 - 0.4   foundation
-  //   0.4 - 0.8   walls
-  //   0.8 - 1.2   roof
-  //   1.2 - 1.6   door
-  //   1.6 - 2.0   window
-  //   2.0 - 3.0   hold (full house drawn)
-  //   3.0 - 3.6   erase + restart
+  // Per-element animation timing. Total cycle = 3.6s. Each piece
+  // animates over the full cycle but with its own delay so they
+  // appear in build order.
   //
-  // Tailwind doesn't expose stroke-dash animations natively so we
-  // inline keyframes via styled-jsx.
+  // The `--hb-len` CSS variable is set per-element so the keyframes
+  // can reference each piece's own path length. Without this, every
+  // piece would animate to/from the same fixed offset which would
+  // over-erase short pieces and leave long ones partially drawn.
+  const baseAnim =
+    "hb-draw 3.6s cubic-bezier(0.4, 0, 0.2, 1) infinite";
+  const piece = (
+    length: number,
+    delaySeconds: number,
+  ): React.CSSProperties =>
+    // CSSProperties doesn't type custom-property keys; cast a
+    // record-shape so `--hb-len` is allowed.
+    ({
+      strokeDasharray: length,
+      strokeDashoffset: length,
+      animation: baseAnim,
+      animationDelay: `${delaySeconds}s`,
+      ["--hb-len" as string]: `${length}px`,
+    }) as React.CSSProperties;
+
   return (
-    <svg
-      viewBox="0 0 64 64"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={2.5}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={`${className} text-blue-600`}
-      aria-hidden
-    >
-      {/* Foundation — bottom rectangle base */}
-      <line className="hb-foundation" x1="8" y1="55" x2="56" y2="55" />
+    <>
+      <svg
+        viewBox="0 0 64 64"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={2.5}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className={`${className} text-blue-600`}
+        aria-hidden
+      >
+        {/* Foundation — bottom rectangle base */}
+        <line x1="8" y1="55" x2="56" y2="55" style={piece(50, 0)} />
 
-      {/* Walls — left + right */}
-      <line className="hb-wall-left" x1="12" y1="55" x2="12" y2="28" />
-      <line className="hb-wall-right" x1="52" y1="55" x2="52" y2="28" />
-      <line className="hb-wall-top" x1="12" y1="28" x2="52" y2="28" />
+        {/* Walls — left + right + top plate */}
+        <line x1="12" y1="55" x2="12" y2="28" style={piece(28, 0.25)} />
+        <line x1="52" y1="55" x2="52" y2="28" style={piece(28, 0.35)} />
+        <line x1="12" y1="28" x2="52" y2="28" style={piece(40, 0.55)} />
 
-      {/* Roof — pitched */}
-      <polyline className="hb-roof" points="9,28 32,12 55,28" />
+        {/* Roof — pitched */}
+        <polyline
+          points="9,28 32,12 55,28"
+          style={piece(60, 0.85)}
+        />
 
-      {/* Door */}
-      <rect
-        className="hb-door"
-        x="28"
-        y="42"
-        width="8"
-        height="13"
-        rx="0.5"
-      />
+        {/* Door */}
+        <rect
+          x="28"
+          y="42"
+          width="8"
+          height="13"
+          rx="0.5"
+          style={piece(42, 1.2)}
+        />
 
-      {/* Window */}
-      <rect
-        className="hb-window"
-        x="38"
-        y="34"
-        width="8"
-        height="6"
-        rx="0.5"
-      />
-
-      <style jsx>{`
-        /* Each piece is drawn by animating stroke-dashoffset from its
-           own length down to 0 — same trick as svg-stroke "draw"
-           tutorials. Different stroke-dasharray per piece so the
-           timing matches its actual length. */
+        {/* Window */}
+        <rect
+          x="38"
+          y="34"
+          width="8"
+          height="6"
+          rx="0.5"
+          style={piece(28, 1.45)}
+        />
+      </svg>
+      <style>{`
         @keyframes hb-draw {
-          0%, 5%   { stroke-dashoffset: var(--len); opacity: 0; }
+          0%, 5%   { stroke-dashoffset: var(--hb-len, 60px); opacity: 0; }
           10%      { opacity: 1; }
-          25%      { stroke-dashoffset: 0; opacity: 1; }
-          75%      { stroke-dashoffset: 0; opacity: 1; }
-          90%      { stroke-dashoffset: 0; opacity: 1; }
-          100%     { stroke-dashoffset: var(--len); opacity: 0; }
+          30%      { stroke-dashoffset: 0; opacity: 1; }
+          78%      { stroke-dashoffset: 0; opacity: 1; }
+          100%     { stroke-dashoffset: var(--hb-len, 60px); opacity: 0; }
         }
-        line, polyline, rect {
-          animation: hb-draw 3.6s ease-in-out infinite;
-          stroke-dasharray: var(--len);
-          stroke-dashoffset: var(--len);
-          will-change: stroke-dashoffset, opacity;
-        }
-        .hb-foundation { --len: 50px; animation-delay: 0s; }
-        .hb-wall-left  { --len: 28px; animation-delay: 0.25s; }
-        .hb-wall-right { --len: 28px; animation-delay: 0.35s; }
-        .hb-wall-top   { --len: 40px; animation-delay: 0.55s; }
-        .hb-roof       { --len: 60px; animation-delay: 0.85s; }
-        .hb-door       { --len: 42px; animation-delay: 1.2s; }
-        .hb-window     { --len: 28px; animation-delay: 1.45s; }
       `}</style>
-    </svg>
+    </>
   );
 }
