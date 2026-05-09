@@ -873,7 +873,18 @@ export function PlotDetailClient({
   // Tab persistence — same pattern as Settings/Suppliers. `?tab=X`
   // restores on refresh / deep link. Default "overview" if absent.
   const VALID_TABS = useMemo(
-    () => new Set(["overview", "gantt", "todo", "jobs", "history", "materials", "drawings"]),
+    () =>
+      new Set([
+        "overview",
+        "gantt",
+        "todo",
+        "jobs",
+        "history",
+        "materials",
+        "drawings",
+        "handover",
+        "customer",
+      ]),
     [],
   );
   const tabFromUrl = searchParams?.get("tab") ?? "";

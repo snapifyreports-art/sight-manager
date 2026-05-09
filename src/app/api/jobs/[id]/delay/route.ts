@@ -156,6 +156,46 @@ export async function POST(
         ? "Weather – Temperature"
         : reason || "No reason given";
 
+  // Upsert+bump the DelayReason chip-list so commonly-used reasons
+  // (system-seeded or user-typed) float to the top of the picker over
+  // time. Only persist labels that look like real reasons — skip the
+  // "No reason given" fallback so we don't pollute the chip grid.
+  if (reason && reason.trim() && reason.trim().toLowerCase() !== "no reason given") {
+    const trimmed = reason.trim().slice(0, 60);
+    const labelTitled = trimmed[0].toUpperCase() + trimmed.slice(1);
+    await prisma.delayReason
+      .upsert({
+        where: { label: labelTitled },
+        update: { usageCount: { increment: 1 }, lastUsedAt: new Date() },
+        create: {
+          label: labelTitled,
+          category: delayReasonType,
+          usageCount: 1,
+          lastUsedAt: new Date(),
+          isSystem: false,
+        },
+      })
+      .catch(() => {
+        /* non-critical — don't fail the delay if the chip-tracking write hiccups */
+      });
+  } else if (delayReasonType === "WEATHER_RAIN" || delayReasonType === "WEATHER_TEMPERATURE") {
+    // Bump the seeded weather reason so its usage rank reflects reality
+    const weatherLabel = delayReasonType === "WEATHER_RAIN" ? "Rain" : "Temperature";
+    await prisma.delayReason
+      .upsert({
+        where: { label: weatherLabel },
+        update: { usageCount: { increment: 1 }, lastUsedAt: new Date() },
+        create: {
+          label: weatherLabel,
+          category: delayReasonType,
+          usageCount: 1,
+          lastUsedAt: new Date(),
+          isSystem: true,
+        },
+      })
+      .catch(() => {});
+  }
+
   const noteEmoji =
     delayReasonType === "WEATHER_RAIN"
       ? "☔"

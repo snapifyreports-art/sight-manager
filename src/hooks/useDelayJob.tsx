@@ -39,6 +39,36 @@ import { HelpTip } from "@/components/shared/HelpTip";
 
 type DelayReasonType = "WEATHER_RAIN" | "WEATHER_TEMPERATURE" | "OTHER";
 
+interface DelayReasonChip {
+  id: string;
+  label: string;
+  category: string; // WEATHER_RAIN | WEATHER_TEMPERATURE | OTHER
+  isSystem: boolean;
+  usageCount: number;
+}
+
+// Map a chip's category onto the EventLog enum the API expects.
+function categoryToType(cat: string): DelayReasonType {
+  if (cat === "WEATHER_RAIN" || cat === "WEATHER_TEMPERATURE") return cat;
+  return "OTHER";
+}
+
+// Friendly emoji per reason chip — Rain/Temperature get weather glyphs,
+// everything else falls back to a neutral marker. Pure cosmetic.
+function chipEmoji(label: string, category: string): string {
+  if (category === "WEATHER_RAIN") return "☔";
+  if (category === "WEATHER_TEMPERATURE") return "🌡️";
+  const l = label.toLowerCase();
+  if (l.includes("contractor")) return "👷";
+  if (l.includes("delivery") || l.includes("deliver")) return "🚚";
+  if (l.includes("order")) return "📦";
+  if (l.includes("material")) return "🧱";
+  if (l.includes("snag")) return "🔧";
+  if (l.includes("plant") || l.includes("equipment")) return "🛠️";
+  if (l.includes("access")) return "🚧";
+  return "⏳";
+}
+
 export interface DelayableJob {
   id: string;
   name: string;
@@ -61,8 +91,13 @@ export function useDelayJob(onSuccess?: () => void): DelayHookResult {
   const [inputMode, setInputMode] = useState<"days" | "date">("days");
   const [days, setDays] = useState(1);
   const [pickedEndDate, setPickedEndDate] = useState("");
-  const [reasonType, setReasonType] = useState<DelayReasonType>("OTHER");
-  const [reasonNote, setReasonNote] = useState("");
+  // Selected chip drives the reason. `selectedChipId` is null when the
+  // user is typing a fresh custom reason (then we read `customLabel`).
+  // Chips come from /api/delay-reasons — seeded common ones plus
+  // anything previous custom entries have added.
+  const [chips, setChips] = useState<DelayReasonChip[]>([]);
+  const [selectedChipId, setSelectedChipId] = useState<string | null>(null);
+  const [customLabel, setCustomLabel] = useState("");
   const [submitting, setSubmitting] = useState(false);
   // Weather suggestion — fetched when dialog opens. Pre-selects the reason
   // type if there are rained-off days logged during the job's period so the
@@ -78,8 +113,8 @@ export function useDelayJob(onSuccess?: () => void): DelayHookResult {
     setInputMode("days");
     setDays(1);
     setPickedEndDate("");
-    setReasonType("OTHER");
-    setReasonNote("");
+    setSelectedChipId(null);
+    setCustomLabel("");
     setWeatherSuggestion(null);
   }, []);
 
@@ -87,14 +122,34 @@ export function useDelayJob(onSuccess?: () => void): DelayHookResult {
     setTarget(job);
     setDays(Math.max(1, defaultDays));
     setPickedEndDate("");
-    setReasonType("OTHER");
-    setReasonNote("");
+    setSelectedChipId(null);
+    setCustomLabel("");
     setInputMode("days");
     setWeatherSuggestion(null);
   }, []);
 
+  // Load chips on first dialog open (and refresh each time so a custom
+  // entry typed in this session appears in the next picker too).
+  useEffect(() => {
+    if (!target) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/delay-reasons", { cache: "no-store" });
+        if (!res.ok) return;
+        const data = (await res.json()) as DelayReasonChip[];
+        if (cancelled) return;
+        setChips(data);
+      } catch {
+        /* non-critical */
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [target]);
+
   // Fetch weather suggestion when dialog opens for a specific job. Silent
   // failure on error — this is an enhancement, not a blocker for submitting.
+  // Also auto-pick the matching weather chip if a suggestion comes back.
   useEffect(() => {
     if (!target) return;
     let cancelled = false;
@@ -112,13 +167,18 @@ export function useDelayJob(onSuccess?: () => void): DelayHookResult {
           rainDays: data.rainDays ?? 0,
           temperatureDays: data.temperatureDays ?? 0,
         });
-        if (data.suggestedReason) setReasonType(data.suggestedReason);
+        // Match the suggested category to a chip and pre-select it.
+        // Defer one tick so the chips fetch can land first.
+        if (data.suggestedReason && chips.length > 0) {
+          const match = chips.find((c) => c.category === data.suggestedReason);
+          if (match) setSelectedChipId(match.id);
+        }
       } catch {
         /* non-critical */
       }
     })();
     return () => { cancelled = true; };
-  }, [target]);
+  }, [target, chips]);
 
   // Resolve the working-day delta from whichever input mode is active.
   // Returns null if the input doesn't produce a positive shift.
@@ -141,6 +201,24 @@ export function useDelayJob(onSuccess?: () => void): DelayHookResult {
     return { start: format(newStart, "dd MMM"), end: format(newEnd, "dd MMM") };
   }
 
+  // Resolve the chosen reason into the API payload shape.
+  // Selected chip wins; otherwise treat custom text as a fresh OTHER reason.
+  function resolveReason(): { type: DelayReasonType; reason?: string } {
+    const chip = chips.find((c) => c.id === selectedChipId);
+    const customTrimmed = customLabel.trim();
+    if (chip) {
+      const type = categoryToType(chip.category);
+      // For weather chips the API derives the label from the type; for
+      // OTHER chips we send the chip label as `reason` so it shows up
+      // on the Delay Report.
+      return type === "OTHER" ? { type, reason: chip.label } : { type };
+    }
+    if (customTrimmed) {
+      return { type: "OTHER", reason: customTrimmed };
+    }
+    return { type: "OTHER" };
+  }
+
   async function apply() {
     if (!target) return;
     const resolved = resolveDays();
@@ -148,6 +226,7 @@ export function useDelayJob(onSuccess?: () => void): DelayHookResult {
       toast.error("Delay must be at least 1 working day");
       return;
     }
+    const { type, reason } = resolveReason();
     setSubmitting(true);
     try {
       const res = await fetch(`/api/jobs/${target.id}/delay`, {
@@ -155,8 +234,8 @@ export function useDelayJob(onSuccess?: () => void): DelayHookResult {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           days: resolved,
-          delayReasonType: reasonType,
-          reason: reasonNote.trim() || undefined,
+          delayReasonType: type,
+          reason: reason || undefined,
         }),
       });
       if (!res.ok) {
@@ -285,46 +364,66 @@ export function useDelayJob(onSuccess?: () => void): DelayHookResult {
             </div>
           )}
 
-          {/* Reason picker — matches Delay Report enum */}
+          {/* Reason chips — common reasons learn from custom additions
+              over time so the most-used ones float to the top.
+              Picking a chip wins; typing a custom one creates a new
+              chip on submit. */}
           <div className="space-y-1.5">
             <Label className="text-xs font-medium">Reason</Label>
-            <div className="grid grid-cols-3 gap-1.5">
-              {[
-                { v: "WEATHER_RAIN" as const, label: "Rain", emoji: "☔" },
-                { v: "WEATHER_TEMPERATURE" as const, label: "Temperature", emoji: "🌡️" },
-                { v: "OTHER" as const, label: "Other", emoji: "⏳" },
-              ].map((r) => (
-                <button
-                  key={r.v}
-                  type="button"
-                  onClick={() => setReasonType(r.v)}
-                  className={cn(
-                    "rounded-lg border px-2 py-1.5 text-xs font-medium transition-colors",
-                    reasonType === r.v
-                      ? "border-amber-400 bg-amber-50 text-amber-900"
-                      : "border-border bg-white text-muted-foreground hover:bg-slate-50"
-                  )}
-                >
-                  <span className="mr-1">{r.emoji}</span>{r.label}
-                </button>
-              ))}
+            <div className="flex flex-wrap gap-1.5">
+              {chips.map((c) => {
+                const selected = selectedChipId === c.id;
+                return (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => {
+                      setSelectedChipId(selected ? null : c.id);
+                      // Clear custom field when picking a chip — the two
+                      // are mutually exclusive at submit time.
+                      if (!selected) setCustomLabel("");
+                    }}
+                    className={cn(
+                      "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
+                      selected
+                        ? "border-amber-400 bg-amber-50 text-amber-900"
+                        : "border-border bg-white text-muted-foreground hover:bg-slate-50",
+                    )}
+                  >
+                    <span className="mr-1">{chipEmoji(c.label, c.category)}</span>
+                    {c.label}
+                  </button>
+                );
+              })}
+              {chips.length === 0 && (
+                <span className="text-xs italic text-muted-foreground">Loading reasons…</span>
+              )}
             </div>
           </div>
 
-          {reasonType === "OTHER" && (
-            <div className="space-y-1.5">
-              <Label htmlFor="delay-note" className="text-xs font-medium">
-                Notes <span className="text-muted-foreground">(optional — shows on delay report)</span>
-              </Label>
-              <Input
-                id="delay-note"
-                value={reasonNote}
-                onChange={(e) => setReasonNote(e.target.value)}
-                placeholder="e.g. Contractor no-show, material not on site yet"
-                maxLength={200}
-              />
-            </div>
-          )}
+          {/* Always-visible custom field — type a fresh reason and it
+              gets added to the chip list on submit so it's a one-click
+              pick next time. */}
+          <div className="space-y-1.5">
+            <Label htmlFor="delay-custom" className="text-xs font-medium">
+              Or type your own{" "}
+              <span className="text-muted-foreground">
+                (saved for next time — shows on delay report)
+              </span>
+            </Label>
+            <Input
+              id="delay-custom"
+              value={customLabel}
+              onChange={(e) => {
+                setCustomLabel(e.target.value);
+                // Typing in the custom field clears any chip selection
+                // — the two are mutually exclusive.
+                if (e.target.value && selectedChipId) setSelectedChipId(null);
+              }}
+              placeholder="e.g. Roofer ran late, brick delivery short"
+              maxLength={60}
+            />
+          </div>
 
           <p className="text-xs text-muted-foreground">
             Dependent jobs on the same plot will shift by the same amount.

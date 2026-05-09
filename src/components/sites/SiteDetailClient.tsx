@@ -83,6 +83,7 @@ import { SiteLogClient } from "@/components/sites/SiteLogClient";
 import { usePlotCreation } from "@/hooks/usePlotCreation";
 import { SnagAgeingReport } from "@/components/snags/SnagAgeingReport";
 import { CashFlowReport } from "@/components/reports/CashFlowReport";
+import { SiteCustomerPagesPanel } from "@/components/sites/SiteCustomerPagesPanel";
 import { Badge } from "@/components/ui/badge";
 import { HelpTip } from "@/components/shared/HelpTip";
 
@@ -2229,6 +2230,16 @@ export function SiteDetailClient({
           <div className={activeTab !== "cash-flow" ? "hidden" : undefined}>
             {visitedTabs.has("cash-flow") && (
               <CashFlowReport siteId={site.id} />
+            )}
+          </div>
+
+          {/* Customer Pages — site-wide overview of every plot's
+              /progress/<token> share link with quick admin actions.
+              Lives under the Site Admin sidebar group; per-plot
+              management is on the plot detail "Customer view" tab. */}
+          <div className={activeTab !== "customer-pages" ? "hidden" : undefined}>
+            {visitedTabs.has("customer-pages") && (
+              <SiteCustomerPagesPanel siteId={site.id} />
             )}
           </div>
         </div>

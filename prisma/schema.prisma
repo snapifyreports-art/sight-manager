@@ -845,6 +845,29 @@ model HandoverChecklist {
   @@unique([plotId, docType])
 }
 
+// ---------- Delay Reasons ----------
+
+// Curated + learned list of delay reasons. Seeded with common ones
+// (Contractor no-show, Order delay, Material missing, Rain, Temperature
+// etc.); when a user types a NEW reason in the delay dialog, it gets
+// upserted here so next time it appears as a quick-pick chip. Sorted
+// by usageCount so the most-used reasons float to the top.
+//
+// `category` buckets the reason for the Delay Report — must be one
+// of: WEATHER_RAIN | WEATHER_TEMPERATURE | OTHER. Used to fill
+// EventLog.delayReasonType when a delay is recorded.
+model DelayReason {
+  id          String    @id @default(cuid())
+  label       String    @unique
+  category    String    @default("OTHER")
+  usageCount  Int       @default(0)
+  isSystem    Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+  lastUsedAt  DateTime?
+
+  @@index([usageCount])
+}
+
 // ---------- Event Log ----------
 
 model EventLog {
