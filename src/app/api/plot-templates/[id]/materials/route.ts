@@ -6,22 +6,26 @@ import { apiError } from "@/lib/api-errors";
 export const dynamic = "force-dynamic";
 
 // GET /api/plot-templates/[id]/materials — list materials on a template
+// (or variant if ?variantId=X is passed; null means base template).
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const session = await auth();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { id } = await params;
+  const { searchParams } = new URL(req.url);
+  const variantId = searchParams.get("variantId");
   const materials = await prisma.templateMaterial.findMany({
-    where: { templateId: id },
+    where: { templateId: id, variantId },
     orderBy: [{ category: "asc" }, { name: "asc" }],
   });
   return NextResponse.json(materials);
 }
 
 // POST /api/plot-templates/[id]/materials — add a material to a template
+// (or variant if ?variantId=X is passed).
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -30,6 +34,8 @@ export async function POST(
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { id: templateId } = await params;
+  const { searchParams } = new URL(req.url);
+  const variantId = searchParams.get("variantId");
   const body = await req.json();
   const { name, quantity, unit, unitCost, category, notes, linkedStageCode } = body;
 
@@ -41,6 +47,7 @@ export async function POST(
     const material = await prisma.templateMaterial.create({
       data: {
         templateId,
+        variantId,
         name: name.trim(),
         quantity,
         unit: (unit || "each").trim(),

@@ -4,12 +4,10 @@ import { useEffect, useState } from "react";
 import {
   Plus,
   Trash2,
-  Copy,
   Loader2,
   Layers,
-  Pencil,
-  Check,
-  X,
+  ChevronRight,
+  Copy,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,42 +21,69 @@ import {
   DialogFooter,
   DialogClose,
 } from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 import { useConfirmAction } from "@/hooks/useConfirmAction";
-import type {
-  TemplateData,
-  TemplateJobData,
-  TemplateVariantData,
-} from "./types";
+import type { TemplateData, TemplateVariantData } from "./types";
 
 /**
- * Variants section inside the editor. Lets a single template carry
- * multiple plot variants (e.g. Keith's 2-storey covering 765/775/923/
- * 990/1047 sq-ft) without forcing 5 cloned templates that drift over
- * time.
+ * Variants section inside the editor. Each variant is a fully
+ * independent template (its own stages/sub-jobs/orders/materials/
+ * documents) — May 2026 rework. Clicking a card hands control to the
+ * parent so it can swap to the variant editor view.
  *
- * MVP scope: per-variant durationDays overrides on any sub-job. Material
- * overrides are wired in the schema but not yet surfaced — follow-up.
- *
- * Apply-template path picks one variant at apply time and the cascade
- * applies the variant's overrides on top of the base template.
+ * On creation the user picks "Copy from base", "Copy from another
+ * variant", or "Start blank". Copy operations fire on the server.
  */
 export function TemplateVariantsSection({
   template,
+  onOpenVariant,
 }: {
   template: TemplateData;
+  onOpenVariant: (variantId: string) => void;
 }) {
   const toast = useToast();
   const { confirmAction, dialogs: confirmDialogs } = useConfirmAction();
 
   const [variants, setVariants] = useState<TemplateVariantData[]>([]);
+  const [counts, setCounts] = useState<Record<string, VariantSummary>>({});
+  const [loading, setLoading] = useState(true);
+
+  const [openCreate, setOpenCreate] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newDesc, setNewDesc] = useState("");
+  const [seedFrom, setSeedFrom] = useState<string>("base"); // "base" | "blank" | <variantId>
+  const [creating, setCreating] = useState(false);
 
   const reload = async () => {
-    const res = await fetch(
-      `/api/plot-templates/${template.id}/variants`,
-      { cache: "no-store" },
-    );
-    if (res.ok) setVariants(await res.json());
+    setLoading(true);
+    try {
+      const res = await fetch(
+        `/api/plot-templates/${template.id}/variants`,
+        { cache: "no-store" },
+      );
+      if (!res.ok) return;
+      const data: TemplateVariantData[] = await res.json();
+      setVariants(data);
+
+      // Pull counts for each variant in parallel — small per-variant
+      // summaries (jobs, orders, materials, docs) for the cards.
+      const byId: Record<string, VariantSummary> = {};
+      await Promise.all(
+        data.map(async (v) => {
+          byId[v.id] = await fetchSummary(template.id, v.id);
+        }),
+      );
+      setCounts(byId);
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -66,20 +91,11 @@ export function TemplateVariantsSection({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [template.id]);
 
-  const onChanged = reload;
-
-  const [openCreate, setOpenCreate] = useState(false);
-  const [newName, setNewName] = useState("");
-  const [newDesc, setNewDesc] = useState("");
-  const [creating, setCreating] = useState(false);
-
-  // Currently-expanded variant for the override editor
-  const [expandedId, setExpandedId] = useState<string | null>(null);
-
   async function handleCreate() {
     if (!newName.trim()) return;
     setCreating(true);
     try {
+      // 1. Create the variant
       const res = await fetch(
         `/api/plot-templates/${template.id}/variants`,
         {
@@ -97,11 +113,36 @@ export function TemplateVariantsSection({
         );
         return;
       }
+      const created: TemplateVariantData = await res.json();
+
+      // 2. If seeding from another source, fire the seed
+      if (seedFrom !== "blank") {
+        const seedRes = await fetch(
+          `/api/plot-templates/${template.id}/variants/${created.id}/seed`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              fromVariantId: seedFrom === "base" ? null : seedFrom,
+            }),
+          },
+        );
+        if (!seedRes.ok) {
+          toast.error(
+            await fetchErrorMessage(seedRes, "Variant created but seed failed"),
+          );
+          // Continue — the variant exists, user can manually populate.
+        }
+      }
+
       setNewName("");
       setNewDesc("");
+      setSeedFrom("base");
       setOpenCreate(false);
-      await onChanged();
-      toast.success("Variant added");
+      toast.success(`Variant "${created.name}" added`);
+      await reload();
+      // Auto-open the new variant so the user lands on the editor.
+      onOpenVariant(created.id);
     } finally {
       setCreating(false);
     }
@@ -112,9 +153,9 @@ export function TemplateVariantsSection({
       title: "Delete variant",
       description: (
         <>
-          Delete <span className="font-medium text-foreground">{v.name}</span>{" "}
-          and its overrides? Plots already created using this variant keep
-          their snapshots — only the template-side variant is removed.
+          Delete <span className="font-medium text-foreground">{v.name}</span>?
+          All its stages, orders, materials and documents are removed. Plots
+          already created using this variant keep their snapshots.
         </>
       ),
       confirmLabel: "Delete",
@@ -128,14 +169,10 @@ export function TemplateVariantsSection({
             await fetchErrorMessage(res, "Failed to delete variant"),
           );
         }
-        await onChanged();
+        await reload();
       },
     });
   }
-
-  // Flat list of every leaf job (sub-job that has no children) for the
-  // override editor — that's where durationDays makes sense.
-  const overrideTargets = collectLeafJobs(template);
 
   return (
     <div className="space-y-3">
@@ -149,8 +186,8 @@ export function TemplateVariantsSection({
             </span>
           </h3>
           <p className="text-xs text-muted-foreground">
-            Per-variant duration overrides. Apply-template asks "which
-            variant?" and uses the override values for that plot.
+            Each variant is its own full template — own stages, orders,
+            materials, drawings. Tap a variant to edit.
           </p>
         </div>
         <Button size="sm" onClick={() => setOpenCreate(true)}>
@@ -159,38 +196,59 @@ export function TemplateVariantsSection({
         </Button>
       </div>
 
-      {variants.length === 0 ? (
+      {loading && variants.length === 0 ? (
+        <div className="flex items-center justify-center rounded border p-4">
+          <Loader2 className="size-4 animate-spin text-muted-foreground" />
+        </div>
+      ) : variants.length === 0 ? (
         <p className="rounded border border-dashed p-3 text-xs text-muted-foreground">
-          No variants yet. Add one (e.g. "765", "Apple Tree") to give this
-          template multiple flavours without cloning it.
+          No variants yet. Add one (e.g. "765", "Apple Tree") and choose to
+          copy from the base template so you don't restart from scratch.
         </p>
       ) : (
-        <div className="space-y-2">
+        <div className="grid gap-2 sm:grid-cols-2">
           {variants.map((v) => (
-            <VariantCard
+            <button
               key={v.id}
-              variant={v}
-              expanded={expandedId === v.id}
-              onToggle={() =>
-                setExpandedId((prev) => (prev === v.id ? null : v.id))
-              }
-              onDelete={() => handleDelete(v)}
-              templateId={template.id}
-              overrideTargets={overrideTargets}
-              onOverrideChanged={onChanged}
-            />
+              type="button"
+              onClick={() => onOpenVariant(v.id)}
+              className="group flex items-center gap-3 rounded-lg border bg-white p-3 text-left transition-all hover:-translate-y-0.5 hover:shadow-sm"
+            >
+              <Layers className="size-4 shrink-0 text-blue-600" />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium">{v.name}</p>
+                {v.description && (
+                  <p className="line-clamp-1 text-[11px] text-muted-foreground">
+                    {v.description}
+                  </p>
+                )}
+                <SummaryLine summary={counts[v.id]} />
+              </div>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleDelete(v);
+                }}
+                className="rounded p-1 text-muted-foreground hover:bg-red-50 hover:text-red-600"
+                title="Delete variant"
+              >
+                <Trash2 className="size-3.5" />
+              </button>
+              <ChevronRight className="size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
+            </button>
           ))}
         </div>
       )}
 
       {/* Create dialog */}
       <Dialog open={openCreate} onOpenChange={setOpenCreate}>
-        <DialogContent className="sm:max-w-sm">
+        <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Add variant</DialogTitle>
             <DialogDescription>
-              Give this template a new variant. Same stages and sub-jobs;
-              you'll set per-variant duration overrides next.
+              A variant is its own full template within this group. Copy
+              from a starting point so you don&apos;t restart from zero.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3 py-2">
@@ -209,6 +267,40 @@ export function TemplateVariantsSection({
                 value={newDesc}
                 onChange={(e) => setNewDesc(e.target.value)}
               />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Start from</Label>
+              <Select
+                value={seedFrom}
+                onValueChange={(v) => setSeedFrom(v ?? "base")}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="base">
+                    <span className="flex items-center gap-2">
+                      <Copy className="size-3.5" /> Copy from base template
+                    </span>
+                  </SelectItem>
+                  {variants.map((v) => (
+                    <SelectItem key={v.id} value={v.id}>
+                      <span className="flex items-center gap-2">
+                        <Copy className="size-3.5" /> Copy from "{v.name}"
+                      </span>
+                    </SelectItem>
+                  ))}
+                  <SelectItem value="blank">
+                    <span className="flex items-center gap-2">
+                      <Plus className="size-3.5" /> Start blank
+                    </span>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-[11px] text-muted-foreground">
+                Stages and sub-jobs will be deep-cloned so editing this
+                variant doesn&apos;t affect the source.
+              </p>
             </div>
           </div>
           <DialogFooter>
@@ -235,226 +327,88 @@ export function TemplateVariantsSection({
   );
 }
 
-function VariantCard({
-  variant,
-  expanded,
-  onToggle,
-  onDelete,
-  templateId,
-  overrideTargets,
-  onOverrideChanged,
-}: {
-  variant: TemplateVariantData;
-  expanded: boolean;
-  onToggle: () => void;
-  onDelete: () => void;
-  templateId: string;
-  overrideTargets: Array<{
-    id: string;
-    name: string;
-    parentName: string;
-    baseDays: number;
-  }>;
-  onOverrideChanged: () => void | Promise<void>;
-}) {
-  const overrideMap = new Map(
-    variant.jobOverrides.map((o) => [o.templateJobId, o.durationDays]),
-  );
-  const overrideCount = variant.jobOverrides.filter(
-    (o) => o.durationDays != null,
-  ).length;
-
-  return (
-    <div className="rounded-lg border bg-white">
-      <div className="flex items-center gap-2 px-3 py-2">
-        <button
-          type="button"
-          onClick={onToggle}
-          className="flex flex-1 items-center gap-2 text-left"
-        >
-          <Layers className="size-4 shrink-0 text-blue-600" />
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-medium">{variant.name}</p>
-            {variant.description && (
-              <p className="truncate text-[11px] text-muted-foreground">
-                {variant.description}
-              </p>
-            )}
-          </div>
-          <span className="shrink-0 rounded bg-blue-50 px-2 py-0.5 text-[10px] font-medium text-blue-700">
-            {overrideCount} override{overrideCount === 1 ? "" : "s"}
-          </span>
-        </button>
-        <button
-          onClick={onDelete}
-          className="rounded p-1 text-muted-foreground hover:bg-red-50 hover:text-red-600"
-          title="Delete variant"
-        >
-          <Trash2 className="size-3.5" />
-        </button>
-      </div>
-
-      {expanded && (
-        <div className="space-y-1 border-t bg-slate-50/40 p-3 text-xs">
-          <p className="text-muted-foreground">
-            Set a duration override for any sub-job. Leave blank to inherit
-            the base template value.
-          </p>
-          <div className="mt-2 max-h-[280px] space-y-1 overflow-y-auto">
-            {overrideTargets.length === 0 ? (
-              <p className="italic text-muted-foreground">
-                No sub-jobs yet — add stages first.
-              </p>
-            ) : (
-              overrideTargets.map((t) => (
-                <OverrideRow
-                  key={t.id}
-                  target={t}
-                  override={overrideMap.get(t.id) ?? null}
-                  templateId={templateId}
-                  variantId={variant.id}
-                  onChanged={onOverrideChanged}
-                />
-              ))
-            )}
-          </div>
-        </div>
-      )}
-    </div>
-  );
+interface VariantSummary {
+  jobs: number;
+  orders: number;
+  materials: number;
+  documents: number;
+  totalDays: number;
 }
 
-function OverrideRow({
-  target,
-  override,
-  templateId,
-  variantId,
-  onChanged,
-}: {
-  target: { id: string; name: string; parentName: string; baseDays: number };
-  override: number | null;
-  templateId: string;
-  variantId: string;
-  onChanged: () => void | Promise<void>;
-}) {
-  const [draft, setDraft] = useState<string>(
-    override != null ? String(override) : "",
-  );
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    setDraft(override != null ? String(override) : "");
-  }, [override]);
-
-  async function commit() {
-    const trimmed = draft.trim();
-    const newVal = trimmed === "" ? null : parseInt(trimmed, 10);
-    if (
-      (newVal == null && override == null) ||
-      (newVal != null && newVal === override)
-    ) {
-      return;
+async function fetchSummary(
+  templateId: string,
+  variantId: string,
+): Promise<VariantSummary> {
+  try {
+    const res = await fetch(
+      `/api/plot-templates/${templateId}/variants/${variantId}/full`,
+      { cache: "no-store" },
+    );
+    if (!res.ok)
+      return {
+        jobs: 0,
+        orders: 0,
+        materials: 0,
+        documents: 0,
+        totalDays: 0,
+      };
+    const data = await res.json();
+    let jobs = 0;
+    let orders = 0;
+    let totalDays = 0;
+    type J = {
+      id: string;
+      durationDays: number | null;
+      durationWeeks: number | null;
+      orders?: unknown[];
+      children?: J[];
+    };
+    function walk(j: J) {
+      jobs += 1;
+      if (j.orders) orders += j.orders.length;
+      const days =
+        j.durationDays && j.durationDays > 0
+          ? j.durationDays
+          : j.durationWeeks
+            ? j.durationWeeks * 5
+            : 0;
+      // Only count leaf days
+      if (!j.children || j.children.length === 0) totalDays += days;
+      if (j.children) j.children.forEach(walk);
     }
-    if (newVal != null && (!Number.isFinite(newVal) || newVal < 1)) {
-      setDraft(override != null ? String(override) : "");
-      return;
-    }
-    setSaving(true);
-    try {
-      await fetch(
-        `/api/plot-templates/${templateId}/variants/${variantId}/job-overrides`,
-        {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            templateJobId: target.id,
-            durationDays: newVal,
-          }),
-        },
-      );
-      await onChanged();
-    } finally {
-      setSaving(false);
-    }
+    if (data?.jobs) data.jobs.forEach(walk);
+    // Material + document counts via the parallel endpoints
+    const [matRes, docRes] = await Promise.all([
+      fetch(
+        `/api/plot-templates/${templateId}/materials?variantId=${variantId}`,
+        { cache: "no-store" },
+      ),
+      fetch(
+        `/api/plot-templates/${templateId}/documents?variantId=${variantId}`,
+        { cache: "no-store" },
+      ),
+    ]);
+    const materials = matRes.ok ? (await matRes.json()).length : 0;
+    const documents = docRes.ok ? (await docRes.json()).length : 0;
+    return { jobs, orders, materials, documents, totalDays };
+  } catch {
+    return { jobs: 0, orders: 0, materials: 0, documents: 0, totalDays: 0 };
   }
-
-  const overridden = override != null && override !== target.baseDays;
-
-  return (
-    <div className="flex items-center gap-2 rounded bg-white px-2 py-1 ring-1 ring-border/40">
-      <span className="min-w-0 flex-1 truncate">
-        <span className="text-muted-foreground">{target.parentName}</span>
-        <span className="px-1 text-muted-foreground">›</span>
-        <span className="font-medium">{target.name}</span>
-      </span>
-      <span className="shrink-0 text-[10px] text-muted-foreground">
-        base {target.baseDays}d
-      </span>
-      <Input
-        type="number"
-        min={1}
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={commit}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-        }}
-        disabled={saving}
-        placeholder={`= ${target.baseDays}`}
-        className={`h-7 w-20 text-center text-xs ${
-          overridden ? "border-blue-300 bg-blue-50" : ""
-        }`}
-      />
-      <span className="w-3 shrink-0">
-        {saving ? (
-          <Loader2 className="size-3 animate-spin text-muted-foreground" />
-        ) : overridden ? (
-          <Check className="size-3 text-blue-600" />
-        ) : null}
-      </span>
-    </div>
-  );
 }
 
-function collectLeafJobs(template: TemplateData): Array<{
-  id: string;
-  name: string;
-  parentName: string;
-  baseDays: number;
-}> {
-  const result: Array<{
-    id: string;
-    name: string;
-    parentName: string;
-    baseDays: number;
-  }> = [];
-  function leafDays(j: TemplateJobData): number {
-    if (j.durationDays && j.durationDays > 0) return j.durationDays;
-    if (j.durationWeeks && j.durationWeeks > 0) return j.durationWeeks * 5;
-    return 0;
-  }
-  for (const stage of template.jobs) {
-    const kids = stage.children ?? [];
-    if (kids.length === 0) {
-      result.push({
-        id: stage.id,
-        name: stage.name,
-        parentName: "(stage)",
-        baseDays: leafDays(stage),
-      });
-      continue;
-    }
-    for (const child of kids) {
-      // For now, only first-level sub-jobs are override-able. Three-level
-      // templates are uncommon and adding the third level here can come
-      // later if needed.
-      result.push({
-        id: child.id,
-        name: child.name,
-        parentName: stage.name,
-        baseDays: leafDays(child),
-      });
-    }
-  }
-  return result;
+function SummaryLine({ summary }: { summary?: VariantSummary }) {
+  if (!summary)
+    return (
+      <p className="mt-0.5 text-[10px] text-muted-foreground">loading…</p>
+    );
+  const parts: string[] = [];
+  if (summary.jobs > 0) parts.push(`${summary.jobs} jobs`);
+  if (summary.totalDays > 0) parts.push(`${summary.totalDays} working days`);
+  if (summary.orders > 0) parts.push(`${summary.orders} orders`);
+  if (summary.materials > 0) parts.push(`${summary.materials} materials`);
+  if (summary.documents > 0) parts.push(`${summary.documents} drawings`);
+  if (parts.length === 0) parts.push("empty — start setting up");
+  return (
+    <p className="mt-0.5 text-[10px] text-muted-foreground">{parts.join(" · ")}</p>
+  );
 }

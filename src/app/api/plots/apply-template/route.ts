@@ -39,14 +39,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Site not found" }, { status: 404 });
   }
 
-  // Fetch template with all nested data including children + materials + documents
+  // Fetch template metadata. Jobs / materials / documents are fetched
+  // separately below so we can scope by variant cleanly (May 2026
+  // full-fat variants rework — variants own their full data, not
+  // overlay overrides).
   const template = await prisma.plotTemplate.findUnique({
     where: { id: templateId },
-    include: {
-      jobs: templateJobsInclude,
-      materials: true,
-      documents: true,
-    },
   });
 
   if (!template) {
@@ -56,25 +54,10 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Guard: an empty template would create an empty plot, which is almost
-  // always a sign of a broken template or user error. Reject explicitly
-  // rather than silently succeeding.
-  if (template.jobs.length === 0) {
-    return NextResponse.json(
-      { error: `Template "${template.name}" has no jobs — nothing to apply. Add at least one stage to the template first.` },
-      { status: 400 }
-    );
-  }
-
-  // Variant overrides — if a variantId was passed, load its job +
-  // material overrides and mutate the template payload BEFORE the apply
-  // helper runs. createJobsFromTemplate reads `durationDays` directly,
-  // so injecting the variant value here is the simplest splice point.
   let resolvedVariantId: string | null = null;
   if (variantId) {
     const variant = await prisma.templateVariant.findUnique({
       where: { id: variantId },
-      include: { jobOverrides: true, materialOverrides: true },
     });
     if (!variant || variant.templateId !== templateId) {
       return NextResponse.json(
@@ -83,30 +66,59 @@ export async function POST(request: NextRequest) {
       );
     }
     resolvedVariantId = variant.id;
-    const jobOverrides = new Map(
-      variant.jobOverrides.map((o) => [o.templateJobId, o.durationDays]),
+  }
+
+  // Pull the rows scoped to whichever flavour we're applying — base
+  // when no variant, the variant's own rows when one was picked.
+  const [scopedJobs, scopedMaterials, scopedDocuments] = await Promise.all([
+    prisma.templateJob.findMany({
+      where: { templateId, variantId: resolvedVariantId, parentId: null },
+      orderBy: { sortOrder: "asc" },
+      include: {
+        contact: { select: { id: true, name: true, company: true } },
+        orders: {
+          include: {
+            items: true,
+            supplier: true,
+            anchorJob: {
+              select: { id: true, name: true, startWeek: true, stageCode: true },
+            },
+          },
+        },
+        children: {
+          orderBy: { sortOrder: "asc" },
+          include: {
+            contact: { select: { id: true, name: true, company: true } },
+            orders: {
+              include: {
+                items: true,
+                supplier: true,
+                anchorJob: {
+                  select: { id: true, name: true, startWeek: true, stageCode: true },
+                },
+              },
+            },
+          },
+        },
+      },
+    }),
+    prisma.templateMaterial.findMany({
+      where: { templateId, variantId: resolvedVariantId },
+    }),
+    prisma.templateDocument.findMany({
+      where: { templateId, variantId: resolvedVariantId },
+    }),
+  ]);
+
+  // Guard: empty templates / variants produce empty plots.
+  if (scopedJobs.length === 0) {
+    const what = resolvedVariantId
+      ? `Variant of "${template.name}"`
+      : `Template "${template.name}"`;
+    return NextResponse.json(
+      { error: `${what} has no jobs — nothing to apply. Add at least one stage first.` },
+      { status: 400 }
     );
-    const materialOverrides = new Map(
-      variant.materialOverrides.map((o) => [o.templateMaterialId, o]),
-    );
-    // Walk every job (and child) and replace durationDays where the
-    // variant has an override. Loosely typed because the templateJobs
-    // include is nested and the inferred Prisma type is awkward.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const applyJobOverride = (j: any) => {
-      const v = jobOverrides.get(j.id);
-      if (v != null) j.durationDays = v;
-      if (Array.isArray(j.children)) j.children.forEach(applyJobOverride);
-    };
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (template.jobs as any[]).forEach((j) => applyJobOverride(j));
-    // Materials
-    for (const m of template.materials) {
-      const override = materialOverrides.get(m.id);
-      if (!override) continue;
-      if (override.quantity != null) m.quantity = override.quantity;
-      if (override.unitCost != null) m.unitCost = override.unitCost;
-    }
   }
 
   const plotStartDate = new Date(startDate);
@@ -131,20 +143,21 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // 2. Create Jobs from template (handles both hierarchical and flat)
+    // 2. Create Jobs from template/variant (handles both hierarchical and flat)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const warnings = await createJobsFromTemplate(
       tx,
       plot.id,
       plotStartDate,
-      template.jobs,
+      scopedJobs as any,
       supplierMappings || null,
       site.assignedToId
     );
 
     // 2b. Copy TemplateMaterial rows → PlotMaterial (sourceType=TEMPLATE, snapshot)
-    if (template.materials.length > 0) {
+    if (scopedMaterials.length > 0) {
       await tx.plotMaterial.createMany({
-        data: template.materials.map((m) => ({
+        data: scopedMaterials.map((m) => ({
           plotId: plot.id,
           sourceType: "TEMPLATE",
           name: m.name,
@@ -159,9 +172,9 @@ export async function POST(request: NextRequest) {
     }
 
     // 2c. Copy TemplateDocument rows → SiteDocument (plot-scoped snapshot)
-    if (template.documents.length > 0) {
+    if (scopedDocuments.length > 0) {
       await tx.siteDocument.createMany({
-        data: template.documents.map((d) => ({
+        data: scopedDocuments.map((d) => ({
           name: d.name,
           url: d.url,
           fileName: d.fileName,

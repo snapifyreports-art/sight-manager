@@ -88,6 +88,27 @@ export function TemplateEditor({
   onUpdate,
 }: TemplateEditorProps) {
   const toast = useToast();
+
+  // ---------- API URL helper (May 2026 full-fat variants rework) ----------
+  // When `template.isVariant` is true, the editor is scoped to a variant.
+  // Reads of "the whole template" go to /variants/[variantId]/full;
+  // every other endpoint stays under /api/plot-templates/[templateId]/...
+  // with `?variantId=X` appended so writes scope correctly.
+  //
+  // Empty suffix ("") = "fetch the whole thing fresh after a write".
+  // Sub-resource (e.g. "/jobs/${id}") = a normal write path.
+  const tplBaseId = template.templateId ?? template.id;
+  const variantId = template.variantId ?? null;
+  function apiUrl(suffix: string): string {
+    if (suffix === "") {
+      return variantId
+        ? `/api/plot-templates/${tplBaseId}/variants/${variantId}/full`
+        : `/api/plot-templates/${tplBaseId}`;
+    }
+    const base = `/api/plot-templates/${tplBaseId}${suffix}`;
+    if (!variantId) return base;
+    return `${base}${base.includes("?") ? "&" : "?"}variantId=${variantId}`;
+  }
   // "Review items" flow — after saving an order, offers to add any new
   // items to the supplier's pricelist (or update differing prices).
   const { openReview: openMaterialReview, dialogs: materialReviewDialogs } =
@@ -288,7 +309,7 @@ export function TemplateEditor({
     try {
       await Promise.all(
         updates.map(({ job, newIdx }) =>
-          fetch(`/api/plot-templates/${template.id}/jobs/${job.id}`, {
+          fetch(apiUrl(`/jobs/${job.id}`), {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ sortOrder: newIdx }),
@@ -296,7 +317,7 @@ export function TemplateEditor({
         )
       );
       // Re-fetch template to get normalised state.
-      const tplRes = await fetch(`/api/plot-templates/${template.id}`, { cache: "no-store" });
+      const tplRes = await fetch(apiUrl(""), { cache: "no-store" });
       if (tplRes.ok) {
         const updated = await tplRes.json();
         onUpdate(updated);
@@ -378,7 +399,7 @@ export function TemplateEditor({
     try {
       await Promise.all(
         orderedChildren.map((c, idx) =>
-          fetch(`/api/plot-templates/${template.id}/jobs/${c.id}`, {
+          fetch(apiUrl(`/jobs/${c.id}`), {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ sortOrder: idx }),
@@ -387,8 +408,8 @@ export function TemplateEditor({
       );
       // Re-run the parent's recalculate to re-derive parent span from new
       // child order.
-      await fetch(`/api/plot-templates/${template.id}/jobs/${parentId}/recalculate`, { method: "POST" });
-      const tplRes = await fetch(`/api/plot-templates/${template.id}`, { cache: "no-store" });
+      await fetch(apiUrl(`/jobs/${parentId}/recalculate`), { method: "POST" });
+      const tplRes = await fetch(apiUrl(""), { cache: "no-store" });
       if (tplRes.ok) onUpdate(await tplRes.json());
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to save new sub-job order");
@@ -437,7 +458,7 @@ export function TemplateEditor({
     setSavingSplit(true);
     try {
       const res = await fetch(
-        `/api/plot-templates/${template.id}/jobs/${splitJobId}/split`,
+        apiUrl(`/jobs/${splitJobId}/split`),
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -506,7 +527,7 @@ export function TemplateEditor({
           : { startWeek, endWeek };
 
         const res = await fetch(
-          `/api/plot-templates/${template.id}/jobs/${jobId}`,
+          apiUrl(`/jobs/${jobId}`),
           {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
@@ -518,7 +539,7 @@ export function TemplateEditor({
         // If the job has children (parent stage moved), recalculate children
         if (job && job.children && job.children.length > 0) {
           await fetch(
-            `/api/plot-templates/${template.id}/jobs/${jobId}/recalculate`,
+            apiUrl(`/jobs/${jobId}/recalculate`),
             { method: "POST" }
           );
         }
@@ -526,12 +547,12 @@ export function TemplateEditor({
         // If the job is a sub-job, recalculate the parent to update its span
         if (subJob && subJob.parentId) {
           await fetch(
-            `/api/plot-templates/${template.id}/jobs/${subJob.parentId}/recalculate`,
+            apiUrl(`/jobs/${subJob.parentId}/recalculate`),
             { method: "POST" }
           );
         }
 
-        const tplRes = await fetch(`/api/plot-templates/${template.id}`, { cache: "no-store" });
+        const tplRes = await fetch(apiUrl(""), { cache: "no-store" });
         const updated = await tplRes.json();
         onUpdate(updated);
       } catch (error) {
@@ -547,7 +568,7 @@ export function TemplateEditor({
   async function handleSaveMeta() {
     setSavingMeta(true);
     try {
-      const res = await fetch(`/api/plot-templates/${template.id}`, {
+      const res = await fetch(apiUrl(""), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -592,7 +613,7 @@ export function TemplateEditor({
           return;
         }
       }
-      const res = await fetch(`/api/plot-templates/${template.id}`, {
+      const res = await fetch(apiUrl(""), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ isDraft: !template.isDraft }),
@@ -682,7 +703,7 @@ export function TemplateEditor({
         const endWeek = startWeek + (totalDurationWeeks > 0 ? totalDurationWeeks : 1) - 1;
 
         const res = await fetch(
-          `/api/plot-templates/${template.id}/jobs`,
+          apiUrl(`/jobs`),
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -718,7 +739,7 @@ export function TemplateEditor({
           const isDays = sj.unit === "days";
           const weeksSpan = isDays ? 1 : sj.duration;
           const subEnd = subStart + weeksSpan - 1;
-          const subRes = await fetch(`/api/plot-templates/${template.id}/jobs`, {
+          const subRes = await fetch(apiUrl(`/jobs`), {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -743,7 +764,7 @@ export function TemplateEditor({
         // Add all selected predefined stages in one bulk call
         const codes = Array.from(selectedStageCodes);
         const res = await fetch(
-          `/api/plot-templates/${template.id}/bulk-stages`,
+          apiUrl(`/bulk-stages`),
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -756,7 +777,7 @@ export function TemplateEditor({
         }
       }
 
-      const tplRes = await fetch(`/api/plot-templates/${template.id}`, { cache: "no-store" });
+      const tplRes = await fetch(apiUrl(""), { cache: "no-store" });
       const updated = await tplRes.json();
       onUpdate(updated);
       setStageDialogOpen(false);
@@ -814,7 +835,7 @@ export function TemplateEditor({
         }
 
         const res = await fetch(
-          `/api/plot-templates/${template.id}/jobs/${editingJob.id}`,
+          apiUrl(`/jobs/${editingJob.id}`),
           {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
@@ -837,7 +858,7 @@ export function TemplateEditor({
         // If the edited job has children, recalculate their weeks
         if (editingJob.children && editingJob.children.length > 0) {
           await fetch(
-            `/api/plot-templates/${template.id}/jobs/${editingJob.id}/recalculate`,
+            apiUrl(`/jobs/${editingJob.id}/recalculate`),
             { method: "POST" }
           );
         }
@@ -845,7 +866,7 @@ export function TemplateEditor({
         // If the edited job is a sub-job, recalculate the parent to update its span
         if (isSubJob && editingJob.parentId) {
           await fetch(
-            `/api/plot-templates/${template.id}/jobs/${editingJob.parentId}/recalculate`,
+            apiUrl(`/jobs/${editingJob.parentId}/recalculate`),
             { method: "POST" }
           );
         }
@@ -858,13 +879,13 @@ export function TemplateEditor({
         // this in Apr 2026.
         if (!hasChildren && !isSubJob && jobIsAtomic) {
           await fetch(
-            `/api/plot-templates/${template.id}/recalculate-stages`,
+            apiUrl(`/recalculate-stages`),
             { method: "POST" }
           );
         }
       }
 
-      const tplRes = await fetch(`/api/plot-templates/${template.id}`, { cache: "no-store" });
+      const tplRes = await fetch(apiUrl(""), { cache: "no-store" });
       const updated = await tplRes.json();
       onUpdate(updated);
       setJobDialogOpen(false);
@@ -879,7 +900,7 @@ export function TemplateEditor({
     if (!deletingJobId) return;
     try {
       const res = await fetch(
-        `/api/plot-templates/${template.id}/jobs/${deletingJobId}`,
+        apiUrl(`/jobs/${deletingJobId}`),
         { method: "DELETE" }
       );
       if (!res.ok) {
@@ -887,7 +908,7 @@ export function TemplateEditor({
         return;
       }
 
-      const tplRes = await fetch(`/api/plot-templates/${template.id}`, { cache: "no-store" });
+      const tplRes = await fetch(apiUrl(""), { cache: "no-store" });
       const updated = await tplRes.json();
       onUpdate(updated);
       setDeleteJobDialogOpen(false);
@@ -921,7 +942,7 @@ export function TemplateEditor({
       // model (occupies one week slot). durationDays overrides at apply.
       const endWeek = isDays ? startWeek : startWeek + subJobDuration - 1;
 
-      const res = await fetch(`/api/plot-templates/${template.id}/jobs`, {
+      const res = await fetch(apiUrl(`/jobs`), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -944,11 +965,11 @@ export function TemplateEditor({
 
       // Recalculate parent stage
       await fetch(
-        `/api/plot-templates/${template.id}/jobs/${subJobParentId}/recalculate`,
+        apiUrl(`/jobs/${subJobParentId}/recalculate`),
         { method: "POST" }
       );
 
-      const tplRes = await fetch(`/api/plot-templates/${template.id}`, { cache: "no-store" });
+      const tplRes = await fetch(apiUrl(""), { cache: "no-store" });
       const updated = await tplRes.json();
       onUpdate(updated);
       setSubJobDialogOpen(false);
@@ -974,7 +995,7 @@ export function TemplateEditor({
     // Sub-jobs are measured in working days — persist durationDays, null
     // durationWeeks so the days value is the single source of truth.
     const res = await fetch(
-      `/api/plot-templates/${template.id}/jobs/${subJob.id}`,
+      apiUrl(`/jobs/${subJob.id}`),
       {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -990,11 +1011,11 @@ export function TemplateEditor({
     // recalculate fires resequenceTopLevelStages so downstream siblings
     // slide to close any gap created by the duration change.
     await fetch(
-      `/api/plot-templates/${template.id}/jobs/${parentId}/recalculate`,
+      apiUrl(`/jobs/${parentId}/recalculate`),
       { method: "POST" },
     );
 
-    const tplRes = await fetch(`/api/plot-templates/${template.id}`, {
+    const tplRes = await fetch(apiUrl(""), {
       cache: "no-store",
     });
     if (!tplRes.ok) {
@@ -1151,7 +1172,7 @@ export function TemplateEditor({
 
       if (editingOrder) {
         const res = await fetch(
-          `/api/plot-templates/${template.id}/jobs/${orderJobId}/orders/${editingOrder.id}`,
+          apiUrl(`/jobs/${orderJobId}/orders/${editingOrder.id}`),
           {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
@@ -1166,7 +1187,7 @@ export function TemplateEditor({
         }
       } else {
         const res = await fetch(
-          `/api/plot-templates/${template.id}/jobs/${orderJobId}/orders`,
+          apiUrl(`/jobs/${orderJobId}/orders`),
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -1181,7 +1202,7 @@ export function TemplateEditor({
         }
       }
 
-      const tplRes = await fetch(`/api/plot-templates/${template.id}`, { cache: "no-store" });
+      const tplRes = await fetch(apiUrl(""), { cache: "no-store" });
       const updated = await tplRes.json();
       onUpdate(updated);
       setOrderDialogOpen(false);
@@ -1218,7 +1239,7 @@ export function TemplateEditor({
     if (!deletingOrderId || !orderJobId) return;
     try {
       const res = await fetch(
-        `/api/plot-templates/${template.id}/jobs/${orderJobId}/orders/${deletingOrderId}`,
+        apiUrl(`/jobs/${orderJobId}/orders/${deletingOrderId}`),
         { method: "DELETE" }
       );
       if (!res.ok) {
@@ -1226,7 +1247,7 @@ export function TemplateEditor({
         return;
       }
 
-      const tplRes = await fetch(`/api/plot-templates/${template.id}`, { cache: "no-store" });
+      const tplRes = await fetch(apiUrl(""), { cache: "no-store" });
       const updated = await tplRes.json();
       onUpdate(updated);
       setDeleteOrderDialogOpen(false);
@@ -1645,7 +1666,7 @@ export function TemplateEditor({
         onChanged={async () => {
           // Pull the latest template after a quick-edit so the table
           // reflects what was actually saved.
-          const res = await fetch(`/api/plot-templates/${template.id}`, {
+          const res = await fetch(apiUrl(""), {
             cache: "no-store",
           });
           if (res.ok) onUpdate(await res.json());

@@ -102,6 +102,12 @@ export function PlotTemplatesSection({
   const [editingTemplate, setEditingTemplate] = useState<TemplateData | null>(
     null
   );
+  // Variant edit mode — when set, the editor renders the variant's
+  // own scoped data instead of the base template.
+  const [editingVariant, setEditingVariant] = useState<TemplateData | null>(
+    null,
+  );
+  const [loadingVariant, setLoadingVariant] = useState(false);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const { confirmAction, dialogs: confirmDialogs } = useConfirmAction();
@@ -278,6 +284,56 @@ export function PlotTemplatesSection({
     setEditingTemplate(updated);
   }
 
+  async function openVariant(variantId: string) {
+    if (!editingTemplate) return;
+    setLoadingVariant(true);
+    try {
+      const res = await fetch(
+        `/api/plot-templates/${editingTemplate.id}/variants/${variantId}/full`,
+        { cache: "no-store" },
+      );
+      if (!res.ok) {
+        toast.error(await fetchErrorMessage(res, "Failed to load variant"));
+        return;
+      }
+      const variant = await res.json();
+      setEditingVariant(variant);
+    } finally {
+      setLoadingVariant(false);
+    }
+  }
+
+  // Variant editing — same components, scoped to a variant via the
+  // isVariant + templateId + variantId fields on the TemplateData shape.
+  if (editingVariant && editingTemplate) {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <button
+            onClick={() => setEditingVariant(null)}
+            className="rounded px-2 py-1 hover:bg-muted hover:text-foreground"
+          >
+            ← {editingTemplate.name}
+          </button>
+          <span>/</span>
+          <span className="font-medium text-foreground">
+            {editingVariant.name} (variant)
+          </span>
+        </div>
+        <TemplateEditor
+          template={editingVariant}
+          onBack={() => setEditingVariant(null)}
+          onUpdate={(t) => setEditingVariant(t)}
+        />
+        <TemplateExtras
+          templateId={editingTemplate.id}
+          templateName={`${editingTemplate.name} — ${editingVariant.name}`}
+          variantId={editingVariant.variantId ?? null}
+        />
+      </div>
+    );
+  }
+
   // If editing, show the editor + materials/drawings extras panel below
   if (editingTemplate) {
     return (
@@ -290,9 +346,21 @@ export function PlotTemplatesSection({
           }}
           onUpdate={handleTemplateUpdated}
         />
-        <TemplateVariantsSection template={editingTemplate} />
-        <TemplateExtras templateId={editingTemplate.id} templateName={editingTemplate.name} />
+        <TemplateVariantsSection
+          template={editingTemplate}
+          onOpenVariant={(variantId) => {
+            void openVariant(variantId);
+          }}
+        />
+        <TemplateExtras templateId={editingTemplate.id} templateName={editingTemplate.name} variantId={null} />
         <TemplateAuditLog templateId={editingTemplate.id} />
+        {loadingVariant && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20">
+            <div className="rounded-lg bg-white p-4 shadow-lg">
+              <Loader2 className="size-5 animate-spin text-blue-600" />
+            </div>
+          </div>
+        )}
       </div>
     );
   }

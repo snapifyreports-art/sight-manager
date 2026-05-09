@@ -7,22 +7,26 @@ import { apiError } from "@/lib/api-errors";
 export const dynamic = "force-dynamic";
 
 // GET /api/plot-templates/[id]/documents
+// (or variant docs if ?variantId=X is passed; null = base template)
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const session = await auth();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { id } = await params;
+  const { searchParams } = new URL(req.url);
+  const variantId = searchParams.get("variantId");
   const docs = await prisma.templateDocument.findMany({
-    where: { templateId: id },
+    where: { templateId: id, variantId },
     orderBy: [{ category: "asc" }, { name: "asc" }],
   });
   return NextResponse.json(docs);
 }
 
-// POST /api/plot-templates/[id]/documents — upload a file
+// POST /api/plot-templates/[id]/documents — upload a file (base or
+// variant if ?variantId=X passed)
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -31,6 +35,8 @@ export async function POST(
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { id: templateId } = await params;
+  const { searchParams } = new URL(req.url);
+  const variantId = searchParams.get("variantId");
   const formData = await req.formData();
   const file = formData.get("file") as File | null;
   const name = (formData.get("name") as string | null)?.trim();
@@ -64,6 +70,7 @@ export async function POST(
     const doc = await prisma.templateDocument.create({
       data: {
         templateId,
+        variantId,
         name,
         url: publicUrl,
         fileName: file.name,

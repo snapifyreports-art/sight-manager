@@ -14,9 +14,10 @@ export async function POST(request: NextRequest) {
   }
 
   const body = await request.json();
-  const { siteId, templateId, startDate, supplierMappings, plots } = body as {
+  const { siteId, templateId, variantId, startDate, supplierMappings, plots } = body as {
     siteId: string;
     templateId: string;
+    variantId?: string | null;
     startDate: string;
     supplierMappings: Record<string, string>;
     plots: Array<{ plotNumber: string; plotName: string }>;
@@ -38,14 +39,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Site not found" }, { status: 404 });
   }
 
-  // Fetch template with all nested data including children + materials + documents
+  // Fetch template metadata; variant-scoped fetch happens below.
   const template = await prisma.plotTemplate.findUnique({
     where: { id: templateId },
-    include: {
-      jobs: templateJobsInclude,
-      materials: true,
-      documents: true,
-    },
   });
 
   if (!template) {
@@ -55,10 +51,68 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Guard: empty templates produce empty plots — reject explicitly.
-  if (template.jobs.length === 0) {
+  // Variant resolution (May 2026 full-fat variants rework). Same flow
+  // as apply-template (single): variants own full data; null = base.
+  let resolvedVariantId: string | null = null;
+  if (variantId) {
+    const variant = await prisma.templateVariant.findUnique({
+      where: { id: variantId },
+    });
+    if (!variant || variant.templateId !== templateId) {
+      return NextResponse.json(
+        { error: "Variant not found or doesn't belong to this template" },
+        { status: 400 },
+      );
+    }
+    resolvedVariantId = variant.id;
+  }
+
+  const [scopedJobs, scopedMaterials, scopedDocuments] = await Promise.all([
+    prisma.templateJob.findMany({
+      where: { templateId, variantId: resolvedVariantId, parentId: null },
+      orderBy: { sortOrder: "asc" },
+      include: {
+        contact: { select: { id: true, name: true, company: true } },
+        orders: {
+          include: {
+            items: true,
+            supplier: true,
+            anchorJob: {
+              select: { id: true, name: true, startWeek: true, stageCode: true },
+            },
+          },
+        },
+        children: {
+          orderBy: { sortOrder: "asc" },
+          include: {
+            contact: { select: { id: true, name: true, company: true } },
+            orders: {
+              include: {
+                items: true,
+                supplier: true,
+                anchorJob: {
+                  select: { id: true, name: true, startWeek: true, stageCode: true },
+                },
+              },
+            },
+          },
+        },
+      },
+    }),
+    prisma.templateMaterial.findMany({
+      where: { templateId, variantId: resolvedVariantId },
+    }),
+    prisma.templateDocument.findMany({
+      where: { templateId, variantId: resolvedVariantId },
+    }),
+  ]);
+
+  if (scopedJobs.length === 0) {
+    const what = resolvedVariantId
+      ? `Variant of "${template.name}"`
+      : `Template "${template.name}"`;
     return NextResponse.json(
-      { error: `Template "${template.name}" has no jobs — nothing to apply.` },
+      { error: `${what} has no jobs — nothing to apply.` },
       { status: 400 }
     );
   }
@@ -110,22 +164,24 @@ export async function POST(request: NextRequest) {
             plotNumber: plotInput.plotNumber?.trim() || null,
             houseType: template.typeLabel || null,
             sourceTemplateId: template.id,
+            sourceVariantId: resolvedVariantId,
           },
         });
 
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const w = await createJobsFromTemplate(
           tx,
           plot.id,
           plotStartDate,
-          template.jobs,
+          scopedJobs as any,
           supplierMappings || null,
           site.assignedToId
         );
 
         // Copy TemplateMaterial rows → PlotMaterial snapshot
-        if (template.materials.length > 0) {
+        if (scopedMaterials.length > 0) {
           await tx.plotMaterial.createMany({
-            data: template.materials.map((m) => ({
+            data: scopedMaterials.map((m) => ({
               plotId: plot.id,
               sourceType: "TEMPLATE",
               name: m.name,
@@ -140,9 +196,9 @@ export async function POST(request: NextRequest) {
         }
 
         // Copy TemplateDocument rows → SiteDocument (plot-scoped) snapshot
-        if (template.documents.length > 0) {
+        if (scopedDocuments.length > 0) {
           await tx.siteDocument.createMany({
-            data: template.documents.map((d) => ({
+            data: scopedDocuments.map((d) => ({
               name: d.name,
               url: d.url,
               fileName: d.fileName,

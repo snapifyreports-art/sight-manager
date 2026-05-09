@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { templateJobsInclude, normaliseTemplateParentDates } from "@/lib/template-includes";
+import { templateJobsInclude, variantJobsInclude, normaliseTemplateParentDates } from "@/lib/template-includes";
 import { apiError } from "@/lib/api-errors";
 import { resequenceTopLevelStages } from "@/lib/template-pack-children";
 
@@ -21,7 +21,8 @@ export async function POST(
 
   const { id, jobId } = await params;
 
-  // Fetch the parent job with its children
+  // Fetch the parent job with its children. Capture variantId so we can
+  // scope the resequence to the parent's own scope (base or variant).
   const parent = await prisma.templateJob.findFirst({
     where: { id: jobId, templateId: id },
     include: {
@@ -57,12 +58,39 @@ export async function POST(
       // We can't call packChildrenAndUpdateParent then resequence as
       // separate steps — the resequence rewrites every stage's
       // startWeek anyway, and re-packs each stage's children inside
-      // its new window. So just trigger the full template re-sequence;
-      // the parent we were called for gets handled in the loop.
-      await resequenceTopLevelStages(tx, id);
+      // its new window. So just trigger the full re-sequence scoped to
+      // the parent's variant (or base); the parent gets handled in the
+      // loop.
+      await resequenceTopLevelStages(tx, id, parent.variantId);
     });
 
-    // Return updated template
+    // Return updated template (or variant) so the client can swap it in.
+    if (parent.variantId) {
+      const variant = await prisma.templateVariant.findUnique({
+        where: { id: parent.variantId },
+      });
+      const jobs = await prisma.templateJob.findMany(
+        variantJobsInclude(parent.variantId),
+      );
+      const shaped = variant
+        ? {
+            id: variant.id,
+            templateId: id,
+            name: variant.name,
+            description: variant.description,
+            typeLabel: null,
+            isDraft: false,
+            isVariant: true,
+            createdAt: variant.createdAt,
+            updatedAt: variant.updatedAt,
+            jobs,
+            variants: [],
+          }
+        : null;
+      return NextResponse.json(
+        shaped ? normaliseTemplateParentDates(shaped) : shaped,
+      );
+    }
     const template = await prisma.plotTemplate.findUnique({
       where: { id },
       include: {

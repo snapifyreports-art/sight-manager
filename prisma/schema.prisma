@@ -435,6 +435,11 @@ model TemplateVariant {
   updatedAt   DateTime @updatedAt
 
   template          PlotTemplate                @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  // Full-fat content owned by this variant (May 2026 rework).
+  jobs              TemplateJob[]
+  materials         TemplateMaterial[]
+  documents         TemplateDocument[]
+  // Legacy override tables — kept for migration, deprecated post-rework.
   jobOverrides      TemplateVariantJobOverride[]
   materialOverrides TemplateVariantMaterialOverride[]
   appliedToPlots    Plot[]                      @relation("PlotVariant")
@@ -491,6 +496,8 @@ model TemplateAuditEvent {
 model TemplateMaterial {
   id              String   @id @default(cuid())
   templateId      String
+  // See TemplateJob.variantId — variants own their full materials list.
+  variantId       String?
   name            String
   quantity        Float // per plot
   unit            String   @default("each")
@@ -504,8 +511,11 @@ model TemplateMaterial {
   updatedAt       DateTime @updatedAt
 
   template          PlotTemplate                       @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  variant           TemplateVariant?                   @relation(fields: [variantId], references: [id], onDelete: Cascade)
   variantOverrides  TemplateVariantMaterialOverride[]
   consumptionEvents TemplateMaterialConsumption[]
+
+  @@index([templateId, variantId])
 }
 
 // ---------- Template Material Consumption ----------
@@ -531,6 +541,8 @@ model TemplateMaterialConsumption {
 model TemplateDocument {
   id         String   @id @default(cuid())
   templateId String
+  // See TemplateJob.variantId — variants own their full document list.
+  variantId  String?
   name       String
   url        String
   fileName   String
@@ -545,7 +557,10 @@ model TemplateDocument {
   isPlaceholder Boolean @default(false)
   createdAt  DateTime @default(now())
 
-  template PlotTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  template PlotTemplate     @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  variant  TemplateVariant? @relation(fields: [variantId], references: [id], onDelete: Cascade)
+
+  @@index([templateId, variantId])
 }
 
 // ---------- Plot Materials (Quants) ----------
@@ -573,6 +588,13 @@ model PlotMaterial {
 model TemplateJob {
   id                  String   @id @default(cuid())
   templateId          String
+  // When variantId is set, this job belongs to that variant only.
+  // When variantId is null, it belongs to the base template directly
+  // (used at apply-time when the user picks no variant). Variants own
+  // their full job tree — adding/removing stages on a variant doesn't
+  // affect the base or sibling variants. (May 2026 rework — replaces
+  // the older overlay model.)
+  variantId           String?
   name                String
   description         String?
   stageCode           String?
@@ -592,12 +614,15 @@ model TemplateJob {
   createdAt           DateTime @default(now())
 
   template         PlotTemplate                  @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  variant          TemplateVariant?              @relation(fields: [variantId], references: [id], onDelete: Cascade)
   parent           TemplateJob?                  @relation("SubJobs", fields: [parentId], references: [id], onDelete: Cascade)
   children         TemplateJob[]                 @relation("SubJobs")
   contact          Contact?                      @relation(fields: [contactId], references: [id], onDelete: SetNull)
   orders           TemplateOrder[]
   anchoredOrders   TemplateOrder[]               @relation("OrderAnchorJob")
   variantOverrides TemplateVariantJobOverride[]
+
+  @@index([templateId, variantId])
 }
 
 model TemplateOrder {

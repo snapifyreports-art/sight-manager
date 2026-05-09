@@ -122,6 +122,72 @@ async function main() {
     ADD COLUMN IF NOT EXISTS "isPlaceholder" BOOLEAN NOT NULL DEFAULT false;
   `);
 
+  // 8a. variantId on TemplateJob / TemplateMaterial / TemplateDocument
+  // (full-fat variants rework, May 2026). Nullable — null means the row
+  // belongs to the base template; non-null means it's owned by a variant.
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "TemplateJob"
+    ADD COLUMN IF NOT EXISTS "variantId" TEXT;
+  `);
+  await prisma.$executeRawUnsafe(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'TemplateJob_variant_fk'
+      ) THEN
+        ALTER TABLE "TemplateJob"
+        ADD CONSTRAINT "TemplateJob_variant_fk"
+        FOREIGN KEY ("variantId") REFERENCES "TemplateVariant"("id") ON DELETE CASCADE;
+      END IF;
+    END $$;
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "TemplateJob_template_variant_idx"
+    ON "TemplateJob" ("templateId", "variantId");
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "TemplateMaterial"
+    ADD COLUMN IF NOT EXISTS "variantId" TEXT;
+  `);
+  await prisma.$executeRawUnsafe(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'TemplateMaterial_variant_fk'
+      ) THEN
+        ALTER TABLE "TemplateMaterial"
+        ADD CONSTRAINT "TemplateMaterial_variant_fk"
+        FOREIGN KEY ("variantId") REFERENCES "TemplateVariant"("id") ON DELETE CASCADE;
+      END IF;
+    END $$;
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "TemplateMaterial_template_variant_idx"
+    ON "TemplateMaterial" ("templateId", "variantId");
+  `);
+
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "TemplateDocument"
+    ADD COLUMN IF NOT EXISTS "variantId" TEXT;
+  `);
+  await prisma.$executeRawUnsafe(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'TemplateDocument_variant_fk'
+      ) THEN
+        ALTER TABLE "TemplateDocument"
+        ADD CONSTRAINT "TemplateDocument_variant_fk"
+        FOREIGN KEY ("variantId") REFERENCES "TemplateVariant"("id") ON DELETE CASCADE;
+      END IF;
+    END $$;
+  `);
+  await prisma.$executeRawUnsafe(`
+    CREATE INDEX IF NOT EXISTS "TemplateDocument_template_variant_idx"
+    ON "TemplateDocument" ("templateId", "variantId");
+  `);
+
   // 9. Plot.sourceVariantId FK (separate so the column can exist on rows
   //    that pre-date the variant table without errors; only added after
   //    the table itself is in place).

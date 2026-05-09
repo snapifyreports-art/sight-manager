@@ -104,9 +104,13 @@ export async function packChildrenAndUpdateParent(
 export async function resequenceTopLevelStages(
   tx: PrismaClient | Prisma.TransactionClient,
   templateId: string,
+  variantId: string | null = null,
 ): Promise<void> {
+  // Variant-scoped (May 2026 full-fat variants rework): when a
+  // variantId is passed, sequence only that variant's stages.
+  // variantId === null targets the base template.
   const stages = await tx.templateJob.findMany({
-    where: { templateId, parentId: null },
+    where: { templateId, variantId, parentId: null },
     orderBy: { sortOrder: "asc" },
     include: { children: { orderBy: { sortOrder: "asc" } } },
   });

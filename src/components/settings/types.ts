@@ -101,6 +101,15 @@ export interface TemplateData {
   updatedAt: string;
   jobs: TemplateJobData[];
   variants?: TemplateVariantData[];
+  /**
+   * Variant-mode fields. Set when this `TemplateData` represents a
+   * variant rather than a base template (returned by /variants/[v]/full
+   * endpoint). The base API URL is `templateId` (not `id`) when in
+   * variant mode, and write requests append `?variantId=${variantId}`.
+   */
+  isVariant?: boolean;
+  templateId?: string;
+  variantId?: string;
   /** Populated by the detail endpoint — count of Plots that were
    *  created from this template (snapshot link, no auto-sync). */
   _count?: { sourcedPlots: number };

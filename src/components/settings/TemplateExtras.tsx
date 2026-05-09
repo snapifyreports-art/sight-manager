@@ -43,7 +43,17 @@ interface TemplateDocument {
   createdAt: string;
 }
 
-export function TemplateExtras({ templateId, templateName }: { templateId: string; templateName: string }) {
+export function TemplateExtras({
+  templateId,
+  templateName,
+  variantId = null,
+}: {
+  templateId: string;
+  templateName: string;
+  variantId?: string | null;
+}) {
+  // ?variantId=X scopes every read + write to that variant. Null = base.
+  const variantQ = variantId ? `?variantId=${variantId}` : "";
   const [materials, setMaterials] = useState<TemplateMaterial[]>([]);
   const [documents, setDocuments] = useState<TemplateDocument[]>([]);
   const [loading, setLoading] = useState(true);
@@ -74,13 +84,13 @@ export function TemplateExtras({ templateId, templateName }: { templateId: strin
   const load = useCallback(async () => {
     setLoading(true);
     const [mRes, dRes] = await Promise.all([
-      fetch(`/api/plot-templates/${templateId}/materials`),
-      fetch(`/api/plot-templates/${templateId}/documents`),
+      fetch(`/api/plot-templates/${templateId}/materials${variantQ}`),
+      fetch(`/api/plot-templates/${templateId}/documents${variantQ}`),
     ]);
     if (mRes.ok) setMaterials(await mRes.json());
     if (dRes.ok) setDocuments(await dRes.json());
     setLoading(false);
-  }, [templateId]);
+  }, [templateId, variantQ]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -88,7 +98,7 @@ export function TemplateExtras({ templateId, templateName }: { templateId: strin
     if (!mName || !mQuantity) return;
     setMSubmitting(true);
     try {
-      const res = await fetch(`/api/plot-templates/${templateId}/materials`, {
+      const res = await fetch(`/api/plot-templates/${templateId}/materials${variantQ}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -217,9 +227,9 @@ export function TemplateExtras({ templateId, templateName }: { templateId: strin
               );
             }
 
-            // 3. Register the DB row.
+            // 3. Register the DB row (variant-scoped if variantId set).
             const regRes = await fetch(
-              `/api/plot-templates/${templateId}/documents/register`,
+              `/api/plot-templates/${templateId}/documents/register${variantQ}`,
               {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },

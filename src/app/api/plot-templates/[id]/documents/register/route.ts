@@ -22,6 +22,8 @@ export async function POST(
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { id: templateId } = await params;
+  const { searchParams } = new URL(req.url);
+  const variantId = searchParams.get("variantId");
   const body = await req.json().catch(() => null);
   if (!body) return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
 
@@ -78,6 +80,7 @@ export async function POST(
     const doc = await prisma.templateDocument.create({
       data: {
         templateId,
+        variantId,
         name: name.trim(),
         url: publicUrl,
         fileName,

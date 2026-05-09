@@ -16,6 +16,9 @@ export async function POST(
   }
 
   const { id } = await params;
+  const { searchParams } = new URL(request.url);
+  // Optional variantId — when set, scope the new job to a variant.
+  const variantId = searchParams.get("variantId");
   const body = await request.json();
   const { name, description, stageCode, sortOrder, startWeek, endWeek, parentId, durationWeeks, durationDays, contactId } = body;
 
@@ -45,6 +48,7 @@ export async function POST(
     const job = await prisma.templateJob.create({
       data: {
         templateId: id,
+        variantId,
         name: name.trim(),
         description: description?.trim() || null,
         stageCode: stageCode?.trim() || null,
