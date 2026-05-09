@@ -94,6 +94,7 @@ export function TemplateEditor({
   );
   const [metaTypeLabel, setMetaTypeLabel] = useState(template.typeLabel ?? "");
   const [savingMeta, setSavingMeta] = useState(false);
+  const [togglingDraft, setTogglingDraft] = useState(false);
 
   // Job edit dialog (used for both stages and sub-jobs)
   const [jobDialogOpen, setJobDialogOpen] = useState(false);
@@ -559,6 +560,49 @@ export function TemplateEditor({
       toast.error(error instanceof Error ? error.message : "Failed to update template");
     } finally {
       setSavingMeta(false);
+    }
+  }
+
+  /**
+   * Flip the template between Draft and Live. Drafts are hidden from the
+   * apply-to-plot picker (`?liveOnly=true` filter on the list endpoint).
+   * Going Live also runs validation — if there are errors, we refuse and
+   * tell the user why so they don't ship a half-built template.
+   */
+  async function handleToggleDraft() {
+    setTogglingDraft(true);
+    try {
+      // Lazy import to avoid a circular dep risk on a hot path
+      const { validateTemplate } = await import("@/lib/template-validation");
+      const goingLive = template.isDraft === true;
+      if (goingLive) {
+        const issues = validateTemplate(template);
+        const errors = issues.filter((i) => i.severity === "error");
+        if (errors.length > 0) {
+          toast.error(
+            `Can't mark Live — fix ${errors.length} validation error${errors.length === 1 ? "" : "s"} first.`,
+          );
+          return;
+        }
+      }
+      const res = await fetch(`/api/plot-templates/${template.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isDraft: !template.isDraft }),
+      });
+      if (!res.ok) {
+        toast.error(await fetchErrorMessage(res, "Failed to change status"));
+        return;
+      }
+      const updated = await res.json();
+      onUpdate(updated);
+      toast.success(goingLive ? "Marked as Live" : "Sent to Draft");
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Failed to change status",
+      );
+    } finally {
+      setTogglingDraft(false);
     }
   }
 
@@ -1499,12 +1543,29 @@ export function TemplateEditor({
               </div>
             ) : (
               <div>
-                <div className="flex items-center gap-3">
+                <div className="flex flex-wrap items-center gap-3">
                   <h2 className="text-2xl font-bold tracking-tight">
                     {template.name}
                   </h2>
                   {template.typeLabel && (
                     <Badge variant="secondary">{template.typeLabel}</Badge>
+                  )}
+                  {template.isDraft ? (
+                    <Badge
+                      variant="outline"
+                      className="border-amber-300 bg-amber-50 text-amber-800"
+                      title="Hidden from the apply-to-plot picker. Mark as Live when ready."
+                    >
+                      Draft
+                    </Badge>
+                  ) : (
+                    <Badge
+                      variant="outline"
+                      className="border-emerald-300 bg-emerald-50 text-emerald-800"
+                      title="Available in the apply-to-plot picker."
+                    >
+                      Live
+                    </Badge>
                   )}
                 </div>
                 {template.description && (
@@ -1516,14 +1577,36 @@ export function TemplateEditor({
             )}
           </div>
           {!editingMeta && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setEditingMeta(true)}
-            >
-              <Pencil className="size-3.5" />
-              Edit
-            </Button>
+            <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+              <Button
+                variant={template.isDraft ? "default" : "outline"}
+                size="sm"
+                onClick={handleToggleDraft}
+                disabled={togglingDraft}
+                title={
+                  template.isDraft
+                    ? "Mark this template as live so it shows up in the apply-to-plot picker"
+                    : "Send this template back to draft so it's hidden from the apply-to-plot picker"
+                }
+              >
+                {togglingDraft ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : template.isDraft ? (
+                  <Check className="size-3.5" />
+                ) : (
+                  <AlertTriangle className="size-3.5" />
+                )}
+                {template.isDraft ? "Mark Live" : "Send to Draft"}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setEditingMeta(true)}
+              >
+                <Pencil className="size-3.5" />
+                Edit
+              </Button>
+            </div>
           )}
         </div>
       </div>

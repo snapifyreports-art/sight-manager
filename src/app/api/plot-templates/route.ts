@@ -7,16 +7,25 @@ import { apiError } from "@/lib/api-errors";
 export const dynamic = "force-dynamic";
 
 // GET /api/plot-templates — list all templates
-export async function GET() {
+//
+// Query params:
+//   - liveOnly=true  →  hide drafts (used by the apply-to-plot picker so
+//                       half-built templates can't be applied by mistake)
+export async function GET(request: NextRequest) {
   const session = await auth();
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  const { searchParams } = new URL(request.url);
+  const liveOnly = searchParams.get("liveOnly") === "true";
+
   const templates = await prisma.plotTemplate.findMany({
+    where: liveOnly ? { isDraft: false } : undefined,
     orderBy: { createdAt: "desc" },
     include: {
       jobs: templateJobsInclude,
+      variants: { orderBy: { sortOrder: "asc" } },
     },
   });
 
@@ -46,9 +55,26 @@ export async function POST(request: NextRequest) {
         name: name.trim(),
         description: description?.trim() || null,
         typeLabel: typeLabel?.trim() || null,
+        // New templates start as drafts so a half-built one can't be
+        // applied to a live site by accident. User flips Live in the
+        // editor when ready.
+        isDraft: true,
       },
       include: {
         jobs: templateJobsInclude,
+      },
+    });
+
+    // Audit log: capture creation event so the change log has a starting
+    // point. userName captured at write time so subsequent renames don't
+    // break history.
+    await prisma.templateAuditEvent.create({
+      data: {
+        templateId: template.id,
+        userId: session.user?.id ?? null,
+        userName: session.user?.name ?? session.user?.email ?? null,
+        action: "created",
+        detail: `Created "${template.name}" (draft)`,
       },
     });
 

@@ -111,6 +111,13 @@ export function PlotTemplatesSection({
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [sortBy, setSortBy] = useState<SortKey>("recent");
+  // Draft visibility: "all" shows live + drafts; "live" hides drafts;
+  // "drafts" shows only drafts. Keith's most common ask is "what's
+  // ready to apply right now?" so default to "all" — but the bar
+  // makes it one click to filter to live-only.
+  const [draftFilter, setDraftFilter] = useState<"all" | "live" | "drafts">(
+    "all",
+  );
 
   // Distinct typeLabels for the filter dropdown. Trim + dedupe so
   // "2 STOREY" / "2 storey" don't both appear; we keep the first
@@ -142,6 +149,8 @@ export function PlotTemplatesSection({
   const filteredTemplates = useMemo(() => {
     const q = search.trim().toLowerCase();
     let list = templates.filter((t) => {
+      if (draftFilter === "live" && t.isDraft) return false;
+      if (draftFilter === "drafts" && !t.isDraft) return false;
       if (typeFilter !== "all") {
         const tl = t.typeLabel?.trim().toLowerCase() ?? "";
         if (tl !== typeFilter.toLowerCase()) return false;
@@ -188,15 +197,19 @@ export function PlotTemplatesSection({
     }
 
     return list;
-  }, [templates, search, typeFilter, sortBy]);
+  }, [templates, search, typeFilter, sortBy, draftFilter]);
 
   const filtersActive =
-    search.trim() !== "" || typeFilter !== "all" || sortBy !== "recent";
+    search.trim() !== "" ||
+    typeFilter !== "all" ||
+    sortBy !== "recent" ||
+    draftFilter !== "all";
 
   function clearFilters() {
     setSearch("");
     setTypeFilter("all");
     setSortBy("recent");
+    setDraftFilter("all");
   }
 
   async function handleCreate() {
@@ -360,6 +373,28 @@ export function PlotTemplatesSection({
             )}
 
             <Select
+              value={draftFilter}
+              onValueChange={(v) =>
+                setDraftFilter((v as "all" | "live" | "drafts") || "all")
+              }
+            >
+              <SelectTrigger className="w-full sm:w-36">
+                <SelectValue>
+                  {draftFilter === "all" && (
+                    <span className="text-muted-foreground">All</span>
+                  )}
+                  {draftFilter === "live" && "Live only"}
+                  {draftFilter === "drafts" && "Drafts only"}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All</SelectItem>
+                <SelectItem value="live">Live only</SelectItem>
+                <SelectItem value="drafts">Drafts only</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <Select
               value={sortBy}
               onValueChange={(v) => setSortBy((v as SortKey) || "recent")}
             >
@@ -425,7 +460,7 @@ export function PlotTemplatesSection({
             return (
               <Card
                 key={template.id}
-                className="cursor-pointer overflow-hidden border-border/50 bg-white shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md"
+                className={`cursor-pointer overflow-hidden border-border/50 bg-white shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md ${template.isDraft ? "ring-1 ring-amber-200" : ""}`}
                 onClick={() => setEditingTemplate(template)}
               >
                 <CardHeader>
@@ -436,14 +471,22 @@ export function PlotTemplatesSection({
                         {template.name}
                       </CardTitle>
                     </div>
-                    {template.typeLabel && (
-                      <Badge
-                        variant="secondary"
-                        className="shrink-0 text-xs"
-                      >
-                        {template.typeLabel}
-                      </Badge>
-                    )}
+                    <div className="flex shrink-0 flex-wrap items-center justify-end gap-1">
+                      {template.isDraft && (
+                        <Badge
+                          variant="outline"
+                          className="border-amber-300 bg-amber-50 text-[10px] font-medium text-amber-800"
+                          title="Draft templates are hidden from the apply-to-plot picker"
+                        >
+                          Draft
+                        </Badge>
+                      )}
+                      {template.typeLabel && (
+                        <Badge variant="secondary" className="text-xs">
+                          {template.typeLabel}
+                        </Badge>
+                      )}
+                    </div>
                   </div>
                   {template.description && (
                     <CardDescription className="line-clamp-2">

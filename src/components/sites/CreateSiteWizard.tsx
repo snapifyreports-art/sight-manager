@@ -265,7 +265,7 @@ export function CreateSiteWizard({
     if (step === "plot-batches" && templates.length === 0) {
       setLoadingTemplates(true);
       Promise.all([
-        fetch("/api/plot-templates").then(async (r) => {
+        fetch("/api/plot-templates?liveOnly=true").then(async (r) => {
           if (!r.ok) throw new Error(await fetchErrorMessage(r, "Failed to load plot templates"));
           return r.json();
         }),

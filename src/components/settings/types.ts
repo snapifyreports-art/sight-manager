@@ -63,14 +63,44 @@ export interface TemplateJobData {
   children: TemplateJobData[];
 }
 
+export interface TemplateVariantData {
+  id: string;
+  name: string;
+  description: string | null;
+  sortOrder: number;
+  jobOverrides: Array<{
+    id: string;
+    templateJobId: string;
+    durationDays: number | null;
+  }>;
+  materialOverrides: Array<{
+    id: string;
+    templateMaterialId: string;
+    quantity: number | null;
+    unitCost: number | null;
+  }>;
+}
+
+export interface TemplateAuditEventData {
+  id: string;
+  userId: string | null;
+  userName: string | null;
+  action: string;
+  detail: string | null;
+  createdAt: string;
+}
+
 export interface TemplateData {
   id: string;
   name: string;
   description: string | null;
   typeLabel: string | null;
+  /** Draft templates are hidden from the apply-to-plot picker. */
+  isDraft: boolean;
   createdAt: string;
   updatedAt: string;
   jobs: TemplateJobData[];
+  variants?: TemplateVariantData[];
   /** Populated by the detail endpoint — count of Plots that were
    *  created from this template (snapshot link, no auto-sync). */
   _count?: { sourcedPlots: number };

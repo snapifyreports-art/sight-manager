@@ -566,7 +566,7 @@ export function SiteDetailClient({
     ) {
       setLoadingTemplates(true);
       Promise.all([
-        fetch("/api/plot-templates").then((r) => r.json()),
+        fetch("/api/plot-templates?liveOnly=true").then((r) => r.json()),
         fetch("/api/suppliers").then((r) => r.json()),
       ])
         .then(([tpls, sups]) => {

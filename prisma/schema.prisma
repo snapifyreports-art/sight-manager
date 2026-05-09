@@ -187,11 +187,15 @@ model Plot {
   // No auto-sync: plots snapshot the template at apply time. Nullable
   // so pre-existing and manually-created plots are unaffected.
   sourceTemplateId               String?
+  // Optional pointer to the variant chosen at apply time. Captured for
+  // reporting / drift detection; not used at runtime by the cascade.
+  sourceVariantId                String?
   createdAt                      DateTime  @default(now())
   updatedAt                      DateTime  @updatedAt
 
   site              Site                @relation(fields: [siteId], references: [id], onDelete: Cascade)
   sourceTemplate    PlotTemplate?       @relation("PlotSourceTemplate", fields: [sourceTemplateId], references: [id], onDelete: SetNull)
+  sourceVariant     TemplateVariant?    @relation("PlotVariant", fields: [sourceVariantId], references: [id], onDelete: SetNull)
   jobs              Job[]
   events            EventLog[]
   snags             Snag[]
@@ -399,13 +403,86 @@ model PlotTemplate {
   name        String
   description String?
   typeLabel   String?
+  // Draft templates are hidden from the apply-to-plot picker so a half-built
+  // template can't accidentally be applied to a live site. Defaults false so
+  // every existing template stays "live" on schema upgrade; the UI flips
+  // newly-created templates to draft until the user marks them ready.
+  isDraft     Boolean  @default(false)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
   jobs         TemplateJob[]
   materials    TemplateMaterial[]
   documents    TemplateDocument[]
+  variants     TemplateVariant[]
+  auditEvents  TemplateAuditEvent[]
   sourcedPlots Plot[]             @relation("PlotSourceTemplate")
+}
+
+// ---------- Template Variants ----------
+// Single template can carry multiple variants (e.g. a 2-storey house with
+// 765/775/923/990/1047 sq-ft plot variations). Same stage list, same
+// sub-jobs, same orders — but per-variant per-job duration overrides AND
+// per-variant per-material qty overrides. Apply-template picks one variant
+// at apply time.
+model TemplateVariant {
+  id          String   @id @default(cuid())
+  templateId  String
+  name        String   // e.g. "765", "Apple Tree"
+  description String?
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  template          PlotTemplate                @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  jobOverrides      TemplateVariantJobOverride[]
+  materialOverrides TemplateVariantMaterialOverride[]
+  appliedToPlots    Plot[]                      @relation("PlotVariant")
+
+  @@unique([templateId, name])
+}
+
+model TemplateVariantJobOverride {
+  id            String @id @default(cuid())
+  variantId     String
+  templateJobId String
+  durationDays  Int?
+
+  variant     TemplateVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  templateJob TemplateJob     @relation(fields: [templateJobId], references: [id], onDelete: Cascade)
+
+  @@unique([variantId, templateJobId])
+}
+
+model TemplateVariantMaterialOverride {
+  id                 String @id @default(cuid())
+  variantId          String
+  templateMaterialId String
+  quantity           Float?
+  unitCost           Float?
+
+  variant          TemplateVariant  @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  templateMaterial TemplateMaterial @relation(fields: [templateMaterialId], references: [id], onDelete: Cascade)
+
+  @@unique([variantId, templateMaterialId])
+}
+
+// ---------- Template Audit Events ----------
+// Lightweight change log so "this used to work, what changed?" has an
+// answer. Recorded by the API layer on every mutation — schema lives
+// here so the data is durable across deploys.
+model TemplateAuditEvent {
+  id         String   @id @default(cuid())
+  templateId String
+  userId     String?
+  userName   String?  // captured at write time so user renames don't break history
+  action     String   // "created" | "renamed" | "stage_added" | "stage_removed" | "duration_changed" | "order_added" | "order_changed" | "order_removed" | "material_added" | "material_removed" | "variant_added" | "variant_removed" | "marked_live" | "marked_draft" | "cloned_from"
+  detail     String?  // human-readable one-liner
+  createdAt  DateTime @default(now())
+
+  template PlotTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@index([templateId, createdAt])
 }
 
 // ---------- Template Materials (Quants) ----------
@@ -426,7 +503,28 @@ model TemplateMaterial {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  template PlotTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  template          PlotTemplate                       @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  variantOverrides  TemplateVariantMaterialOverride[]
+  consumptionEvents TemplateMaterialConsumption[]
+}
+
+// ---------- Template Material Consumption ----------
+// When a job linked to a TemplateMaterial.linkedStageCode starts, we log
+// a consumption row so the Quants Burn-Down report can show "expected vs
+// actual" by plot. Pure additive log — no UI overrides yet (Keith asked
+// for the surface; deeper edit-it-yourself UI is a follow-up).
+model TemplateMaterialConsumption {
+  id                 String   @id @default(cuid())
+  templateMaterialId String
+  plotId             String
+  jobId              String?  // job that triggered the consumption (nullable so manual logs work)
+  quantity           Float
+  loggedAt           DateTime @default(now())
+
+  templateMaterial TemplateMaterial @relation(fields: [templateMaterialId], references: [id], onDelete: Cascade)
+
+  @@index([templateMaterialId, loggedAt])
+  @@index([plotId])
 }
 
 // ---------- Template Documents (Drawings + spec) ----------
@@ -487,12 +585,13 @@ model TemplateJob {
   contactId           String?
   createdAt           DateTime @default(now())
 
-  template       PlotTemplate    @relation(fields: [templateId], references: [id], onDelete: Cascade)
-  parent         TemplateJob?    @relation("SubJobs", fields: [parentId], references: [id], onDelete: Cascade)
-  children       TemplateJob[]   @relation("SubJobs")
-  contact        Contact?        @relation(fields: [contactId], references: [id], onDelete: SetNull)
-  orders         TemplateOrder[]
-  anchoredOrders TemplateOrder[] @relation("OrderAnchorJob")
+  template         PlotTemplate                  @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  parent           TemplateJob?                  @relation("SubJobs", fields: [parentId], references: [id], onDelete: Cascade)
+  children         TemplateJob[]                 @relation("SubJobs")
+  contact          Contact?                      @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  orders           TemplateOrder[]
+  anchoredOrders   TemplateOrder[]               @relation("OrderAnchorJob")
+  variantOverrides TemplateVariantJobOverride[]
 }
 
 model TemplateOrder {

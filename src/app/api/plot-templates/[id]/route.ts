@@ -48,7 +48,7 @@ export async function PUT(
 
   const { id } = await params;
   const body = await request.json();
-  const { name, description, typeLabel } = body;
+  const { name, description, typeLabel, isDraft } = body;
 
   const existing = await prisma.plotTemplate.findUnique({ where: { id } });
   if (!existing) {
@@ -69,11 +69,40 @@ export async function PUT(
         ...(typeLabel !== undefined && {
           typeLabel: typeLabel?.trim() || null,
         }),
+        ...(typeof isDraft === "boolean" && { isDraft }),
       },
       include: {
         jobs: templateJobsInclude,
       },
     });
+
+    // Audit log
+    const events: Array<{ action: string; detail: string }> = [];
+    if (name !== undefined && name.trim() !== existing.name) {
+      events.push({
+        action: "renamed",
+        detail: `Renamed from "${existing.name}" to "${name.trim()}"`,
+      });
+    }
+    if (typeof isDraft === "boolean" && isDraft !== existing.isDraft) {
+      events.push({
+        action: isDraft ? "marked_draft" : "marked_live",
+        detail: isDraft
+          ? "Marked as draft (hidden from apply-picker)"
+          : "Marked as live (available to apply to plots)",
+      });
+    }
+    for (const ev of events) {
+      await prisma.templateAuditEvent.create({
+        data: {
+          templateId: id,
+          userId: session.user?.id ?? null,
+          userName: session.user?.name ?? session.user?.email ?? null,
+          action: ev.action,
+          detail: ev.detail,
+        },
+      });
+    }
 
     return NextResponse.json(normaliseTemplateParentDates(template));
   } catch (err) {
