@@ -44,12 +44,15 @@ export async function POST(
     });
     if (!source) return NextResponse.json({ error: "Template not found" }, { status: 404 });
 
-    // Create the new template shell.
+    // Create the new template shell. Clones start as drafts so the user
+    // has a chance to review (re-upload placeholder docs, tweak names,
+    // adjust durations) before exposing the copy in the apply-picker.
     const clone = await prisma.plotTemplate.create({
       data: {
         name: newName || `${source.name} (copy)`,
         description: source.description,
         typeLabel: source.typeLabel,
+        isDraft: true,
       },
     });
 
@@ -151,9 +154,37 @@ export async function POST(
       });
     }
 
-    // Documents stay with the original template — cloning docs would
-    // duplicate Supabase storage for no benefit. If the user wants them
-    // on the copy, they can re-upload.
+    // Documents — Supabase storage objects aren't duplicated (storage
+    // costs add up across clones). Instead we create placeholder rows
+    // carrying the original metadata so the user can see what was on
+    // the source template and re-upload deliberately. UI flags
+    // isPlaceholder=true rows with a "re-upload" affordance.
+    if (source.documents.length > 0) {
+      await prisma.templateDocument.createMany({
+        data: source.documents.map((d) => ({
+          templateId: clone.id,
+          name: d.name,
+          url: "", // empty for placeholders — UI uses isPlaceholder check
+          fileName: d.fileName,
+          fileSize: d.fileSize,
+          mimeType: d.mimeType,
+          category: d.category,
+          isPlaceholder: true,
+        })),
+      });
+    }
+
+    // Audit log: capture the clone-from event so the change log on the
+    // new template starts with a clear origin point.
+    await prisma.templateAuditEvent.create({
+      data: {
+        templateId: clone.id,
+        userId: session.user?.id ?? null,
+        userName: session.user?.name ?? session.user?.email ?? null,
+        action: "cloned_from",
+        detail: `Cloned from "${source.name}"`,
+      },
+    });
 
     return NextResponse.json({ id: clone.id, name: clone.name }, { status: 201 });
   } catch (err) {

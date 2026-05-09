@@ -38,6 +38,8 @@ interface TemplateDocument {
   fileSize: number | null;
   mimeType: string | null;
   category: string | null;
+  /** True for cloned-template placeholder rows that have no storage object yet. */
+  isPlaceholder?: boolean;
   createdAt: string;
 }
 
@@ -388,19 +390,48 @@ export function TemplateExtras({ templateId, templateName }: { templateId: strin
           <div className="divide-y rounded-lg border">
             {documents.map((d) => {
               const sizeKb = d.fileSize ? Math.round(d.fileSize / 1024) : null;
+              const isPlaceholder = !!d.isPlaceholder;
               return (
-                <div key={d.id} className="flex items-center justify-between px-3 py-2">
+                <div
+                  key={d.id}
+                  className={`flex items-center justify-between px-3 py-2 ${
+                    isPlaceholder ? "bg-amber-50/40" : ""
+                  }`}
+                >
                   <div className="flex min-w-0 flex-1 items-center gap-2">
-                    <FileText className="size-4 shrink-0 text-muted-foreground" />
+                    <FileText
+                      className={`size-4 shrink-0 ${
+                        isPlaceholder ? "text-amber-600" : "text-muted-foreground"
+                      }`}
+                    />
                     <div className="min-w-0">
                       <p className="truncate text-sm font-medium">{d.name}</p>
-                      <p className="text-[11px] text-muted-foreground">{d.fileName}{sizeKb ? ` · ${sizeKb} KB` : ""}</p>
+                      <p className="text-[11px] text-muted-foreground">
+                        {isPlaceholder ? (
+                          <>
+                            <span className="font-medium text-amber-800">
+                              Re-upload needed
+                            </span>{" "}
+                            — original was {d.fileName}
+                            {sizeKb ? ` · ${sizeKb} KB` : ""}
+                          </>
+                        ) : (
+                          <>
+                            {d.fileName}
+                            {sizeKb ? ` · ${sizeKb} KB` : ""}
+                          </>
+                        )}
+                      </p>
                     </div>
                   </div>
                   <div className="flex items-center gap-1">
-                    <a href={d.url} target="_blank" rel="noopener noreferrer" className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground" title="Open"><ExternalLink className="size-4" /></a>
-                    <a href={d.url} download={d.fileName} className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground" title="Download"><Download className="size-4" /></a>
-                    <button onClick={() => deleteDoc(d.id)} className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-destructive" title="Delete"><Trash2 className="size-4" /></button>
+                    {isPlaceholder ? null : (
+                      <>
+                        <a href={d.url} target="_blank" rel="noopener noreferrer" className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground" title="Open"><ExternalLink className="size-4" /></a>
+                        <a href={d.url} download={d.fileName} className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground" title="Download"><Download className="size-4" /></a>
+                      </>
+                    )}
+                    <button onClick={() => deleteDoc(d.id)} className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-destructive" title={isPlaceholder ? "Remove placeholder" : "Delete"}><Trash2 className="size-4" /></button>
                   </div>
                 </div>
               );

@@ -116,7 +116,13 @@ async function main() {
     ON "TemplateMaterialConsumption" ("plotId");
   `);
 
-  // 8. Plot.sourceVariantId FK (separate so the column can exist on rows
+  // 8. TemplateDocument.isPlaceholder
+  await prisma.$executeRawUnsafe(`
+    ALTER TABLE "TemplateDocument"
+    ADD COLUMN IF NOT EXISTS "isPlaceholder" BOOLEAN NOT NULL DEFAULT false;
+  `);
+
+  // 9. Plot.sourceVariantId FK (separate so the column can exist on rows
   //    that pre-date the variant table without errors; only added after
   //    the table itself is in place).
   await prisma.$executeRawUnsafe(`

@@ -537,6 +537,12 @@ model TemplateDocument {
   fileSize   Int?
   mimeType   String?
   category   String? // "DRAWING" | "SPEC" | "OTHER"
+  // Placeholder rows are created when a template is cloned — they
+  // carry the original metadata (name, fileName) so the user knows
+  // what to re-upload, but the storage object is NOT duplicated to
+  // keep Supabase costs down. UI shows "Re-upload needed" instead of
+  // a download link when `isPlaceholder=true`.
+  isPlaceholder Boolean @default(false)
   createdAt  DateTime @default(now())
 
   template PlotTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)

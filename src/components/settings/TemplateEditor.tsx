@@ -16,6 +16,7 @@ import {
   Layers,
   GitBranch,
   AlertTriangle,
+  Calendar,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -46,6 +47,8 @@ import { TemplateTimeline } from "./TemplateTimeline";
 import { DurationCell } from "./DurationCell";
 import { TemplateValidationPanel } from "./TemplateValidationPanel";
 import { TemplateCostFooter } from "./TemplateCostFooter";
+import { TemplateOrderTimeline } from "./TemplateOrderTimeline";
+import { ApplyTemplatePreview } from "./ApplyTemplatePreview";
 import type {
   TemplateData,
   TemplateJobData,
@@ -95,6 +98,7 @@ export function TemplateEditor({
   const [metaTypeLabel, setMetaTypeLabel] = useState(template.typeLabel ?? "");
   const [savingMeta, setSavingMeta] = useState(false);
   const [togglingDraft, setTogglingDraft] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   // Job edit dialog (used for both stages and sub-jobs)
   const [jobDialogOpen, setJobDialogOpen] = useState(false);
@@ -1579,6 +1583,16 @@ export function TemplateEditor({
           {!editingMeta && (
             <div className="flex shrink-0 flex-wrap items-center gap-1.5">
               <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setPreviewOpen(true)}
+                disabled={template.jobs.length === 0}
+                title="Dry-run: see what applying this template would create on a plot starting today"
+              >
+                <Calendar className="size-3.5" />
+                Preview Apply
+              </Button>
+              <Button
                 variant={template.isDraft ? "default" : "outline"}
                 size="sm"
                 onClick={handleToggleDraft}
@@ -1611,6 +1625,23 @@ export function TemplateEditor({
         </div>
       </div>
 
+      {/* Apply preview modal — pure dry-run, no DB writes. */}
+      <ApplyTemplatePreview
+        open={previewOpen}
+        onClose={() => setPreviewOpen(false)}
+        template={template}
+        startDate={new Date()}
+        onConfirm={() => {
+          // From within the editor we don't actually apply — the preview
+          // is informational. Close the modal and direct the user to the
+          // apply flow.
+          setPreviewOpen(false);
+          toast.success(
+            "Preview only. Apply the template from a site's plots view.",
+          );
+        }}
+      />
+
       {/* Timeline Preview - now interactive */}
       {template.jobs.length > 0 && (
         <TemplateTimeline
@@ -1629,6 +1660,11 @@ export function TemplateEditor({
       {/* Per-template order cost — sum of every TemplateOrderItem.
           Materials cost is summed in TemplateExtras separately. */}
       <TemplateCostFooter template={template} />
+
+      {/* Order schedule strip — visualises every order's place + arrive
+          weeks against the same scale as the Gantt above. Surfaces
+          delivery collisions before the template ships. */}
+      <TemplateOrderTimeline template={template} />
 
       {/* Jobs List */}
       <div className="space-y-3">
