@@ -44,6 +44,8 @@ import {
 } from "@/components/ui/select";
 import { TemplateTimeline } from "./TemplateTimeline";
 import { DurationCell } from "./DurationCell";
+import { TemplateValidationPanel } from "./TemplateValidationPanel";
+import { TemplateCostFooter } from "./TemplateCostFooter";
 import type {
   TemplateData,
   TemplateJobData,
@@ -1537,13 +1539,25 @@ export function TemplateEditor({
         />
       )}
 
+      {/* Validation panel — flags missing durations, orphaned anchors,
+          empty orders, etc. Cheap pure-client check, runs every render. */}
+      <TemplateValidationPanel template={template} />
+
+      {/* Per-template order cost — sum of every TemplateOrderItem.
+          Materials cost is summed in TemplateExtras separately. */}
+      <TemplateCostFooter template={template} />
+
       {/* Jobs List */}
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <h3 className="text-lg font-semibold">Jobs</h3>
-          <Button size="sm" onClick={openAddStage}>
+          <Button
+            size="sm"
+            onClick={openAddStage}
+            title="Pick one or more stages from the UK library, or define a custom stage"
+          >
             <Layers className="size-3.5" />
-            Add Stage
+            Add Stages
           </Button>
         </div>
 

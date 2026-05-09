@@ -338,6 +338,34 @@ export function TemplateExtras({ templateId, templateName }: { templateId: strin
                   </tr>
                 ))}
               </tbody>
+              {(() => {
+                const total = materials.reduce(
+                  (sum, m) => sum + (m.unitCost ?? 0) * (m.quantity || 0),
+                  0,
+                );
+                const priced = materials.filter((m) => m.unitCost != null);
+                if (total === 0) return null;
+                return (
+                  <tfoot className="border-t bg-muted/20 text-xs">
+                    <tr>
+                      <td colSpan={4} className="px-3 py-2 font-medium">
+                        Materials cost per plot
+                        <span className="ml-2 font-normal text-muted-foreground">
+                          ({priced.length} of {materials.length} priced)
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-right font-semibold tabular-nums">
+                        {new Intl.NumberFormat("en-GB", {
+                          style: "currency",
+                          currency: "GBP",
+                          maximumFractionDigits: total % 1 === 0 ? 0 : 2,
+                        }).format(total)}
+                      </td>
+                      <td />
+                    </tr>
+                  </tfoot>
+                );
+              })()}
             </table>
           </div>
         )}
