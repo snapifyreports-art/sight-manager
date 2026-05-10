@@ -8,6 +8,7 @@ import {
   AlertTriangle,
   ArrowLeft,
   CheckCircle,
+  CheckCircle2,
   Plus,
   Pencil,
   MapPin,
@@ -1836,6 +1837,39 @@ export function SiteDetailClient({
           </div>
         </div>
       </div>
+
+      {/* (May 2026 audit #42 + #43 + #45) Site-status banner.
+          Pre-fix the only visual clue that a site was ON_HOLD or
+          COMPLETED was a tiny chip next to the title — easy to miss,
+          and didn't explain the consequence. The banner spells it out
+          right above the tabs so a manager landing on a stale site
+          knows the state before clicking anything. */}
+      {site.status === "ON_HOLD" && (
+        <div className="flex items-start justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-600" />
+            <div>
+              <p className="text-sm font-semibold text-amber-800">This site is on hold</p>
+              <p className="mt-0.5 text-xs text-amber-700">
+                Programme actions still record but contractors and the daily-brief crons skip on-hold sites. Take it off hold from the site header to resume.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+      {site.status === "COMPLETED" && (
+        <div className="flex items-start justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3">
+          <div className="flex items-start gap-2">
+            <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-emerald-600" />
+            <div>
+              <p className="text-sm font-semibold text-emerald-800">This site is completed</p>
+              <p className="mt-0.5 text-xs text-emerald-700">
+                Handover ZIP has been (or can be) generated from the Site Closure tab. Edits here are still allowed, but the site no longer appears in active dashboards or the daily-brief email.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Overdue alert banner (UX #6) */}
       {overdueCount > 0 && (
