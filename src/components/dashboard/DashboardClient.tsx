@@ -16,6 +16,8 @@ import {
   Send,
   AlertTriangle,
   Bug,
+  Star,
+  MapPin,
 } from "lucide-react";
 import {
   Card,
@@ -103,6 +105,14 @@ interface StaleSnag {
   };
 }
 
+interface WatchedSite {
+  id: string;
+  name: string;
+  location: string | null;
+  status: string;
+  plotCount: number;
+}
+
 export interface DashboardData {
   stats: StatsData;
   jobsByStatus: JobsByStatus;
@@ -110,6 +120,7 @@ export interface DashboardData {
   trafficLightJobs: TrafficLightJob[];
   overdueJobs: OverdueJob[];
   staleSnags: StaleSnag[];
+  watchedSites: WatchedSite[];
 }
 
 // ---------- Helpers ----------
@@ -278,6 +289,77 @@ function StatsCards({ stats }: { stats: StatsData }) {
         );
       })}
     </div>
+  );
+}
+
+// ---------- Watched Sites Panel ----------
+//
+// (May 2026 audit follow-up to #152) Renders the sites the current
+// user has opted in to watching. Empty state coaches them to use the
+// Watch button on a site header. Each card links into the site so
+// the panel doubles as a personal-shortcuts panel.
+
+function WatchedSitesPanel({ sites }: { sites: WatchedSite[] }) {
+  if (sites.length === 0) {
+    // Don't render empty state on dashboard — most managers won't
+    // start watching anything for weeks. Keep the dashboard calm.
+    return null;
+  }
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <div className="flex items-center gap-2">
+          <Star
+            className="size-4 fill-amber-400 text-amber-500"
+            aria-hidden="true"
+          />
+          <CardTitle className="text-base">Sites you&apos;re watching</CardTitle>
+          <span className="text-sm font-normal text-muted-foreground">
+            ({sites.length})
+          </span>
+        </div>
+        <CardDescription className="text-xs">
+          Your personal radar. Use the Watch button on a site header to add
+          or remove.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+        {sites.map((s) => (
+          <Link
+            key={s.id}
+            href={`/sites/${s.id}`}
+            className="rounded-lg border bg-white p-3 text-xs ring-amber-100 transition hover:ring-2 hover:ring-amber-300"
+          >
+            <div className="flex items-start justify-between gap-2">
+              <p className="truncate text-sm font-medium text-slate-900">
+                {s.name}
+              </p>
+              {s.status === "ON_HOLD" && (
+                <span className="shrink-0 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
+                  On hold
+                </span>
+              )}
+              {s.status === "COMPLETED" && (
+                <span className="shrink-0 rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">
+                  Complete
+                </span>
+              )}
+            </div>
+            <div className="mt-1 flex items-center gap-3 text-[11px] text-slate-500">
+              {s.location && (
+                <span className="flex items-center gap-1 truncate">
+                  <MapPin className="size-3" aria-hidden="true" />
+                  {s.location}
+                </span>
+              )}
+              <span>
+                {s.plotCount} plot{s.plotCount !== 1 ? "s" : ""}
+              </span>
+            </div>
+          </Link>
+        ))}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -679,6 +761,11 @@ export function DashboardClient({ data }: { data: DashboardData }) {
 
       {/* Stats Row */}
       <StatsCards stats={data.stats} />
+
+      {/* (May 2026 audit follow-up to #152) Sites the user is watching
+          — surfaces what's on their personal radar without trawling
+          the full /sites list. */}
+      <WatchedSitesPanel sites={data.watchedSites} />
 
       {/* (May 2026 audit #46) At-Risk panel surfaces things the
           manager should worry about right now: overdue jobs (end

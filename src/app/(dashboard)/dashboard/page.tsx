@@ -31,6 +31,12 @@ export default async function DashboardPage() {
     trafficLightJobs,
     overdueJobs,
     staleSnags,
+    // (May 2026 audit follow-up to #152) Sites the current user is
+    // watching — surface them as a dashboard widget so the manager
+    // sees what's on their personal radar without trawling the sites
+    // page. Skipped when session is null because we already auth-gate
+    // higher up the layout chain.
+    watchedSites,
   ] = await Promise.all([
     // Total sites (filtered)
     prisma.site.count({ where: siteWhere }),
@@ -141,6 +147,27 @@ export default async function DashboardPage() {
         },
       },
     }),
+
+    // (May 2026 audit follow-up to #152) Watched sites for the current
+    // user — includes a few headline numbers per site so the widget
+    // can render without a second round-trip.
+    session
+      ? prisma.watchedSite.findMany({
+          where: { userId: session.user.id },
+          orderBy: { createdAt: "desc" },
+          select: {
+            site: {
+              select: {
+                id: true,
+                name: true,
+                location: true,
+                status: true,
+                _count: { select: { plots: true } },
+              },
+            },
+          },
+        })
+      : Promise.resolve([]),
   ]);
 
   // Build the job status map with defaults
@@ -203,6 +230,13 @@ export default async function DashboardPage() {
       createdAt: s.createdAt.toISOString(),
       priority: s.priority,
       plot: s.plot,
+    })),
+    watchedSites: watchedSites.map((w) => ({
+      id: w.site.id,
+      name: w.site.name,
+      location: w.site.location,
+      status: w.site.status,
+      plotCount: w.site._count.plots,
     })),
   };
 
