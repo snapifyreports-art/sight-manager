@@ -113,6 +113,17 @@ interface WatchedSite {
   plotCount: number;
 }
 
+interface PlotOverBudget {
+  id: string;
+  name: string;
+  plotNumber: string | null;
+  siteId: string;
+  siteName: string;
+  budgeted: number;
+  actual: number;
+  overrun: number;
+}
+
 export interface DashboardData {
   stats: StatsData;
   jobsByStatus: JobsByStatus;
@@ -121,6 +132,7 @@ export interface DashboardData {
   overdueJobs: OverdueJob[];
   staleSnags: StaleSnag[];
   watchedSites: WatchedSite[];
+  plotsOverBudget: PlotOverBudget[];
 }
 
 // ---------- Helpers ----------
@@ -772,6 +784,52 @@ export function DashboardClient({ data }: { data: DashboardData }) {
           date passed, not COMPLETED) and stale snags (open >30 days).
           Hidden when there's nothing to show — no noise in calm weeks. */}
       <AtRiskPanel overdueJobs={data.overdueJobs} staleSnags={data.staleSnags} />
+
+      {/* (May 2026 audit #168) Plots over budget. Hidden when none. */}
+      {data.plotsOverBudget.length > 0 && (
+        <Card className="border-rose-200 bg-rose-50/30">
+          <CardHeader className="pb-3">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="size-4 text-rose-600" aria-hidden />
+              <CardTitle className="text-base text-rose-900">
+                Plots over budget
+              </CardTitle>
+              <span className="text-xs font-normal text-rose-700">
+                ({data.plotsOverBudget.length})
+              </span>
+            </div>
+            <CardDescription className="text-xs text-rose-800">
+              Delivered materials cost is already over the planned budget.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ul className="space-y-1.5">
+              {data.plotsOverBudget.map((p) => (
+                <li key={p.id}>
+                  <Link
+                    href={`/sites/${p.siteId}/plots/${p.id}`}
+                    className="flex items-center justify-between gap-2 rounded-md bg-white px-3 py-2 text-xs ring-1 ring-rose-100 hover:ring-rose-300"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-medium text-slate-900">
+                        {p.plotNumber ? `Plot ${p.plotNumber}` : p.name} ·{" "}
+                        <span className="text-slate-500">{p.siteName}</span>
+                      </p>
+                      <p className="text-[11px] text-slate-500">
+                        £{p.actual.toLocaleString("en-GB")} actual / £
+                        {p.budgeted.toLocaleString("en-GB")} budgeted
+                      </p>
+                    </div>
+                    <span className="shrink-0 rounded bg-rose-100 px-1.5 py-0.5 text-[10px] font-semibold text-rose-700">
+                      +£{p.overrun.toLocaleString("en-GB")}
+                    </span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Traffic Light System */}
       <TrafficLightSection
