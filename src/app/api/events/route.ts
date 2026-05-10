@@ -72,7 +72,9 @@ export async function GET(req: NextRequest) {
         plot: { select: { id: true, name: true, siteId: true } },
         job: { select: { id: true, name: true, plotId: true } },
       },
-      orderBy: { createdAt: "desc" },
+      // (May 2026 audit #78) id tiebreaker for stable ordering across
+      // pages — without it, pagination can show duplicates / skips.
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       skip: (page - 1) * limit,
       take: limit,
     }),

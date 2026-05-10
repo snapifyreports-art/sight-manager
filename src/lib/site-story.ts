@@ -496,7 +496,9 @@ export async function buildSiteStory(
           ],
         },
       },
-      orderBy: { createdAt: "asc" },
+      // (May 2026 audit #78) id tiebreaker so plot-story timelines
+      // render in a stable order — cascade events can share a millisecond.
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
       select: {
         id: true,
         type: true,

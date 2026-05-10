@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { sendPushToAll } from "@/lib/push";
 import { addDays } from "date-fns";
-import { getServerCurrentDate } from "@/lib/dev-date";
+import { getServerCurrentDate, getServerStartOfDay } from "@/lib/dev-date";
 import { checkCronAuth } from "@/lib/cron-auth";
 
 export const dynamic = "force-dynamic";
@@ -21,17 +21,11 @@ export async function GET(req: NextRequest) {
   // (#41) Route through getServerCurrentDate so Dev Mode tests can
   // simulate cron firings on a non-real date. Vercel cron sends no
   // dev-date cookie so production behaviour is identical to before.
+  // (#87) UTC start-of-day so the boundary matches how Prisma stores
+  // timestamps — see getServerStartOfDay() doc.
   const now = getServerCurrentDate(req);
-  const todayStart = new Date(
-    now.getFullYear(),
-    now.getMonth(),
-    now.getDate()
-  );
-  const todayEnd = new Date(
-    now.getFullYear(),
-    now.getMonth(),
-    now.getDate() + 1
-  );
+  const todayStart = getServerStartOfDay(req);
+  const todayEnd = new Date(todayStart.getTime() + 86_400_000);
   const in3Days = addDays(now, 3);
 
   // Count items for each notification category (same logic as /api/tasks)

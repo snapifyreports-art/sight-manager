@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/email";
 import { format } from "date-fns";
-import { getServerCurrentDate } from "@/lib/dev-date";
+import { getServerCurrentDate, getServerStartOfDay } from "@/lib/dev-date";
 
 export const dynamic = "force-dynamic";
 
@@ -22,9 +22,11 @@ export async function GET(req: NextRequest) {
   // (#42) Route through getServerCurrentDate so Dev Mode tests can
   // simulate the morning email on a non-real date. Vercel cron sends
   // no dev-date cookie so production matches the previous behaviour.
+  // (#87) UTC start-of-day so the boundary matches how Prisma stores
+  // timestamps — see getServerStartOfDay() doc.
   const now = getServerCurrentDate(req);
   const todayStr = format(now, "yyyy-MM-dd");
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const todayStart = getServerStartOfDay(req);
 
   // Get all active sites
   const sites = await prisma.site.findMany({

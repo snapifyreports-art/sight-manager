@@ -144,7 +144,9 @@ export async function GET(req: NextRequest) {
     }),
     prisma.eventLog.findMany({
       where: siteId ? { siteId } : {},
-      orderBy: { createdAt: "desc" },
+      // (May 2026 audit #78) id tiebreaker so the take-100 cut-off
+      // lands on a stable boundary across loads.
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: 100,
       select: { type: true, createdAt: true },
     }),

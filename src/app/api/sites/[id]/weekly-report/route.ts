@@ -90,7 +90,9 @@ export async function GET(
         createdAt: true,
         user: { select: { name: true } },
       },
-      orderBy: { createdAt: "desc" },
+      // (May 2026 audit #78) id tiebreaker for stable order in the
+      // weekly report — events from the same cascade tx tie on createdAt.
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: 50,
     }),
     prisma.rainedOffDay.findMany({

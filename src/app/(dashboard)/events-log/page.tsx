@@ -28,7 +28,11 @@ export default async function EventsLogPage() {
         plot: { select: { id: true, name: true, siteId: true } },
         job: { select: { id: true, name: true, plotId: true } },
       },
-      orderBy: { createdAt: "desc" },
+      // (May 2026 audit #78) Stable ordering — id tiebreaker for events
+      // that share a createdAt timestamp (cascade ops in a single tx
+      // often produce sub-millisecond clusters). Without this the same
+      // page can render in different orders across loads.
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: 50,
     }),
     prisma.eventLog.count({ where: eventWhere }),

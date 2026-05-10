@@ -63,5 +63,28 @@ export function getServerCurrentDate(req: { cookies: { get: (name: string) => { 
   return buildOverrideDate(cookie.value) ?? new Date();
 }
 
+/**
+ * (May 2026 audit #87) Server "start of today" snapped to UTC midnight.
+ *
+ * Why UTC: every Date Prisma writes is stored as UTC. When a cron asks
+ * "jobs starting today", the boundary needs to match how those dates
+ * were stored — i.e. UTC midnight. Local-timezone snap (`new Date(year,
+ * month, day)`) only happens to do the right thing on Vercel because
+ * the runtime is UTC; this helper makes the intent explicit and keeps
+ * the boundary stable for any developer running cron handlers in a
+ * non-UTC dev environment.
+ *
+ * Use this in cron handlers anywhere you need "today's calendar day"
+ * for date-range queries against Prisma timestamps.
+ */
+export function getServerStartOfDay(
+  req: { cookies: { get: (name: string) => { value: string } | undefined } },
+): Date {
+  const now = getServerCurrentDate(req);
+  return new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+  );
+}
+
 /** Cookie name export for the context provider */
 export { COOKIE_NAME as DEV_DATE_COOKIE };

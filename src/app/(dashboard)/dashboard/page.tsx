@@ -51,9 +51,11 @@ export default async function DashboardPage() {
     }),
 
     // Recent 10 events with relations (filtered)
+    // (May 2026 audit #78) id tiebreaker for stable ordering when
+    // multiple events share a createdAt millisecond.
     prisma.eventLog.findMany({
       take: 10,
-      orderBy: { createdAt: "desc" },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       where: eventSiteWhere,
       include: {
         user: { select: { name: true } },

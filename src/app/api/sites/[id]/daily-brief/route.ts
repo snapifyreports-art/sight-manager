@@ -508,7 +508,9 @@ export async function GET(
         id: true, type: true, description: true, createdAt: true,
         user: { select: { name: true } },
       },
-      orderBy: { createdAt: "desc" },
+      // (May 2026 audit #78) id tiebreaker for stable order in the
+      // daily brief — events from a single cascade tx tie on createdAt.
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: 20,
     }),
     prisma.plot.count({ where: { siteId: id } }),

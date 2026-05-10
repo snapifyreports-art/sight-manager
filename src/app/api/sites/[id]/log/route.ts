@@ -77,7 +77,10 @@ export async function GET(
         plot: { select: { id: true, name: true, plotNumber: true } },
         job: { select: { id: true, name: true } },
       },
-      orderBy: { createdAt: "desc" },
+      // (May 2026 audit #78) id tiebreaker — same-millisecond events
+      // (common during cascade transactions) need a stable secondary
+      // sort or pagination produces duplicates.
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       skip: (page - 1) * limit,
       take: limit,
     }),
