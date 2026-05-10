@@ -13,9 +13,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { Settings, User, Bell, Shield, LayoutTemplate, Users } from "lucide-react";
+import { Settings, User, Bell, Shield, LayoutTemplate, Users, Palette } from "lucide-react";
 import { PlotTemplatesSection } from "./PlotTemplatesSection";
 import { NotificationsSection } from "./NotificationsSection";
+import { BrandingSection } from "./BrandingSection";
 import { UsersClient } from "@/components/users/UsersClient";
 import type { TemplateData } from "./types";
 
@@ -133,6 +134,11 @@ export function SettingsClient({ user, templates, users, currentUserId, sites, i
             <Users className="size-4" />
             Users
           </TabsTrigger>
+          {/* (May 2026 audit #56) White-label branding. */}
+          <TabsTrigger value="branding">
+            <Palette className="size-4" />
+            Branding
+          </TabsTrigger>
         </TabsList>
 
         {/* General Tab */}
@@ -203,6 +209,11 @@ export function SettingsClient({ user, templates, users, currentUserId, sites, i
         {/* Users Tab */}
         <TabsContent value="users">
           <UsersClient users={users} currentUserId={currentUserId} sites={sites} />
+        </TabsContent>
+
+        {/* (May 2026 audit #56) Branding Tab */}
+        <TabsContent value="branding">
+          <BrandingSection />
         </TabsContent>
       </Tabs>
     </div>
