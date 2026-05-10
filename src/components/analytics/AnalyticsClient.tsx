@@ -813,6 +813,166 @@ export function AnalyticsClient() {
           </div>
         )}
       </div>
+
+      {/* (May 2026 audit #180 + #182 + #183) Three new derived
+          analytics widgets pulled from the dedicated endpoints. */}
+      <StageBenchmarkWidget />
+      <DelayTrendsWidget />
+      <WeatherLossWidget />
+    </div>
+  );
+}
+
+// ────────── Stage benchmarking ──────────────────────────────────────────
+
+interface StageStat {
+  stage: string;
+  sample: number;
+  mean: number;
+  median: number;
+  p10: number;
+  p90: number;
+}
+
+function StageBenchmarkWidget() {
+  const [items, setItems] = useState<StageStat[]>([]);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    fetch("/api/analytics/stage-benchmark")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (d?.items) setItems(d.items);
+      })
+      .finally(() => setLoading(false));
+  }, []);
+  if (loading) return null;
+  if (items.length === 0) return null;
+  return (
+    <div className="rounded-xl border bg-white p-4">
+      <h3 className="font-semibold">Stage benchmark</h3>
+      <p className="text-xs text-muted-foreground">
+        Actual durations from every completed leaf job, grouped by stage.
+        Longest mean at the top.
+      </p>
+      <div className="mt-3 overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="text-xs uppercase text-slate-500">
+            <tr>
+              <th className="text-left">Stage</th>
+              <th className="text-right">Mean (d)</th>
+              <th className="text-right">Median</th>
+              <th className="text-right">p10</th>
+              <th className="text-right">p90</th>
+              <th className="text-right">N</th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.slice(0, 15).map((s) => (
+              <tr key={s.stage} className="border-t">
+                <td className="font-medium">{s.stage}</td>
+                <td className="text-right">{s.mean}</td>
+                <td className="text-right">{s.median}</td>
+                <td className="text-right text-slate-500">{s.p10}</td>
+                <td className="text-right text-slate-500">{s.p90}</td>
+                <td className="text-right text-slate-500">{s.sample}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ────────── Delay trends ────────────────────────────────────────────────
+
+interface DelaySeriesItem {
+  weekStart: string;
+  total: number;
+  reasons: Record<string, number>;
+}
+
+function DelayTrendsWidget() {
+  const [data, setData] = useState<{
+    series: DelaySeriesItem[];
+    topReasons: Array<{ reason: string; count: number }>;
+  } | null>(null);
+  useEffect(() => {
+    fetch("/api/analytics/delay-trends")
+      .then((r) => (r.ok ? r.json() : null))
+      .then(setData);
+  }, []);
+  if (!data) return null;
+  const max = Math.max(1, ...data.series.map((s) => s.total));
+  return (
+    <div className="rounded-xl border bg-white p-4">
+      <h3 className="font-semibold">Delay trends (last 12 weeks)</h3>
+      <p className="text-xs text-muted-foreground">
+        Cascade events per week. Top reasons:{" "}
+        {data.topReasons.slice(0, 3).map((r) => `${r.reason} (${r.count})`).join(", ") || "no delays"}
+      </p>
+      <div className="mt-3 flex h-32 items-end gap-1">
+        {data.series.map((s) => {
+          const pct = (s.total / max) * 100;
+          return (
+            <div key={s.weekStart} className="flex flex-1 flex-col items-center">
+              <div
+                className="w-full rounded-t bg-amber-400"
+                style={{ height: `${pct}%`, minHeight: s.total > 0 ? 2 : 0 }}
+                title={`${s.weekStart}: ${s.total}`}
+              />
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ────────── Weather loss ────────────────────────────────────────────────
+
+interface WeatherLoss {
+  totalDays: number;
+  byType: Record<string, number>;
+  bySite: Array<{ id: string; name: string; days: number }>;
+}
+
+function WeatherLossWidget() {
+  const [data, setData] = useState<WeatherLoss | null>(null);
+  useEffect(() => {
+    fetch("/api/analytics/weather-loss")
+      .then((r) => (r.ok ? r.json() : null))
+      .then(setData);
+  }, []);
+  if (!data || data.totalDays === 0) return null;
+  return (
+    <div className="rounded-xl border bg-white p-4">
+      <h3 className="font-semibold">Weather loss</h3>
+      <p className="text-xs text-muted-foreground">
+        Total {data.totalDays} weather days recorded across all sites.
+      </p>
+      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+        <div>
+          <p className="text-xs font-medium text-slate-700">By type</p>
+          <ul className="mt-1 space-y-0.5 text-xs">
+            {Object.entries(data.byType).map(([k, v]) => (
+              <li key={k}>
+                <span className="font-medium">{k}</span>: {v} days
+              </li>
+            ))}
+          </ul>
+        </div>
+        <div>
+          <p className="text-xs font-medium text-slate-700">Most affected sites</p>
+          <ul className="mt-1 space-y-0.5 text-xs">
+            {data.bySite.slice(0, 5).map((s) => (
+              <li key={s.id}>
+                <span className="font-medium">{s.name}</span>: {s.days} days
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
     </div>
   );
 }
