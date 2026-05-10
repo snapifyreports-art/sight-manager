@@ -241,6 +241,9 @@ model Plot {
   variations            Variation[]
   defectReports         DefectReport[]
   customerSubscriptions CustomerPushSubscription[]
+  drawSchedule          PlotDrawSchedule[]
+  voiceNotes            VoiceNote[]
+  photoAnnotations      PhotoAnnotation[]
 
   @@unique([siteId, plotNumber])
   @@index([siteId]) // hot path: every site page loads plots
@@ -357,8 +360,9 @@ model JobPhoto {
   sharedWithCustomer Boolean @default(false)
   createdAt    DateTime @default(now())
 
-  job        Job   @relation(fields: [jobId], references: [id], onDelete: Cascade)
-  uploadedBy User? @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
+  job         Job               @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  uploadedBy  User?             @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
+  annotations PhotoAnnotation[]
 
   @@index([jobId, sharedWithCustomer])
 }
@@ -1076,6 +1080,81 @@ enum DefectReportStatus {
   IN_PROGRESS
   RESOLVED
   CLOSED
+}
+
+/// (May 2026 audit #166) Draw schedule — financial milestone payments
+/// the customer makes during the build (e.g. 10% deposit, 30% on damp
+/// proof course, 50% on roof complete, 10% on handover). Each row is
+/// one milestone with amount, due date, status, and an optional
+/// linked job that triggers due-status when complete.
+model PlotDrawSchedule {
+  id            String           @id @default(cuid())
+  plotId        String
+  name          String
+  amount        Float
+  sortOrder     Int              @default(0)
+  triggerJobId  String? // optional: when this job completes, status flips DUE
+  dueAt         DateTime?
+  status        PlotDrawStatus   @default(SCHEDULED)
+  paidAt        DateTime?
+  paidById      String?
+  notes         String?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  plot Plot @relation(fields: [plotId], references: [id], onDelete: Cascade)
+
+  @@index([plotId, sortOrder])
+}
+
+enum PlotDrawStatus {
+  SCHEDULED
+  DUE
+  PAID
+  WAIVED
+}
+
+/// (May 2026 audit #49) Voice notes recorded on a job/plot/snag.
+/// The file lives in Supabase storage (same bucket as photos);
+/// transcription is the future tier — initial version is just the
+/// audio + optional caption.
+model VoiceNote {
+  id          String   @id @default(cuid())
+  plotId      String
+  jobId       String?
+  snagId      String?
+  url         String
+  durationSec Int?
+  caption     String?
+  transcript  String? // future: ASR fills this
+  createdAt   DateTime @default(now())
+  createdById String?
+
+  plot Plot @relation(fields: [plotId], references: [id], onDelete: Cascade)
+
+  @@index([plotId, createdAt])
+}
+
+/// (May 2026 audit #50) Annotations layered on top of a job photo —
+/// arrows, circles, freehand strokes. Serialised as a JSON `strokes`
+/// blob so the front-end can re-render the canvas. Distinct from
+/// JobPhoto so the original photo stays untouched + multiple users
+/// can annotate the same photo without conflicts.
+model PhotoAnnotation {
+  id          String   @id @default(cuid())
+  jobPhotoId  String
+  plotId      String
+  strokes     String // JSON-encoded array of stroke objects
+  caption     String?
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  plot     Plot     @relation(fields: [plotId], references: [id], onDelete: Cascade)
+  jobPhoto JobPhoto @relation(fields: [jobPhotoId], references: [id], onDelete: Cascade)
+
+  @@index([jobPhotoId])
+  @@index([plotId])
 }
 
 model HandoverChecklist {
