@@ -5,6 +5,7 @@ import { format } from "date-fns";
 import { addWorkingDays, differenceInWorkingDays, isWorkingDay, snapToWorkingDay } from "@/lib/working-days";
 import { toDateKey } from "@/lib/dates";
 import { useJobAction } from "@/hooks/useJobAction";
+import { JobPhotoLightbox } from "@/components/programme/JobPhotoLightbox";
 import Link from "next/link";
 import {
   Loader2,
@@ -1843,171 +1844,23 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
         </DialogContent>
       </Dialog>
 
-      {/* Photo Lightbox Dialog */}
-      <Dialog
-        open={lightboxIndex !== null}
-        onOpenChange={() => {
-          setLightboxIndex(null);
-          setEditingCaption(false);
-        }}
-      >
-        <DialogContent className="max-w-3xl p-0 overflow-hidden [&>button]:hidden">
-          {lightboxPhoto && (
-            <div>
-              {/* Image area */}
-              <div className="relative flex items-center justify-center bg-black min-h-[300px]">
-                <img
-                  src={lightboxPhoto.url}
-                  alt={lightboxPhoto.caption || lightboxPhoto.fileName || "Photo"}
-                  className="max-h-[70vh] w-auto object-contain"
-                />
-
-                {/* Close button */}
-                <button
-                  className="absolute right-3 top-3 rounded-full bg-black/50 p-2 text-white hover:bg-black/70 z-10"
-                  onClick={() => {
-                    setLightboxIndex(null);
-                    setEditingCaption(false);
-                  }}
-                >
-                  <X className="size-4" />
-                </button>
-
-                {/* Nav arrows */}
-                {photos.length > 1 && (
-                  <>
-                    <button
-                      className="absolute left-2 rounded-full bg-black/50 p-2 text-white hover:bg-black/70"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setLightboxIndex((i) =>
-                          i !== null && i > 0 ? i - 1 : photos.length - 1
-                        );
-                        setEditingCaption(false);
-                      }}
-                    >
-                      <ChevronLeft className="size-5" />
-                    </button>
-                    <button
-                      className="absolute right-2 rounded-full bg-black/50 p-2 text-white hover:bg-black/70"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setLightboxIndex((i) =>
-                          i !== null && i < photos.length - 1 ? i + 1 : 0
-                        );
-                        setEditingCaption(false);
-                      }}
-                    >
-                      <ChevronRight className="size-5" />
-                    </button>
-                  </>
-                )}
-              </div>
-
-              {/* Footer with actions */}
-              <div className="border-t p-3 space-y-2">
-                {/* Caption row */}
-                <div className="flex items-center gap-2">
-                  {editingCaption ? (
-                    <div className="flex flex-1 gap-2">
-                      <Input
-                        value={captionDraft}
-                        onChange={(e) => setCaptionDraft(e.target.value)}
-                        placeholder="Add a caption..."
-                        className="h-7 text-xs flex-1"
-                        autoFocus
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") {
-                            handleSaveCaption(lightboxPhoto.id, captionDraft);
-                          } else if (e.key === "Escape") {
-                            setEditingCaption(false);
-                          }
-                        }}
-                      />
-                      <Button
-                        size="sm"
-                        className="h-7 text-xs"
-                        onClick={() => handleSaveCaption(lightboxPhoto.id, captionDraft)}
-                        disabled={savingCaption}
-                      >
-                        {savingCaption ? <Loader2 className="size-3 animate-spin" /> : "Save"}
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-7 text-xs"
-                        onClick={() => setEditingCaption(false)}
-                      >
-                        Cancel
-                      </Button>
-                    </div>
-                  ) : (
-                    <div className="flex flex-1 items-center gap-2 min-w-0">
-                      <p className="text-sm truncate flex-1">
-                        {lightboxPhoto.caption || (
-                          <span className="text-muted-foreground italic">No caption</span>
-                        )}
-                      </p>
-                      {!isSynthetic && (
-                        <button
-                          className="shrink-0 text-muted-foreground hover:text-foreground"
-                          onClick={() => {
-                            setCaptionDraft(lightboxPhoto.caption || "");
-                            setEditingCaption(true);
-                          }}
-                        >
-                          <Pencil className="size-3.5" />
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                {/* Info + actions row */}
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                    <span>
-                      {lightboxPhoto.uploadedBy?.name || "Unknown"} &middot;{" "}
-                      {format(new Date(lightboxPhoto.createdAt), "d MMM HH:mm")}
-                    </span>
-                    <span>
-                      {lightboxIndex! + 1} / {photos.length}
-                    </span>
-                  </div>
-
-                  {!isSynthetic && (
-                    <div className="flex items-center gap-1">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-7 text-xs text-amber-700 border-amber-300 hover:bg-amber-50"
-                        onClick={() => handleRaiseSnagFromPhoto(lightboxPhoto)}
-                      >
-                        <AlertTriangle className="size-3" />
-                        Raise Snag
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-7 text-xs text-red-500 hover:text-red-600"
-                        onClick={() => handleDeletePhoto(lightboxPhoto.id)}
-                        disabled={deletingId === lightboxPhoto.id}
-                      >
-                        {deletingId === lightboxPhoto.id ? (
-                          <Loader2 className="size-3 animate-spin" />
-                        ) : (
-                          <Trash2 className="size-3" />
-                        )}
-                        Delete
-                      </Button>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
+      {/* Photo Lightbox — extracted to JobPhotoLightbox.tsx as the
+          first piece of the JobWeekPanel split. */}
+      <JobPhotoLightbox
+        photos={photos}
+        index={lightboxIndex}
+        onIndexChange={setLightboxIndex}
+        isSynthetic={isSynthetic}
+        editingCaption={editingCaption}
+        setEditingCaption={setEditingCaption}
+        captionDraft={captionDraft}
+        setCaptionDraft={setCaptionDraft}
+        onSaveCaption={handleSaveCaption}
+        savingCaption={savingCaption}
+        onRaiseSnag={handleRaiseSnagFromPhoto}
+        onDelete={handleDeletePhoto}
+        deletingId={deletingId}
+      />
 
       {/* Snag Dialog — full form with all fields */}
       {!isSynthetic && (
