@@ -1984,10 +1984,23 @@ export function SiteDetailClient({
               return (
                 <Card
                   key={plot.id}
-                  className="group cursor-pointer transition-shadow hover:shadow-md"
+                  className="group cursor-pointer transition-shadow hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
                   onClick={() =>
                     router.push(`/sites/${site.id}/plots/${plot.id}`)
                   }
+                  // (May 2026 a11y audit #126) Same pattern as the
+                  // SitesClient cards — div-with-onClick wasn't
+                  // keyboard-reachable. role="link" + tabIndex make
+                  // it Tab-focusable; Enter/Space activate.
+                  role="link"
+                  tabIndex={0}
+                  aria-label={`Open plot ${plot.plotNumber || plot.name}`}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      router.push(`/sites/${site.id}/plots/${plot.id}`);
+                    }
+                  }}
                 >
                   <CardHeader>
                     <div className="flex items-start justify-between gap-2">

@@ -233,8 +233,24 @@ export function SitesClient({
             return (
               <Card
                 key={site.id}
-                className="group cursor-pointer overflow-hidden border-border/50 bg-white shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md"
+                className="group cursor-pointer overflow-hidden border-border/50 bg-white shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
                 onClick={() => goToSite(site.id)}
+                // (May 2026 a11y audit #126) Pre-fix the card was a
+                // div-with-onClick — no keyboard activation, no
+                // screen-reader role. Adding role="link" + tabIndex
+                // makes it Tab-reachable; Enter/Space activate the
+                // navigation. (Full <Link> wrapping would require
+                // restructuring the inner Delete button which uses
+                // stopPropagation — minimal fix preferred.)
+                role="link"
+                tabIndex={0}
+                aria-label={`Open site ${site.name}`}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    goToSite(site.id);
+                  }
+                }}
               >
                 <CardHeader>
                   <div className="flex items-start justify-between gap-2">
