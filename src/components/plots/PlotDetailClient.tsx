@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { useRefreshOnFocus } from "@/hooks/useRefreshOnFocus";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -491,6 +491,9 @@ function PlotOverview({
           )}
         </div>
       )}
+
+      {/* (May 2026 audit #53) Predictive completion banner. */}
+      <PredictiveCompletionBanner plotId={plot.id} />
 
       {/* Progress Stats */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -1303,6 +1306,71 @@ export function PlotDetailClient({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+// ────────── Predictive Completion banner ───────────────────────────────
+//
+// (May 2026 audit #53) Pulls the predictive-completion endpoint and
+// renders a calm 1-line banner near the top of the plot overview.
+// Three states:
+//   - stalled      → red, "No completions in 30 days"
+//   - on/under     → emerald, "On track" with predicted date
+//   - over plan    → amber, "Predicted X days late"
+//   - no data      → nothing rendered
+
+interface PredictiveData {
+  predictedDate: string | null;
+  predictedDaysRemaining: number | null;
+  slippageDays: number | null;
+  velocity: number;
+  remaining: number;
+  stalled: boolean;
+}
+
+function PredictiveCompletionBanner({ plotId }: { plotId: string }) {
+  const [data, setData] = useState<PredictiveData | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/plots/${plotId}/predictive-completion`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!cancelled && d) setData(d);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [plotId]);
+
+  if (!data) return null;
+  if (data.remaining === 0) return null; // plot complete; no prediction needed
+
+  const fmt = (iso: string) => new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+
+  if (data.stalled) {
+    return (
+      <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">
+        <strong>Stalled.</strong> No job completions in the last 30 days. {data.remaining} job{data.remaining !== 1 ? "s" : ""} remaining.
+      </div>
+    );
+  }
+  if (!data.predictedDate) return null;
+  const slip = data.slippageDays ?? 0;
+  let cls = "border-emerald-200 bg-emerald-50 text-emerald-800";
+  let lead = "On track.";
+  if (slip > 7) {
+    cls = "border-amber-200 bg-amber-50 text-amber-900";
+    lead = `Predicted ${slip} days late.`;
+  } else if (slip < -7) {
+    lead = `Predicted ${Math.abs(slip)} days early.`;
+  }
+  return (
+    <div className={`rounded-lg border px-3 py-2 text-xs ${cls}`}>
+      <strong>{lead}</strong>{" "}
+      At current velocity ({data.velocity.toFixed(2)} jobs/day) {data.remaining} job
+      {data.remaining !== 1 ? "s" : ""} remaining — predicted finish {fmt(data.predictedDate)}.
     </div>
   );
 }
