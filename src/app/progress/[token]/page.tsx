@@ -189,7 +189,15 @@ export default async function ProgressPage({
               )}
             </div>
             <div className="relative size-20 shrink-0">
-              <svg className="size-20 -rotate-90">
+              {/* (May 2026 a11y audit #120) Accessible label for the
+                  progress ring — screen readers announce "X% complete"
+                  via the role + aria-label rather than just hearing
+                  the percentage text underneath in isolation. */}
+              <svg
+                className="size-20 -rotate-90"
+                role="img"
+                aria-label={`${pct}% complete`}
+              >
                 <circle
                   cx="40"
                   cy="40"

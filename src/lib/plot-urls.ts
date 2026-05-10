@@ -34,9 +34,15 @@ export function getPlotInternalUrl({ siteId, plotId, origin }: PlotUrlInput): st
   return `${resolveOrigin(origin)}/sites/${siteId}/plots/${plotId}`;
 }
 
-/** Whatever URL a QR code should encode — currently the internal page.
- *  Wrapped as a separate function so a future change (e.g. switching to
- *  a short `/q/<token>` redirect) only touches this file. */
-export function getPlotQrUrl(input: PlotUrlInput): string {
-  return getPlotInternalUrl(input);
+/** URL that printed QR codes encode. Resolves at scan time to the
+ *  customer-share /progress/<token> page (when one exists), otherwise
+ *  shows a friendly "not yet active" message. The intermediate
+ *  /q/<plotId> redirect means rotating the share token doesn't
+ *  invalidate the printed QR — the QR is permanent for the life of
+ *  the plot.
+ *
+ *  (May 2026 audit #206) Pre-fix this returned the internal app URL —
+ *  scanning the for-sale board QR sent buyers to a login screen. */
+export function getPlotQrUrl({ plotId, origin }: PlotUrlInput): string {
+  return `${resolveOrigin(origin)}/q/${plotId}`;
 }
