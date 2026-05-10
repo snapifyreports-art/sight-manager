@@ -272,6 +272,8 @@ export function SiteQuantsClient({
   return (
     <div className="space-y-4">
       {confirmDialog}
+      {/* (May 2026 audit #207) Material burndown alerts. */}
+      <BurndownAlerts siteId={siteId} />
       {/* Summary row */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
         <div className="rounded-xl border bg-card p-4">
@@ -633,6 +635,81 @@ export function SiteQuantsClient({
       {/* Review items dialog — fires after a one-off order save if
           items don't match the supplier's pricelist. */}
       {materialReviewDialogs}
+    </div>
+  );
+}
+
+/**
+ * (May 2026 audit #207) Material burndown alert strip. Renders only
+ * when there are SHORT or STOCKPILE materials — silent on healthy sites.
+ */
+function BurndownAlerts({ siteId }: { siteId: string }) {
+  const [data, setData] = useState<{
+    items: Array<{
+      name: string;
+      unit: string;
+      state: "SHORT" | "STOCKPILE" | "ON_TRACK";
+      delivered: number;
+      consumed: number;
+      expected: number;
+    }>;
+    totals: { shortCount: number; stockpileCount: number };
+  } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/sites/${siteId}/material-burndown`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!cancelled && d) setData(d);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [siteId]);
+
+  if (!data || (data.totals.shortCount === 0 && data.totals.stockpileCount === 0)) {
+    return null;
+  }
+  const shortItems = data.items.filter((i) => i.state === "SHORT").slice(0, 5);
+  const stockpileItems = data.items.filter((i) => i.state === "STOCKPILE").slice(0, 5);
+
+  return (
+    <div className="rounded-lg border border-amber-200 bg-amber-50/40 p-3">
+      <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">
+        Material burndown alerts
+      </p>
+      {shortItems.length > 0 && (
+        <div className="mt-2">
+          <p className="text-xs font-medium text-red-700">
+            Short ({data.totals.shortCount}) — consuming faster than delivered
+          </p>
+          <ul className="mt-1 space-y-0.5 text-xs text-red-800">
+            {shortItems.map((i) => (
+              <li key={i.name}>
+                <span className="font-medium">{i.name}</span> · consumed{" "}
+                {i.consumed} {i.unit}, only {i.delivered} delivered
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {stockpileItems.length > 0 && (
+        <div className="mt-2">
+          <p className="text-xs font-medium text-amber-700">
+            Stockpile ({data.totals.stockpileCount}) — delivered but unused
+          </p>
+          <ul className="mt-1 space-y-0.5 text-xs text-amber-800">
+            {stockpileItems.map((i) => (
+              <li key={i.name}>
+                <span className="font-medium">{i.name}</span> · {i.delivered}{" "}
+                {i.unit} on site, none consumed yet
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }
