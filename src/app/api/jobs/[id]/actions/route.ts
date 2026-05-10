@@ -208,6 +208,29 @@ export async function POST(
     },
   });
 
+  // (May 2026 audit follow-up to #152) Per-site push for the
+  // milestone job actions. Started + completed + signed off are
+  // the ones that move a plot forward; 'stop' and 'note' are too
+  // chatty to push and would train users to mute. Best-effort —
+  // failure here doesn't fail the action.
+  if (action === "complete" || action === "signoff" || action === "start") {
+    const { sendPushToSiteAudience } = await import("@/lib/push");
+    const verb = action === "start" ? "started" : action === "complete" ? "completed" : "signed off";
+    const emoji = action === "start" ? "▶️" : action === "complete" ? "✅" : "✍️";
+    void sendPushToSiteAudience(
+      existing.plot.siteId,
+      action === "signoff" ? "JOBS_READY_FOR_SIGNOFF" : "NEW_NOTES_PHOTOS",
+      {
+        title: `${emoji} Job ${verb}`,
+        body: `${existing.name}${existing.plot ? ` · Plot ${existing.plot.plotNumber || existing.plot.name}` : ""}`,
+        url: `/sites/${existing.plot.siteId}?tab=programme&jobId=${id}`,
+        tag: `job-${id}-${action}`,
+      },
+    ).catch((err) => {
+      console.warn("[job-actions] sendPushToSiteAudience failed:", err);
+    });
+  }
+
   // Auto-reorder: when a job starts, create draft orders from template orders.
   // Previously this loop issued 1 findFirst per template order (N+1) and 1
   // sequential create per new order. Now we fetch existing orders once, skip
