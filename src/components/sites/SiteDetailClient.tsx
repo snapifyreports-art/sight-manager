@@ -35,6 +35,9 @@ import { Button } from "@/components/ui/button";
 import { Breadcrumbs } from "@/components/ui/breadcrumbs";
 import { WatchToggle } from "@/components/sites/WatchToggle";
 import { SitePhotoAlbum } from "@/components/sites/SitePhotoAlbum";
+import { SiteCompliance } from "@/components/sites/SiteCompliance";
+import { SiteToolboxTalks } from "@/components/sites/SiteToolboxTalks";
+import { SiteNCRs } from "@/components/sites/SiteNCRs";
 import {
   Card,
   CardContent,
@@ -2191,6 +2194,21 @@ export function SiteDetailClient({
             {visitedTabs.has("photos") && (
               <SitePhotoAlbum siteId={site.id} siteName={site.name} />
             )}
+          </div>
+
+          {/* (May 2026 audit #57) Compliance tracker. */}
+          <div className={activeTab !== "compliance" ? "hidden" : undefined}>
+            {visitedTabs.has("compliance") && <SiteCompliance siteId={site.id} />}
+          </div>
+
+          {/* (May 2026 audit #176) Toolbox talks log. */}
+          <div className={activeTab !== "toolbox" ? "hidden" : undefined}>
+            {visitedTabs.has("toolbox") && <SiteToolboxTalks siteId={site.id} />}
+          </div>
+
+          {/* (May 2026 audit #178) Non-Conformance Reports. */}
+          <div className={activeTab !== "ncrs" ? "hidden" : undefined}>
+            {visitedTabs.has("ncrs") && <SiteNCRs siteId={site.id} />}
           </div>
 
           <div className={activeTab !== "daily-brief" ? "hidden" : undefined}>
