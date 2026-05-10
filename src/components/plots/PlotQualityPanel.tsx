@@ -69,7 +69,7 @@ interface Defect {
   resolvedAt: string | null;
 }
 
-type Tab = "checks" | "variations" | "defects";
+type Tab = "checks" | "variations" | "defects" | "draws";
 
 export function PlotQualityPanel({ plotId }: { plotId: string }) {
   const [tab, setTab] = useState<Tab>("checks");
@@ -80,10 +80,12 @@ export function PlotQualityPanel({ plotId }: { plotId: string }) {
         <TabButton active={tab === "checks"} onClick={() => setTab("checks")} icon={ClipboardCheck} label="Pre-start" />
         <TabButton active={tab === "variations"} onClick={() => setTab("variations")} icon={PoundSterling} label="Variations" />
         <TabButton active={tab === "defects"} onClick={() => setTab("defects")} icon={FileWarning} label="Defects" />
+        <TabButton active={tab === "draws"} onClick={() => setTab("draws")} icon={PoundSterling} label="Draws" />
       </div>
       {tab === "checks" && <ChecksSection plotId={plotId} />}
       {tab === "variations" && <VariationsSection plotId={plotId} />}
       {tab === "defects" && <DefectsSection plotId={plotId} />}
+      {tab === "draws" && <DrawScheduleSection plotId={plotId} />}
     </div>
   );
 }
@@ -586,6 +588,212 @@ function DefectsSection({ plotId }: { plotId: string }) {
             <DialogClose render={<Button variant="outline" />}>Cancel</DialogClose>
             <Button onClick={submit} disabled={!title.trim() || !description.trim()}>
               Report
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+// ───────── Draw schedule ────────────────────────────────────────────────
+
+interface Draw {
+  id: string;
+  name: string;
+  amount: number;
+  status: "SCHEDULED" | "DUE" | "PAID" | "WAIVED";
+  dueAt: string | null;
+  paidAt: string | null;
+  notes: string | null;
+}
+
+const DRAW_STATUS_CLASS: Record<Draw["status"], string> = {
+  SCHEDULED: "bg-slate-100 text-slate-600",
+  DUE: "bg-amber-100 text-amber-800",
+  PAID: "bg-emerald-100 text-emerald-800",
+  WAIVED: "bg-slate-200 text-slate-500",
+};
+
+function DrawScheduleSection({ plotId }: { plotId: string }) {
+  const [draws, setDraws] = useState<Draw[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [amount, setAmount] = useState("");
+  const [dueAt, setDueAt] = useState("");
+  const [notes, setNotes] = useState("");
+  const toast = useToast();
+
+  const refresh = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/plots/${plotId}/draw-schedule`);
+      if (res.ok) setDraws(await res.json());
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plotId]);
+
+  async function submit() {
+    if (!name.trim() || !amount) return;
+    const res = await fetch(`/api/plots/${plotId}/draw-schedule`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: name.trim(),
+        amount: Number(amount),
+        dueAt: dueAt || null,
+        notes: notes || null,
+      }),
+    });
+    if (!res.ok) {
+      toast.error(await fetchErrorMessage(res, "Failed to add"));
+      return;
+    }
+    setOpen(false);
+    setName("");
+    setAmount("");
+    setDueAt("");
+    setNotes("");
+    void refresh();
+  }
+
+  async function updateStatus(d: Draw, status: Draw["status"]) {
+    await fetch(`/api/plots/${plotId}/draw-schedule/${d.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status }),
+    });
+    void refresh();
+  }
+
+  const totalScheduled = draws.reduce((s, d) => s + d.amount, 0);
+  const totalPaid = draws
+    .filter((d) => d.status === "PAID")
+    .reduce((s, d) => s + d.amount, 0);
+  const pctPaid =
+    totalScheduled > 0 ? Math.round((totalPaid / totalScheduled) * 100) : 0;
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs text-muted-foreground">
+          £{totalPaid.toLocaleString("en-GB")} of £
+          {totalScheduled.toLocaleString("en-GB")} ({pctPaid}%) paid to date
+        </p>
+        <Button size="sm" onClick={() => setOpen(true)}>
+          <Plus className="size-4" /> Milestone
+        </Button>
+      </div>
+      {loading ? (
+        <Loader2 className="mx-auto size-4 animate-spin" aria-hidden />
+      ) : draws.length === 0 ? (
+        <p className="rounded border border-dashed bg-white p-6 text-center text-sm text-muted-foreground">
+          No draw schedule yet. Add milestone payments (deposit, DPC,
+          roof complete, handover, etc.) so the buyer&apos;s payment
+          timeline is tracked.
+        </p>
+      ) : (
+        <div className="overflow-hidden rounded-lg border bg-white">
+          <table className="w-full text-sm">
+            <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+              <tr>
+                <th className="px-3 py-2 text-left">Milestone</th>
+                <th className="px-3 py-2 text-right">Amount</th>
+                <th className="px-3 py-2 text-left">Due</th>
+                <th className="px-3 py-2 text-left">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {draws.map((d) => (
+                <tr key={d.id} className="border-t">
+                  <td className="px-3 py-2">
+                    <p className="font-medium">{d.name}</p>
+                    {d.notes && (
+                      <p className="text-xs text-muted-foreground">{d.notes}</p>
+                    )}
+                  </td>
+                  <td className="px-3 py-2 text-right font-semibold">
+                    £{d.amount.toLocaleString("en-GB")}
+                  </td>
+                  <td className="px-3 py-2 text-xs">
+                    {d.dueAt ? format(parseISO(d.dueAt), "dd MMM yyyy") : "—"}
+                  </td>
+                  <td className="px-3 py-2">
+                    <select
+                      value={d.status}
+                      onChange={(e) =>
+                        updateStatus(d, e.target.value as Draw["status"])
+                      }
+                      className={`rounded-full border-0 px-2 py-0.5 text-[11px] font-semibold ${DRAW_STATUS_CLASS[d.status]}`}
+                      aria-label={`Status for ${d.name}`}
+                    >
+                      <option value="SCHEDULED">SCHEDULED</option>
+                      <option value="DUE">DUE</option>
+                      <option value="PAID">PAID</option>
+                      <option value="WAIVED">WAIVED</option>
+                    </select>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Add draw milestone</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <Label htmlFor="dr-name">Name *</Label>
+              <Input
+                id="dr-name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="e.g. DPC complete (30%)"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label htmlFor="dr-amt">Amount (£) *</Label>
+                <Input
+                  id="dr-amt"
+                  type="number"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                />
+              </div>
+              <div>
+                <Label htmlFor="dr-due">Due</Label>
+                <Input
+                  id="dr-due"
+                  type="date"
+                  value={dueAt}
+                  onChange={(e) => setDueAt(e.target.value)}
+                />
+              </div>
+            </div>
+            <div>
+              <Label htmlFor="dr-notes">Notes</Label>
+              <Input
+                id="dr-notes"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <DialogClose render={<Button variant="outline" />}>Cancel</DialogClose>
+            <Button onClick={submit} disabled={!name.trim() || !amount}>
+              Add
             </Button>
           </DialogFooter>
         </DialogContent>
