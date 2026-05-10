@@ -36,6 +36,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { fetchErrorMessage, useToast } from "@/components/ui/toast";
 import { useCopyToClipboard } from "@/hooks/useCopyToClipboard";
+import { useConfirm } from "@/hooks/useConfirm";
 import { MiniGantt } from "@/components/shared/MiniGantt";
 
 interface Job {
@@ -462,6 +463,7 @@ function ContractorCard({
   siteId: string;
 }) {
   const toast = useToast();
+  const { confirm, dialog: confirmDialog } = useConfirm();
   const [shareOpen, setShareOpen] = useState(false);
   const { lastSent, log: shareLog, markSent } = useLastShareSent(siteId, contractor.id);
   const [requestingSignOff, setRequestingSignOff] = useState<Set<string>>(new Set());
@@ -515,7 +517,12 @@ function ContractorCard({
   };
 
   const handleRamsDelete = async (docId: string) => {
-    const ok = confirm("Delete this document? This cannot be undone.");
+    const ok = await confirm({
+      title: "Delete this document?",
+      body: "This cannot be undone.",
+      confirmLabel: "Delete document",
+      danger: true,
+    });
     if (!ok) return;
     try {
       const res = await fetch(`/api/documents/${docId}`, { method: "DELETE" });
@@ -543,6 +550,7 @@ function ContractorCard({
 
   return (
     <div className="rounded-xl border bg-white shadow-sm print:break-inside-avoid print:shadow-none">
+      {confirmDialog}
       {/* Header */}
       <div className="border-b px-4 py-4 sm:px-5">
         <div className="flex items-start gap-3">

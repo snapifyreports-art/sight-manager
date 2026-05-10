@@ -55,6 +55,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useJobAction } from "@/hooks/useJobAction";
 import { useDelayJob } from "@/hooks/useDelayJob";
+import { useConfirm } from "@/hooks/useConfirm";
 import { usePullForwardDecision } from "@/hooks/usePullForwardDecision";
 import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 
@@ -170,6 +171,7 @@ const EMPTY_FORM: JobFormData = {
 export function JobsClient({ initialJobs, workflows, users }: JobsClientProps) {
   const router = useRouter();
   const toast = useToast();
+  const { confirm, dialog: confirmDialog } = useConfirm();
   const [jobs, setJobs] = useState(initialJobs);
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [workflowFilter, setWorkflowFilter] = useState<string>("all");
@@ -342,7 +344,13 @@ export function JobsClient({ initialJobs, workflows, users }: JobsClientProps) {
 
   // Delete job
   async function handleDelete(jobId: string) {
-    if (!confirm("Delete this job? Linked orders, photos, and notes will be removed.")) return;
+    const ok = await confirm({
+      title: "Delete this job?",
+      body: "Linked orders, photos, and notes will be removed. Downstream jobs depending on this one will need their dates checked. This cannot be undone.",
+      confirmLabel: "Delete job",
+      danger: true,
+    });
+    if (!ok) return;
     try {
       const res = await fetch(`/api/jobs/${jobId}`, { method: "DELETE" });
       if (res.ok) {
@@ -358,6 +366,7 @@ export function JobsClient({ initialJobs, workflows, users }: JobsClientProps) {
 
   return (
     <div className="space-y-6">
+      {confirmDialog}
       {jobActionDialogs}
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">

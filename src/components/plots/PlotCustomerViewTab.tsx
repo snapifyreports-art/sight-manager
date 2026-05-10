@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useCopyToClipboard } from "@/hooks/useCopyToClipboard";
 import { useToast, fetchErrorMessage } from "@/components/ui/toast";
+import { useConfirm } from "@/hooks/useConfirm";
 
 // Helper to combine a "title" and "description" into a single string
 // for the lightweight toast api (which takes a single message arg).
@@ -56,6 +57,7 @@ type CuratedPhoto = {
 
 export function PlotCustomerViewTab({ plotId }: { plotId: string }) {
   const toast = useToast();
+  const { confirm, dialog: confirmDialog } = useConfirm();
 
   // ─── Link state ─────────────────────────────────────────────────────
   const [link, setLink] = useState<LinkState | null>(null);
@@ -167,7 +169,13 @@ export function PlotCustomerViewTab({ plotId }: { plotId: string }) {
   }
 
   async function deleteEntry(entryId: string) {
-    if (!confirm("Delete this update? It will disappear from the customer page.")) return;
+    const ok = await confirm({
+      title: "Delete this update?",
+      body: "It will disappear from the customer page. This cannot be undone.",
+      confirmLabel: "Delete update",
+      danger: true,
+    });
+    if (!ok) return;
     const res = await fetch(`/api/plots/${plotId}/journal/${entryId}`, { method: "DELETE" });
     if (!res.ok) {
       const msg = await fetchErrorMessage(res);
@@ -207,6 +215,7 @@ export function PlotCustomerViewTab({ plotId }: { plotId: string }) {
 
   return (
     <div className="space-y-8">
+      {confirmDialog}
       {/* ─── Section: Customer link ───────────────────────────────── */}
       <section className="rounded-xl border bg-white p-6 shadow-sm">
         <div className="mb-4 flex items-start justify-between gap-4">

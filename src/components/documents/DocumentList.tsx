@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast, fetchErrorMessage } from "@/components/ui/toast";
+import { useConfirm } from "@/hooks/useConfirm";
 
 interface Document {
   id: string;
@@ -55,9 +56,16 @@ function formatSize(bytes: number | null) {
 export function DocumentList({ documents, onDelete, level = "site" }: DocumentListProps) {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const toast = useToast();
+  const { confirm, dialog: confirmDialog } = useConfirm();
 
   const handleDelete = async (id: string) => {
-    if (!confirm("Delete this document?")) return;
+    const ok = await confirm({
+      title: "Delete this document?",
+      body: "This cannot be undone. If the document is referenced by a handover checklist, that checklist item will become unchecked.",
+      confirmLabel: "Delete document",
+      danger: true,
+    });
+    if (!ok) return;
     setDeletingId(id);
     try {
       const res = await fetch(`/api/documents/${id}`, { method: "DELETE" });
@@ -125,12 +133,15 @@ export function DocumentList({ documents, onDelete, level = "site" }: DocumentLi
   }
 
   return (
-    <DocTable
-      docs={documents}
-      deletingId={deletingId}
-      onDelete={handleDelete}
-      showJob={level === "plot"}
-    />
+    <>
+      {confirmDialog}
+      <DocTable
+        docs={documents}
+        deletingId={deletingId}
+        onDelete={handleDelete}
+        showJob={level === "plot"}
+      />
+    </>
   );
 }
 

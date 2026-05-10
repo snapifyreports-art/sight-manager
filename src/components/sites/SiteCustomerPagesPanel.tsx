@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useCopyToClipboard } from "@/hooks/useCopyToClipboard";
 import { useToast } from "@/components/ui/toast";
+import { useConfirm } from "@/hooks/useConfirm";
 
 /**
  * Site-level overview of every plot's customer-facing /progress/<token>
@@ -44,6 +45,7 @@ interface PlotRow {
 export function SiteCustomerPagesPanel({ siteId }: { siteId: string }) {
   const toast = useToast();
   const { copy, copiedKey } = useCopyToClipboard();
+  const { confirm, dialog: confirmDialog } = useConfirm();
 
   const [rows, setRows] = useState<PlotRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -91,7 +93,13 @@ export function SiteCustomerPagesPanel({ siteId }: { siteId: string }) {
   }
 
   async function rotate(plotId: string) {
-    if (!confirm("Rotate the link? The previous URL will stop working.")) return;
+    const ok = await confirm({
+      title: "Rotate this customer link?",
+      body: "The previous URL will stop working immediately. Anyone with the old link will see 'This link isn't active' and you'll need to send them the new one.",
+      confirmLabel: "Rotate link",
+      danger: true,
+    });
+    if (!ok) return;
     setBusyId(plotId);
     try {
       const res = await fetch(`/api/plots/${plotId}/customer-link`, {
@@ -168,6 +176,7 @@ export function SiteCustomerPagesPanel({ siteId }: { siteId: string }) {
 
   return (
     <div className="space-y-4">
+      {confirmDialog}
       <div>
         <div className="flex items-center gap-2">
           <Heart className="size-5 text-rose-500" />

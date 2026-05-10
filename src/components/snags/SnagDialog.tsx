@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/dialog";
 import { HelpTip } from "@/components/shared/HelpTip";
 import { useToast, fetchErrorMessage } from "@/components/ui/toast";
+import { useConfirm } from "@/hooks/useConfirm";
 
 interface SnagUser {
   id: string;
@@ -107,6 +108,7 @@ export function SnagDialog({
   initialContactId,
 }: SnagDialogProps) {
   const toast = useToast();
+  const { confirm, dialog: confirmDialog } = useConfirm();
   const isEditing = !!snag;
   const [viewMode, setViewMode] = useState(isEditing);
 
@@ -436,7 +438,14 @@ export function SnagDialog({
   };
 
   const handleDelete = async () => {
-    if (!snag || !confirm("Delete this snag?")) return;
+    if (!snag) return;
+    const ok = await confirm({
+      title: "Delete this snag?",
+      body: "Photos and contractor history attached to this snag will be deleted too. This cannot be undone.",
+      confirmLabel: "Delete snag",
+      danger: true,
+    });
+    if (!ok) return;
     const res = await fetch(`/api/snags/${snag.id}`, { method: "DELETE" });
     if (!res.ok) {
       toast.error(await fetchErrorMessage(res, "Failed to delete snag"));
@@ -593,6 +602,7 @@ export function SnagDialog({
 
   return (
     <>
+      {confirmDialog}
       <Dialog
         open={open}
         onOpenChange={(o) => {
