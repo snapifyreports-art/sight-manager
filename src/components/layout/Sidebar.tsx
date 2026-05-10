@@ -95,6 +95,9 @@ const SITE_TAB_GROUPS = [
 // deep-links but aren't in the sidebar.
 const navItems = [
   { label: "Dashboard",     href: "/dashboard",   icon: LayoutDashboard },
+  // (May 2026 audit #181) Cross-site exec view — at-risk counts +
+  // progress bars per site, tenant-wide totals at the top.
+  { label: "Portfolio",     href: "/portfolio",   icon: Building2 },
   // (May 2026 audit #111) Disambiguated from the per-site "Daily Brief"
   // tab inside Manage Site. This one's the cross-site digest.
   { label: "Daily Brief (all sites)", href: "/daily-brief", icon: ClipboardList },
