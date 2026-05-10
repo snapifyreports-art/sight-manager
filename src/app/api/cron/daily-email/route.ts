@@ -139,31 +139,105 @@ export async function GET(req: NextRequest) {
 
   // Build email HTML
   const dateLabel = format(now, "EEEE d MMMM yyyy");
+  const baseUrl =
+    process.env.NEXTAUTH_URL ?? "https://sight-manager.vercel.app";
+
+  // (May 2026 audit #140) Each alert / status chip in the email links
+  // straight to the relevant in-app tab. Pre-fix the email was a dead
+  // text summary — managers had to navigate the app from scratch.
+  // Now clicking "3 overdue jobs" opens that site's Daily Brief tab,
+  // "2 deliveries due" opens the Orders page filtered to that site,
+  // etc.
+  const linkChip = (
+    label: string,
+    color: { bg: string; fg: string },
+    href: string,
+  ) =>
+    `<a href="${href}" style="background:${color.bg};color:${color.fg};padding:2px 8px;border-radius:9999px;font-size:11px;text-decoration:none;display:inline-block;">${label}</a>`;
+  const linkAlert = (
+    label: string,
+    color: string,
+    href: string,
+  ) =>
+    `<a href="${href}" style="color:${color};font-weight:600;text-decoration:none;border-bottom:1px dashed currentColor;">${label}</a>`;
 
   const siteRows = siteDigests
     .map((d) => {
+      const siteUrl = `${baseUrl}/sites/${d.site.id}`;
       const alerts = [];
       if (d.overdueJobs > 0)
-        alerts.push(`<span style="color:#dc2626;font-weight:600;">${d.overdueJobs} overdue job${d.overdueJobs !== 1 ? "s" : ""}</span>`);
+        alerts.push(
+          linkAlert(
+            `${d.overdueJobs} overdue job${d.overdueJobs !== 1 ? "s" : ""}`,
+            "#dc2626",
+            `${siteUrl}?tab=daily-brief`,
+          ),
+        );
       if (d.lateStarts > 0)
-        alerts.push(`<span style="color:#ea580c;font-weight:600;">${d.lateStarts} late start${d.lateStarts !== 1 ? "s" : ""}</span>`);
+        alerts.push(
+          linkAlert(
+            `${d.lateStarts} late start${d.lateStarts !== 1 ? "s" : ""}`,
+            "#ea580c",
+            `${siteUrl}?tab=daily-brief`,
+          ),
+        );
       if (d.overdueDeliveries > 0)
-        alerts.push(`<span style="color:#d97706;font-weight:600;">${d.overdueDeliveries} overdue deliver${d.overdueDeliveries !== 1 ? "ies" : "y"}</span>`);
+        alerts.push(
+          linkAlert(
+            `${d.overdueDeliveries} overdue deliver${d.overdueDeliveries !== 1 ? "ies" : "y"}`,
+            "#d97706",
+            `${baseUrl}/orders?status=ORDERED&site=${d.site.id}`,
+          ),
+        );
       if (d.ordersToPlace > 0)
-        alerts.push(`<span style="color:#7c3aed;font-weight:600;">${d.ordersToPlace} order${d.ordersToPlace !== 1 ? "s" : ""} to place</span>`);
+        alerts.push(
+          linkAlert(
+            `${d.ordersToPlace} order${d.ordersToPlace !== 1 ? "s" : ""} to place`,
+            "#7c3aed",
+            `${baseUrl}/orders?status=PENDING&site=${d.site.id}`,
+          ),
+        );
 
       const statusPills = [
-        d.activeJobs > 0 ? `<span style="background:#dbeafe;color:#1d4ed8;padding:2px 8px;border-radius:9999px;font-size:11px;">${d.activeJobs} active</span>` : null,
-        d.jobsStartingToday > 0 ? `<span style="background:#dcfce7;color:#16a34a;padding:2px 8px;border-radius:9999px;font-size:11px;">${d.jobsStartingToday} starting today</span>` : null,
-        d.deliveriesToday > 0 ? `<span style="background:#ede9fe;color:#7c3aed;padding:2px 8px;border-radius:9999px;font-size:11px;">${d.deliveriesToday} deliver${d.deliveriesToday !== 1 ? "ies" : "y"} due</span>` : null,
-        d.openSnags > 0 ? `<span style="background:#fef3c7;color:#b45309;padding:2px 8px;border-radius:9999px;font-size:11px;">${d.openSnags} open snag${d.openSnags !== 1 ? "s" : ""}</span>` : null,
-      ].filter(Boolean).join(" ");
+        d.activeJobs > 0
+          ? linkChip(
+              `${d.activeJobs} active`,
+              { bg: "#dbeafe", fg: "#1d4ed8" },
+              `${siteUrl}?tab=programme`,
+            )
+          : null,
+        d.jobsStartingToday > 0
+          ? linkChip(
+              `${d.jobsStartingToday} starting today`,
+              { bg: "#dcfce7", fg: "#16a34a" },
+              `${siteUrl}?tab=daily-brief`,
+            )
+          : null,
+        d.deliveriesToday > 0
+          ? linkChip(
+              `${d.deliveriesToday} deliver${d.deliveriesToday !== 1 ? "ies" : "y"} due`,
+              { bg: "#ede9fe", fg: "#7c3aed" },
+              `${baseUrl}/orders?site=${d.site.id}`,
+            )
+          : null,
+        d.openSnags > 0
+          ? linkChip(
+              `${d.openSnags} open snag${d.openSnags !== 1 ? "s" : ""}`,
+              { bg: "#fef3c7", fg: "#b45309" },
+              `${siteUrl}?tab=snags`,
+            )
+          : null,
+      ]
+        .filter(Boolean)
+        .join(" ");
 
       return `
         <div style="border:1px solid ${d.hasAlerts ? "#fca5a5" : "#e2e8f0"};border-radius:8px;padding:16px;margin:0 0 12px;background:${d.hasAlerts ? "#fff7f7" : "#fff"};">
           <div style="display:flex;justify-content:space-between;align-items:flex-start;margin:0 0 8px;">
             <div>
-              <p style="margin:0;font-size:15px;font-weight:600;color:#0f172a;">${d.site.name}</p>
+              <a href="${siteUrl}" style="text-decoration:none;color:#0f172a;">
+                <p style="margin:0;font-size:15px;font-weight:600;">${d.site.name}</p>
+              </a>
               ${d.site.location ? `<p style="margin:2px 0 0;font-size:12px;color:#64748b;">${d.site.location}</p>` : ""}
             </div>
             ${d.hasAlerts ? '<span style="background:#fee2e2;color:#dc2626;padding:2px 8px;border-radius:9999px;font-size:11px;font-weight:600;">ACTION NEEDED</span>' : '<span style="background:#dcfce7;color:#16a34a;padding:2px 8px;border-radius:9999px;font-size:11px;">All clear</span>'}
