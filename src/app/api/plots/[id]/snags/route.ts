@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getServerCurrentDate } from "@/lib/dev-date";
 import { apiError } from "@/lib/api-errors";
+import { sendPushToSiteAudience } from "@/lib/push";
 
 export const dynamic = "force-dynamic";
 
@@ -150,6 +151,25 @@ export async function POST(
       : Promise.resolve(null);
 
     await Promise.all([eventLogPromise, jobActionPromise]);
+
+    // (May 2026 audit follow-up to #152) Fire a per-site push so the
+    // site's assignee + watchers + execs know a snag was raised.
+    // High-priority + critical snags get a louder notification.
+    // Best-effort: failure here doesn't fail the snag creation.
+    // Routes through NEW_NOTES_PHOTOS for now since the enum doesn't
+    // have a SNAG_RAISED entry — a separate batch adds the dedicated
+    // enum value + apply-schema script if Keith wants finer-grained
+    // pref control.
+    const isUrgent = priority === "HIGH" || priority === "CRITICAL";
+    void sendPushToSiteAudience(plot.siteId, "NEW_NOTES_PHOTOS", {
+      title: isUrgent ? `⚠️ ${priority} snag raised` : "Snag raised",
+      body: `Plot ${plot.plotNumber || plot.name}: ${description.trim().slice(0, 80)}`,
+      url: `/sites/${plot.siteId}?tab=snags&snagId=${snag.id}`,
+      tag: `snag-${snag.id}`,
+      renotify: isUrgent,
+    }).catch((err) => {
+      console.warn("[snag-create] sendPushToSiteAudience failed:", err);
+    });
 
     return NextResponse.json(snag, { status: 201 });
   } catch (err) {
