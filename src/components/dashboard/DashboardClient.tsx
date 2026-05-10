@@ -156,12 +156,16 @@ function StatsCards({ stats }: { stats: StatsData }) {
       href: "/sites",
     },
     {
+      // (May 2026 audit #143) Pre-fix Total Jobs + Jobs In Progress
+      // were dead numbers — clicking them did nothing. Linking to
+      // the cross-site Daily Brief is the closest "show me the jobs"
+      // page we have today; it lists all sites' active work.
       title: "Total Jobs",
       value: stats.totalJobs,
       icon: Briefcase,
       gradient: "from-slate-500 to-slate-600",
       shadow: "shadow-slate-500/20",
-      href: null as string | null,
+      href: "/daily-brief" as string | null,
     },
     {
       title: "Jobs In Progress",
@@ -169,7 +173,7 @@ function StatsCards({ stats }: { stats: StatsData }) {
       icon: Activity,
       gradient: "from-emerald-500 to-emerald-600",
       shadow: "shadow-emerald-500/20",
-      href: null as string | null,
+      href: "/daily-brief" as string | null,
     },
     {
       title: "Total Orders",
