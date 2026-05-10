@@ -49,6 +49,8 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { ClipboardCheck } from "lucide-react";
+import { PlotQualityPanel } from "@/components/plots/PlotQualityPanel";
 import {
   Dialog,
   DialogContent,
@@ -1061,6 +1063,12 @@ export function PlotDetailClient({
             <Heart className="size-4" />
             Customer view
           </TabsTrigger>
+          {/* (May 2026 audit #175 + #169 + #177) Combined quality /
+              commercial / warranty tracker. */}
+          <TabsTrigger value="quality">
+            <ClipboardCheck className="size-4" />
+            Quality
+          </TabsTrigger>
         </TabsList>
 
         {/* Overview Tab */}
@@ -1212,6 +1220,12 @@ export function PlotDetailClient({
             orders / contractors to the buyer. */}
         <TabsContent value="customer">
           <PlotCustomerViewTab plotId={plot.id} />
+        </TabsContent>
+
+        {/* (May 2026 audit #175 + #169 + #177) Quality / commercial /
+            warranty panel — pre-start checks, variations, defects. */}
+        <TabsContent value="quality">
+          <PlotQualityPanel plotId={plot.id} />
         </TabsContent>
       </Tabs>
 
