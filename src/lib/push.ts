@@ -74,6 +74,94 @@ export async function sendPushToUser(
 }
 
 /**
+ * (May 2026 audit #152 follow-up) Send a push notification to the
+ * "audience" for a site — anyone who would reasonably want to know
+ * about an event on that site. Composes three sources:
+ *
+ *   1. The site's assigned manager (Site.assignedToId)
+ *   2. Anyone watching the site (WatchedSite — opt-in)
+ *   3. Anyone who is CEO or DIRECTOR (always wants to know,
+ *      regardless of explicit watch state)
+ *
+ * Each recipient's notification preferences still apply — a user
+ * who has disabled this NotificationType won't get the push.
+ *
+ * Use this for per-site events (delivery arrived, milestone hit,
+ * snag raised). The existing sendPushToAll stays for tenant-wide
+ * grouped summaries that aren't tied to one site.
+ */
+export async function sendPushToSiteAudience(
+  siteId: string,
+  type: NotificationType,
+  payload: PushPayload,
+) {
+  configureWebPush();
+
+  // 1. Site assignee
+  const site = await prisma.site.findUnique({
+    where: { id: siteId },
+    select: { assignedToId: true },
+  });
+
+  // 2. Watchers
+  const watchers = await prisma.watchedSite.findMany({
+    where: { siteId },
+    select: { userId: true },
+  });
+
+  // 3. CEO + DIRECTOR
+  const execs = await prisma.user.findMany({
+    where: { role: { in: ["CEO", "DIRECTOR"] } },
+    select: { id: true },
+  });
+
+  const audience = Array.from(
+    new Set(
+      [
+        site?.assignedToId,
+        ...watchers.map((w) => w.userId),
+        ...execs.map((e) => e.id),
+      ].filter((id): id is string => !!id),
+    ),
+  );
+  if (audience.length === 0) return;
+
+  // Drop anyone who has explicitly disabled this notification type.
+  const disabledPrefs = await prisma.notificationPreference.findMany({
+    where: { type, enabled: false, userId: { in: audience } },
+    select: { userId: true },
+  });
+  const disabled = new Set(disabledPrefs.map((p) => p.userId));
+  const recipientIds = audience.filter((id) => !disabled.has(id));
+  if (recipientIds.length === 0) return;
+
+  const subscriptions = await prisma.pushSubscription.findMany({
+    where: { userId: { in: recipientIds } },
+  });
+  if (subscriptions.length === 0) return;
+
+  const pushPayload = JSON.stringify(payload);
+  return Promise.allSettled(
+    subscriptions.map(async (sub) => {
+      try {
+        await webpush.sendNotification(
+          {
+            endpoint: sub.endpoint,
+            keys: { p256dh: sub.p256dh, auth: sub.auth },
+          },
+          pushPayload,
+        );
+      } catch (err: unknown) {
+        const statusCode = (err as { statusCode?: number }).statusCode;
+        if (statusCode === 410 || statusCode === 404) {
+          await prisma.pushSubscription.delete({ where: { id: sub.id } });
+        }
+      }
+    }),
+  );
+}
+
+/**
  * Send a push notification to all users who have the notification type enabled.
  * Used by the daily cron job for grouped summaries.
  */
