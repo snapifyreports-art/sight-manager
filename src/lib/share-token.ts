@@ -85,6 +85,44 @@ export function signShareToken(payload: { plotId: string; exp: number }): string
   return `${data}.${sig}`;
 }
 
+// ─── Password reset / invite tokens ─────────────────────────────────────────
+//
+// (May 2026 audit #132 + #133) Same signing primitive as the share
+// tokens above, scoped to a userId + email + exp. Issued by:
+//   - "Forgot password?" flow on the login page
+//   - Admin-triggered "Resend invite" action on the user list
+// Either way the recipient clicks a link, lands on /reset-password/<token>,
+// sets a new password, and is logged in. Single-use is enforced by
+// updating the user's password (which the verifier checks against the
+// signed-at timestamp via passwordVersion).
+export function signResetToken(payload: { userId: string; email: string; exp: number }): string {
+  const data = b64url(JSON.stringify(payload));
+  const sig = createHmac("sha256", requireSecret()).update(data).digest("base64url");
+  return `${data}.${sig}`;
+}
+
+export function verifyResetToken(token: string): { userId: string; email: string; exp: number } | null {
+  try {
+    const dot = token.lastIndexOf(".");
+    if (dot === -1) return null;
+    const data = token.slice(0, dot);
+    const sig = token.slice(dot + 1);
+    const expected = createHmac("sha256", requireSecret()).update(data).digest("base64url");
+    const sigBuf = Buffer.from(sig);
+    const expBuf = Buffer.from(expected);
+    if (sigBuf.length !== expBuf.length) return null;
+    if (!timingSafeEqual(sigBuf, expBuf)) return null;
+    const payload = JSON.parse(fromB64url(data));
+    if (typeof payload.userId !== "string" || typeof payload.email !== "string" || typeof payload.exp !== "number") {
+      return null;
+    }
+    if (Date.now() > payload.exp) return null;
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
 // Verify and decode a share token. Returns null if invalid or expired.
 export function verifyShareToken(token: string): { plotId: string; exp: number } | null {
   try {

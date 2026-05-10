@@ -141,6 +141,17 @@ export default function LoginPage() {
               {loading && <Loader2 className="size-4 animate-spin" />}
               {loading ? "Signing in..." : "Sign in"}
             </Button>
+            {/* (May 2026 audit #133) Forgot password — sends a signed
+                reset-token email. The /forgot-password page hosts the
+                request form so we don't gum up the login UX. */}
+            <p className="mt-2 text-center text-xs text-slate-500">
+              <a
+                href="/forgot-password"
+                className="text-blue-600 underline-offset-2 hover:underline"
+              >
+                Forgot password?
+              </a>
+            </p>
           </form>
         </div>
 
