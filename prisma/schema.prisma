@@ -9,6 +9,13 @@ datasource db {
 }
 
 enum UserRole {
+  // (May 2026 audit #201) SUPER_ADMIN — operator role that can access
+  // every site without explicit UserSite rows, manage users + roles
+  // app-wide, and view tenant-level audit. Reserved for the
+  // platform-operator's own staff (not Keith's team). Above CEO in
+  // privilege but should never be assigned via the in-app UI — it's
+  // set by direct DB update during onboarding.
+  SUPER_ADMIN
   CEO
   DIRECTOR
   SITE_MANAGER

@@ -10,8 +10,9 @@ export async function getUserSiteIds(
   userId: string,
   role: string
 ): Promise<string[] | null> {
-  // CEO and DIRECTOR see everything — return null to signal "no filter needed"
-  if (role === "CEO" || role === "DIRECTOR") {
+  // (May 2026 audit #201) SUPER_ADMIN sees every site, same as
+  // CEO + DIRECTOR. Return null to signal "no filter needed".
+  if (role === "SUPER_ADMIN" || role === "CEO" || role === "DIRECTOR") {
     return null;
   }
 

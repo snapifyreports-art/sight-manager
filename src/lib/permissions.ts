@@ -104,6 +104,12 @@ export const PERMISSION_META: Record<
 // --- Default permissions per role ---
 
 export const DEFAULT_PERMISSIONS: Record<UserRole, string[]> = {
+  // (May 2026 audit #201) SUPER_ADMIN gets every permission like
+  // CEO/DIRECTOR. The role exists so platform operators can be
+  // distinguished from tenant executives in audit logs and have a
+  // separate management path that doesn't show up in the in-app
+  // user list — but they still bypass every permission gate.
+  SUPER_ADMIN: [...ALL_PERMISSIONS],
   CEO: [...ALL_PERMISSIONS],
   DIRECTOR: [...ALL_PERMISSIONS],
   SITE_MANAGER: ALL_PERMISSIONS.filter(
@@ -156,6 +162,8 @@ export function sessionHasPermission(
   key: string
 ): boolean {
   if (!user) return false;
-  if (user.role === "CEO" || user.role === "DIRECTOR") return true;
+  // (May 2026 audit #201) SUPER_ADMIN bypasses every permission gate
+  // alongside CEO + DIRECTOR.
+  if (user.role === "SUPER_ADMIN" || user.role === "CEO" || user.role === "DIRECTOR") return true;
   return hasPermission(user.permissions, key);
 }
