@@ -69,6 +69,21 @@ const NOTIFICATION_TYPE_META: Record<
     label: "Weather Alerts",
     description: "When tomorrow's forecast shows rain or frost at a site with weather-sensitive work",
   },
+  // (May 2026 audit follow-up to #152) Per-site event types — one
+  // push per real-world event, scoped to the site's audience
+  // (assignee + watchers + execs).
+  SNAG_RAISED: {
+    label: "Snag Raised",
+    description: "When a snag is raised on a site you watch or are assigned to. High-priority + critical snags re-notify even if you've already seen one.",
+  },
+  DELIVERY_CONFIRMED: {
+    label: "Delivery Confirmed",
+    description: "When an order's status flips to DELIVERED. Live signal that materials are on site.",
+  },
+  JOB_MILESTONE: {
+    label: "Job Milestones",
+    description: "When a job is started, completed, or signed off. The three actions that move a plot forward — note edits and stops aren't included to keep this quiet.",
+  },
 };
 
 interface Preference {

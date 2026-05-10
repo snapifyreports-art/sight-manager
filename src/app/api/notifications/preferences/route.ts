@@ -22,7 +22,13 @@ export async function GET() {
   const allTypes: string[] = [
     ...Object.values(NotificationType),
     // New types added after last client generation:
-    ...["WEATHER_ALERT"].filter((t) => !Object.values(NotificationType).includes(t as NotificationType)),
+    ...[
+      "WEATHER_ALERT",
+      // (May 2026 audit follow-up to #152) Per-site event types.
+      "SNAG_RAISED",
+      "DELIVERY_CONFIRMED",
+      "JOB_MILESTONE",
+    ].filter((t) => !Object.values(NotificationType).includes(t as NotificationType)),
   ];
   const prefMap = new Map(preferences.map((p) => [p.type, p.enabled]));
 
