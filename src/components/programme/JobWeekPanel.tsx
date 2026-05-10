@@ -7,6 +7,8 @@ import { toDateKey } from "@/lib/dates";
 import { useJobAction } from "@/hooks/useJobAction";
 import { JobPhotoLightbox } from "@/components/programme/JobPhotoLightbox";
 import { JobOrdersSection } from "@/components/programme/JobOrdersSection";
+import { JobContractorRow } from "@/components/programme/JobContractorRow";
+import { JobPhotosSection } from "@/components/programme/JobPhotosSection";
 import Link from "next/link";
 import {
   Loader2,
@@ -14,18 +16,10 @@ import {
   CalendarDays,
   StickyNote,
   Send,
-  Camera,
-  Upload,
-  X,
-  ImageIcon,
   ShoppingCart,
   Truck,
   CircleCheck,
   AlertTriangle,
-  ChevronLeft,
-  ChevronRight,
-  Pencil,
-  Trash2,
   HardHat,
   Check,
   Play,
@@ -35,7 +29,6 @@ import {
   Zap,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
@@ -1495,29 +1488,12 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
                 </div>
               )}
 
-              {/* Contractor row */}
-              <div className="flex items-center justify-between rounded-lg border bg-slate-50 px-3 py-2.5">
-                <div className="flex items-center gap-2">
-                  <HardHat className="size-4 shrink-0 text-muted-foreground" />
-                  {panelContractors.length === 0 ? (
-                    <span className="text-sm text-muted-foreground">No contractor assigned</span>
-                  ) : (
-                    <div className="flex flex-wrap gap-1.5">
-                      {panelContractors.map((c) => (
-                        <span key={c.id} className="rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-medium text-blue-700">
-                          {c.company || c.name}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-                {!isSynthetic && (
-                  <Button variant="ghost" size="sm" className="h-7 shrink-0 gap-1 text-xs" onClick={() => openContractorPicker()}>
-                    <Pencil className="size-3" />
-                    {panelContractors.length === 0 ? "Assign" : "Change"}
-                  </Button>
-                )}
-              </div>
+              {/* Contractor row — extracted to JobContractorRow.tsx */}
+              <JobContractorRow
+                contractors={panelContractors}
+                isSynthetic={isSynthetic}
+                onEdit={() => openContractorPicker()}
+              />
 
               {/* Orders & Deliveries — extracted to JobOrdersSection.tsx */}
               <JobOrdersSection
@@ -1537,176 +1513,27 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
                 isSynthetic={isSynthetic}
               />
 
-              {/* Photos Section */}
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <ImageIcon className="size-4 text-muted-foreground" />
-                    <h4 className="text-sm font-semibold">Photos</h4>
-                    <span className="text-xs text-muted-foreground">
-                      ({photos.length})
-                    </span>
-                  </div>
-                  {/* Upload buttons — only for real jobs, not synthetic parents */}
-                  {!isSynthetic && (
-                    <div className="flex items-center gap-1.5">
-                      <input
-                        ref={cameraInputRef}
-                        type="file"
-                        accept="image/*"
-                        capture="environment"
-                        className="hidden"
-                        onChange={(e) => handleFileSelect(e.target.files)}
-                      />
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => cameraInputRef.current?.click()}
-                        disabled={uploading}
-                        className="h-7 text-xs"
-                      >
-                        <Camera className="size-3" />
-                        Camera
-                      </Button>
-
-                      <input
-                        ref={fileInputRef}
-                        type="file"
-                        accept="image/*"
-                        multiple
-                        className="hidden"
-                        onChange={(e) => handleFileSelect(e.target.files)}
-                      />
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => fileInputRef.current?.click()}
-                        disabled={uploading}
-                        className="h-7 text-xs"
-                      >
-                        <Upload className="size-3" />
-                        Upload
-                      </Button>
-                    </div>
-                  )}
-                </div>
-
-                {/* Caption input — shown after selecting files */}
-                {pendingFiles && (
-                  <div className="rounded-lg border border-blue-200 bg-blue-50/50 p-2.5 space-y-2">
-                    <p className="text-xs text-muted-foreground">
-                      {pendingFiles.length} photo{pendingFiles.length > 1 ? "s" : ""} selected
-                    </p>
-                    <Input
-                      placeholder="Add a caption (optional)..."
-                      value={photoCaption}
-                      onChange={(e) => setPhotoCaption(e.target.value)}
-                      className="h-8 text-sm"
-                      autoFocus
-                    />
-                    <div className="flex gap-2">
-                      <Button
-                        size="sm"
-                        onClick={handleUpload}
-                        disabled={uploading}
-                        className="h-7 text-xs"
-                      >
-                        {uploading ? (
-                          <Loader2 className="size-3 animate-spin" />
-                        ) : (
-                          <Upload className="size-3" />
-                        )}
-                        {uploading ? "Uploading..." : "Upload"}
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => {
-                          setPendingFiles(null);
-                          setPhotoCaption("");
-                          if (fileInputRef.current) fileInputRef.current.value = "";
-                          if (cameraInputRef.current) cameraInputRef.current.value = "";
-                        }}
-                        disabled={uploading}
-                        className="h-7 text-xs"
-                      >
-                        Cancel
-                      </Button>
-                    </div>
-                  </div>
-                )}
-
-                {/* "Raise as Snag?" prompt after upload */}
-                {snagPromptPhotos && !isSynthetic && (
-                  <div className="rounded-lg border border-amber-200 bg-amber-50/50 p-2.5 flex items-center justify-between gap-2">
-                    <p className="text-xs text-amber-800">
-                      \ud83d\udcf7 Photo uploaded — Raise as a snag?
-                    </p>
-                    <div className="flex items-center gap-1.5">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-6 text-[10px] border-amber-300 text-amber-700 hover:bg-amber-100"
-                        onClick={handleSnagPromptYes}
-                      >
-                        <AlertTriangle className="size-3" />
-                        Yes
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-6 text-[10px]"
-                        onClick={() => setSnagPromptPhotos(null)}
-                      >
-                        No
-                      </Button>
-                    </div>
-                  </div>
-                )}
-
-                {photos.length === 0 ? (
-                  !isSynthetic ? (
-                    <div className="flex flex-col items-center py-4 text-center">
-                      <ImageIcon className="size-6 text-muted-foreground/40" />
-                      <p className="mt-1.5 text-xs text-muted-foreground">
-                        No photos yet — use the buttons above
-                      </p>
-                    </div>
-                  ) : null
-                ) : (
-                  <div className="grid grid-cols-3 gap-2">
-                    {photos.map((photo, idx) => (
-                      <button
-                        key={photo.id}
-                        className="group relative aspect-square overflow-hidden rounded-lg border bg-muted cursor-pointer"
-                        onClick={() => {
-                          setLightboxIndex(idx);
-                          setEditingCaption(false);
-                        }}
-                      >
-                        <img
-                          src={photo.url}
-                          alt={photo.caption || photo.fileName || "Job photo"}
-                          className="size-full object-cover"
-                        />
-                        <div className="absolute inset-0 bg-black/0 transition-colors group-hover:bg-black/20" />
-                        <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/60 to-transparent p-1">
-                          {photo.caption && (
-                            <p className="truncate text-[9px] font-medium text-white">
-                              {photo.caption}
-                            </p>
-                          )}
-                          {photo.createdAt && (
-                            <p className="truncate text-[9px] text-white/80">
-                              {format(new Date(photo.createdAt), "d MMM HH:mm")}
-                            </p>
-                          )}
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
+              {/* Photos Section — extracted to JobPhotosSection.tsx */}
+              <JobPhotosSection
+                photos={photos}
+                isSynthetic={isSynthetic}
+                uploading={uploading}
+                pendingFiles={pendingFiles}
+                setPendingFiles={setPendingFiles}
+                photoCaption={photoCaption}
+                setPhotoCaption={setPhotoCaption}
+                snagPromptPhotos={snagPromptPhotos}
+                setSnagPromptPhotos={setSnagPromptPhotos}
+                cameraInputRef={cameraInputRef}
+                fileInputRef={fileInputRef}
+                onFileSelect={handleFileSelect}
+                onUpload={handleUpload}
+                onSnagPromptYes={handleSnagPromptYes}
+                onOpenLightbox={(idx) => {
+                  setLightboxIndex(idx);
+                  setEditingCaption(false);
+                }}
+              />
 
               {/* Raise Snag — only for real jobs */}
               {!isSynthetic && (
