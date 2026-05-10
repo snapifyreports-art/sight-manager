@@ -39,6 +39,7 @@ interface CriticalJob {
   jobId: string;
   name: string;
   status: string;
+  parentStage?: string | null;
   startDate: string;
   endDate: string;
   duration: number;
@@ -349,12 +350,22 @@ export function CriticalPath({ siteId }: CriticalPathProps) {
             {jobs.length > 0 && (
               <div className={isExpanded ? "" : "hidden print:block"}>
               <CardContent className="border-t pt-3">
-                {/* Gantt-like bar chart */}
+                {/* Gantt-like bar chart. Now shows leaf jobs only (no
+                    parent rollups) in canonical sortOrder, with the
+                    parent stage as a small grey label so the user
+                    knows which stage each leaf belongs to. */}
                 <div className="space-y-1.5">
                   {jobs.map((job) => (
                     <div key={job.jobId} className="flex items-center gap-2">
-                      {/* Job name — links to the job detail page */}
-                      <div className="w-36 shrink-0 truncate text-xs">
+                      {/* Job name — links to the job detail page.
+                          parentStage shows above the name in dim text
+                          so the grouping context isn't lost. */}
+                      <div className="w-44 shrink-0 truncate text-xs">
+                        {job.parentStage && (
+                          <div className="truncate text-[9px] uppercase tracking-wider text-slate-400">
+                            {job.parentStage}
+                          </div>
+                        )}
                         <Link
                           href={`/jobs/${job.jobId}`}
                           className={`hover:underline ${job.isCritical ? "font-semibold text-red-700" : "text-foreground hover:text-blue-600"}`}
