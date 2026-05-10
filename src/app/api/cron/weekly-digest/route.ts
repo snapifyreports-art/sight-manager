@@ -102,11 +102,14 @@ export async function GET(req: NextRequest) {
       snagsResolved: number;
       photos: number;
       delays: number;
+      // (May 2026 audit #145) Stale-snag count: open snags older than
+      // 30 days. Surfaces things slipping through the cracks.
+      staleSnags: number;
     };
 
     const summaries: SiteSummary[] = await Promise.all(
       sites.map(async (s) => {
-        const [jobsStarted, jobsCompleted, snagsRaised, snagsResolved, photos, delays] =
+        const [jobsStarted, jobsCompleted, snagsRaised, snagsResolved, photos, delays, staleSnags] =
           await Promise.all([
             prisma.job.count({
               where: {
@@ -148,6 +151,13 @@ export async function GET(req: NextRequest) {
                 createdAt: { gte: weekStart, lt: todayStart },
               },
             }),
+            prisma.snag.count({
+              where: {
+                plot: { siteId: s.id },
+                status: { in: ["OPEN", "IN_PROGRESS"] },
+                createdAt: { lt: subDays(todayStart, 30) },
+              },
+            }),
           ]);
         return {
           siteId: s.id,
@@ -158,13 +168,14 @@ export async function GET(req: NextRequest) {
           snagsResolved,
           photos,
           delays,
+          staleSnags,
         };
       }),
     );
 
     const totalActivity = summaries.reduce(
       (acc, s) =>
-        acc + s.jobsStarted + s.jobsCompleted + s.snagsRaised + s.snagsResolved + s.photos + s.delays,
+        acc + s.jobsStarted + s.jobsCompleted + s.snagsRaised + s.snagsResolved + s.photos + s.delays + s.staleSnags,
       0,
     );
 
@@ -188,6 +199,12 @@ export async function GET(req: NextRequest) {
           stat("snags resolved", s.snagsResolved, "#dcfce7"),
           stat("photos", s.photos, "#e0e7ff"),
           stat("delays", s.delays, "#fef3c7"),
+          // (May 2026 audit #145) Stale snag highlight in red. Catches
+          // the eye in a sea of green / blue chips so a manager scrolling
+          // past doesn't miss long-rotting snags.
+          s.staleSnags > 0
+            ? `<span style="background:#fecaca;color:#b91c1c;border-radius:9999px;padding:2px 8px;font-size:11px;margin-right:6px;font-weight:600;">${s.staleSnags} stale snag${s.staleSnags !== 1 ? "s" : ""} &gt;30d</span>`
+            : "",
         ]
           .filter(Boolean)
           .join("");
