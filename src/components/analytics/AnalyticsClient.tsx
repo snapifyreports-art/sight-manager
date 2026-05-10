@@ -814,11 +814,14 @@ export function AnalyticsClient() {
         )}
       </div>
 
-      {/* (May 2026 audit #180 + #182 + #183) Three new derived
-          analytics widgets pulled from the dedicated endpoints. */}
+      {/* (May 2026 audit #180 + #182 + #183) Derived analytics
+          widgets pulled from the dedicated endpoints. */}
       <StageBenchmarkWidget />
       <DelayTrendsWidget />
       <WeatherLossWidget />
+      {/* (May 2026 audit #167 + #52) */}
+      <ProfitabilityWidget />
+      <ContractorCalendarWidget />
     </div>
   );
 }
@@ -972,6 +975,151 @@ function WeatherLossWidget() {
             ))}
           </ul>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ────────── Profitability ──────────────────────────────────────────────
+
+interface ProfRow {
+  plotId: string;
+  plotName: string;
+  plotNumber: string | null;
+  siteName: string;
+  revenue: number;
+  cost: number;
+  profit: number;
+  marginPct: number;
+}
+
+function ProfitabilityWidget() {
+  const [rows, setRows] = useState<ProfRow[]>([]);
+  const [totals, setTotals] = useState<{ revenue: number; cost: number; profit: number } | null>(null);
+  useEffect(() => {
+    fetch("/api/analytics/profitability")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (d) {
+          setRows(d.rows);
+          setTotals(d.totals);
+        }
+      });
+  }, []);
+  if (rows.length === 0) return null;
+  return (
+    <div className="rounded-xl border bg-white p-4">
+      <h3 className="font-semibold">Per-plot profitability</h3>
+      {totals && (
+        <p className="text-xs text-muted-foreground">
+          Total revenue £{totals.revenue.toLocaleString("en-GB")} · cost £
+          {totals.cost.toLocaleString("en-GB")} · profit £
+          {totals.profit.toLocaleString("en-GB")}
+        </p>
+      )}
+      <div className="mt-3 overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="text-xs uppercase text-slate-500">
+            <tr>
+              <th className="text-left">Plot</th>
+              <th className="text-left">Site</th>
+              <th className="text-right">Revenue</th>
+              <th className="text-right">Cost</th>
+              <th className="text-right">Profit</th>
+              <th className="text-right">Margin</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.slice(0, 15).map((r) => (
+              <tr key={r.plotId} className="border-t">
+                <td className="font-medium">
+                  {r.plotNumber ? `Plot ${r.plotNumber}` : r.plotName}
+                </td>
+                <td className="text-xs text-slate-600">{r.siteName}</td>
+                <td className="text-right text-xs">
+                  £{r.revenue.toLocaleString("en-GB")}
+                </td>
+                <td className="text-right text-xs">
+                  £{r.cost.toLocaleString("en-GB")}
+                </td>
+                <td
+                  className={`text-right font-semibold ${r.profit >= 0 ? "text-emerald-700" : "text-red-700"}`}
+                >
+                  £{r.profit.toLocaleString("en-GB")}
+                </td>
+                <td className="text-right text-xs">{r.marginPct}%</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ────────── Contractor calendar ────────────────────────────────────────
+
+interface ContractorRow {
+  contactId: string;
+  name: string;
+  company: string | null;
+  jobs: Array<{
+    jobId: string;
+    jobName: string;
+    start: string;
+    end: string;
+    plotLabel: string;
+    siteName: string;
+  }>;
+}
+
+function ContractorCalendarWidget() {
+  const [data, setData] = useState<ContractorRow[]>([]);
+  useEffect(() => {
+    fetch("/api/analytics/contractor-calendar")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (d?.contractors) setData(d.contractors);
+      });
+  }, []);
+  if (data.length === 0) return null;
+  return (
+    <div className="rounded-xl border bg-white p-4">
+      <h3 className="font-semibold">Contractor schedule (next 8 weeks)</h3>
+      <p className="text-xs text-muted-foreground">
+        Each row is one contractor; their assigned jobs in the window are
+        listed in start-date order.
+      </p>
+      <div className="mt-3 max-h-96 overflow-y-auto">
+        <ul className="divide-y">
+          {data.map((c) => (
+            <li key={c.contactId} className="py-2">
+              <p className="text-sm font-medium">
+                {c.company || c.name}{" "}
+                {c.company && <span className="text-xs text-slate-500">· {c.name}</span>}
+              </p>
+              <ul className="ml-3 mt-1 space-y-0.5 text-xs text-slate-600">
+                {c.jobs.map((j) => (
+                  <li key={j.jobId}>
+                    <span className="font-medium text-slate-800">
+                      {j.plotLabel}
+                    </span>{" "}
+                    · {j.jobName} ·{" "}
+                    {new Date(j.start).toLocaleDateString("en-GB", {
+                      day: "numeric",
+                      month: "short",
+                    })}{" "}
+                    →{" "}
+                    {new Date(j.end).toLocaleDateString("en-GB", {
+                      day: "numeric",
+                      month: "short",
+                    })}
+                  </li>
+                ))}
+              </ul>
+            </li>
+          ))}
+        </ul>
       </div>
     </div>
   );
