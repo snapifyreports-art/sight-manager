@@ -34,6 +34,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Breadcrumbs } from "@/components/ui/breadcrumbs";
 import { WatchToggle } from "@/components/sites/WatchToggle";
+import { SitePhotoAlbum } from "@/components/sites/SitePhotoAlbum";
 import {
   Card,
   CardContent,
@@ -2182,6 +2183,13 @@ export function SiteDetailClient({
           <div className={activeTab !== "documents" ? "hidden" : undefined}>
             {visitedTabs.has("documents") && (
               <SiteDocuments siteId={site.id} />
+            )}
+          </div>
+
+          {/* (May 2026 audit #154) Site-wide photo album. */}
+          <div className={activeTab !== "photos" ? "hidden" : undefined}>
+            {visitedTabs.has("photos") && (
+              <SitePhotoAlbum siteId={site.id} siteName={site.name} />
             )}
           </div>
 

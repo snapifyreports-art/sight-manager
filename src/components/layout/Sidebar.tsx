@@ -74,6 +74,7 @@ const SITE_TAB_GROUPS = [
       { label: "Quants",         tab: "quants" },
       { label: "Drawings",       tab: "drawings" },
       { label: "Documents",      tab: "documents" },
+      { label: "Photos",         tab: "photos" },
       { label: "Critical Path",  tab: "critical-path" },
       { label: "QR Codes",       tab: "qr-codes" },
       { label: "Customer Pages", tab: "customer-pages" },
