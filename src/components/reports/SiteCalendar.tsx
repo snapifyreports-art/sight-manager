@@ -256,14 +256,15 @@ export function SiteCalendar({ siteId }: SiteCalendarProps) {
     <div className="space-y-4">
       {jobActionDialogs}
       {/* Month navigation */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <Button
             variant="outline"
             size="icon"
             onClick={() => setCurrentMonth((m) => subMonths(m, 1))}
+            aria-label="Previous month"
           >
-            <ChevronLeft className="size-4" />
+            <ChevronLeft className="size-4" aria-hidden="true" />
           </Button>
           <h3 className="text-lg font-semibold">
             {format(currentMonth, "MMMM yyyy")}
@@ -272,20 +273,29 @@ export function SiteCalendar({ siteId }: SiteCalendarProps) {
             variant="outline"
             size="icon"
             onClick={() => setCurrentMonth((m) => addMonths(m, 1))}
+            aria-label="Next month"
           >
-            <ChevronRight className="size-4" />
+            <ChevronRight className="size-4" aria-hidden="true" />
           </Button>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => {
-            setCurrentMonth(getCurrentDate());
-            setSelectedDay(getCurrentDate());
-          }}
-        >
-          Today
-        </Button>
+        <div className="flex items-center gap-2">
+          {/* (May 2026 audit #59 + #189) Subscribe-to-calendar button.
+              Copies the iCal feed URL so the manager can paste it into
+              Outlook / Google / Apple Calendar's "Add subscription"
+              flow. The feed itself is the /api/sites/[id]/calendar.ics
+              route shipped in batch 39. */}
+          <SubscribeButton siteId={siteId} />
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              setCurrentMonth(getCurrentDate());
+              setSelectedDay(getCurrentDate());
+            }}
+          >
+            Today
+          </Button>
+        </div>
       </div>
 
       {/* Calendar grid */}
@@ -722,5 +732,44 @@ export function SiteCalendar({ siteId }: SiteCalendarProps) {
         </span>
       </div>
     </div>
+  );
+}
+
+/**
+ * (May 2026 audit #59 + #189) Subscribe-to-calendar button.
+ * Copies the .ics feed URL to the clipboard. Calendar apps consume
+ * the URL via "Add subscription" / "Add by URL" flows.
+ */
+function SubscribeButton({ siteId }: { siteId: string }) {
+  const [copied, setCopied] = useState(false);
+  const url =
+    typeof window !== "undefined"
+      ? `${window.location.origin}/api/sites/${siteId}/calendar.ics`
+      : "";
+
+  const onClick = async () => {
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Older browsers / restrictive clipboard env — fall back to
+      // opening the URL in a new tab so the user can copy from the
+      // address bar.
+      window.open(url, "_blank", "noopener,noreferrer");
+    }
+  };
+
+  return (
+    <Button
+      variant="outline"
+      size="sm"
+      onClick={onClick}
+      title="Copy iCal subscription URL"
+      aria-label="Copy iCal subscription URL"
+    >
+      <Mail className="size-4" aria-hidden="true" />
+      {copied ? "URL copied!" : "Subscribe"}
+    </Button>
   );
 }
