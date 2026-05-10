@@ -8,8 +8,19 @@ import { cn } from "@/lib/utils"
 // (May 2026 a11y audit #118) Disabled buttons used opacity-50 which dropped
 // text contrast below WCAG 4.5:1 against most backgrounds. Bumped to
 // opacity-65 — still visually distinguishable as disabled but readable.
+//
+// (May 2026 a11y audit #34) Touch target expansion. WCAG 2.5.5 requires
+// interactive controls to be at least 24×24 (AA) / 44×44 (AAA). Many
+// of our buttons are 24-32px tall by design (dense list rows, toolbar
+// chips). The `before:` pseudo expands the hit area to a 44px square
+// centred on the button, without changing visual size — touches that
+// land in the expanded zone still register, fingers-on-glass users
+// don't need to aim for tiny targets. `pointer-events-auto` ensures
+// the expanded area receives the touch; `inset-[-min(0px,...)]`
+// only inflates negatively when the button is smaller than 44px so
+// already-large buttons aren't affected.
 const buttonVariants = cva(
-  "group/button inline-flex shrink-0 items-center justify-center rounded-lg border border-transparent bg-clip-padding text-sm font-medium whitespace-nowrap transition-all outline-none select-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-65 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  "group/button relative inline-flex shrink-0 items-center justify-center rounded-lg border border-transparent bg-clip-padding text-sm font-medium whitespace-nowrap transition-all outline-none select-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-65 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 before:absolute before:left-1/2 before:top-1/2 before:size-[max(100%,44px)] before:-translate-x-1/2 before:-translate-y-1/2 before:content-[''] before:pointer-events-auto",
   {
     variants: {
       variant: {
