@@ -553,7 +553,7 @@ export default async function ContractorSharePage({
             </summary>
             <div className="border-t px-4 py-3 space-y-2">
               {openSnags.map((snag) => (
-                <SnagSignOffCard key={snag.id} snag={snag} />
+                <SnagSignOffCard key={snag.id} snag={snag} token={token} />
               ))}
             </div>
           </details>

@@ -26,30 +26,35 @@ function plotLabel(plot: { plotNumber: string | null; name: string }) {
   return plot.plotNumber ? `Plot ${plot.plotNumber}` : plot.name;
 }
 
-export function SnagSignOffCard({ snag }: { snag: Snag }) {
+export function SnagSignOffCard({ snag, token }: { snag: Snag; token: string }) {
   const [expanded, setExpanded] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [notes, setNotes] = useState("");
   const [photos, setPhotos] = useState<File[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [requested, setRequested] = useState(snag.status === "IN_PROGRESS");
+  const [error, setError] = useState<string | null>(null);
 
   const hasDetail = (snag.photos && snag.photos.length > 0) || snag.notes;
 
   const handleSubmit = async () => {
     setSubmitting(true);
+    setError(null);
     try {
-      if (photos.length > 0) {
-        const fd = new FormData();
-        photos.forEach((f) => fd.append("photos", f));
-        fd.append("tag", "after");
-        await fetch(`/api/snags/${snag.id}/photos`, { method: "POST", body: fd });
-      }
-      await fetch(`/api/snags/${snag.id}/request-signoff`, {
+      // Token-auth endpoint — photos + notes + status flip in one call.
+      const fd = new FormData();
+      fd.append("snagId", snag.id);
+      if (notes.trim()) fd.append("notes", notes.trim());
+      photos.forEach((f) => fd.append("photos", f));
+      const res = await fetch(`/api/contractor-share/${token}/snag-action`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ notes: notes.trim() || undefined }),
+        body: fd,
       });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setError(data?.error || "Failed to submit");
+        return;
+      }
       setRequested(true);
       setShowForm(false);
     } finally {
@@ -110,6 +115,11 @@ export function SnagSignOffCard({ snag }: { snag: Snag }) {
       )}
       {showForm && !requested && (
         <div className="mt-3 space-y-2 border-t border-orange-200 pt-3">
+          {error && (
+            <p className="rounded border border-red-200 bg-red-50 px-2 py-1 text-xs text-red-700">
+              {error}
+            </p>
+          )}
           <textarea
             value={notes}
             onChange={(e) => setNotes(e.target.value)}

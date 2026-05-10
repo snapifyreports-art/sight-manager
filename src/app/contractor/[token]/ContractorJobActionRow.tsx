@@ -1,7 +1,13 @@
 "use client";
 
-import { useState } from "react";
-import { PlayCircle, CheckCircle2, MessageSquare, Loader2 } from "lucide-react";
+import { useRef, useState } from "react";
+import {
+  PlayCircle,
+  CheckCircle2,
+  MessageSquare,
+  Loader2,
+  Camera,
+} from "lucide-react";
 
 /**
  * (May 2026 contractor self-service) Three-action row attached to a
@@ -30,6 +36,35 @@ export function ContractorJobActionRow({
   const [noteText, setNoteText] = useState("");
   const [noteSaved, setNoteSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [photoSavedCount, setPhotoSavedCount] = useState(0);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  async function uploadPhotos(files: FileList | null) {
+    if (!files || files.length === 0) return;
+    setBusyAction("photo");
+    setError(null);
+    try {
+      const fd = new FormData();
+      fd.append("jobId", jobId);
+      Array.from(files).forEach((f) => fd.append("photos", f));
+      const res = await fetch(`/api/contractor-share/${token}/photo`, {
+        method: "POST",
+        body: fd,
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        setError(body.error || "Upload failed");
+        return;
+      }
+      const data: { count?: number } = await res.json().catch(() => ({}));
+      setPhotoSavedCount((c) => c + (data.count ?? files.length));
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    } catch {
+      setError("Network error");
+    } finally {
+      setBusyAction(null);
+    }
+  }
 
   async function send(action: "confirm_start" | "confirm_complete" | "note", notes?: string) {
     setBusyAction(action);
@@ -108,6 +143,29 @@ export function ContractorJobActionRow({
           <MessageSquare className="size-3" aria-hidden />
           Add note
         </button>
+        <label className="inline-flex cursor-pointer items-center gap-1 rounded border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50">
+          {busyAction === "photo" ? (
+            <Loader2 className="size-3 animate-spin" aria-hidden />
+          ) : (
+            <Camera className="size-3" aria-hidden />
+          )}
+          Add photo
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            capture="environment"
+            className="hidden"
+            disabled={busyAction !== null}
+            onChange={(e) => uploadPhotos(e.target.files)}
+          />
+        </label>
+        {photoSavedCount > 0 && (
+          <span className="text-[10px] text-emerald-700">
+            {photoSavedCount} photo{photoSavedCount > 1 ? "s" : ""} sent
+          </span>
+        )}
       </div>
       {noteOpen && (
         <div className="mt-2 flex flex-col gap-2 rounded-md border border-slate-200 bg-white p-2">
