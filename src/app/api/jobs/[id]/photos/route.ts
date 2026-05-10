@@ -2,8 +2,34 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getSupabase, PHOTOS_BUCKET } from "@/lib/supabase";
+import { canAccessSite } from "@/lib/site-access";
 
 export const dynamic = "force-dynamic";
+
+// (May 2026 audit #1) Helper used by every method on this route. Checks
+// caller has access to the job's owning site.
+async function authoriseJob(jobId: string, session: { user: { id: string; role?: string } }) {
+  const job = await prisma.job.findUnique({
+    where: { id: jobId },
+    include: { plot: true },
+  });
+  if (!job) return { error: NextResponse.json({ error: "Job not found" }, { status: 404 }) };
+  if (
+    !(await canAccessSite(
+      session.user.id,
+      session.user.role ?? "",
+      job.plot.siteId,
+    ))
+  ) {
+    return {
+      error: NextResponse.json(
+        { error: "You do not have access to this site" },
+        { status: 403 },
+      ),
+    };
+  }
+  return { job };
+}
 
 // GET /api/jobs/[id]/photos — list photos for a job
 export async function GET(
@@ -16,6 +42,8 @@ export async function GET(
   }
 
   const { id } = await params;
+  const result = await authoriseJob(id, session);
+  if ("error" in result) return result.error;
 
   const photos = await prisma.jobPhoto.findMany({
     where: { jobId: id },
@@ -40,15 +68,9 @@ export async function POST(
     }
 
     const { id } = await params;
-
-    // Verify job exists
-    const job = await prisma.job.findUnique({
-      where: { id },
-      include: { plot: true },
-    });
-    if (!job) {
-      return NextResponse.json({ error: "Job not found" }, { status: 404 });
-    }
+    const result = await authoriseJob(id, session);
+    if ("error" in result) return result.error;
+    const job = result.job;
 
     const formData = await req.formData();
     const files = formData.getAll("photos") as File[];
@@ -150,6 +172,9 @@ export async function PATCH(
   }
 
   const { id } = await params;
+  const authResult = await authoriseJob(id, session);
+  if ("error" in authResult) return authResult.error;
+
   const body = await req.json();
   const { photoId, tag, caption } = body;
 
@@ -184,6 +209,9 @@ export async function DELETE(
   }
 
   const { id } = await params;
+  const authResult = await authoriseJob(id, session);
+  if ("error" in authResult) return authResult.error;
+
   const { searchParams } = new URL(req.url);
   const photoId = searchParams.get("photoId");
 

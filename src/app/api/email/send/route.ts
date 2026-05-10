@@ -10,6 +10,24 @@ import {
 
 export const dynamic = "force-dynamic";
 
+// (May 2026 audit #9) Allow only emails of contacts or suppliers
+// already in the tenant. Case-insensitive match.
+async function isKnownRecipient(email: string): Promise<boolean> {
+  const normalised = email.trim().toLowerCase();
+  if (!normalised) return false;
+  const [contact, supplier] = await Promise.all([
+    prisma.contact.findFirst({
+      where: { email: { equals: normalised, mode: "insensitive" } },
+      select: { id: true },
+    }),
+    prisma.supplier.findFirst({
+      where: { contactEmail: { equals: normalised, mode: "insensitive" } },
+      select: { id: true },
+    }),
+  ]);
+  return !!(contact || supplier);
+}
+
 export async function POST(req: NextRequest) {
   const session = await auth();
   if (!session) {
@@ -28,6 +46,18 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       { error: "type, to, recipientName, and data are required" },
       { status: 400 }
+    );
+  }
+
+  // (May 2026 audit #9) The recipient must be a known contact /
+  // supplier email already in the tenant — pre-fix any logged-in user
+  // could send templated emails to arbitrary addresses, abusing the
+  // verified domain as a spam relay. Lock to known recipients.
+  const isKnown = await isKnownRecipient(to);
+  if (!isKnown) {
+    return NextResponse.json(
+      { error: "Recipient must be an existing contact or supplier email" },
+      { status: 403 },
     );
   }
 

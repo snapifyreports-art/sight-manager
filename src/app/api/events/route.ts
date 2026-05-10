@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { EventType } from "@prisma/client";
+import { getUserSiteIds } from "@/lib/site-access";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +20,15 @@ export async function GET(req: NextRequest) {
   const plotId = searchParams.get("plotId");
   const jobId = searchParams.get("jobId");
 
+  // (May 2026 audit #1) Scope by accessible sites. Pre-fix this
+  // returned every audit-log entry for any site the caller named in
+  // ?siteId — even sites they had no business with. Admins (CEO /
+  // DIRECTOR) keep their unfiltered view.
+  const accessibleSiteIds = await getUserSiteIds(
+    session.user.id,
+    (session.user as { role: string }).role,
+  );
+
   // Build where clause from filters
   const where: Record<string, unknown> = {};
 
@@ -27,7 +37,22 @@ export async function GET(req: NextRequest) {
   }
 
   if (siteId) {
+    // If user explicitly filters to a specific site, enforce access.
+    if (accessibleSiteIds !== null && !accessibleSiteIds.includes(siteId)) {
+      return NextResponse.json(
+        { error: "You do not have access to this site" },
+        { status: 403 },
+      );
+    }
     where.siteId = siteId;
+  } else if (accessibleSiteIds !== null) {
+    // Non-admin without an explicit site filter: only show events on
+    // their accessible sites OR events with no site (rare; e.g. user
+    // actions logged at tenant level).
+    where.OR = [
+      { siteId: { in: accessibleSiteIds } },
+      { siteId: null },
+    ];
   }
 
   if (plotId) {

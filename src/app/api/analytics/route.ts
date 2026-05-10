@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { differenceInDays } from "date-fns";
 import { getServerCurrentDate } from "@/lib/dev-date";
+import { getUserSiteIds, canAccessSite } from "@/lib/site-access";
 
 export const dynamic = "force-dynamic";
 
@@ -16,10 +17,32 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const siteId = searchParams.get("siteId"); // optional filter
 
-  const siteFilter = siteId ? { siteId } : {};
-  const plotFilter = siteId
+  // (May 2026 audit #1) Scope by accessible sites. Pre-fix this
+  // returned aggregated data across every site for any logged-in user
+  // when no siteId was supplied — full portfolio leak.
+  const role = (session.user as { role: string }).role;
+  if (siteId) {
+    if (!(await canAccessSite(session.user.id, role, siteId))) {
+      return NextResponse.json(
+        { error: "You do not have access to this site" },
+        { status: 403 },
+      );
+    }
+  }
+  const accessibleSiteIds = await getUserSiteIds(session.user.id, role);
+
+  // Build filters: explicit siteId wins; otherwise scope to accessible
+  // sites for non-admins (admins keep their unfiltered view).
+  const siteFilter: Record<string, unknown> = siteId
+    ? { siteId }
+    : accessibleSiteIds === null
+      ? {}
+      : { siteId: { in: accessibleSiteIds } };
+  const plotFilter: Record<string, unknown> = siteId
     ? { plot: { siteId } }
-    : {};
+    : accessibleSiteIds === null
+      ? {}
+      : { plot: { siteId: { in: accessibleSiteIds } } };
 
   // Run ALL queries in parallel — all independent reads, no write
   // ordering. Previously split into 3 sequential Promise.all batches
@@ -29,7 +52,11 @@ export async function GET(req: NextRequest) {
   // All job-level analytics use LEAF jobs only (parents are derived rollups).
   const [sites, plots, jobs, orders, orderItems, contractors, events, rainedOffDays, weatherNotes] = await Promise.all([
     prisma.site.findMany({
-      where: siteId ? { id: siteId } : {},
+      where: siteId
+        ? { id: siteId }
+        : accessibleSiteIds === null
+          ? {}
+          : { id: { in: accessibleSiteIds } },
       select: {
         id: true,
         name: true,

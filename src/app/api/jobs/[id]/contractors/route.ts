@@ -2,8 +2,38 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { apiError } from "@/lib/api-errors";
+import { canAccessSite } from "@/lib/site-access";
 
 export const dynamic = "force-dynamic";
+
+// (May 2026 audit #1) Helper used by every method on this route.
+async function authoriseJob(jobId: string, session: { user: { id: string; role?: string } }) {
+  const job = await prisma.job.findUnique({
+    where: { id: jobId },
+    select: {
+      id: true,
+      name: true,
+      plotId: true,
+      plot: { select: { siteId: true } },
+    },
+  });
+  if (!job) return { error: NextResponse.json({ error: "Job not found" }, { status: 404 }) };
+  if (
+    !(await canAccessSite(
+      session.user.id,
+      session.user.role ?? "",
+      job.plot.siteId,
+    ))
+  ) {
+    return {
+      error: NextResponse.json(
+        { error: "You do not have access to this site" },
+        { status: 403 },
+      ),
+    };
+  }
+  return { job };
+}
 
 // GET /api/jobs/[id]/contractors — list contractors on a job
 export async function GET(
@@ -16,6 +46,8 @@ export async function GET(
   }
 
   const { id } = await params;
+  const result = await authoriseJob(id, session);
+  if ("error" in result) return result.error;
 
   const contractors = await prisma.jobContractor.findMany({
     where: { jobId: id },
@@ -49,14 +81,10 @@ export async function PUT(
     );
   }
 
-  // Verify job exists
-  const job = await prisma.job.findUnique({
-    where: { id },
-    include: { plot: true },
-  });
-  if (!job) {
-    return NextResponse.json({ error: "Job not found" }, { status: 404 });
-  }
+  // Verify job + caller's site access in one check
+  const result = await authoriseJob(id, session);
+  if ("error" in result) return result.error;
+  const job = result.job;
 
   // Fetch contractor names for the log description
   const contacts = contactIds.length > 0

@@ -204,6 +204,22 @@ export async function DELETE(
     return NextResponse.json({ error: "Site not found" }, { status: 404 });
   }
 
+  // (May 2026 audit #1) Permission check is generic — also check the
+  // user actually has access to THIS site. Pre-fix anyone with the
+  // DELETE_ITEMS permission could delete any site.
+  if (
+    !(await canAccessSite(
+      session.user.id,
+      (session.user as { role: string }).role,
+      id,
+    ))
+  ) {
+    return NextResponse.json(
+      { error: "You do not have access to this site" },
+      { status: 403 },
+    );
+  }
+
   try {
     // Audit trail — EventLog.siteId cascade-deletes with the site, so record to a
     // site-less audit entry instead (plotId/jobId/userId SetNull survive)

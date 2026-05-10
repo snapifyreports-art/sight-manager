@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { templateJobsInclude } from "@/lib/template-includes";
 import { createJobsFromTemplate } from "@/lib/apply-template-helpers";
+import { canAccessSite } from "@/lib/site-access";
 
 export const dynamic = "force-dynamic";
 
@@ -33,10 +34,22 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Verify site exists
+  // Verify site exists + caller has access (May 2026 audit #1).
   const site = await prisma.site.findUnique({ where: { id: siteId }, select: { id: true, assignedToId: true } });
   if (!site) {
     return NextResponse.json({ error: "Site not found" }, { status: 404 });
+  }
+  if (
+    !(await canAccessSite(
+      session.user.id,
+      (session.user as { role: string }).role,
+      siteId,
+    ))
+  ) {
+    return NextResponse.json(
+      { error: "You do not have access to this site" },
+      { status: 403 },
+    );
   }
 
   // Fetch template metadata. Jobs / materials / documents are fetched

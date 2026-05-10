@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { canAccessSite } from "@/lib/site-access";
 
 export const dynamic = "force-dynamic";
 
@@ -15,6 +16,27 @@ export async function GET(
   }
 
   const { id } = await params;
+
+  // (May 2026 audit #1) Verify caller can access the plot's site.
+  const plot = await prisma.plot.findUnique({
+    where: { id },
+    select: { siteId: true },
+  });
+  if (!plot) {
+    return NextResponse.json({ error: "Plot not found" }, { status: 404 });
+  }
+  if (
+    !(await canAccessSite(
+      session.user.id,
+      (session.user as { role: string }).role,
+      plot.siteId,
+    ))
+  ) {
+    return NextResponse.json(
+      { error: "You do not have access to this site" },
+      { status: 403 },
+    );
+  }
 
   const photos = await prisma.jobPhoto.findMany({
     where: { job: { plotId: id } },

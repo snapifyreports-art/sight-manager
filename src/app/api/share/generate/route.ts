@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { signShareToken } from "@/lib/share-token";
+import { canAccessSite } from "@/lib/site-access";
 
 export const dynamic = "force-dynamic";
 
@@ -27,6 +28,23 @@ export async function POST(req: NextRequest) {
 
   if (!plot) {
     return NextResponse.json({ error: "Plot not found" }, { status: 404 });
+  }
+
+  // (May 2026 audit #1) Verify caller can access the plot's site
+  // before minting a public share link to it. Pre-fix any logged-in
+  // user could create public URLs for plots on sites they had no
+  // business with, and signed tokens have no DB-backed revocation.
+  if (
+    !(await canAccessSite(
+      session.user.id,
+      (session.user as { role: string }).role,
+      plot.siteId,
+    ))
+  ) {
+    return NextResponse.json(
+      { error: "You do not have access to this site" },
+      { status: 403 },
+    );
   }
 
   const days = Math.min(Math.max(1, Number(expiryDays) || 30), 365);

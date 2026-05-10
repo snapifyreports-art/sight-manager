@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getServerCurrentDate } from "@/lib/dev-date";
+import { canAccessSite } from "@/lib/site-access";
 
 export const dynamic = "force-dynamic";
 
@@ -44,6 +45,21 @@ export async function POST(req: NextRequest) {
       });
 
       if (!existing) continue;
+
+      // (May 2026 audit #1) Verify caller has access to the order's
+      // site before mutating status. Pre-fix any logged-in user could
+      // change any order's status across every site.
+      const orderSiteId = existing.job?.plot?.siteId ?? existing.siteId;
+      if (
+        orderSiteId &&
+        !(await canAccessSite(
+          session.user.id,
+          (session.user as { role: string }).role,
+          orderSiteId,
+        ))
+      ) {
+        continue; // silently skip orders the caller can't access
+      }
 
       // Block invalid PENDING → DELIVERED direct transition (must go via ORDERED)
       if (existing.status === "PENDING" && status === "DELIVERED") continue;

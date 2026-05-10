@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { canAccessSite, getUserSiteIds } from "@/lib/site-access";
 
 export const dynamic = "force-dynamic";
 
@@ -10,7 +11,15 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  // (May 2026 audit #1) Scope to sites the user can access. Pre-fix
+  // this returned every job across every site for any logged-in user.
+  const siteIds = await getUserSiteIds(
+    session.user.id,
+    (session.user as { role: string }).role,
+  );
+
   const jobs = await prisma.job.findMany({
+    where: siteIds === null ? {} : { plot: { siteId: { in: siteIds } } },
     include: {
       plot: { include: { site: true } },
       assignedTo: true,
@@ -36,6 +45,28 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       { error: "plotId and name are required" },
       { status: 400 }
+    );
+  }
+
+  // (May 2026 audit #1) Verify caller can access the target plot's
+  // site before creating a job there.
+  const plotForCheck = await prisma.plot.findUnique({
+    where: { id: plotId },
+    select: { siteId: true },
+  });
+  if (!plotForCheck) {
+    return NextResponse.json({ error: "Plot not found" }, { status: 404 });
+  }
+  if (
+    !(await canAccessSite(
+      session.user.id,
+      (session.user as { role: string }).role,
+      plotForCheck.siteId,
+    ))
+  ) {
+    return NextResponse.json(
+      { error: "You do not have access to this site" },
+      { status: 403 },
     );
   }
 

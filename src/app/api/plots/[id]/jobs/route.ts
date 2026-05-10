@@ -2,8 +2,37 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { apiError } from "@/lib/api-errors";
+import { canAccessSite } from "@/lib/site-access";
 
 export const dynamic = "force-dynamic";
+
+// (May 2026 audit #1) Helper used by GET + POST below to check that the
+// caller has access to the plot's owning site. Returns either the plot
+// (with siteId loaded) or a 403/404 response.
+async function authorisePlot(plotId: string, session: { user: { id: string; role?: string } }) {
+  const plot = await prisma.plot.findUnique({
+    where: { id: plotId },
+    include: { site: { select: { id: true, name: true, assignedToId: true } } },
+  });
+  if (!plot) {
+    return { error: NextResponse.json({ error: "Plot not found" }, { status: 404 }) };
+  }
+  if (
+    !(await canAccessSite(
+      session.user.id,
+      (session.user as { role: string }).role,
+      plot.site.id,
+    ))
+  ) {
+    return {
+      error: NextResponse.json(
+        { error: "You do not have access to this site" },
+        { status: 403 },
+      ),
+    };
+  }
+  return { plot };
+}
 
 // GET /api/plots/[id]/jobs — list all jobs for a plot
 export async function GET(
@@ -16,6 +45,9 @@ export async function GET(
   }
 
   const { id: plotId } = await params;
+
+  const result = await authorisePlot(plotId, session);
+  if ("error" in result) return result.error;
 
   const jobs = await prisma.job.findMany({
     where: { plotId },
@@ -58,15 +90,10 @@ export async function POST(
     );
   }
 
-  // Verify plot exists and get site info (including site's assignedToId for inheritance)
-  const plot = await prisma.plot.findUnique({
-    where: { id: plotId },
-    include: { site: { select: { id: true, name: true, assignedToId: true } } },
-  });
-
-  if (!plot) {
-    return NextResponse.json({ error: "Plot not found" }, { status: 404 });
-  }
+  // Verify plot + caller's site access in one go (May 2026 audit #1).
+  const result = await authorisePlot(plotId, session);
+  if ("error" in result) return result.error;
+  const plot = result.plot;
 
   // Inherit assignedToId from site if not explicitly provided
   const resolvedAssignedToId = assignedToId || plot.site.assignedToId || null;
