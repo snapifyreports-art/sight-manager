@@ -6,6 +6,7 @@ import { addWorkingDays, differenceInWorkingDays, isWorkingDay, snapToWorkingDay
 import { toDateKey } from "@/lib/dates";
 import { useJobAction } from "@/hooks/useJobAction";
 import { JobPhotoLightbox } from "@/components/programme/JobPhotoLightbox";
+import { JobOrdersSection } from "@/components/programme/JobOrdersSection";
 import Link from "next/link";
 import {
   Loader2,
@@ -1518,112 +1519,13 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
                 )}
               </div>
 
-              {/* Orders & Deliveries Section */}
-              {orders.length > 0 && (
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <Truck className="size-4 text-muted-foreground" />
-                    <h4 className="text-sm font-semibold">Orders & Deliveries</h4>
-                    <span className="text-xs text-muted-foreground">
-                      ({orders.length})
-                    </span>
-                  </div>
-                  <div className="space-y-2">
-                    {orders.map((order) => {
-                      const isActioning = isOrderPending(order.id);
-                      const statusColors: Record<string, string> = {
-                        PENDING: "bg-slate-100 text-slate-600",
-                        ORDERED: "bg-blue-100 text-blue-700",
-                        DELIVERED: "bg-green-100 text-green-700",
-                        CANCELLED: "bg-red-100 text-red-700",
-                      };
-                      return (
-                        <div
-                          key={order.id}
-                          className="rounded-lg border p-2.5 text-sm"
-                        >
-                          <div className="flex items-center justify-between gap-2">
-                            <button onClick={() => handleOpenOrderDetail(order.id)} className="font-medium truncate text-blue-600 hover:underline text-left">
-                              {order.supplier.name}
-                            </button>
-                            <span
-                              className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${
-                                statusColors[order.status] || statusColors.PENDING
-                              }`}
-                            >
-                              {order.status.replace(/_/g, " ")}
-                            </span>
-                          </div>
-                          {order.orderItems && order.orderItems.length > 0 && (
-                            <p className="mt-1 text-xs text-muted-foreground truncate">
-                              {order.orderItems
-                                .map((i) => `${i.quantity}x ${i.name || "item"}`)
-                                .join(", ")}
-                            </p>
-                          )}
-                          <div className="mt-1.5 flex items-center justify-between">
-                            <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
-                              <span className="flex items-center gap-1">
-                                <ShoppingCart className="size-2.5" />
-                                {format(new Date(order.dateOfOrder), "d MMM")}
-                              </span>
-                              {order.expectedDeliveryDate && (
-                                <span className="flex items-center gap-1">
-                                  <Truck className="size-2.5" />
-                                  {format(
-                                    new Date(order.expectedDeliveryDate),
-                                    "d MMM"
-                                  )}
-                                </span>
-                              )}
-                              {order.leadTimeDays != null && (
-                                <span className="text-muted-foreground/70">
-                                  {order.leadTimeDays}d
-                                </span>
-                              )}
-                            </div>
-                            {/* Action buttons based on status */}
-                            <div className="flex items-center gap-1">
-                              {order.status === "PENDING" && (
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className="h-6 px-2 text-[10px] border-blue-300 text-blue-700 hover:bg-blue-50"
-                                  disabled={isActioning}
-                                  onClick={() => handleOrderAction(order.id, "ORDERED")}
-                                >
-                                  {isActioning ? (
-                                    <Loader2 className="size-3 animate-spin" />
-                                  ) : (
-                                    <Send className="size-3" />
-                                  )}
-                                  Mark Sent
-                                </Button>
-                              )}
-                              {order.status === "ORDERED" && (
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className="h-6 px-2 text-[10px] border-green-300 text-green-700 hover:bg-green-50"
-                                  disabled={isActioning}
-                                  onClick={() => handleOrderAction(order.id, "DELIVERED")}
-                                >
-                                  {isActioning ? (
-                                    <Loader2 className="size-3 animate-spin" />
-                                  ) : (
-                                    <CircleCheck className="size-3" />
-                                  )}
-                                  Confirm Delivery
-                                </Button>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
+              {/* Orders & Deliveries — extracted to JobOrdersSection.tsx */}
+              <JobOrdersSection
+                orders={orders}
+                isOrderPending={isOrderPending}
+                onAction={handleOrderAction}
+                onOpenDetail={handleOpenOrderDetail}
+              />
 
               {/* Notes Section */}
               <NotesSection
