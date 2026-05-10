@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import { auth } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { OfflineIndicator } from "@/components/layout/OfflineIndicator";
@@ -18,8 +19,19 @@ export default async function DashboardLayout({
     redirect("/login");
   }
 
+  // (May 2026 audit #56) Apply tenant branding via inline style.
+  // Server-rendered so no flash on first paint. Settings cache is
+  // fast enough to not need memoisation; one tenant, one row.
+  const settings = await prisma.appSettings
+    .findUnique({ where: { id: "default" } })
+    .catch(() => null);
+  const primaryColor = settings?.primaryColor ?? "#2563eb";
+
   return (
-    <div className="flex h-screen flex-col overflow-hidden">
+    <div
+      className="flex h-screen flex-col overflow-hidden"
+      style={{ "--brand-primary": primaryColor } as React.CSSProperties}
+    >
       <OfflineIndicator />
       <NotificationBlockedBanner />
       <div className="flex flex-1 overflow-hidden">
