@@ -162,6 +162,46 @@ export async function sendPushToSiteAudience(
 }
 
 /**
+ * (May 2026 audit #196) Send a push to every customer subscription
+ * registered against a plot. Used when a sharedWithCustomer photo
+ * is added or a journal entry is posted — the buyer's browser pings
+ * with "your home has a new update" linking to /progress/<token>.
+ *
+ * No NotificationPreference gating — customers don't have a user
+ * record so there's no preference grid to consult. Customers who
+ * don't want pushes simply don't subscribe in the first place.
+ */
+export async function sendPushToPlotCustomers(
+  plotId: string,
+  payload: PushPayload,
+) {
+  configureWebPush();
+  const subs = await prisma.customerPushSubscription.findMany({
+    where: { plotId },
+  });
+  if (subs.length === 0) return;
+  const pushPayload = JSON.stringify(payload);
+  return Promise.allSettled(
+    subs.map(async (sub) => {
+      try {
+        await webpush.sendNotification(
+          {
+            endpoint: sub.endpoint,
+            keys: { p256dh: sub.p256dh, auth: sub.auth },
+          },
+          pushPayload,
+        );
+      } catch (err: unknown) {
+        const statusCode = (err as { statusCode?: number }).statusCode;
+        if (statusCode === 410 || statusCode === 404) {
+          await prisma.customerPushSubscription.delete({ where: { id: sub.id } });
+        }
+      }
+    }),
+  );
+}
+
+/**
  * Send a push notification to all users who have the notification type enabled.
  * Used by the daily cron job for grouped summaries.
  */

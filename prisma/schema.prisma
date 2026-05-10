@@ -232,14 +232,15 @@ model Plot {
   events            EventLog[]
   snags             Snag[]
   documents         SiteDocument[]
-  handoverChecklist HandoverChecklist[]
-  materials         PlotMaterial[]
-  oneOffOrders      MaterialOrder[] // back-relation for MaterialOrder.plotId (plot-level one-off)
-  journalEntries    PlotJournalEntry[]
-  ncrs              NCR[]
-  preStartChecks    PreStartCheck[]
-  variations        Variation[]
-  defectReports     DefectReport[]
+  handoverChecklist     HandoverChecklist[]
+  materials             PlotMaterial[]
+  oneOffOrders          MaterialOrder[] // back-relation for MaterialOrder.plotId (plot-level one-off)
+  journalEntries        PlotJournalEntry[]
+  ncrs                  NCR[]
+  preStartChecks        PreStartCheck[]
+  variations            Variation[]
+  defectReports         DefectReport[]
+  customerSubscriptions CustomerPushSubscription[]
 
   @@unique([siteId, plotNumber])
   @@index([siteId]) // hot path: every site page loads plots
@@ -739,6 +740,26 @@ model PushSubscription {
   createdAt DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+/// (May 2026 audit #196) Customer-facing push subscription, keyed by
+/// plot share-token rather than a User. Created when a buyer clicks
+/// "Get progress notifications" on /progress/[token] and grants
+/// browser permission. No auth required — the share token is the
+/// identity proof. Subscriptions are dropped when the underlying
+/// plot is deleted.
+model CustomerPushSubscription {
+  id          String   @id @default(cuid())
+  plotId      String
+  endpoint    String   @unique
+  p256dh      String
+  auth        String
+  userAgent   String?
+  createdAt   DateTime @default(now())
+
+  plot Plot @relation(fields: [plotId], references: [id], onDelete: Cascade)
+
+  @@index([plotId])
 }
 
 model NotificationPreference {
