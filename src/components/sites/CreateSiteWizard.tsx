@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { format } from "date-fns";
 import { addWorkingDays } from "@/lib/working-days";
 import { BatchProgrammePreviewDialog } from "./BatchProgrammePreviewDialog";
+import { useConfirm } from "@/hooks/useConfirm";
 import {
   Plus,
   Trash2,
@@ -397,6 +398,45 @@ export function CreateSiteWizard({
   // and behaviour as SiteDetailClient so you learn one flow.
   const { createBlankBatch, createBatchFromTemplate } = usePlotCreation();
 
+  // (May 2026 audit #18 + #25 + #110) Guard against accidental close.
+  // Pre-fix the wizard's Dialog wired onOpenChange directly to the
+  // parent's setter, so a misclick on the backdrop or an accidental
+  // Escape press wiped 5 minutes of typing. Now we ask first when
+  // there's actually anything to lose.
+  const { confirm, dialog: confirmDialog } = useConfirm();
+  const isDirty =
+    siteName.trim().length > 0 ||
+    siteDescription.trim().length > 0 ||
+    siteLocation.trim().length > 0 ||
+    siteAddress.trim().length > 0 ||
+    sitePostcode.trim().length > 0 ||
+    plotBatches.length > 0 ||
+    Object.keys(supplierMappings).length > 0 ||
+    batchPlotNumbersInput.trim().length > 0;
+  const guardedOpenChange = useCallback(
+    async (next: boolean) => {
+      // Opening / programmatic close after submit — no guard.
+      if (next || submitting) {
+        onOpenChange(next);
+        return;
+      }
+      if (!isDirty) {
+        onOpenChange(false);
+        return;
+      }
+      const ok = await confirm({
+        title: "Discard this site?",
+        body:
+          "You haven't created the site yet. Closing now drops the details and any plot batches you've added.",
+        confirmLabel: "Discard",
+        cancelLabel: "Keep editing",
+        danger: true,
+      });
+      if (ok) onOpenChange(false);
+    },
+    [isDirty, submitting, onOpenChange, confirm],
+  );
+
   // Reset on close
   useEffect(() => {
     if (!open) {
@@ -757,8 +797,10 @@ export function CreateSiteWizard({
         : "Step 3 of 3: Supplier mapping";
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className={dialogWidth}>
+    <>
+      {confirmDialog}
+      <Dialog open={open} onOpenChange={guardedOpenChange}>
+        <DialogContent className={dialogWidth}>
         {/* Live-region announces the current step on change */}
         <div role="status" aria-live="polite" className="sr-only">
           {stepAnnouncement}
@@ -1483,7 +1525,8 @@ export function CreateSiteWizard({
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         templates={templates as any}
       />
-    </Dialog>
+      </Dialog>
+    </>
   );
 }
 
