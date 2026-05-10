@@ -1,6 +1,29 @@
 import { createHmac, timingSafeEqual } from "crypto";
 
-const SECRET = process.env.NEXTAUTH_SECRET || "dev-fallback-secret";
+// (May 2026 audit #4) Hard-fail in production if the secret is missing.
+// Pre-fix this used a "dev-fallback-secret" fallback string, which meant
+// a misconfigured production deploy silently accepted forged tokens.
+// Now: dev still allows the fallback (so local development isn't blocked
+// when the .env is missing), but production refuses to start.
+function resolveSecret(): string {
+  const v = process.env.NEXTAUTH_SECRET;
+  if (v && v.length > 0) return v;
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(
+      "NEXTAUTH_SECRET is missing. The app refuses to start in production " +
+        "without it because share-link tokens become forgeable. Set it in " +
+        "Vercel project env vars and redeploy.",
+    );
+  }
+  // Dev: log loudly so it's not silent, but allow the fallback.
+  // eslint-disable-next-line no-console
+  console.warn(
+    "[share-token] WARNING: NEXTAUTH_SECRET unset — using dev-only fallback. Tokens will be invalid in production.",
+  );
+  return "dev-fallback-secret";
+}
+
+const SECRET = resolveSecret();
 
 // ─── Contractor share tokens ──────────────────────────────────────────────────
 

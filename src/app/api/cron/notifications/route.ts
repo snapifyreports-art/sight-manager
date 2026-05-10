@@ -3,14 +3,19 @@ import { prisma } from "@/lib/prisma";
 import { sendPushToAll } from "@/lib/push";
 import { addDays } from "date-fns";
 import { getServerCurrentDate } from "@/lib/dev-date";
+import { checkCronAuth } from "@/lib/cron-auth";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
-  // Verify cron secret (Vercel sends this header automatically)
-  const authHeader = req.headers.get("authorization");
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // (May 2026 audit #4) Single source for cron auth — hard-fails if
+  // CRON_SECRET is missing in production, uses constant-time compare.
+  const authCheck = checkCronAuth(req.headers.get("authorization"));
+  if (!authCheck.ok) {
+    return NextResponse.json(
+      { error: "Unauthorized", reason: authCheck.reason },
+      { status: 401 },
+    );
   }
 
   // (#41) Route through getServerCurrentDate so Dev Mode tests can

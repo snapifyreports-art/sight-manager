@@ -13,6 +13,14 @@ export async function POST(_req: NextRequest) {
   const session = await auth();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
+  // (May 2026 audit #2 cousin) Tenant-wide contractor reassignment must
+  // be CEO/DIRECTOR only — without this, any logged-in user (including
+  // CONTRACTOR role) can shuffle contractor assignments site-wide.
+  const role = (session.user as { role: string }).role;
+  if (role !== "CEO" && role !== "DIRECTOR") {
+    return NextResponse.json({ error: "Admins only" }, { status: 403 });
+  }
+
   // Get all contractor contacts
   const contacts = await prisma.contact.findMany({
     where: { type: "CONTRACTOR" },

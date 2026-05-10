@@ -10,9 +10,13 @@ export const dynamic = "force-dynamic";
 // Sends a daily morning brief email digest to managers (CEO, DIRECTOR, SITE_MANAGER)
 // Scheduled at 6am UTC in vercel.json
 export async function GET(req: NextRequest) {
-  const authHeader = req.headers.get("authorization");
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const { checkCronAuth } = await import("@/lib/cron-auth");
+  const authCheck = checkCronAuth(req.headers.get("authorization"));
+  if (!authCheck.ok) {
+    return NextResponse.json(
+      { error: "Unauthorized", reason: authCheck.reason },
+      { status: 401 },
+    );
   }
 
   // (#42) Route through getServerCurrentDate so Dev Mode tests can

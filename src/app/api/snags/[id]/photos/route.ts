@@ -72,6 +72,33 @@ export async function POST(
       return NextResponse.json({ error: "copyFromUrl is required" }, { status: 400 });
     }
 
+    // (May 2026 audit #6) Restrict copyFromUrl to our own Supabase
+    // storage. Pre-fix this accepted any URL — a malicious caller could
+    // make the server fetch internal-only addresses (cloud metadata,
+    // localhost services) and re-host the response as a "snag photo"
+    // they could read. Classic SSRF. Lock to the project's Supabase
+    // public-bucket origin only.
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    if (!supabaseUrl) {
+      return NextResponse.json(
+        { error: "Server misconfigured: NEXT_PUBLIC_SUPABASE_URL unset" },
+        { status: 500 },
+      );
+    }
+    let parsed: URL;
+    try {
+      parsed = new URL(copyFromUrl);
+    } catch {
+      return NextResponse.json({ error: "Invalid copyFromUrl" }, { status: 400 });
+    }
+    const supabaseOrigin = new URL(supabaseUrl).origin;
+    if (parsed.origin !== supabaseOrigin) {
+      return NextResponse.json(
+        { error: "copyFromUrl must point to the project's storage" },
+        { status: 400 },
+      );
+    }
+
     // Fetch the image from the public URL
     const imgRes = await fetch(copyFromUrl);
     if (!imgRes.ok) {
