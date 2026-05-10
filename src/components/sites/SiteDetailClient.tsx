@@ -84,6 +84,8 @@ import { usePlotCreation } from "@/hooks/usePlotCreation";
 import { SnagAgeingReport } from "@/components/snags/SnagAgeingReport";
 import { CashFlowReport } from "@/components/reports/CashFlowReport";
 import { SiteCustomerPagesPanel } from "@/components/sites/SiteCustomerPagesPanel";
+import { SiteStoryPanel } from "@/components/sites/SiteStoryPanel";
+import { SiteClosurePanel } from "@/components/sites/SiteClosurePanel";
 import { Badge } from "@/components/ui/badge";
 import { HelpTip } from "@/components/shared/HelpTip";
 
@@ -2240,6 +2242,21 @@ export function SiteDetailClient({
           <div className={activeTab !== "customer-pages" ? "hidden" : undefined}>
             {visitedTabs.has("customer-pages") && (
               <SiteCustomerPagesPanel siteId={site.id} />
+            )}
+          </div>
+
+          {/* Site Story — internal retrospective. Builds continuously
+              as the site runs. Same data feeds the Handover ZIP. */}
+          <div className={activeTab !== "story" ? "hidden" : undefined}>
+            {visitedTabs.has("story") && (
+              <SiteStoryPanel siteId={site.id} />
+            )}
+          </div>
+
+          {/* Site Closure — end-of-site Handover ZIP generator. */}
+          <div className={activeTab !== "site-closure" ? "hidden" : undefined}>
+            {visitedTabs.has("site-closure") && (
+              <SiteClosurePanel siteId={site.id} />
             )}
           </div>
         </div>

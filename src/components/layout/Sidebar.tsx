@@ -77,6 +77,8 @@ const SITE_TAB_GROUPS = [
       { label: "Critical Path",  tab: "critical-path" },
       { label: "QR Codes",       tab: "qr-codes" },
       { label: "Customer Pages", tab: "customer-pages" },
+      { label: "Story",          tab: "story" },
+      { label: "Site Closure",   tab: "site-closure" },
     ],
   },
 ];

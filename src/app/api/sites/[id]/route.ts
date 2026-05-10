@@ -107,6 +107,16 @@ export async function PUT(
           postcode: postcode?.trim() || null,
         }),
         ...(status !== undefined && { status }),
+        // Stamp completedAt the FIRST time status flips to COMPLETED so
+        // the Story tab + Handover ZIP have a canonical site closure
+        // date. Re-opening a closed site (COMPLETED → anything else)
+        // clears it so a future re-close gets a fresh timestamp.
+        ...(status !== undefined && status === "COMPLETED" && existing.status !== "COMPLETED"
+          ? { completedAt: new Date() }
+          : {}),
+        ...(status !== undefined && status !== "COMPLETED" && existing.status === "COMPLETED"
+          ? { completedAt: null }
+          : {}),
         ...(assignedToId !== undefined && { assignedToId: assignedToId || null }),
       },
       include: {

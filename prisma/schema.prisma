@@ -140,6 +140,11 @@ model Site {
   status       SiteStatus @default(ACTIVE)
   createdById  String
   assignedToId String?
+  // Set when site status flips to COMPLETED — used as the canonical
+  // "story end date" for the Site Story tab and the Handover ZIP. Not
+  // updatable directly; set via a status-change side effect so we
+  // capture the actual moment of closure rather than mutation time.
+  completedAt  DateTime?
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 
