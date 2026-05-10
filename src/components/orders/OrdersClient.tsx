@@ -788,6 +788,11 @@ export function OrdersClient({
   const [plotFilter, setPlotFilter] = useState<string>("ALL");
   const [dateFrom, setDateFrom] = useState<string>("");
   const [dateTo, setDateTo] = useState<string>("");
+  // (May 2026 audit #109) Search across order details / supplier name /
+  // plot name / item names. Free-text search complements the chip
+  // filters above — managers asking "did we order the plumbing for
+  // plot 14 yet?" need to type, not click through 40 orders.
+  const [searchQuery, setSearchQuery] = useState<string>("");
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
 
@@ -815,6 +820,7 @@ export function OrdersClient({
   const siteFilter = searchParams.get("site") ?? "";
 
   const filteredOrders = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
     return orders.filter((order) => {
       if (statusFilter === "OVERDUE") {
         if (!isOverdue(order)) return false;
@@ -828,9 +834,26 @@ export function OrdersClient({
       if (dateFrom && !order.expectedDeliveryDate) return false;
       if (dateTo && order.expectedDeliveryDate && order.expectedDeliveryDate.split("T")[0] > dateTo) return false;
       if (dateTo && !order.expectedDeliveryDate) return false;
+      // (May 2026 audit #109) Free-text search across the fields a
+      // manager would naturally type: order details, supplier name,
+      // plot name, plot number, site name, job name, item names.
+      if (q) {
+        const haystack = [
+          order.orderDetails ?? "",
+          order.itemsDescription ?? "",
+          order.supplier?.name ?? "",
+          order.job?.name ?? "",
+          order.job?.plot?.name ?? "",
+          order.job?.plot?.site?.name ?? "",
+          ...(order.orderItems?.map((i) => i.name) ?? []),
+        ]
+          .join(" ")
+          .toLowerCase();
+        if (!haystack.includes(q)) return false;
+      }
       return true;
     });
-  }, [orders, statusFilter, supplierFilter, plotFilter, siteFilter, dateFrom, dateTo]);
+  }, [orders, statusFilter, supplierFilter, plotFilter, siteFilter, dateFrom, dateTo, searchQuery]);
 
   // Build plot options dynamically from order data
   const plotOptions = useMemo(() => {
@@ -1079,7 +1102,20 @@ export function OrdersClient({
           />
         </div>
 
-        {(statusFilter !== "ALL" || supplierFilter !== "ALL" || plotFilter !== "ALL" || dateFrom || dateTo) && (
+        {/* (May 2026 audit #109) Free-text search across orders. */}
+        <div className="grid gap-1 flex-1 min-w-[200px]">
+          <label htmlFor="orders-search-input" className="text-xs font-medium text-muted-foreground">Search</label>
+          <Input
+            id="orders-search-input"
+            type="search"
+            placeholder="Item, supplier, plot…"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="h-9"
+          />
+        </div>
+
+        {(statusFilter !== "ALL" || supplierFilter !== "ALL" || plotFilter !== "ALL" || dateFrom || dateTo || searchQuery) && (
           <Button
             variant="ghost"
             size="sm"
@@ -1090,6 +1126,7 @@ export function OrdersClient({
               setPlotFilter("ALL");
               setDateFrom("");
               setDateTo("");
+              setSearchQuery("");
             }}
           >
             Clear filters
