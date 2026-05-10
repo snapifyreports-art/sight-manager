@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { apiError } from "@/lib/api-errors";
+import { sessionHasPermission } from "@/lib/permissions";
 import * as XLSX from "xlsx";
 
 export const dynamic = "force-dynamic";
@@ -21,6 +22,15 @@ export async function POST(
   const session = await auth();
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  // (May 2026 audit #67) Bulk pricelist upload — same MANAGE_ORDERS gate
+  // as the per-item POST/PUT/DELETE.
+  if (!sessionHasPermission(session.user, "MANAGE_ORDERS")) {
+    return NextResponse.json(
+      { error: "You don't have permission to upload pricelist files" },
+      { status: 403 },
+    );
   }
 
   const { id } = await params;

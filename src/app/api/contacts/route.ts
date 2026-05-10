@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { ContactType } from "@prisma/client";
 import { apiError } from "@/lib/api-errors";
+import { sessionHasPermission } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -92,6 +93,17 @@ export async function POST(req: NextRequest) {
   const session = await auth();
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  // (May 2026 audit #68) Contact creation gated to MANAGE_ORDERS — pre-fix
+  // anyone authenticated (incl. CONTRACTOR role) could add contractors /
+  // suppliers with arbitrary phone/email/notes data, polluting the
+  // company directory and seeding the email-relay allowlist.
+  if (!sessionHasPermission(session.user, "MANAGE_ORDERS")) {
+    return NextResponse.json(
+      { error: "You don't have permission to create contacts" },
+      { status: 403 },
+    );
   }
 
   const body = await req.json();

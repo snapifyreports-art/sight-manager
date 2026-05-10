@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { sessionHasPermission } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -11,6 +12,15 @@ export async function PUT(
   const session = await auth();
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  // (May 2026 audit #67) Pricelist mutations are commercially sensitive
+  // — only roles with MANAGE_ORDERS may write.
+  if (!sessionHasPermission(session.user, "MANAGE_ORDERS")) {
+    return NextResponse.json(
+      { error: "You don't have permission to edit supplier pricelists" },
+      { status: 403 },
+    );
   }
 
   const { itemId } = await params;
@@ -42,6 +52,14 @@ export async function DELETE(
   const session = await auth();
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  // (May 2026 audit #67) Pricelist deletion gated to MANAGE_ORDERS.
+  if (!sessionHasPermission(session.user, "MANAGE_ORDERS")) {
+    return NextResponse.json(
+      { error: "You don't have permission to delete pricelist items" },
+      { status: 403 },
+    );
   }
 
   const { itemId } = await params;

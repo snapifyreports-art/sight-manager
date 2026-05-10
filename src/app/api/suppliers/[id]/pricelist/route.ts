@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { sessionHasPermission } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -30,6 +31,17 @@ export async function POST(
   const session = await auth();
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  // (May 2026 audit #67) Pricelist mutations are commercially sensitive
+  // — only roles that handle supplier negotiations may write. Pre-fix
+  // every authenticated user (including CONTRACTOR role) could create,
+  // edit, and delete any supplier's pricing data.
+  if (!sessionHasPermission(session.user, "MANAGE_ORDERS")) {
+    return NextResponse.json(
+      { error: "You don't have permission to edit supplier pricelists" },
+      { status: 403 },
+    );
   }
 
   const { id } = await params;

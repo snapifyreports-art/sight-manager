@@ -10,22 +10,41 @@ import {
 
 export const dynamic = "force-dynamic";
 
-// (May 2026 audit #9) Allow only emails of contacts or suppliers
+// (May 2026 audit #9 + #76) Allow only emails of contacts or suppliers
 // already in the tenant. Case-insensitive match.
-async function isKnownRecipient(email: string): Promise<boolean> {
+//
+// Returns the canonical email FROM THE DB (not the user-supplied
+// string) when found. The caller MUST send to the returned email,
+// not the original input. This:
+//   1. Eliminates the TOCTOU window between "is this allowed" and
+//      "send to this address" — we send to whatever the directory
+//      says now, so a contact deleted between check and send can't
+//      receive an email.
+//   2. Prevents header injection — the user-supplied `to` could
+//      have been crafted to inject CR/LF into SMTP headers, but the
+//      DB email is validated at insert time.
+async function resolveKnownRecipient(
+  email: string,
+): Promise<{ canonicalEmail: string; contactId: string | null; supplierId: string | null } | null> {
   const normalised = email.trim().toLowerCase();
-  if (!normalised) return false;
+  if (!normalised) return null;
   const [contact, supplier] = await Promise.all([
     prisma.contact.findFirst({
       where: { email: { equals: normalised, mode: "insensitive" } },
-      select: { id: true },
+      select: { id: true, email: true },
     }),
     prisma.supplier.findFirst({
       where: { contactEmail: { equals: normalised, mode: "insensitive" } },
-      select: { id: true },
+      select: { id: true, contactEmail: true },
     }),
   ]);
-  return !!(contact || supplier);
+  if (contact?.email) {
+    return { canonicalEmail: contact.email, contactId: contact.id, supplierId: null };
+  }
+  if (supplier?.contactEmail) {
+    return { canonicalEmail: supplier.contactEmail, contactId: null, supplierId: supplier.id };
+  }
+  return null;
 }
 
 export async function POST(req: NextRequest) {
@@ -53,13 +72,17 @@ export async function POST(req: NextRequest) {
   // supplier email already in the tenant — pre-fix any logged-in user
   // could send templated emails to arbitrary addresses, abusing the
   // verified domain as a spam relay. Lock to known recipients.
-  const isKnown = await isKnownRecipient(to);
-  if (!isKnown) {
+  // (audit #76) Capture the canonical email from the DB and send to
+  // it — closes the TOCTOU window between check and send and blocks
+  // header-injection in the user-supplied `to` string.
+  const recipient = await resolveKnownRecipient(to);
+  if (!recipient) {
     return NextResponse.json(
       { error: "Recipient must be an existing contact or supplier email" },
       { status: 403 },
     );
   }
+  const canonicalTo = recipient.canonicalEmail;
 
   let subject: string;
   let html: string;
@@ -104,13 +127,16 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    await sendEmail({ to, subject, html });
+    // (audit #76) Always send to the canonical email pulled from the DB,
+    // never the user-supplied string.
+    await sendEmail({ to: canonicalTo, subject, html });
 
-    // Log the notification event
+    // Log the notification event — record both the recipient ID and the
+    // canonical email so the audit log survives a contact rename later.
     await prisma.eventLog.create({
       data: {
         type: "NOTIFICATION",
-        description: `Email sent to ${recipientName} (${to}): ${subject}`,
+        description: `Email sent to ${recipientName} (${canonicalTo}): ${subject}`,
         userId: session.user.id,
       },
     });

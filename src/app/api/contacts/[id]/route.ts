@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { apiError } from "@/lib/api-errors";
+import { sessionHasPermission } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -88,6 +89,14 @@ export async function PUT(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  // (May 2026 audit #68) Contact edits gated to MANAGE_ORDERS.
+  if (!sessionHasPermission(session.user, "MANAGE_ORDERS")) {
+    return NextResponse.json(
+      { error: "You don't have permission to edit contacts" },
+      { status: 403 },
+    );
+  }
+
   const { id } = await params;
   const body = await req.json();
 
@@ -129,6 +138,14 @@ export async function DELETE(
   const session = await auth();
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  // (May 2026 audit #68) Contact deletion gated to MANAGE_ORDERS.
+  if (!sessionHasPermission(session.user, "MANAGE_ORDERS")) {
+    return NextResponse.json(
+      { error: "You don't have permission to delete contacts" },
+      { status: 403 },
+    );
   }
 
   const { id } = await params;
