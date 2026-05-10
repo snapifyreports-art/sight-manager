@@ -344,9 +344,16 @@ export function GanttChart({ jobs, enableDateControls = false }: GanttChartProps
   }, [timelineStart]);
 
   if (allJobs.length === 0) {
+    // (May 2026 audit #39) Coach toward populating the timeline rather
+    // than leaving the user looking at a flat grey strip with no clue
+    // why nothing's here.
     return (
-      <div className="flex items-center justify-center h-48 text-sm text-gray-400">
-        No jobs to display on the timeline.
+      <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-slate-200 py-12 text-center">
+        <p className="text-sm font-medium text-slate-700">Timeline is empty</p>
+        <p className="mt-1 max-w-md text-xs text-slate-500">
+          Add plots to this site (or apply a template to existing plots) and
+          their jobs will appear here as a Gantt chart.
+        </p>
       </div>
     );
   }

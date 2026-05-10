@@ -80,10 +80,20 @@ export function DocumentList({ documents, onDelete, level = "site" }: DocumentLi
   };
 
   if (documents.length === 0) {
+    // (May 2026 audit #39) Empty state coach. Pre-fix this just said
+    // "No documents uploaded yet" with no hint about what to do or
+    // why. The follow-up copy tells managers what categories matter
+    // for the handover ZIP — certs, drawings, RAMS — so they upload
+    // the right things rather than a folder of holiday photos.
     return (
-      <div className="flex flex-col items-center py-8 text-muted-foreground">
+      <div className="flex flex-col items-center py-10 text-center text-muted-foreground">
         <File className="mb-2 size-8 opacity-30" />
-        <p className="text-sm">No documents uploaded yet</p>
+        <p className="text-sm font-medium text-slate-700">No documents uploaded yet</p>
+        <p className="mt-1 max-w-md text-xs text-slate-500">
+          Upload certificates, drawings, specifications, and RAMS as you go.
+          They&apos;ll be picked up automatically by the Handover ZIP at site
+          completion.
+        </p>
       </div>
     );
   }

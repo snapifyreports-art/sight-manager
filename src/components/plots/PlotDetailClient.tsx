@@ -563,7 +563,17 @@ function PlotOverview({
           </CardHeader>
           <CardContent>
             {stageGroups.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No jobs yet</p>
+              // (May 2026 audit #39) Coach the user toward the canonical
+              // way to populate a blank plot — apply a template — rather
+              // than just saying "No jobs yet" and leaving them stuck.
+              <div className="rounded-lg border border-dashed border-slate-200 p-4 text-center">
+                <Briefcase className="mx-auto size-6 text-slate-300" />
+                <p className="mt-2 text-sm font-medium text-slate-700">No jobs yet</p>
+                <p className="mt-1 text-xs text-slate-500">
+                  Apply a plot template from the site&apos;s Plots tab to populate
+                  the programme in one click, or add jobs individually below.
+                </p>
+              </div>
             ) : (
               <div className="space-y-3">
                 {stageGroups.map((group) => {
