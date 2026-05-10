@@ -29,6 +29,8 @@ export default async function DashboardPage() {
     jobStatusCounts,
     recentEvents,
     trafficLightJobs,
+    overdueJobs,
+    staleSnags,
   ] = await Promise.all([
     // Total sites (filtered)
     prisma.site.count({ where: siteWhere }),
@@ -86,6 +88,59 @@ export default async function DashboardPage() {
         assignedTo: { select: { name: true } },
       },
     }),
+
+    // (May 2026 audit #46) At-Risk: overdue jobs (endDate passed,
+    // status not COMPLETED, leaf-only). Sorted by how overdue they
+    // are so the worst floats to the top.
+    prisma.job.findMany({
+      take: 8,
+      where: {
+        endDate: { lt: new Date() },
+        status: { not: "COMPLETED" },
+        ...jobSiteWhere,
+        children: { none: {} },
+      },
+      orderBy: { endDate: "asc" },
+      select: {
+        id: true,
+        name: true,
+        endDate: true,
+        plot: {
+          select: {
+            id: true,
+            name: true,
+            plotNumber: true,
+            site: { select: { id: true, name: true } },
+          },
+        },
+      },
+    }),
+
+    // (May 2026 audit #46) At-Risk: stale open snags — open more
+    // than 30 days. Surfaces things slipping through the cracks.
+    prisma.snag.findMany({
+      take: 8,
+      where: {
+        status: { in: ["OPEN", "IN_PROGRESS"] },
+        createdAt: { lt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) },
+        ...(siteIds !== null ? { plot: { siteId: { in: siteIds } } } : {}),
+      },
+      orderBy: { createdAt: "asc" },
+      select: {
+        id: true,
+        description: true,
+        createdAt: true,
+        priority: true,
+        plot: {
+          select: {
+            id: true,
+            name: true,
+            plotNumber: true,
+            site: { select: { id: true, name: true } },
+          },
+        },
+      },
+    }),
   ]);
 
   // Build the job status map with defaults
@@ -135,6 +190,20 @@ export default async function DashboardPage() {
       job: event.job,
     })),
     trafficLightJobs,
+    // (May 2026 audit #46) At-Risk panel feeds.
+    overdueJobs: overdueJobs.map((j) => ({
+      id: j.id,
+      name: j.name,
+      endDate: j.endDate?.toISOString() ?? null,
+      plot: j.plot,
+    })),
+    staleSnags: staleSnags.map((s) => ({
+      id: s.id,
+      description: s.description,
+      createdAt: s.createdAt.toISOString(),
+      priority: s.priority,
+      plot: s.plot,
+    })),
   };
 
   return <DashboardClient data={data} />;

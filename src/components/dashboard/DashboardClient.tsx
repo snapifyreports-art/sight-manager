@@ -14,6 +14,8 @@ import {
   Truck,
   PackageCheck,
   Send,
+  AlertTriangle,
+  Bug,
 } from "lucide-react";
 import {
   Card,
@@ -76,11 +78,38 @@ interface TrafficLightJob {
   assignedTo: { name: string } | null;
 }
 
+interface OverdueJob {
+  id: string;
+  name: string;
+  endDate: string | null;
+  plot: {
+    id: string;
+    name: string;
+    plotNumber: string | null;
+    site: { id: string; name: string };
+  };
+}
+
+interface StaleSnag {
+  id: string;
+  description: string;
+  createdAt: string;
+  priority: string;
+  plot: {
+    id: string;
+    name: string;
+    plotNumber: string | null;
+    site: { id: string; name: string };
+  };
+}
+
 export interface DashboardData {
   stats: StatsData;
   jobsByStatus: JobsByStatus;
   recentEvents: EventLogEntry[];
   trafficLightJobs: TrafficLightJob[];
+  overdueJobs: OverdueJob[];
+  staleSnags: StaleSnag[];
 }
 
 // ---------- Helpers ----------
@@ -249,6 +278,112 @@ function StatsCards({ stats }: { stats: StatsData }) {
         );
       })}
     </div>
+  );
+}
+
+// ---------- At-Risk Panel ----------
+//
+// (May 2026 audit #46) Surface things the manager should look at now.
+// Two columns: overdue jobs (endDate passed) + stale snags (open
+// >30d). Renders nothing when both lists are empty so the dashboard
+// stays calm when nothing's burning.
+
+function AtRiskPanel({
+  overdueJobs,
+  staleSnags,
+}: {
+  overdueJobs: OverdueJob[];
+  staleSnags: StaleSnag[];
+}) {
+  if (overdueJobs.length === 0 && staleSnags.length === 0) return null;
+
+  const dayCount = (iso: string | null): number => {
+    if (!iso) return 0;
+    const ms = Date.now() - new Date(iso).getTime();
+    return Math.max(0, Math.floor(ms / (24 * 60 * 60 * 1000)));
+  };
+
+  return (
+    <Card className="border-amber-200 bg-amber-50/30">
+      <CardHeader className="pb-3">
+        <div className="flex items-center gap-2">
+          <AlertTriangle className="size-4 text-amber-600" aria-hidden="true" />
+          <CardTitle className="text-base text-amber-900">At-Risk</CardTitle>
+        </div>
+        <CardDescription className="text-xs text-amber-800">
+          Things slipping. Click any row to drill into the plot.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-4 md:grid-cols-2">
+        {overdueJobs.length > 0 && (
+          <div>
+            <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-amber-700">
+              <Clock className="size-3.5" aria-hidden="true" />
+              Overdue jobs ({overdueJobs.length})
+            </p>
+            <ul className="space-y-1.5">
+              {overdueJobs.map((j) => {
+                const days = dayCount(j.endDate);
+                return (
+                  <li key={j.id}>
+                    <Link
+                      href={`/sites/${j.plot.site.id}/plots/${j.plot.id}`}
+                      className="flex items-center justify-between gap-2 rounded-md bg-white px-3 py-2 text-xs ring-1 ring-amber-100 hover:ring-amber-300"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate font-medium text-slate-900">
+                          {j.plot.plotNumber ? `Plot ${j.plot.plotNumber}` : j.plot.name} · {j.name}
+                        </p>
+                        <p className="truncate text-[11px] text-slate-500">
+                          {j.plot.site.name}
+                        </p>
+                      </div>
+                      <span className="shrink-0 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
+                        {days}d late
+                      </span>
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
+
+        {staleSnags.length > 0 && (
+          <div>
+            <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-amber-700">
+              <Bug className="size-3.5" aria-hidden="true" />
+              Stale snags &gt;30d ({staleSnags.length})
+            </p>
+            <ul className="space-y-1.5">
+              {staleSnags.map((s) => {
+                const days = dayCount(s.createdAt);
+                return (
+                  <li key={s.id}>
+                    <Link
+                      href={`/sites/${s.plot.site.id}?tab=snags`}
+                      className="flex items-center justify-between gap-2 rounded-md bg-white px-3 py-2 text-xs ring-1 ring-amber-100 hover:ring-amber-300"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate font-medium text-slate-900">
+                          {s.description}
+                        </p>
+                        <p className="truncate text-[11px] text-slate-500">
+                          {s.plot.plotNumber ? `Plot ${s.plot.plotNumber}` : s.plot.name} · {s.plot.site.name}
+                        </p>
+                      </div>
+                      <span className="shrink-0 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
+                        {days}d open
+                      </span>
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -544,6 +679,12 @@ export function DashboardClient({ data }: { data: DashboardData }) {
 
       {/* Stats Row */}
       <StatsCards stats={data.stats} />
+
+      {/* (May 2026 audit #46) At-Risk panel surfaces things the
+          manager should worry about right now: overdue jobs (end
+          date passed, not COMPLETED) and stale snags (open >30 days).
+          Hidden when there's nothing to show — no noise in calm weeks. */}
+      <AtRiskPanel overdueJobs={data.overdueJobs} staleSnags={data.staleSnags} />
 
       {/* Traffic Light System */}
       <TrafficLightSection
