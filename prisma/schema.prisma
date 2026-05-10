@@ -163,15 +163,18 @@ model Site {
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 
-  createdBy     User            @relation(fields: [createdById], references: [id])
-  assignedTo    User?           @relation("AssignedSites", fields: [assignedToId], references: [id])
-  plots         Plot[]
-  events        EventLog[]
-  rainedOffDays RainedOffDay[]
-  documents     SiteDocument[]
-  userAccess    UserSite[]
-  oneOffOrders  MaterialOrder[] // back-relation for MaterialOrder.siteId (one-off orders)
-  watchers      WatchedSite[]
+  createdBy        User                 @relation(fields: [createdById], references: [id])
+  assignedTo       User?                @relation("AssignedSites", fields: [assignedToId], references: [id])
+  plots            Plot[]
+  events           EventLog[]
+  rainedOffDays    RainedOffDay[]
+  documents        SiteDocument[]
+  userAccess       UserSite[]
+  oneOffOrders     MaterialOrder[] // back-relation for MaterialOrder.siteId (one-off orders)
+  watchers         WatchedSite[]
+  complianceItems  SiteComplianceItem[]
+  toolboxTalks     ToolboxTalk[]
+  nonConformances  NCR[]
 }
 
 model RainedOffDay {
@@ -233,6 +236,7 @@ model Plot {
   materials         PlotMaterial[]
   oneOffOrders      MaterialOrder[] // back-relation for MaterialOrder.plotId (plot-level one-off)
   journalEntries    PlotJournalEntry[]
+  ncrs              NCR[]
 
   @@unique([siteId, plotNumber])
   @@index([siteId]) // hot path: every site page loads plots
@@ -300,6 +304,7 @@ model Job {
   photos      JobPhoto[]
   documents   SiteDocument[]
   snags       Snag[]
+  ncrs        NCR[]
 
   @@index([plotId])       // hot: programme, daily-brief, reports join on plot
   @@index([status])       // hot: "NOT_STARTED where startDate < today" etc.
@@ -454,6 +459,7 @@ model Contact {
   templateJobs   TemplateJob[]
   snags          Snag[]
   documents      SiteDocument[]
+  ncrs           NCR[]
 }
 
 // ---------- Plot Templates ----------
@@ -858,12 +864,13 @@ model SiteDocument {
   uploadedById String
   createdAt    DateTime @default(now())
 
-  site          Site?               @relation(fields: [siteId], references: [id], onDelete: Cascade)
-  plot          Plot?               @relation(fields: [plotId], references: [id], onDelete: SetNull)
-  job           Job?                @relation(fields: [jobId], references: [id], onDelete: SetNull)
-  contact       Contact?            @relation(fields: [contactId], references: [id], onDelete: Cascade)
-  uploadedBy    User                @relation("UploadedDocuments", fields: [uploadedById], references: [id])
-  handoverItems HandoverChecklist[]
+  site            Site?                @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  plot            Plot?                @relation(fields: [plotId], references: [id], onDelete: SetNull)
+  job             Job?                 @relation(fields: [jobId], references: [id], onDelete: SetNull)
+  contact         Contact?             @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  uploadedBy      User                 @relation("UploadedDocuments", fields: [uploadedById], references: [id])
+  handoverItems   HandoverChecklist[]
+  complianceItems SiteComplianceItem[] @relation("ComplianceDocument")
 
   @@index([contactId])
   @@index([siteId])        // hot: site-docs list
@@ -872,6 +879,98 @@ model SiteDocument {
 }
 
 // ---------- Handover Pack ----------
+
+/// (May 2026 audit #57) Per-site compliance tracker. Each row is one
+/// item the site must hold: insurance certificate, CDM appointment,
+/// section-61 noise consent, environment-agency permit, etc.
+/// `expiresAt` is optional — some compliance items don't expire.
+/// Status flips to EXPIRED automatically when expiresAt < now.
+model SiteComplianceItem {
+  id          String                   @id @default(cuid())
+  siteId      String
+  name        String
+  category    String? // INSURANCE | PERMIT | CDM | ENVIRONMENT | OTHER
+  status      SiteComplianceStatus     @default(PENDING)
+  documentId  String?
+  expiresAt   DateTime?
+  notes       String?
+  createdAt   DateTime                 @default(now())
+  updatedAt   DateTime                 @updatedAt
+
+  site     Site          @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  document SiteDocument? @relation("ComplianceDocument", fields: [documentId], references: [id], onDelete: SetNull)
+
+  @@index([siteId])
+  @@index([expiresAt])
+}
+
+enum SiteComplianceStatus {
+  PENDING
+  ACTIVE
+  EXPIRED
+  EXEMPT
+}
+
+/// (May 2026 audit #176) Toolbox talks: short safety briefings logged
+/// when delivered. Each row records the topic, when, and who attended
+/// (as a comma-separated free text field — full attendance schema would
+/// require linking to Contact rows for non-User attendees).
+model ToolboxTalk {
+  id           String   @id @default(cuid())
+  siteId       String
+  topic        String
+  notes        String?
+  attendees    String? // free-text comma list — supports contractor names + worker names
+  deliveredAt  DateTime @default(now())
+  deliveredBy  String? // userId of the manager who ran it (nullable so future scripted entries are possible)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  site Site @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@index([siteId, deliveredAt])
+}
+
+/// (May 2026 audit #178) Non-Conformance Report — heavier than a snag.
+/// Raised when work doesn't meet spec, requires investigation, and is
+/// QA-process bound. Tracks the cycle: raised → investigation →
+/// corrective action → closed. Distinct from snags so the snag flow
+/// stays light + frequent.
+model NCR {
+  id                String       @id @default(cuid())
+  siteId            String
+  plotId            String?
+  jobId             String?
+  contactId         String?
+  ref               String? // optional short reference shown on PDFs (e.g. NCR-001)
+  title             String
+  description       String
+  rootCause         String?
+  correctiveAction  String?
+  status            NCRStatus    @default(OPEN)
+  raisedById        String?
+  closedById        String?
+  raisedAt          DateTime     @default(now())
+  closedAt          DateTime?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+
+  site     Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  plot     Plot?    @relation(fields: [plotId], references: [id], onDelete: SetNull)
+  job      Job?     @relation(fields: [jobId], references: [id], onDelete: SetNull)
+  contact  Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+
+  @@index([siteId, status])
+  @@index([plotId])
+}
+
+enum NCRStatus {
+  OPEN
+  INVESTIGATING
+  AWAITING_CORRECTION
+  RESOLVED
+  CLOSED
+}
 
 model HandoverChecklist {
   id          String    @id @default(cuid())
