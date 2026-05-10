@@ -295,6 +295,11 @@ function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: boolean; on
                 )}
                 <button
                   onClick={() => toggleGroup(group.label)}
+                  // (May 2026 a11y audit #123) aria-expanded so screen
+                  // readers announce the collapsed/expanded state of
+                  // the section. The chevron is decorative — its
+                  // rotation is the visual mirror of aria-expanded.
+                  aria-expanded={isOpen}
                   className={cn(
                     "group flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-[13px] font-medium transition-all duration-150",
                     hasActive
@@ -305,12 +310,12 @@ function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: boolean; on
                   <group.icon className={cn(
                     "size-[18px] shrink-0",
                     hasActive ? "text-blue-600" : "text-muted-foreground/70 group-hover:text-foreground"
-                  )} />
+                  )} aria-hidden="true" />
                   <span className="flex-1 text-left">{group.label}</span>
                   <ChevronDown className={cn(
                     "size-3.5 shrink-0 transition-transform duration-200",
                     isOpen && "rotate-180"
-                  )} />
+                  )} aria-hidden="true" />
                 </button>
                 {isOpen && (
                   <div className="mb-1 pl-9">

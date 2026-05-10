@@ -339,12 +339,17 @@ export function SiteStoryPanel({ siteId }: { siteId: string }) {
                 <button
                   type="button"
                   onClick={() => setExpandedPlot(expanded ? null : p.id)}
+                  // (May 2026 a11y audit #123) aria-expanded so screen
+                  // readers announce the open/closed state of the
+                  // plot card. Chevron is decorative, mirrors the state.
+                  aria-expanded={expanded}
+                  aria-label={`Plot ${p.plotNumber || ""} story — ${expanded ? "collapse" : "expand"}`}
                   className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-slate-50"
                 >
                   {expanded ? (
-                    <ChevronDown className="size-4 text-slate-400" />
+                    <ChevronDown className="size-4 text-slate-400" aria-hidden="true" />
                   ) : (
-                    <ChevronRight className="size-4 text-slate-400" />
+                    <ChevronRight className="size-4 text-slate-400" aria-hidden="true" />
                   )}
                   <div className="min-w-0 flex-1">
                     <div className="flex items-baseline gap-2">
