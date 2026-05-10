@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { CheckCircle2, Circle, Hammer, Home as HomeIcon, AlertCircle } from "lucide-react";
+import { CustomerNotifyToggle } from "./CustomerNotifyToggle";
 
 export const dynamic = "force-dynamic";
 
@@ -169,6 +170,10 @@ export default async function ProgressPage({
               </p>
             ) : null;
           })()}
+          {/* (May 2026 audit #196) Buyer can opt in to browser push
+              for new updates. Renders nothing if push isn't supported
+              or the user denied permission earlier. */}
+          <CustomerNotifyToggle token={token} />
         </header>
 
         {/* ─── Progress summary ─── */}
