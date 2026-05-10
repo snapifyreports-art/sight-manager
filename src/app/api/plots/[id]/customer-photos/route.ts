@@ -90,6 +90,38 @@ export async function PATCH(
         }),
       ),
     );
+
+    // (May 2026 audit #196) If at least one photo was flipped to
+    // sharedWithCustomer = true, fire a single customer push. We
+    // dedupe by the operation rather than per-photo — a manager
+    // bulk-sharing 12 photos at once shouldn't buzz the buyer 12
+    // times. Best-effort, fire-and-forget.
+    const sharedCount = updates.filter((u) => u.shared).length;
+    if (sharedCount > 0) {
+      void (async () => {
+        try {
+          const plot = await prisma.plot.findUnique({
+            where: { id },
+            select: { shareToken: true, shareEnabled: true },
+          });
+          if (plot?.shareToken && plot.shareEnabled) {
+            const { sendPushToPlotCustomers } = await import("@/lib/push");
+            await sendPushToPlotCustomers(id, {
+              title: "📸 New photos of your home",
+              body:
+                sharedCount === 1
+                  ? "A new photo was just added to your build."
+                  : `${sharedCount} new photos were added to your build.`,
+              url: `/progress/${plot.shareToken}`,
+              tag: "customer-photos",
+            });
+          }
+        } catch (err) {
+          console.warn("[customer-photos] push failed:", err);
+        }
+      })();
+    }
+
     return NextResponse.json({ success: true, count: updates.length });
   } catch (err) {
     return apiError(err, "Failed to update photo share flags");
