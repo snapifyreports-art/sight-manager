@@ -419,6 +419,12 @@ export function SnagList({ snags, onSelect, onRefresh, showPlot, highlightId, si
                   {/* Photo thumbnails */}
                   {snag.photos && snag.photos.length > 0 && (
                     <div className="mt-2 flex gap-1">
+                      {/* (May 2026 a11y audit #119) Use the snag
+                          description as photo alt text — gives a
+                          screen reader user the same context a
+                          sighted user gets from the thumbnail next
+                          to the description. Trimmed to 100 chars
+                          to keep announcements short. */}
                       {snag.photos.slice(0, 3).map((p) => (
                         <div
                           key={p.id}
@@ -426,7 +432,7 @@ export function SnagList({ snags, onSelect, onRefresh, showPlot, highlightId, si
                         >
                           <img
                             src={p.url}
-                            alt=""
+                            alt={`Photo of snag: ${(snag.description ?? "").slice(0, 100)}`}
                             className="size-full object-cover"
                           />
                         </div>

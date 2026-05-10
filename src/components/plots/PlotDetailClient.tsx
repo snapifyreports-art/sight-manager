@@ -600,14 +600,23 @@ function PlotOverview({
                             style={{ width: `${pct}%` }}
                           />
                         </div>
-                        <div className="flex gap-1">
+                        <div className="flex gap-1" role="list" aria-label="Job statuses">
+                          {/* (May 2026 a11y audit #36) Color-only status
+                              dots failed colour-blind users + screen
+                              readers. The title attribute alone isn't
+                              announced reliably (Safari/VoiceOver). Each
+                              dot now has role="img" + aria-label so the
+                              status word is read out, while sighted
+                              users still see the compact dot strip. */}
                           {group.jobs.map((job) => {
                             const cfg =
                               JOB_STATUS_CONFIG[job.status] ??
                               JOB_STATUS_CONFIG.NOT_STARTED;
                             return (
-                              <div
+                              <span
                                 key={job.id}
+                                role="img"
+                                aria-label={`${job.name}: ${cfg.label}`}
                                 title={`${job.name} — ${cfg.label}`}
                                 className={`size-2 rounded-full ${cfg.dotColor.replace("text-", "bg-")}`}
                               />

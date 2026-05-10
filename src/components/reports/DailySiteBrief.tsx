@@ -3252,14 +3252,23 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                 <div className="flex flex-wrap gap-2 pt-1">
                   {signOffPreviews.map((url, i) => (
                     <div key={i} className="relative">
+                      {/* (May 2026 a11y audit #119 + #32) Photo gets a
+                          descriptive alt; the X "remove" button gets
+                          an aria-label so screen reader users know
+                          what each unlabeled icon button does. */}
                       {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={url} alt="" className="size-16 rounded object-cover ring-1 ring-slate-200" />
+                      <img
+                        src={url}
+                        alt={`Sign-off photo ${i + 1} preview`}
+                        className="size-16 rounded object-cover ring-1 ring-slate-200"
+                      />
                       <button
                         type="button"
                         className="absolute -right-1.5 -top-1.5 flex size-5 items-center justify-center rounded-full bg-red-600 text-white hover:bg-red-700"
                         onClick={() => removeSignOffPhoto(i)}
+                        aria-label={`Remove sign-off photo ${i + 1}`}
                       >
-                        <X className="size-3" />
+                        <X className="size-3" aria-hidden="true" />
                       </button>
                     </div>
                   ))}
@@ -3342,14 +3351,21 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                 <div className="flex flex-wrap gap-2 pt-1">
                   {snagResolvePreviews.map((url, i) => (
                     <div key={i} className="relative">
+                      {/* (May 2026 a11y audit #119 + #32) Same pattern as
+                          sign-off previews above. */}
                       {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={url} alt="" className="size-16 rounded object-cover ring-1 ring-slate-200" />
+                      <img
+                        src={url}
+                        alt={`Snag resolve photo ${i + 1} preview`}
+                        className="size-16 rounded object-cover ring-1 ring-slate-200"
+                      />
                       <button
                         type="button"
                         className="absolute -right-1.5 -top-1.5 flex size-5 items-center justify-center rounded-full bg-red-600 text-white hover:bg-red-700"
                         onClick={() => removeSnagResolvePhoto(i)}
+                        aria-label={`Remove snag resolve photo ${i + 1}`}
                       >
-                        <X className="size-3" />
+                        <X className="size-3" aria-hidden="true" />
                       </button>
                     </div>
                   ))}

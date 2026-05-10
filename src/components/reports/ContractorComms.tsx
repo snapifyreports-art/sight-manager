@@ -335,10 +335,25 @@ function SnagCard({ snag, siteId }: { snag: Snag; siteId: string }) {
             <div>
               <p className="text-[10px] font-semibold text-muted-foreground mb-1">Photos ({snagPhotos.length})</p>
               <div className="flex flex-wrap gap-1.5">
-                {snagPhotos.map((p) => (
-                  <a key={p.id} href={p.url} target="_blank" rel="noopener noreferrer" className="block">
-                    <img src={p.url} alt="" className="size-16 rounded border object-cover" />
+                {/* (May 2026 a11y audit #119 + #129) Use the photo's
+                    tag (or "Snag photo N") as alt text; external link
+                    gets sr-only "(opens in new tab)". */}
+                {snagPhotos.map((p, i) => (
+                  <a
+                    key={p.id}
+                    href={p.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block"
+                    aria-label={`Open photo${p.tag ? ` (${p.tag})` : ` ${i + 1}`} in new tab`}
+                  >
+                    <img
+                      src={p.url}
+                      alt={p.tag ? `Snag photo: ${p.tag}` : `Snag photo ${i + 1}`}
+                      className="size-16 rounded border object-cover"
+                    />
                     {p.tag && <span className="mt-0.5 block text-center text-[9px] text-muted-foreground">{p.tag}</span>}
+                    <span className="sr-only">(opens in new tab)</span>
                   </a>
                 ))}
               </div>
