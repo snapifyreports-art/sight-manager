@@ -55,7 +55,14 @@ export function verifyContractorToken(token: string): { contactId: string; siteI
     if (!timingSafeEqual(sigBuf, expBuf)) return null;
     const payload = JSON.parse(fromB64url(data));
     if (typeof payload.contactId !== "string" || typeof payload.siteId !== "string") return null;
-    // Contractor links are permanent — no expiry check
+    if (typeof payload.exp !== "number") return null;
+    // (May 2026 audit #10) Honor the exp claim. Pre-fix the verifier
+    // explicitly skipped this check, so an admin who set a 90-day
+    // expiry got a token that worked forever anyway. Now exp is
+    // enforced — same way the customer share token already worked.
+    // Existing tokens were signed with exp = +10 years so backward
+    // compatibility is preserved; new tokens can use any expiry.
+    if (Date.now() > payload.exp) return null;
     return payload;
   } catch {
     return null;
