@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { format, parseISO } from "date-fns";
 import {
@@ -108,8 +108,39 @@ function plotLabel(plot: { plotNumber: string | null; name: string }) {
   return plot.plotNumber ? `Plot ${plot.plotNumber}` : plot.name;
 }
 
+interface Scorecard {
+  score: number;
+  onTime: number;
+  daysLateJobs: number;
+  daysLateTotal: number;
+  onTimeRate: number;
+  signOffRate: number;
+  snagsRaised: number;
+  snagsResolved: number;
+  avgSnagResolveDays: number | null;
+  distinctSites: number;
+  jobs: { total: number; completed: number };
+}
+
 export function ContactDetailClient({ contact, jobs, snags, documents, orders }: Props) {
   const [activeTab, setActiveTab] = useState<"jobs" | "snags" | "documents" | "orders">("jobs");
+  const [scorecard, setScorecard] = useState<Scorecard | null>(null);
+
+  // (May 2026 audit #179) Pull the scorecard on mount. Best-effort —
+  // if the API errors we just don't render the panel.
+  useEffect(() => {
+    let cancelled = false;
+    if (contact.type !== "CONTRACTOR") return;
+    fetch(`/api/contacts/${contact.id}/scorecard`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!cancelled && data && typeof data.score === "number") setScorecard(data);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [contact.id, contact.type]);
 
   // Segment jobs
   const liveJobs = jobs.filter((j) => j.status === "IN_PROGRESS");
@@ -207,6 +238,65 @@ export function ContactDetailClient({ contact, jobs, snags, documents, orders }:
           </CardContent>
         </Card>
       </div>
+
+      {/* (May 2026 audit #179) Contractor scorecard. Only rendered
+          for contractors, only after the API responds. */}
+      {scorecard && contact.type === "CONTRACTOR" && (
+        <Card className="border-blue-200 bg-blue-50/30">
+          <CardContent className="p-4">
+            <div className="flex flex-wrap items-center gap-4">
+              {/* Big score on the left */}
+              <div className="flex shrink-0 items-center gap-3">
+                <div
+                  className={`flex size-16 items-center justify-center rounded-full text-2xl font-bold text-white ${
+                    scorecard.score >= 80
+                      ? "bg-emerald-500"
+                      : scorecard.score >= 60
+                        ? "bg-blue-500"
+                        : scorecard.score >= 40
+                          ? "bg-amber-500"
+                          : "bg-red-500"
+                  }`}
+                >
+                  {scorecard.score}
+                </div>
+                <div>
+                  <p className="text-xs font-medium uppercase tracking-wide text-blue-700">Scorecard</p>
+                  <p className="text-sm text-blue-900">
+                    {scorecard.score >= 80
+                      ? "Top performer"
+                      : scorecard.score >= 60
+                        ? "Solid"
+                        : scorecard.score >= 40
+                          ? "Mixed"
+                          : "Needs attention"}
+                  </p>
+                </div>
+              </div>
+              {/* Stat strip */}
+              <div className="grid flex-1 grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-4">
+                <ScoreStat label="On time" value={`${scorecard.onTimeRate}%`} sub={`${scorecard.onTime}/${scorecard.jobs.completed} jobs`} />
+                <ScoreStat label="Signed off" value={`${scorecard.signOffRate}%`} sub={`${scorecard.jobs.completed} completed`} />
+                <ScoreStat
+                  label="Snag rate"
+                  value={`${scorecard.snagsRaised}`}
+                  sub={
+                    scorecard.avgSnagResolveDays !== null
+                      ? `${scorecard.avgSnagResolveDays}d avg fix`
+                      : "no resolves yet"
+                  }
+                />
+                <ScoreStat label="Sites" value={`${scorecard.distinctSites}`} sub="distinct" />
+              </div>
+            </div>
+            {scorecard.daysLateJobs > 0 && (
+              <p className="mt-3 text-xs text-blue-800">
+                <span className="font-semibold">{scorecard.daysLateJobs}</span> job{scorecard.daysLateJobs !== 1 ? "s" : ""} ran past plan by a combined <span className="font-semibold">{scorecard.daysLateTotal}</span> days.
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Tabs */}
       <div className="flex items-center gap-1 border-b">
@@ -467,5 +557,23 @@ function SnagRow({ snag }: { snag: Snag }) {
         <SnagStatusBadge status={snag.status as "OPEN" | "IN_PROGRESS" | "RESOLVED" | "CLOSED"} />
       </div>
     </Link>
+  );
+}
+
+function ScoreStat({
+  label,
+  value,
+  sub,
+}: {
+  label: string;
+  value: string;
+  sub: string;
+}) {
+  return (
+    <div className="text-sm">
+      <p className="text-[10px] uppercase tracking-wide text-blue-700">{label}</p>
+      <p className="font-semibold text-blue-950">{value}</p>
+      <p className="text-[10px] text-blue-700/70">{sub}</p>
+    </div>
   );
 }
