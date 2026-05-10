@@ -651,10 +651,19 @@ export function MobileSiteBar() {
     <Suspense fallback={null}>
       <div className="flex items-center gap-2 border-b border-border/40 bg-slate-50 px-3 py-1.5 md:hidden">
         <Building2 className="size-3.5 shrink-0 text-muted-foreground" />
+        {/* (May 2026 a11y audit #128) Visible focus ring for keyboard
+            users — pre-fix this <select> set focus:outline-none with no
+            replacement, so tabbing onto it gave no visual feedback. The
+            ring is on the <select> itself rather than the wrapping div
+            so the focus indicator hugs the actual interactive element. */}
+        <label htmlFor="mobile-site-picker" className="sr-only">
+          Switch site
+        </label>
         <select
+          id="mobile-site-picker"
           value={selectedSiteId}
           onChange={(e) => handleChange(e.target.value)}
-          className="flex-1 bg-transparent text-[12px] text-foreground focus:outline-none"
+          className="flex-1 rounded bg-transparent text-[12px] text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1"
         >
           <option value="">— All sites —</option>
           {sites.map((s) => (

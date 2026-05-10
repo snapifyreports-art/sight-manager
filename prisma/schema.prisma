@@ -879,6 +879,25 @@ model DelayReason {
 
 // ---------- Event Log ----------
 
+/// IMMUTABLE — audit log. APPEND-ONLY by contract.
+///
+/// EventLog rows are the source of truth for "what happened on this site"
+/// (story tab, delay analytics, regulator pack inside the handover ZIP).
+/// Mutating a past event would corrupt all of those.
+///
+/// Rules:
+///   1. Code only ever calls `prisma.eventLog.create()`. No update / delete
+///      routes exist anywhere in the API surface — verified by
+///      `grep "eventLog\.(update|delete|deleteMany|updateMany)"` returning
+///      empty. Anyone adding such a call MUST justify it in code review.
+///   2. Cascade deletes via FK are allowed when the parent (Site / Plot /
+///      Job / User) is removed — `onDelete` is set deliberately. Site uses
+///      Cascade so a deleted site doesn't leave dangling logs; plot/job/
+///      user use SetNull so site-level history survives those deletions.
+///      This is the only sanctioned removal path.
+///   3. (May 2026 audit #74) An explicit DB-level CHECK / trigger isn't
+///      added because Prisma is the only thing that talks to this table.
+///      The contract is enforced at the application layer.
 model EventLog {
   id              String    @id @default(cuid())
   type            EventType
