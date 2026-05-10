@@ -260,7 +260,7 @@ export async function PUT(
       if (targetSiteId) {
         const orderLabel = existing.job?.name ?? "one-off order";
         const { sendPushToSiteAudience } = await import("@/lib/push");
-        void sendPushToSiteAudience(targetSiteId, "DELIVERIES_DUE_TODAY", {
+        void sendPushToSiteAudience(targetSiteId, "DELIVERY_CONFIRMED", {
           title: "📦 Delivery confirmed",
           body: `${existing.supplier.name}: ${orderLabel}`,
           url: `/orders?orderId=${id}`,

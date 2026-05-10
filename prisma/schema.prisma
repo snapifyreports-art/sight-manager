@@ -54,6 +54,13 @@ enum NotificationType {
   NEXT_STAGE_READY
   LATE_STARTS
   WEATHER_ALERT
+  // (May 2026 audit follow-up to #152) Per-site event notification
+  // types. Issued by sendPushToSiteAudience so a manager can mute
+  // specific event classes via their preference grid rather than
+  // muting NEW_NOTES_PHOTOS wholesale.
+  SNAG_RAISED
+  DELIVERY_CONFIRMED
+  JOB_MILESTONE
 }
 
 enum SnagPriority {

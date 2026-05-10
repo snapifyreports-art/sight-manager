@@ -219,7 +219,7 @@ export async function POST(
     const emoji = action === "start" ? "▶️" : action === "complete" ? "✅" : "✍️";
     void sendPushToSiteAudience(
       existing.plot.siteId,
-      action === "signoff" ? "JOBS_READY_FOR_SIGNOFF" : "NEW_NOTES_PHOTOS",
+      "JOB_MILESTONE",
       {
         title: `${emoji} Job ${verb}`,
         body: `${existing.name}${existing.plot ? ` · Plot ${existing.plot.plotNumber || existing.plot.name}` : ""}`,

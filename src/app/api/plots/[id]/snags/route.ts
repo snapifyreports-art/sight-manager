@@ -156,12 +156,8 @@ export async function POST(
     // site's assignee + watchers + execs know a snag was raised.
     // High-priority + critical snags get a louder notification.
     // Best-effort: failure here doesn't fail the snag creation.
-    // Routes through NEW_NOTES_PHOTOS for now since the enum doesn't
-    // have a SNAG_RAISED entry — a separate batch adds the dedicated
-    // enum value + apply-schema script if Keith wants finer-grained
-    // pref control.
     const isUrgent = priority === "HIGH" || priority === "CRITICAL";
-    void sendPushToSiteAudience(plot.siteId, "NEW_NOTES_PHOTOS", {
+    void sendPushToSiteAudience(plot.siteId, "SNAG_RAISED", {
       title: isUrgent ? `⚠️ ${priority} snag raised` : "Snag raised",
       body: `Plot ${plot.plotNumber || plot.name}: ${description.trim().slice(0, 80)}`,
       url: `/sites/${plot.siteId}?tab=snags&snagId=${snag.id}`,
