@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canAccessSite } from "@/lib/site-access";
+import { verifyCalendarToken } from "@/lib/share-token";
 
 export const dynamic = "force-dynamic";
 
@@ -64,21 +65,45 @@ function foldLine(line: string): string {
 }
 
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const session = await auth();
-  if (!session) {
-    return new NextResponse("Unauthorized", { status: 401 });
-  }
   const { id: siteId } = await params;
-  if (
-    !(await canAccessSite(
-      session.user.id,
-      (session.user as { role: string }).role,
-      siteId,
-    ))
-  ) {
+
+  // (May 2026 audit #59 + #189) Calendar apps don't preserve cookies
+  // — they hit the URL with no session. Accept a signed ?token=…
+  // query string as an alternative: token binds to a userId + siteId
+  // + exp; we verify, then look up the user and apply the same
+  // canAccessSite gate as the session path.
+  const url = new URL(req.url);
+  const token = url.searchParams.get("token");
+  let authorisedUserId: string | null = null;
+  let authorisedRole = "";
+
+  if (token) {
+    const payload = verifyCalendarToken(token);
+    if (!payload || payload.siteId !== siteId) {
+      return new NextResponse("Invalid or expired token", { status: 401 });
+    }
+    const user = await prisma.user.findUnique({
+      where: { id: payload.userId },
+      select: { id: true, role: true },
+    });
+    if (!user) {
+      return new NextResponse("Token user no longer exists", { status: 401 });
+    }
+    authorisedUserId = user.id;
+    authorisedRole = user.role;
+  } else {
+    const session = await auth();
+    if (!session) {
+      return new NextResponse("Unauthorized", { status: 401 });
+    }
+    authorisedUserId = session.user.id;
+    authorisedRole = (session.user as { role: string }).role;
+  }
+
+  if (!(await canAccessSite(authorisedUserId, authorisedRole, siteId))) {
     return new NextResponse("Forbidden", { status: 403 });
   }
 

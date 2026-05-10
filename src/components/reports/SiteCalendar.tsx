@@ -737,26 +737,43 @@ export function SiteCalendar({ siteId }: SiteCalendarProps) {
 
 /**
  * (May 2026 audit #59 + #189) Subscribe-to-calendar button.
- * Copies the .ics feed URL to the clipboard. Calendar apps consume
- * the URL via "Add subscription" / "Add by URL" flows.
+ * Asks the backend to mint a signed token-URL, then copies that to
+ * the clipboard. The URL is self-authenticating — calendar apps
+ * don't preserve cookies, so the token in the query string is what
+ * keeps the feed accessible after the manager has logged out of
+ * the browser session.
  */
 function SubscribeButton({ siteId }: { siteId: string }) {
-  const [copied, setCopied] = useState(false);
-  const url =
-    typeof window !== "undefined"
-      ? `${window.location.origin}/api/sites/${siteId}/calendar.ics`
-      : "";
+  const [state, setState] = useState<"idle" | "loading" | "copied" | "error">(
+    "idle",
+  );
 
   const onClick = async () => {
+    if (state === "loading") return;
+    setState("loading");
     try {
-      await navigator.clipboard.writeText(url);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      const res = await fetch(`/api/sites/${siteId}/calendar-token`, {
+        method: "POST",
+      });
+      if (!res.ok) {
+        setState("error");
+        setTimeout(() => setState("idle"), 2000);
+        return;
+      }
+      const { url } = await res.json();
+      try {
+        await navigator.clipboard.writeText(url);
+        setState("copied");
+        setTimeout(() => setState("idle"), 2000);
+      } catch {
+        // Clipboard API blocked — open in new tab so the user can
+        // copy from the address bar.
+        window.open(url, "_blank", "noopener,noreferrer");
+        setState("idle");
+      }
     } catch {
-      // Older browsers / restrictive clipboard env — fall back to
-      // opening the URL in a new tab so the user can copy from the
-      // address bar.
-      window.open(url, "_blank", "noopener,noreferrer");
+      setState("error");
+      setTimeout(() => setState("idle"), 2000);
     }
   };
 
@@ -765,11 +782,22 @@ function SubscribeButton({ siteId }: { siteId: string }) {
       variant="outline"
       size="sm"
       onClick={onClick}
+      disabled={state === "loading"}
       title="Copy iCal subscription URL"
       aria-label="Copy iCal subscription URL"
     >
-      <Mail className="size-4" aria-hidden="true" />
-      {copied ? "URL copied!" : "Subscribe"}
+      {state === "loading" ? (
+        <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+      ) : (
+        <Mail className="size-4" aria-hidden="true" />
+      )}
+      {state === "copied"
+        ? "URL copied!"
+        : state === "error"
+          ? "Failed"
+          : state === "loading"
+            ? "Generating…"
+            : "Subscribe"}
     </Button>
   );
 }

@@ -123,6 +123,42 @@ export function verifyResetToken(token: string): { userId: string; email: string
   }
 }
 
+// ─── Calendar-feed tokens ───────────────────────────────────────────────────
+//
+// (May 2026 audit #59 + #189) Signed token for the /calendar.ics feed
+// so Outlook / Google / Apple Calendar can subscribe externally. The
+// token binds to a user + site; the feed renders the same content as
+// the session-based path. 1-year default expiry — calendar apps refresh
+// silently, so a stale token would just stop showing new events rather
+// than cause an audible failure.
+export function signCalendarToken(payload: { userId: string; siteId: string; exp: number }): string {
+  const data = b64url(JSON.stringify(payload));
+  const sig = createHmac("sha256", requireSecret()).update(data).digest("base64url");
+  return `${data}.${sig}`;
+}
+
+export function verifyCalendarToken(token: string): { userId: string; siteId: string; exp: number } | null {
+  try {
+    const dot = token.lastIndexOf(".");
+    if (dot === -1) return null;
+    const data = token.slice(0, dot);
+    const sig = token.slice(dot + 1);
+    const expected = createHmac("sha256", requireSecret()).update(data).digest("base64url");
+    const sigBuf = Buffer.from(sig);
+    const expBuf = Buffer.from(expected);
+    if (sigBuf.length !== expBuf.length) return null;
+    if (!timingSafeEqual(sigBuf, expBuf)) return null;
+    const payload = JSON.parse(fromB64url(data));
+    if (typeof payload.userId !== "string" || typeof payload.siteId !== "string" || typeof payload.exp !== "number") {
+      return null;
+    }
+    if (Date.now() > payload.exp) return null;
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
 // Verify and decode a share token. Returns null if invalid or expired.
 export function verifyShareToken(token: string): { plotId: string; exp: number } | null {
   try {
