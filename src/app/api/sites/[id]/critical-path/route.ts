@@ -2,31 +2,22 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canAccessSite } from "@/lib/site-access";
-import { differenceInWorkingDays } from "@/lib/working-days";
+import { buildJobTimeline, type TimelineJobInput } from "@/lib/job-timeline";
 
 export const dynamic = "force-dynamic";
 
 // GET /api/sites/[id]/critical-path?plotId=xxx (optional filter)
 //
-// Critical path for a site or plot. Per the May 2026 audit (Keith:
-// "these critical paths are absolutely baffling me"), this was rewritten:
+// Returns the critical path for each plot. The "critical path" in our
+// serial cascade model is just every leaf job in sortOrder — there are
+// no parallel branches to be off-critical.
 //
-// 1. LEAF JOBS ONLY — parent rollups were being included alongside their
-//    children, so "Foundation 32d" + "Dig & pour 22d" + "Brickwork 1d"
-//    showed the same work three times. Filter `children: { none: {} }`.
-//
-// 2. WORKING DAYS, not calendar — matches addWorkingDays /
-//    differenceInWorkingDays everywhere else. Calendar-day arithmetic
-//    inflated bar widths over weekends and made pull-forward shifts
-//    look completely wrong.
-//
-// 3. SORT BY sortOrder, not by recomputed earlyStart. Our cascade model
-//    is sequential by sortOrder, so the path is just every leaf job in
-//    that order. earlyStart is now a derived display field, not the
-//    primary sort.
-//
-// 4. CRITICAL = ALL leaf jobs, since the schedule is serial. The "slack"
-//    field stays in the response for backwards compat but is always 0.
+// **All timeline arithmetic is delegated to `buildJobTimeline`** — the
+// canonical helper that every view sharing this concept must use. No
+// view computes durations or offsets locally any more (May 2026 audit:
+// Keith called out the SSOT failure pattern). If you need to change
+// what "earlyStart" / "duration" means, change it in
+// `src/lib/job-timeline.ts` and every consumer follows.
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -38,14 +29,23 @@ export async function GET(
 
   const { id } = await params;
 
-  if (!(await canAccessSite(session.user.id, (session.user as { role: string }).role, id))) {
-    return NextResponse.json({ error: "You do not have access to this site" }, { status: 403 });
+  if (
+    !(await canAccessSite(
+      session.user.id,
+      (session.user as { role: string }).role,
+      id,
+    ))
+  ) {
+    return NextResponse.json(
+      { error: "You do not have access to this site" },
+      { status: 403 },
+    );
   }
   const plotIdFilter = req.nextUrl.searchParams.get("plotId");
 
-  // LEAF jobs only — `children: { none: {} }` filter excludes parent
-  // stage rollups (Foundation, Superstructure, etc.) so they don't
-  // duplicate their own work.
+  // Pull every job (parents + children) so the helper can decide which
+  // are leaves. Filtering parents at the DB level would deny the helper
+  // the information it needs to classify isLeaf correctly.
   const plots = await prisma.plot.findMany({
     where: {
       siteId: id,
@@ -57,7 +57,6 @@ export async function GET(
       name: true,
       houseType: true,
       jobs: {
-        where: { children: { none: {} } },
         select: {
           id: true,
           name: true,
@@ -66,10 +65,13 @@ export async function GET(
           endDate: true,
           actualStartDate: true,
           actualEndDate: true,
+          originalStartDate: true,
+          originalEndDate: true,
           sortOrder: true,
           weatherAffected: true,
           parentId: true,
           parentStage: true,
+          stageCode: true,
           assignedTo: { select: { name: true } },
         },
         orderBy: { sortOrder: "asc" },
@@ -79,135 +81,83 @@ export async function GET(
   });
 
   const plotPaths = plots.map((plot) => {
-    const jobs = plot.jobs.filter((j) => j.startDate && j.endDate);
-
-    if (jobs.length === 0) {
+    if (plot.jobs.length === 0) {
       return {
         plotId: plot.id,
         plotNumber: plot.plotNumber,
         plotName: plot.name,
         houseType: plot.houseType,
         criticalPathJobs: [],
+        allJobs: [],
         totalDuration: 0,
         projectedEnd: null,
         slackDays: 0,
       };
     }
 
-    interface NodeInfo {
-      jobId: string;
-      name: string;
-      status: string;
-      sortOrder: number;
-      parentStage: string | null;
-      startDate: Date;
-      endDate: Date;
-      duration: number; // working days
-      earlyStart: number; // working days from plot start
-      earlyFinish: number;
-      slack: number;
-      isCritical: boolean;
-      weatherAffected: boolean;
-      assignee: string | null;
-    }
+    // Map raw rows → TimelineJobInput. Helper does the rest.
+    const inputs: TimelineJobInput[] = plot.jobs.map((j) => ({
+      id: j.id,
+      name: j.name,
+      status: j.status,
+      sortOrder: j.sortOrder,
+      parentId: j.parentId,
+      parentStage: j.parentStage,
+      startDate: j.startDate,
+      endDate: j.endDate,
+      originalStartDate: j.originalStartDate,
+      originalEndDate: j.originalEndDate,
+      actualStartDate: j.actualStartDate,
+      actualEndDate: j.actualEndDate,
+      weatherAffected: j.weatherAffected,
+      stageCode: j.stageCode,
+      assignee: j.assignedTo?.name ?? null,
+    }));
 
-    // Plot start = the earliest start of any leaf job. Use this as the
-    // anchor for earlyStart calculations.
-    const plotStart = jobs.reduce<Date>(
-      (min, j) =>
-        new Date(j.startDate!) < min ? new Date(j.startDate!) : min,
-      new Date(jobs[0].startDate!),
-    );
+    const timeline = buildJobTimeline(inputs);
 
-    const nodes: NodeInfo[] = jobs.map((job) => {
-      const start = new Date(job.startDate!);
-      const end = new Date(job.endDate!);
-      // Working-day duration. addWorkingDays(start, n) = end means n
-      // working days, but we compute via difference to be tolerant of
-      // legacy/edge data. Floor at 1 so a same-day job still draws.
-      const duration = Math.max(1, differenceInWorkingDays(end, start));
-      const earlyStart = Math.max(0, differenceInWorkingDays(start, plotStart));
+    // Critical path in a serial cascade = every leaf job. allJobs in
+    // the legacy response shape used to include parents too, but the
+    // UI re-renders them as duplicates (Foundation 32d, Dig & pour 22d,
+    // Brickwork 1d showing the same span 3x). Serve only leaves.
+    const renderable = timeline.leafJobs.map((j) => ({
+      jobId: j.id,
+      name: j.name,
+      status: j.status,
+      parentStage: j.parentStage,
+      // Render uses planned timeline (current plan). Original / actual
+      // are available on the helper output if a future view needs them.
+      startDate: j.planned.start.toISOString(),
+      endDate: j.planned.end.toISOString(),
+      duration: j.planned.durationDays,
+      earlyStart: j.planned.offsetFromStart,
+      earlyFinish: j.planned.offsetFromStart + j.planned.durationDays,
+      // Slack is meaningless in our serial model — every leaf is critical.
+      // Field kept for backwards compat with the existing UI.
+      slack: 0,
+      isCritical: true,
+      weatherAffected: j.weatherAffected,
+      assignee: j.assignee,
+    }));
 
-      return {
-        jobId: job.id,
-        name: job.name,
-        status: job.status,
-        sortOrder: job.sortOrder,
-        parentStage: job.parentStage,
-        startDate: start,
-        endDate: end,
-        duration,
-        earlyStart,
-        earlyFinish: earlyStart + duration,
-        // Slack is meaningless in a serial cascade — every leaf job
-        // determines the plot's end date, so they're all critical.
-        slack: 0,
-        isCritical: true,
-        weatherAffected: job.weatherAffected,
-        assignee: job.assignedTo?.name ?? null,
-      };
-    });
-
-    // Project duration in working days = the latest earlyFinish
-    const projectDuration = Math.max(...nodes.map((n) => n.earlyFinish));
-
-    // Projected end = the latest job endDate (already in working-day
-    // calendar terms). No need to addWorkingDays(plotStart, duration)
-    // — the underlying jobs already encode the answer.
-    const projectedEnd = nodes
-      .map((n) => n.endDate)
-      .reduce<Date>(
-        (max, d) => (d > max ? d : max),
-        nodes[0].endDate,
-      );
-
-    // Already in sortOrder thanks to the orderBy on the query.
     return {
       plotId: plot.id,
       plotNumber: plot.plotNumber,
       plotName: plot.name,
       houseType: plot.houseType,
-      projectStart: plotStart.toISOString(),
-      projectedEnd: projectedEnd.toISOString(),
-      totalDuration: projectDuration,
-      criticalPathJobs: nodes.map((n) => ({
-        jobId: n.jobId,
-        name: n.name,
-        status: n.status,
-        parentStage: n.parentStage,
-        startDate: n.startDate.toISOString(),
-        endDate: n.endDate.toISOString(),
-        duration: n.duration,
-        earlyStart: n.earlyStart,
-        earlyFinish: n.earlyFinish,
-        slack: n.slack,
-        isCritical: n.isCritical,
-        weatherAffected: n.weatherAffected,
-        assignee: n.assignee,
-      })),
-      allJobs: nodes.map((n) => ({
-        jobId: n.jobId,
-        name: n.name,
-        status: n.status,
-        parentStage: n.parentStage,
-        startDate: n.startDate.toISOString(),
-        endDate: n.endDate.toISOString(),
-        duration: n.duration,
-        earlyStart: n.earlyStart,
-        earlyFinish: n.earlyFinish,
-        slack: n.slack,
-        isCritical: n.isCritical,
-        weatherAffected: n.weatherAffected,
-        assignee: n.assignee,
-      })),
+      projectStart: timeline.plotStart.toISOString(),
+      projectedEnd: timeline.plotEnd.toISOString(),
+      totalDuration: timeline.totalWorkingDays,
+      criticalPathJobs: renderable,
+      allJobs: renderable,
     };
   });
 
-  // Site-level critical path = plot with latest projected end
-  const siteCriticalPlot = plotPaths.reduce(
+  // Site-level critical path = plot with the longest total duration.
+  const siteCriticalPlot = plotPaths.reduce<typeof plotPaths[number] | null>(
     (latest, p) =>
       p.totalDuration > (latest?.totalDuration ?? 0) ? p : latest,
-    plotPaths[0] ?? null
+    plotPaths[0] ?? null,
   );
 
   return NextResponse.json({
