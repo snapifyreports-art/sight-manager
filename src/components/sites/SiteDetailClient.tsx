@@ -33,6 +33,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Breadcrumbs } from "@/components/ui/breadcrumbs";
+import { WatchToggle } from "@/components/sites/WatchToggle";
 import {
   Card,
   CardContent,
@@ -882,6 +883,10 @@ export function SiteDetailClient({
           </div>
 
           <div className="flex items-center gap-2">
+            {/* (May 2026 audit #152) Watch this site — per-user
+                notification opt-in. Star toggle that POST/DELETEs to
+                /api/sites/[id]/watch. */}
+            <WatchToggle siteId={site.id} siteName={site.name} />
             {/* Quick Raise Snag — hidden on the Snags tab itself (where
                 the SnagsTab's own button takes over). One source of truth:
                 on every other tab you use the header button, on the Snags
