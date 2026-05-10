@@ -138,8 +138,13 @@ export default async function ProgressPage({
           <p className="text-sm font-medium uppercase tracking-wider text-blue-600">
             Your new home
           </p>
+          {/* (May 2026 audit #29) Pre-fix this rendered "Plot —" with a
+              literal em-dash for plots without a plot number. Friendlier
+              fallback: "Your home" if neither number nor name. */}
           <h1 className="mt-1 text-3xl font-bold text-slate-900 sm:text-4xl">
-            Plot {plot.plotNumber || "—"}
+            {plot.plotNumber
+              ? `Plot ${plot.plotNumber}`
+              : "Your home"}
           </h1>
           {plot.houseType && (
             <p className="mt-1 text-base text-slate-600">{plot.houseType}</p>

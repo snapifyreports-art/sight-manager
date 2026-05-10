@@ -193,6 +193,20 @@
   }
 }
 
+/* (May 2026 a11y audit #15) Honour the OS-level "reduce motion"
+   preference. Disables the spinning / pulsing / sliding loaders that
+   otherwise run regardless of user preference. WCAG 2.3.3. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 /* ─── Print styles for Daily Brief ──────────────────────────────────────── */
 @media print {
   /* Hide navigation chrome */

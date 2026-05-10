@@ -434,7 +434,12 @@ export function useDelayJob(onSuccess?: () => void): DelayHookResult {
           <DialogClose render={<Button variant="outline" size="sm" />}>Cancel</DialogClose>
           <Button size="sm" disabled={submitting || !resolvedDays} onClick={apply}>
             {submitting ? <Loader2 className="size-3.5 animate-spin" /> : <CalendarClock className="size-3.5" />}
-            Delay {resolvedDays ?? ""} day{resolvedDays !== 1 ? "s" : ""}
+            {/* (May 2026 audit #12) Pre-fix this rendered "Delay  days" with
+                a literal double space when resolvedDays was null. Show a
+                proper hint instead. */}
+            {resolvedDays
+              ? `Delay ${resolvedDays} day${resolvedDays !== 1 ? "s" : ""}`
+              : "Enter days or pick a date"}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -746,9 +746,23 @@ export function CreateSiteWizard({
   const dialogWidth =
     step === "site-details" ? "sm:max-w-md" : "sm:max-w-lg";
 
+  // (May 2026 a11y audit #37) Polite live-region announcement for screen
+  // readers when step changes. Pre-fix step transitions were silent so
+  // assistive-tech users didn't know they'd moved.
+  const stepAnnouncement =
+    step === "site-details"
+      ? "Step 1 of 3: Site details"
+      : step === "plot-batches"
+        ? "Step 2 of 3: Plot batches"
+        : "Step 3 of 3: Supplier mapping";
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className={dialogWidth}>
+        {/* Live-region announces the current step on change */}
+        <div role="status" aria-live="polite" className="sr-only">
+          {stepAnnouncement}
+        </div>
         <HelpTip title="About the Create Site wizard" anchor="below-left">
           <p><strong>Three steps:</strong> Site details → Plot batches → (if templates are used) Supplier mapping.</p>
           <p><strong>Step 1 — Site:</strong> name, address, postcode. These populate order emails, the header, and contractor-facing pages.</p>

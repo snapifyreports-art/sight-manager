@@ -113,16 +113,21 @@ export default function LoginPage() {
                   disabled={loading}
                   className="h-11 rounded-xl border-slate-200 bg-slate-50/50 px-4 pr-10 text-sm transition-colors focus:bg-white"
                 />
+                {/* (May 2026 audit #35) Restored to keyboard tab order +
+                    aria-label so assistive tech can announce + activate it.
+                    Pre-fix: tabIndex=-1 with no label — keyboard users
+                    couldn't toggle visibility, screen readers got nothing. */}
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 transition-colors hover:text-slate-600"
-                  tabIndex={-1}
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  aria-pressed={showPassword}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 rounded text-slate-400 transition-colors hover:text-slate-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
                 >
                   {showPassword ? (
-                    <EyeOff className="size-4" />
+                    <EyeOff className="size-4" aria-hidden="true" />
                   ) : (
-                    <Eye className="size-4" />
+                    <Eye className="size-4" aria-hidden="true" />
                   )}
                 </button>
               </div>

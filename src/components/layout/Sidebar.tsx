@@ -322,6 +322,10 @@ function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: boolean; on
                           key={t.tab}
                           href={href}
                           onClick={onNavigate}
+                          // (May 2026 a11y audit #17) aria-current="page"
+                          // tells screen readers which link is the current
+                          // view. Pre-fix: state was visible by colour only.
+                          aria-current={isActive ? "page" : undefined}
                           className={cn(
                             "flex items-center gap-1.5 rounded-md px-2 py-1 text-[12px] transition-colors",
                             isActive
@@ -489,6 +493,7 @@ function renderNavItem(
     <Link
       href={getNavHref(item.href)}
       onClick={onNavigate}
+      aria-current={isActive ? "page" : undefined}
       className={cn(
         "group flex items-center gap-3 rounded-lg px-3 py-2.5 text-[13px] font-medium transition-all duration-150",
         isActive

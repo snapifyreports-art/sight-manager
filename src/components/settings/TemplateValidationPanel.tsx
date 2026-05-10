@@ -75,6 +75,18 @@ export function TemplateValidationPanel({
   // dominate.
   const [open, setOpen] = useState(errorCount > 0);
 
+  // (May 2026 audit #27) Re-expand whenever errors transition from 0
+  // → >0 so silent regressions don't hide. Pre-fix the panel was
+  // useState(errorCount > 0) on first render only — fix the errors,
+  // introduce new ones, and the panel stayed collapsed.
+  const [prevErrorCount, setPrevErrorCount] = useState(errorCount);
+  useEffect(() => {
+    if (prevErrorCount === 0 && errorCount > 0) {
+      setOpen(true);
+    }
+    setPrevErrorCount(errorCount);
+  }, [errorCount, prevErrorCount]);
+
   if (total === 0) {
     return (
       <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">

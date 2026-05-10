@@ -2,10 +2,8 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import {
   Search,
-  X,
   MapPin,
   Briefcase,
   Building2,
@@ -15,6 +13,7 @@ import {
   Clock,
   Loader2,
 } from "lucide-react";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 
 interface SearchResults {
   sites: Array<{ id: string; name: string; address: string | null }>;
@@ -86,16 +85,9 @@ export function SearchModal({
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
   }, [query, doSearch]);
 
-  // Close on Escape
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    if (open) window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [open, onClose]);
-
-  if (!open) return null;
+  // (May 2026 audit #20) Removed bespoke Escape handler — the
+  // design-system Dialog component handles ESC, focus trap,
+  // backdrop click, aria-modal and return-focus correctly.
 
   const navigate = (label: string, href: string) => {
     addRecent(label, href);
@@ -141,26 +133,26 @@ export function SearchModal({
   ].filter((g) => g.items.length > 0) : [];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 pt-[10vh]" onClick={onClose}>
-      <div
-        className="w-full max-w-lg rounded-xl bg-white shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Search input */}
+    // (May 2026 audit #20) Use design-system Dialog so we get focus
+    // trap, ESC dismiss, return-focus, aria-modal, backdrop click,
+    // proper labelling — all the things the hand-rolled overlay was
+    // missing.
+    <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
+      <DialogContent className="sm:max-w-lg p-0 gap-0">
+        <DialogTitle className="sr-only">Search</DialogTitle>
+        {/* Search input — Dialog provides its own close X in the corner */}
         <div className="flex items-center gap-3 border-b px-4 py-3">
-          <Search className="size-5 text-muted-foreground" />
+          <Search className="size-5 text-muted-foreground" aria-hidden="true" />
           <input
             ref={inputRef}
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search sites, plots, jobs, suppliers, snags..."
+            aria-label="Search across sites, plots, jobs, suppliers, snags"
             className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
           />
-          {loading && <Loader2 className="size-4 animate-spin text-muted-foreground" />}
-          <button onClick={onClose} className="rounded p-1 text-muted-foreground hover:bg-accent">
-            <X className="size-4" />
-          </button>
+          {loading && <Loader2 className="size-4 animate-spin text-muted-foreground" aria-hidden="true" />}
         </div>
 
         {/* Results */}
@@ -249,7 +241,7 @@ export function SearchModal({
           <span>Type to search</span>
           <span className="rounded border px-1.5 py-0.5 font-mono">ESC</span>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
