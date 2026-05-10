@@ -562,6 +562,14 @@ export default function SiteWalkthrough({
         closeModal();
         showToast(`${photoFiles.length} photo${photoFiles.length !== 1 ? "s" : ""} uploaded`, "success");
         await refresh();
+        // (May 2026 audit #142) Auto-advance to the next plot after
+        // a successful photo upload, but only if there IS one. The
+        // manager-on-site flow is "snap photo, swipe forward, repeat" —
+        // automating the swipe saves a tap each pass through 20+ plots.
+        if (currentIndex < plots.length - 1) {
+          setCurrentIndex((i) => i + 1);
+          setSnagsExpanded(false);
+        }
       } else {
         showToast("Failed to upload photos", "error");
       }
