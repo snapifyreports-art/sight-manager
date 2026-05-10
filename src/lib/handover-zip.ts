@@ -4,6 +4,7 @@
 import * as archiverNs from "archiver";
 import type { Archiver } from "archiver";
 import type { PrismaClient } from "@prisma/client";
+import { Readable } from "stream";
 
 // Some bundlers expose the function as `default`, others as the namespace
 // itself. Try default first then fall back. Both resolutions are typed.
@@ -81,15 +82,22 @@ function extractExtension(url: string, contentType: string | null): string {
 // Best-effort fetch — if a Supabase URL 404s (e.g. file deleted from
 // storage but DB row remains), we log + skip rather than blow up the
 // whole ZIP. The README will still list the plot folder.
-async function fetchAsBuffer(url: string): Promise<Buffer | null> {
+//
+// (May 2026 audit #26 + #83) Streaming fetcher. Pre-fix this used
+// arrayBuffer() which holds the entire file in RAM before appending.
+// On a site with 500 photos × 2MB each = 1GB peak, way over Lambda's
+// default budget. Now we hand the Web ReadableStream straight to
+// archiver via Readable.fromWeb so each chunk passes through and is
+// gone — peak memory is one chunk + the zip's internal compression
+// buffer, regardless of how many or how big the source files are.
+async function fetchAsStream(url: string): Promise<Readable | null> {
   try {
     const res = await fetch(url);
-    if (!res.ok) {
+    if (!res.ok || !res.body) {
       console.warn(`[handover-zip] failed to fetch ${url}: ${res.status}`);
       return null;
     }
-    const ab = await res.arrayBuffer();
-    return Buffer.from(ab);
+    return Readable.fromWeb(res.body as Parameters<typeof Readable.fromWeb>[0]);
   } catch (err) {
     console.warn(`[handover-zip] fetch error for ${url}:`, err);
     return null;
@@ -199,11 +207,11 @@ export async function buildHandoverArchive({
                 : cat === "HANDOVER"
                   ? "handover-checklist"
                   : "other";
-      const buf = await fetchAsBuffer(doc.url);
-      if (!buf) continue;
+      const stream = await fetchAsStream(doc.url);
+      if (!stream) continue;
       const ext = extractExtension(doc.url, null);
       const name = safeName(doc.name);
-      archive.append(buf, {
+      archive.append(stream, {
         name: `${folder}/${folderForCat}/${name}.${ext}`,
       });
     }
@@ -222,13 +230,13 @@ export async function buildHandoverArchive({
       orderBy: { createdAt: "asc" },
     });
     for (const p of photos) {
-      const buf = await fetchAsBuffer(p.url);
-      if (!buf) continue;
+      const stream = await fetchAsStream(p.url);
+      if (!stream) continue;
       const ext = extractExtension(p.url, null);
       const stageFolder = safeName(p.job.stageCode || p.job.name);
       const ts = p.createdAt.toISOString().slice(0, 10);
       const filename = `${ts}_${safeName(p.caption || p.tag || p.id)}.${ext}`;
-      archive.append(buf, {
+      archive.append(stream, {
         name: `${folder}/photos/${stageFolder}/${filename}`,
       });
     }
