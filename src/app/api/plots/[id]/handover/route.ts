@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { getServerCurrentDate } from "@/lib/dev-date";
 import { canAccessSite } from "@/lib/site-access";
 import { apiError } from "@/lib/api-errors";
+import { loadJsPdf, pdfResponse } from "@/lib/pdf-builder";
 
 async function guardPlotAccess(plotId: string, userId: string, role: string) {
   const plot = await prisma.plot.findUnique({ where: { id: plotId }, select: { siteId: true } });
@@ -219,9 +220,8 @@ export async function POST(
     return NextResponse.json({ error: "Plot not found" }, { status: 404 });
   }
 
-  // Build PDF using jsPDF
-  const { jsPDF } = await import("jspdf");
-  const autoTable = (await import("jspdf-autotable")).default;
+  // Build PDF using canonical pdf-builder
+  const { jsPDF, autoTable } = await loadJsPdf();
   const doc = new jsPDF();
 
   // --- Cover Page ---
@@ -307,13 +307,5 @@ export async function POST(
     });
   }
 
-  const pdfBuffer = doc.output("arraybuffer");
-
-  return new NextResponse(Buffer.from(pdfBuffer), {
-    status: 200,
-    headers: {
-      "Content-Type": "application/pdf",
-      "Content-Disposition": `attachment; filename="handover-${plot.plotNumber || plot.name}.pdf"`,
-    },
-  });
+  return pdfResponse(doc, `handover-${plot.plotNumber || plot.name}.pdf`);
 }

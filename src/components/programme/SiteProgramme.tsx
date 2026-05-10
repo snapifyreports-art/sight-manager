@@ -955,8 +955,8 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
   // ---------- Export: PDF ----------
   const handleExportPDF = useCallback(async () => {
     if (!site) return;
-    const { default: jsPDF } = await import("jspdf");
-    const autoTable = (await import("jspdf-autotable")).default;
+    const { loadJsPdf } = await import("@/lib/pdf-builder");
+    const { jsPDF, autoTable } = await loadJsPdf();
 
     const plotsToExport = processedPlots;
 
