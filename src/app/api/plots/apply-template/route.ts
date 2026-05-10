@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { templateJobsInclude } from "@/lib/template-includes";
 import { createJobsFromTemplate } from "@/lib/apply-template-helpers";
 import { canAccessSite } from "@/lib/site-access";
+import { apiError } from "@/lib/api-errors";
 
 export const dynamic = "force-dynamic";
 
@@ -233,16 +234,10 @@ export async function POST(request: NextRequest) {
       return { plot: created, warnings };
     }, { timeout: 60_000 }); // complex templates can have 20+ jobs + 10+ orders each
   } catch (err) {
-    // Surface the actual Prisma / transaction error so the UI can show something
-    // useful instead of a generic 500. Includes the error code for Prisma errors.
-    console.error("apply-template failed:", err);
-    const message = err instanceof Error ? err.message : String(err);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const code = (err as any)?.code;
-    return NextResponse.json(
-      { error: `Failed to create plot: ${message}${code ? ` (${code})` : ""}` },
-      { status: 500 }
-    );
+    // (May 2026 audit #70 + #93) Route through the canonical apiError
+    // helper — friendly Prisma-code mapping, hides raw messages in
+    // production, and removes the local (err as any).code access.
+    return apiError(err, "Failed to create plot");
   }
 
   return NextResponse.json({ ...result.plot, _warnings: result.warnings }, { status: 201 });

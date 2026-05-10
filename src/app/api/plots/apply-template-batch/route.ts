@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { templateJobsInclude } from "@/lib/template-includes";
 import { createJobsFromTemplate } from "@/lib/apply-template-helpers";
 import { canAccessSite } from "@/lib/site-access";
+import { friendlyMessage } from "@/lib/api-errors";
 
 export const dynamic = "force-dynamic";
 
@@ -255,9 +256,13 @@ export async function POST(request: NextRequest) {
         );
       }
     } catch (err) {
+      // (May 2026 audit #70) Per-plot error messages go through the
+      // friendly-message formatter — hides raw Prisma details in prod
+      // while keeping debuggable messages in dev.
+      console.error(`[apply-template-batch] plot ${plotInput.plotNumber || plotInput.plotName} failed:`, err);
       errors.push({
         plotNumber: plotInput.plotNumber || plotInput.plotName,
-        error: err instanceof Error ? err.message : String(err),
+        error: friendlyMessage(err, "Failed to apply template"),
       });
     }
   }
