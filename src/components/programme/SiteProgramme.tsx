@@ -19,6 +19,7 @@ import {
 import { getCurrentDate, getCurrentDateAtMidnight } from "@/lib/dev-date";
 import { useDevDate } from "@/lib/dev-date-context";
 import { differenceInWorkingDays } from "@/lib/working-days";
+import { MobileProgramme } from "@/components/programme/MobileProgramme";
 import { Loader2, Columns3, ChevronRight, Download, FileText, Search, X, Camera, StickyNote, CalendarDays, Calendar, Layers, List, CheckSquare, Clock, ZoomIn, ZoomOut, Maximize2, Minimize2, Play } from "lucide-react";
 import Link from "next/link";
 import { getStageCode, getStageColor } from "@/lib/stage-codes";
@@ -1148,7 +1149,16 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
   const timelineWidth = columns.length * cellWidth;
 
   return (
-    <div className={isFullscreen ? "fixed inset-0 z-50 flex flex-col overflow-hidden bg-white" : "rounded-lg border bg-white"}>
+    <>
+      {/* (May 2026 mobile programme rebuild) Mobile-only list view —
+          the desktop Gantt below is hidden on small screens because
+          horizontal scroll on a phone is unusable. The MobileProgramme
+          renders one card per plot with progress + current/next stage,
+          tap-through to the plot detail. */}
+      <div className="md:hidden">
+        <MobileProgramme siteId={siteId} />
+      </div>
+      <div className={`hidden md:block ${isFullscreen ? "fixed inset-0 z-50 flex flex-col overflow-hidden bg-white" : "rounded-lg border bg-white"}`}>
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-2 border-b px-3 py-2">
         <button
@@ -2428,6 +2438,7 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
           {toast.type === "success" ? "✓" : "✕"} {toast.message}
         </div>
       )}
-    </div>
+      </div>
+    </>
   );
 }
