@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import {
   Camera,
   CheckCircle,
+  FileCheck,
   Loader2,
   Mail,
   X,
@@ -970,6 +971,23 @@ export function SnagDialog({
                   Delete
                 </Button>
                 <div className="flex gap-2">
+                  {/* (May 2026 audit #205) Single-snag PDF export.
+                      Opens the /api/snags/[id]/pdf route in a new tab —
+                      the route returns Content-Disposition: attachment
+                      so the browser downloads instead of inlining. */}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      if (snag) {
+                        window.open(`/api/snags/${snag.id}/pdf`, "_blank", "noopener,noreferrer");
+                      }
+                    }}
+                    aria-label="Download snag report as PDF"
+                  >
+                    <FileCheck className="size-3" aria-hidden="true" />
+                    PDF
+                  </Button>
                   <Button
                     variant="outline"
                     size="sm"
