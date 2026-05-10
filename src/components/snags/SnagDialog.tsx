@@ -1023,9 +1023,16 @@ export function SnagDialog({
               </div>
             )}
 
+            {/* (May 2026 a11y audit #19) Form labels associated with
+                their inputs via htmlFor + id. Pre-fix the label was
+                only visually adjacent — screen readers had no way to
+                associate "Description" with the textarea, so users
+                heard "edit text" with no field name. Fixed by making
+                the labels real <label htmlFor=...>. */}
             <div>
-              <label className="text-xs font-medium">Description *</label>
+              <label htmlFor="snag-description" className="text-xs font-medium">Description *</label>
               <textarea
+                id="snag-description"
                 className="mt-1 w-full rounded-md border px-3 py-2 text-sm"
                 rows={3}
                 value={form.description}
@@ -1038,8 +1045,9 @@ export function SnagDialog({
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-xs font-medium">Location</label>
+                <label htmlFor="snag-location" className="text-xs font-medium">Location</label>
                 <Input
+                  id="snag-location"
                   value={form.location}
                   onChange={(e) =>
                     setForm((f) => ({ ...f, location: e.target.value }))
@@ -1048,8 +1056,9 @@ export function SnagDialog({
                 />
               </div>
               <div>
-                <label className="text-xs font-medium">Priority</label>
+                <label htmlFor="snag-priority" className="text-xs font-medium">Priority</label>
                 <select
+                  id="snag-priority"
                   value={form.priority}
                   onChange={(e) =>
                     setForm((f) => ({ ...f, priority: e.target.value }))
@@ -1067,8 +1076,9 @@ export function SnagDialog({
             {/* Sub-job selector */}
             {jobs.length > 0 && (
               <div>
-                <label className="text-xs font-medium">Sub-Job</label>
+                <label htmlFor="snag-subjob" className="text-xs font-medium">Sub-Job</label>
                 <select
+                  id="snag-subjob"
                   value={form.jobId}
                   onChange={(e) =>
                     setForm((f) => ({ ...f, jobId: e.target.value }))
@@ -1104,8 +1114,9 @@ export function SnagDialog({
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-xs font-medium">Contractor</label>
+                <label htmlFor="snag-contractor" className="text-xs font-medium">Contractor</label>
                 <select
+                  id="snag-contractor"
                   value={form.contactId}
                   onChange={(e) =>
                     setForm((f) => ({ ...f, contactId: e.target.value }))
@@ -1122,8 +1133,9 @@ export function SnagDialog({
                 </select>
               </div>
               <div>
-                <label className="text-xs font-medium">Assign To (Internal)</label>
+                <label htmlFor="snag-assignee" className="text-xs font-medium">Assign To (Internal)</label>
                 <select
+                  id="snag-assignee"
                   value={form.assignedToId}
                   onChange={(e) =>
                     setForm((f) => ({ ...f, assignedToId: e.target.value }))
@@ -1144,8 +1156,9 @@ export function SnagDialog({
             {isEditing && (
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs font-medium">Status</label>
+                  <label htmlFor="snag-status" className="text-xs font-medium">Status</label>
                   <select
+                    id="snag-status"
                     value={form.status}
                     onChange={(e) =>
                       setForm((f) => ({ ...f, status: e.target.value }))
@@ -1162,8 +1175,9 @@ export function SnagDialog({
             )}
 
             <div>
-              <label className="text-xs font-medium">Notes</label>
+              <label htmlFor="snag-notes" className="text-xs font-medium">Notes</label>
               <textarea
+                id="snag-notes"
                 className="mt-1 w-full rounded-md border px-3 py-2 text-sm"
                 rows={2}
                 value={form.notes}
