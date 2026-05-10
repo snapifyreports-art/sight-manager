@@ -345,17 +345,46 @@ function DrawingRow({ d, onDelete, onCopy, copied, compact }: { d: Drawing; onDe
         </div>
       </div>
       <div className="flex items-center gap-1">
-        <a href={d.url} target="_blank" rel="noopener noreferrer" className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground" title="Open">
-          <ExternalLink className="size-4" />
+        {/* (May 2026 a11y audit #32 + #33 + #129) Icon-only buttons /
+            anchors get aria-label so screen readers announce the
+            action; the icon itself is aria-hidden because the label
+            replaces it. External links append a "(opens in new tab)"
+            sr-only span. */}
+        <a
+          href={d.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+          title="Open"
+          aria-label="Open drawing in new tab"
+        >
+          <ExternalLink className="size-4" aria-hidden="true" />
+          <span className="sr-only">(opens in new tab)</span>
         </a>
-        <a href={d.url} download={d.fileName} className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground" title="Download">
-          <Download className="size-4" />
+        <a
+          href={d.url}
+          download={d.fileName}
+          className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+          title="Download"
+          aria-label="Download drawing"
+        >
+          <Download className="size-4" aria-hidden="true" />
         </a>
-        <button onClick={() => onCopy(d.url, d.id)} className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground" title="Copy share link">
-          {copied ? <Check className="size-4 text-green-600" /> : <Share2 className="size-4" />}
+        <button
+          onClick={() => onCopy(d.url, d.id)}
+          className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+          title="Copy share link"
+          aria-label={copied ? "Share link copied" : "Copy share link"}
+        >
+          {copied ? <Check className="size-4 text-green-600" aria-hidden="true" /> : <Share2 className="size-4" aria-hidden="true" />}
         </button>
-        <button onClick={() => onDelete(d)} className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-destructive" title="Delete">
-          <Trash2 className="size-4" />
+        <button
+          onClick={() => onDelete(d)}
+          className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-destructive"
+          title="Delete"
+          aria-label="Delete drawing"
+        >
+          <Trash2 className="size-4" aria-hidden="true" />
         </button>
       </div>
     </div>

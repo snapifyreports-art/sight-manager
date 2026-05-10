@@ -354,11 +354,28 @@ export function ContactDetailClient({ contact, jobs, snags, documents, orders }:
                         </div>
                       </div>
                       <div className="flex shrink-0 items-center gap-1">
-                        <a href={d.url} target="_blank" rel="noopener noreferrer" className="rounded p-1 text-muted-foreground hover:bg-white hover:text-foreground" title="Open">
-                          <ExternalLink className="size-3.5" />
+                        {/* (May 2026 a11y audit #32 + #129) Icon-only
+                            links get aria-label; the icon is hidden
+                            from screen readers. */}
+                        <a
+                          href={d.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="rounded p-1 text-muted-foreground hover:bg-white hover:text-foreground"
+                          title="Open"
+                          aria-label="Open document in new tab"
+                        >
+                          <ExternalLink className="size-3.5" aria-hidden="true" />
+                          <span className="sr-only">(opens in new tab)</span>
                         </a>
-                        <a href={d.url} download={d.fileName} className="rounded p-1 text-muted-foreground hover:bg-white hover:text-foreground" title="Download">
-                          <Download className="size-3.5" />
+                        <a
+                          href={d.url}
+                          download={d.fileName}
+                          className="rounded p-1 text-muted-foreground hover:bg-white hover:text-foreground"
+                          title="Download"
+                          aria-label="Download document"
+                        >
+                          <Download className="size-3.5" aria-hidden="true" />
                         </a>
                       </div>
                     </div>
