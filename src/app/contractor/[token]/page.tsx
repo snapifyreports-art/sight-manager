@@ -6,6 +6,7 @@ import { verifyContractorToken } from "@/lib/share-token";
 import { SnagSignOffCard } from "./SnagSignOffCard";
 import { PrintButton } from "./PrintButton";
 import { RequestSignOffButton } from "./RequestSignOffButton";
+import { ContractorJobActionRow } from "./ContractorJobActionRow";
 import { MiniGantt } from "@/components/shared/MiniGantt";
 
 export const dynamic = "force-dynamic";
@@ -132,6 +133,7 @@ export default async function ContractorSharePage({
   // RequestSignOffButton to show "already requested" state without another
   // client-side fetch.
   const liveJobIds = jobs.filter((j) => j.status === "IN_PROGRESS").map((j) => j.id);
+  const allJobIds = jobs.map((j) => j.id);
   const signOffRequests = liveJobIds.length > 0
     ? await prisma.jobAction.findMany({
         where: { jobId: { in: liveJobIds }, action: "request_signoff" },
@@ -140,6 +142,25 @@ export default async function ContractorSharePage({
       })
     : [];
   const requestedJobIds = new Set(signOffRequests.map((r) => r.jobId));
+
+  // (May 2026 contractor self-service) Which jobs already have
+  // contractor self-attestations? Surfaces the "Start confirmed" /
+  // "Completion confirmed" badges instead of the button.
+  const contractorActions = allJobIds.length > 0
+    ? await prisma.jobAction.findMany({
+        where: {
+          jobId: { in: allJobIds },
+          action: { in: ["confirm_start", "confirm_complete"] },
+        },
+        select: { jobId: true, action: true },
+      })
+    : [];
+  const startedJobIds = new Set(
+    contractorActions.filter((a) => a.action === "confirm_start").map((a) => a.jobId),
+  );
+  const completedJobIds = new Set(
+    contractorActions.filter((a) => a.action === "confirm_complete").map((a) => a.jobId),
+  );
 
   const jobIds = jobs.map((j) => j.id);
   const materialOrders = jobIds.length > 0
@@ -432,6 +453,17 @@ export default async function ContractorSharePage({
                         <p className="text-sm text-muted-foreground">{plotLabel(job.plot)}</p>
                       </div>
                       <p className="text-sm text-muted-foreground">Due {fmtDate(job.endDate)}</p>
+                    </div>
+                    {/* (May 2026 contractor self-service) Self-attestation
+                        row — contractor logs start/finish/note independently
+                        of the admin status flips. */}
+                    <div className="mt-2">
+                      <ContractorJobActionRow
+                        token={token}
+                        jobId={job.id}
+                        startedAlready={startedJobIds.has(job.id)}
+                        completedAlready={completedJobIds.has(job.id)}
+                      />
                     </div>
                     <div className="mt-2 flex justify-end">
                       <RequestSignOffButton
