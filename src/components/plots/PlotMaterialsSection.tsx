@@ -13,6 +13,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { useToast, fetchErrorMessage } from "@/components/ui/toast";
+import { useConfirm } from "@/hooks/useConfirm";
 
 interface PlotMaterial {
   id: string;
@@ -29,6 +30,7 @@ interface PlotMaterial {
 
 export function PlotMaterialsSection({ plotId }: { plotId: string }) {
   const toast = useToast();
+  const { confirm, dialog: confirmDialog } = useConfirm();
   const [materials, setMaterials] = useState<PlotMaterial[]>([]);
   const [loading, setLoading] = useState(true);
   const [addOpen, setAddOpen] = useState(false);
@@ -66,7 +68,13 @@ export function PlotMaterialsSection({ plotId }: { plotId: string }) {
   }
 
   async function deleteMaterial(m: PlotMaterial) {
-    if (!confirm(`Delete "${m.name}"?`)) return;
+    const ok = await confirm({
+      title: `Delete "${m.name}"?`,
+      body: "This material will be removed from the plot. This cannot be undone.",
+      confirmLabel: "Delete material",
+      danger: true,
+    });
+    if (!ok) return;
     try {
       const res = await fetch(`/api/plots/${plotId}/materials/${m.id}`, { method: "DELETE" });
       if (!res.ok) {
@@ -121,6 +129,7 @@ export function PlotMaterialsSection({ plotId }: { plotId: string }) {
 
   return (
     <div className="space-y-4">
+      {confirmDialog}
       <div className="flex items-center justify-between">
         <div>
           <h2 className="flex items-center gap-2 text-base font-semibold"><Package className="size-4 text-blue-600" /> Materials ({materials.length})</h2>

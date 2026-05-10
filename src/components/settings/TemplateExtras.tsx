@@ -13,6 +13,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { useToast, fetchErrorMessage } from "@/components/ui/toast";
+import { useConfirm } from "@/hooks/useConfirm";
 
 /**
  * Compact Materials + Drawings sections for a PlotTemplate.
@@ -80,6 +81,7 @@ export function TemplateExtras({
   const fileRef = useRef<HTMLInputElement | null>(null);
 
   const toast = useToast();
+  const { confirm, dialog: confirmDialog } = useConfirm();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -141,7 +143,13 @@ export function TemplateExtras({
   }
 
   async function deleteMaterial(id: string) {
-    if (!confirm("Delete this material from the template?")) return;
+    const ok = await confirm({
+      title: "Delete this material from the template?",
+      body: "Plots already created from this template aren't affected — only future applies.",
+      confirmLabel: "Delete material",
+      danger: true,
+    });
+    if (!ok) return;
     const res = await fetch(`/api/plot-templates/${templateId}/materials/${id}`, { method: "DELETE" });
     if (!res.ok) {
       toast.error(await fetchErrorMessage(res, "Failed to delete material"));
@@ -293,7 +301,13 @@ export function TemplateExtras({
   }
 
   async function deleteDoc(id: string) {
-    if (!confirm("Delete this drawing from the template?")) return;
+    const ok = await confirm({
+      title: "Delete this drawing from the template?",
+      body: "Plots already created from this template aren't affected.",
+      confirmLabel: "Delete drawing",
+      danger: true,
+    });
+    if (!ok) return;
     const res = await fetch(`/api/plot-templates/${templateId}/documents/${id}`, { method: "DELETE" });
     if (!res.ok) {
       toast.error(await fetchErrorMessage(res, "Failed to delete drawing"));
@@ -306,6 +320,7 @@ export function TemplateExtras({
 
   return (
     <div className="space-y-6 rounded-xl border bg-card p-4">
+      {confirmDialog}
       <div>
         <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Template extras for {templateName}</h2>
         <p className="text-[11px] text-muted-foreground">Materials + drawings copied to each plot on apply. Editing here only affects NEW plots; existing plots keep their original snapshot.</p>
