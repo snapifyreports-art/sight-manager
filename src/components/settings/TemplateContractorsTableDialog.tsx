@@ -19,6 +19,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useToast, fetchErrorMessage } from "@/components/ui/toast";
+import { useConfirm } from "@/hooks/useConfirm";
 import type { TemplateData, TemplateJobData } from "./types";
 
 interface ContactRow {
@@ -50,6 +51,7 @@ export function TemplateContractorsTableDialog({
   onChanged: () => void | Promise<void>;
 }) {
   const toast = useToast();
+  const { confirm, dialog: confirmDialog } = useConfirm();
   const [saving, setSaving] = useState(false);
   const [contacts, setContacts] = useState<ContactRow[]>([]);
 
@@ -158,20 +160,25 @@ export function TemplateContractorsTableDialog({
     setDrafts(initialDrafts);
   }
 
-  function attemptClose() {
+  async function attemptClose() {
     if (dirtyIds.length === 0) {
       onClose();
       return;
     }
-    const proceed = window.confirm(
-      `${dirtyIds.length} unsaved change${dirtyIds.length === 1 ? "" : "s"} — discard and close?`,
-    );
+    const proceed = await confirm({
+      title: `Discard ${dirtyIds.length} unsaved change${dirtyIds.length === 1 ? "" : "s"}?`,
+      body: "Your edits will not be saved.",
+      confirmLabel: "Discard changes",
+      danger: true,
+    });
     if (proceed) onClose();
   }
 
   return (
-    <Dialog open={open} onOpenChange={(v) => !v && attemptClose()}>
-      <DialogContent className="sm:max-w-3xl">
+    <>
+      {confirmDialog}
+      <Dialog open={open} onOpenChange={(v) => { if (!v) void attemptClose(); }}>
+        <DialogContent className="sm:max-w-3xl">
         <DialogHeader>
           <DialogTitle>
             <HardHat className="-mt-0.5 mr-2 inline size-4 text-blue-600" />
@@ -262,6 +269,7 @@ export function TemplateContractorsTableDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    </>
   );
 }
 

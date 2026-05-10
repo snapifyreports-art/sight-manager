@@ -22,6 +22,7 @@ import {
 import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 import { useOrderStatus } from "@/hooks/useOrderStatus";
 import { useReviewSupplierMaterials } from "@/hooks/useReviewSupplierMaterials";
+import { useConfirm } from "@/hooks/useConfirm";
 
 interface ManualByMaterial {
   name: string;
@@ -87,6 +88,7 @@ export function SiteQuantsClient({
   const [error, setError] = useState("");
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const toast = useToast();
+  const { confirm, dialog: confirmDialog } = useConfirm();
   // "Review items" dialog — fires after a one-off order save, offering
   // to add any new items to the supplier's pricelist.
   const { openReview: openMaterialReview, dialogs: materialReviewDialogs } =
@@ -159,11 +161,25 @@ export function SiteQuantsClient({
     onChange: () => refresh(),
   });
   async function updateOneOffStatus(orderId: string, status: "ORDERED" | "DELIVERED" | "CANCELLED") {
-    if (status === "CANCELLED" && !confirm("Cancel this one-off order? Line-item costs will no longer count toward totals.")) return;
+    if (status === "CANCELLED") {
+      const ok = await confirm({
+        title: "Cancel this one-off order?",
+        body: "Line-item costs will no longer count toward totals. The order itself stays in the audit trail.",
+        confirmLabel: "Cancel order",
+        danger: true,
+      });
+      if (!ok) return;
+    }
     await setOrderStatus(orderId, status);
   }
   async function deletePerPlot(m: ManualPerPlot) {
-    if (!confirm(`Delete "${m.name}" from ${m.plotNumber ? `Plot ${m.plotNumber}` : m.plotName}?`)) return;
+    const ok = await confirm({
+      title: `Delete "${m.name}"?`,
+      body: `From ${m.plotNumber ? `Plot ${m.plotNumber}` : m.plotName}. This cannot be undone.`,
+      confirmLabel: "Delete material",
+      danger: true,
+    });
+    if (!ok) return;
     await fetch(`/api/plots/${m.plotId}/materials/${m.id}`, { method: "DELETE" });
     refresh();
   }
@@ -255,6 +271,7 @@ export function SiteQuantsClient({
 
   return (
     <div className="space-y-4">
+      {confirmDialog}
       {/* Summary row */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
         <div className="rounded-xl border bg-card p-4">

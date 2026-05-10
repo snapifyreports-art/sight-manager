@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/select";
 import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 import { useCopyToClipboard } from "@/hooks/useCopyToClipboard";
+import { useConfirm } from "@/hooks/useConfirm";
 
 interface Drawing {
   id: string;
@@ -60,6 +61,7 @@ export function SiteDrawingsClient({ siteId, plots }: { siteId: string; plots: P
   const fileRef = useRef<HTMLInputElement | null>(null);
   const { copy, copiedKey } = useCopyToClipboard();
   const toast = useToast();
+  const { confirm, dialog: confirmDialog } = useConfirm();
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -164,7 +166,13 @@ export function SiteDrawingsClient({ siteId, plots }: { siteId: string; plots: P
   }
 
   async function deleteDrawing(d: Drawing) {
-    if (!confirm(`Delete "${d.name}"?`)) return;
+    const ok = await confirm({
+      title: `Delete "${d.name}"?`,
+      body: "This drawing will be removed from the site. If a handover checklist references it, that item will become unchecked.",
+      confirmLabel: "Delete drawing",
+      danger: true,
+    });
+    if (!ok) return;
     // SiteDocument DELETE endpoint
     const res = await fetch(`/api/documents/${d.id}`, { method: "DELETE" });
     if (!res.ok) {
@@ -181,6 +189,7 @@ export function SiteDrawingsClient({ siteId, plots }: { siteId: string; plots: P
 
   return (
     <div className="space-y-4">
+      {confirmDialog}
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-base font-semibold">Drawings</h2>

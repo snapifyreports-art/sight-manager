@@ -1169,7 +1169,10 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
     <>
       {centralStartDialogs}
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="w-[calc(100vw-2rem)] sm:max-w-lg max-h-[85vh] overflow-y-auto">
+        {/* (May 2026 audit #97) Bumped from sm:max-w-lg to sm:max-w-2xl —
+            this panel renders orders + photos + notes in tabs; lg felt
+            cramped on desktop. */}
+        <DialogContent className="w-[calc(100vw-2rem)] sm:max-w-2xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <div className="flex items-center gap-2">
               <div

@@ -150,6 +150,25 @@ export default async function ProgressPage({
             <p className="mt-1 text-base text-slate-600">{plot.houseType}</p>
           )}
           <p className="mt-1 text-sm text-slate-500">at {plot.site.name}</p>
+          {/* (May 2026 audit #103) Show "last updated: X ago" so a buyer
+              returning to the page can see if it's fresh or stale. The
+              freshest signal is the most recent journal entry OR shared
+              photo — whichever is more recent. */}
+          {(() => {
+            const journalLatest = plot.journalEntries[0]?.createdAt;
+            const photoLatest = photos[0]?.createdAt;
+            const latest =
+              journalLatest && photoLatest
+                ? journalLatest > photoLatest
+                  ? journalLatest
+                  : photoLatest
+                : journalLatest ?? photoLatest;
+            return latest ? (
+              <p className="mt-2 text-xs text-slate-400">
+                Last update: {relativeWhen(latest)}
+              </p>
+            ) : null;
+          })()}
         </header>
 
         {/* ─── Progress summary ─── */}

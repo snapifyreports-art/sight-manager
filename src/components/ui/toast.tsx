@@ -78,8 +78,17 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastContext.Provider value={api}>
       {children}
-      {/* Stacked toast viewport — top-right, above everything else */}
-      <div className="pointer-events-none fixed right-4 top-4 z-[9999] flex max-w-md flex-col gap-2 print:hidden">
+      {/* Stacked toast viewport — top-right, above everything else.
+          (May 2026 a11y audit #122) aria-live="polite" + aria-atomic
+          on the container so screen-reader announcements don't
+          interleave when two toasts fire close together. */}
+      <div
+        role="region"
+        aria-label="Notifications"
+        aria-live="polite"
+        aria-atomic="false"
+        className="pointer-events-none fixed right-4 top-4 z-[9999] flex max-w-md flex-col gap-2 print:hidden"
+      >
         {toasts.map((t) => (
           <ToastItem key={t.id} toast={t} onDismiss={dismiss} />
         ))}
