@@ -80,6 +80,17 @@ SEQUENTIALLY from `plotStartDate`; never reads cached `startWeek`. See
 `memory/project_template_ssot.md` in Keith's Claude memory for the
 full rule.
 
+### Plot URLs
+
+**`plot-urls.ts` — `getPlotInternalUrl({ siteId, plotId, origin? })` /
+`getPlotQrUrl(...)`**
+Single source for "the URL for this plot". QR codes encode it,
+sidebar links route to it, anywhere plot-to-plot navigation needs to
+build a URL. Pre-extraction the QR code component built two different
+URLs in two places (both wrong) while BatchPlotQR built a third —
+classic SSOT failure. Now: change the path here, every consumer
+updates automatically.
+
 ### Date handling
 
 **`dev-date.ts` — `getCurrentDate()` / `getServerCurrentDate(req)` / `getCurrentDateAtMidnight()`**
