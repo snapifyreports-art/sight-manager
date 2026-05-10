@@ -248,6 +248,29 @@ export async function PUT(
       },
     });
 
+    // (May 2026 audit follow-up to #152) Per-site push on delivery
+    // confirmation — site assignee + watchers + execs get notified
+    // that materials are on site. Best-effort; failure here doesn't
+    // fail the order update.
+    if (
+      body.status === "DELIVERED" &&
+      existing.status !== "DELIVERED"
+    ) {
+      const targetSiteId = existing.job?.plot.siteId ?? existing.siteId;
+      if (targetSiteId) {
+        const orderLabel = existing.job?.name ?? "one-off order";
+        const { sendPushToSiteAudience } = await import("@/lib/push");
+        void sendPushToSiteAudience(targetSiteId, "DELIVERIES_DUE_TODAY", {
+          title: "📦 Delivery confirmed",
+          body: `${existing.supplier.name}: ${orderLabel}`,
+          url: `/orders?orderId=${id}`,
+          tag: `delivery-${id}`,
+        }).catch((err) => {
+          console.warn("[order-update] sendPushToSiteAudience failed:", err);
+        });
+      }
+    }
+
     return NextResponse.json(order);
   } catch (err) {
     return apiError(err, "Failed to update order");
