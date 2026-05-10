@@ -1,0 +1,69 @@
+import { NextRequest, NextResponse } from "next/server";
+import { auth } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
+import { canAccessSite } from "@/lib/site-access";
+import { apiError } from "@/lib/api-errors";
+
+export const dynamic = "force-dynamic";
+
+async function authoriseByPlot(plotId: string) {
+  const session = await auth();
+  if (!session) return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
+  const plot = await prisma.plot.findUnique({
+    where: { id: plotId },
+    select: { siteId: true },
+  });
+  if (!plot) return { error: NextResponse.json({ error: "Plot not found" }, { status: 404 }) };
+  if (
+    !(await canAccessSite(session.user.id, (session.user as { role: string }).role, plot.siteId))
+  ) {
+    return { error: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
+  }
+  return { session };
+}
+
+export async function PUT(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string; varId: string }> },
+) {
+  const { id, varId } = await params;
+  const a = await authoriseByPlot(id);
+  if ("error" in a) return a.error;
+
+  const body = await req.json();
+  const data: Record<string, unknown> = {};
+  for (const key of ["title", "description", "requestedBy"]) {
+    if (key in body) data[key] = body[key] || null;
+  }
+  if ("costDelta" in body) data.costDelta = body.costDelta;
+  if ("daysDelta" in body) data.daysDelta = body.daysDelta;
+  if ("status" in body) {
+    data.status = body.status;
+    if (body.status === "APPROVED") {
+      data.approvedAt = new Date();
+      data.approvedById = a.session.user.id;
+    }
+  }
+
+  try {
+    const v = await prisma.variation.update({ where: { id: varId }, data });
+    return NextResponse.json(v);
+  } catch (err) {
+    return apiError(err, "Failed to update variation");
+  }
+}
+
+export async function DELETE(
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string; varId: string }> },
+) {
+  const { id, varId } = await params;
+  const a = await authoriseByPlot(id);
+  if ("error" in a) return a.error;
+  try {
+    await prisma.variation.delete({ where: { id: varId } });
+    return NextResponse.json({ ok: true });
+  } catch (err) {
+    return apiError(err, "Failed to delete variation");
+  }
+}
