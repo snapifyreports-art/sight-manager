@@ -44,8 +44,14 @@ function TabsList({
   ...props
 }: TabsPrimitive.List.Props & VariantProps<typeof tabsListVariants>) {
   return (
+    // (May 2026 a11y audit #125) Mask-image fade on the horizontal
+    // edges signals "there's more content this way" when the tab strip
+    // overflows. Pre-fix the strip just truncated abruptly — users on
+    // narrow screens didn't realise more tabs existed offscreen.
+    // The mask runs a 1rem solid edge then fades; on screens wide
+    // enough for all tabs it has no visual effect.
     <div
-      className="-mx-4 overflow-x-auto px-4 md:mx-0 md:px-0"
+      className="-mx-4 overflow-x-auto px-4 md:mx-0 md:px-0 [mask-image:linear-gradient(to_right,transparent,black_1rem,black_calc(100%-1rem),transparent)]"
       style={{ WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none' }}
     >
       <TabsPrimitive.List
