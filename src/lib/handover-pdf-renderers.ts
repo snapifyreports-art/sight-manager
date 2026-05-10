@@ -1,43 +1,17 @@
 import { format } from "date-fns";
 import type { SiteStory, PlotStory, ContractorPerf } from "./site-story";
+import { loadJsPdf, pdfBuffer, safeDate } from "./pdf-builder";
 
 /**
  * jsPDF renderers for each PDF inside the Handover ZIP.
  *
- * Each function returns a `Buffer` of the generated PDF for the ZIP
- * assembler to add. We use jsPDF + jspdf-autotable everywhere — same
- * pattern as `src/app/api/plots/[id]/handover/route.ts` (the existing
- * per-plot handover PDF) and the SiteProgramme PDF export.
- *
- * Imports are deferred (`await import`) so we don't bloat the
- * non-PDF code paths.
+ * (May 2026 PDF refactor) Routed through src/lib/pdf-builder.ts —
+ * shared loadJsPdf / pdfBuffer / safeDate so every PDF in the system
+ * follows the same convention. The renderers below still know about
+ * the Handover ZIP's particular layout choices, but the boilerplate
+ * (dynamic import, ArrayBuffer→Buffer, date formatting) lives in the
+ * canonical module.
  */
-
-type AutoTableFn = (
-  doc: import("jspdf").jsPDF,
-  options: Record<string, unknown>,
-) => void;
-
-async function loadJsPdf() {
-  const { default: jsPDF } = await import("jspdf");
-  const autoTable = (await import("jspdf-autotable")).default as AutoTableFn;
-  return { jsPDF, autoTable };
-}
-
-function pdfBuffer(doc: import("jspdf").jsPDF): Buffer {
-  // jsPDF output('arraybuffer') returns ArrayBuffer; coerce to Node Buffer
-  const ab = doc.output("arraybuffer");
-  return Buffer.from(ab);
-}
-
-function safeDate(iso: string | null | undefined, fallback = "—"): string {
-  if (!iso) return fallback;
-  try {
-    return format(new Date(iso), "dd MMM yyyy");
-  } catch {
-    return fallback;
-  }
-}
 
 // ──────────────────────────────────────────────────────────────────────
 // 01_Site_Overview/site-story.pdf

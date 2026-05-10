@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canAccessSite } from "@/lib/site-access";
 import { format } from "date-fns";
+import { loadJsPdf, drawHeader, pdfResponse } from "@/lib/pdf-builder";
 
 export const dynamic = "force-dynamic";
 
@@ -69,24 +70,12 @@ export async function GET(
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  const { default: jsPDF } = await import("jspdf");
-  type AutoTableFn = (
-    doc: import("jspdf").jsPDF,
-    options: Record<string, unknown>,
-  ) => void;
-  const autoTable = (await import("jspdf-autotable")).default as AutoTableFn;
-
+  // (May 2026 PDF refactor) Canonical loaders + header helper from
+  // src/lib/pdf-builder.ts. Every PDF in the system uses these so
+  // the boilerplate is one import instead of inline-per-file.
+  const { jsPDF, autoTable } = await loadJsPdf();
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
-
-  // Header
-  doc.setFontSize(18);
-  doc.text("Snag Report", 14, 22);
-  doc.setFontSize(11);
-  doc.setTextColor(100);
-  doc.text(snag.plot.site.name, 14, 30);
-  doc.setFontSize(8);
-  doc.text(`Generated ${format(new Date(), "dd MMM yyyy HH:mm")}`, 14, 36);
-  doc.setTextColor(0);
+  drawHeader(doc, "Snag Report", { subtitle: snag.plot.site.name });
 
   // Status + priority chips at top right
   const priorityColors: Record<string, [number, number, number]> = {
@@ -201,15 +190,6 @@ export async function GET(
     });
   }
 
-  const pdfBytes = doc.output("arraybuffer");
   const filename = `Snag_${snag.plot.plotNumber || snag.plot.name}_${snag.id.slice(-6)}.pdf`.replace(/\s+/g, "_");
-
-  return new NextResponse(Buffer.from(pdfBytes), {
-    status: 200,
-    headers: {
-      "Content-Type": "application/pdf",
-      "Content-Disposition": `attachment; filename="${filename}"`,
-      "Cache-Control": "no-store",
-    },
-  });
+  return pdfResponse(doc, filename);
 }
