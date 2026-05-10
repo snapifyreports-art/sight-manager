@@ -22,6 +22,9 @@ import {
   renderContractorDetailPdf,
   renderSupplierSummaryPdf,
   renderSupplierDetailPdf,
+  renderBudgetReportPdf,
+  renderCashFlowPdf,
+  renderDelayReportPdf,
   renderReadmeTxt,
 } from "./handover-pdf-renderers";
 
@@ -478,27 +481,227 @@ export async function buildHandoverArchive({
     });
   }
 
-  // ─── 05_Cost_Analysis + 06_Reports ───────────────────────────────
-  // First-pass: skip the heavy report PDFs to keep the initial ZIP
-  // shipping. Drop a placeholder so the structure is obvious — the
-  // budget/cash-flow/delay-report renderers can be added in a follow-
-  // up that wraps the existing JSON endpoints in jsPDF.
-  archive.append(
-    Buffer.from(
-      "Cost analysis PDFs (budget-vs-actual, cash-flow, variance) " +
-        "will be added in a follow-up — for now please refer to the " +
-        "respective Reporting tabs in the app.\n",
-      "utf-8",
+  // ─── 05_Cost_Analysis ────────────────────────────────────────────
+  // (May 2026 audit follow-up) Inline summary aggregations rather than
+  // calling into the API route handlers. The richer per-plot detail
+  // remains in the in-app Reporting tabs; this PDF is the executive
+  // summary that lives inside the handover pack.
+
+  const allOrdersRaw = await prisma.materialOrder.findMany({
+    where: { OR: [{ siteId }, { job: { plot: { siteId } } }] },
+    select: {
+      status: true,
+      expectedDeliveryDate: true,
+      deliveredDate: true,
+      orderItems: { select: { quantity: true, unitCost: true } },
+      job: { select: { plot: { select: { id: true, name: true, plotNumber: true } } } },
+    },
+  });
+  // Compute totalCost on the fly — there's no cached total on the model.
+  const allOrders = allOrdersRaw.map((o) => ({
+    ...o,
+    totalCost: o.orderItems.reduce(
+      (s, i) => s + (i.quantity ?? 0) * (i.unitCost ?? 0),
+      0,
     ),
-    { name: "05_Cost_Analysis/_pending.txt" },
+  }));
+
+  const allMaterials = await prisma.plotMaterial.findMany({
+    where: { plot: { siteId } },
+    select: {
+      quantity: true,
+      unitCost: true,
+      delivered: true,
+      plot: { select: { id: true, name: true, plotNumber: true } },
+    },
+  });
+
+  // Budget = sum of plotMaterial.quantity*unitCost (template / forecast).
+  // Actual = sum of materialOrder.totalCost where DELIVERED.
+  // Committed = orders ORDERED or DELIVERED.
+  // Per-plot = group by plot.id and sum.
+  const totalBudgeted = allMaterials.reduce(
+    (s, m) => s + (m.quantity ?? 0) * (m.unitCost ?? 0),
+    0,
   );
-  archive.append(
-    Buffer.from(
-      "Delay report + weekly reports will be added in a follow-up.\n",
-      "utf-8",
-    ),
-    { name: "06_Reports/_pending.txt" },
-  );
+  const totalActual = allOrders
+    .filter((o) => o.status === "DELIVERED")
+    .reduce((s, o) => s + (o.totalCost ?? 0), 0);
+  const totalCommitted = allOrders
+    .filter((o) => ["ORDERED", "DELIVERED"].includes(o.status))
+    .reduce((s, o) => s + (o.totalCost ?? 0), 0);
+  const totalDelivered = totalActual;
+  const totalPending = allOrders
+    .filter((o) => o.status === "PENDING")
+    .reduce((s, o) => s + (o.totalCost ?? 0), 0);
+
+  const plotBudgetMap = new Map<
+    string,
+    { plotName: string; plotNumber: string | null; budgeted: number; actual: number }
+  >();
+  for (const m of allMaterials) {
+    const k = m.plot.id;
+    const cur = plotBudgetMap.get(k) ?? {
+      plotName: m.plot.name,
+      plotNumber: m.plot.plotNumber,
+      budgeted: 0,
+      actual: 0,
+    };
+    cur.budgeted += (m.quantity ?? 0) * (m.unitCost ?? 0);
+    plotBudgetMap.set(k, cur);
+  }
+  for (const o of allOrders) {
+    if (o.status !== "DELIVERED") continue;
+    if (!o.job?.plot) continue;
+    const k = o.job.plot.id;
+    const cur = plotBudgetMap.get(k) ?? {
+      plotName: o.job.plot.name,
+      plotNumber: o.job.plot.plotNumber,
+      budgeted: 0,
+      actual: 0,
+    };
+    cur.actual += o.totalCost ?? 0;
+    plotBudgetMap.set(k, cur);
+  }
+  const plotBudgetRows = Array.from(plotBudgetMap.values())
+    .map((r) => ({ ...r, variance: r.actual - r.budgeted }))
+    .sort((a, b) => Math.abs(b.variance) - Math.abs(a.variance));
+
+  const totalVariance = totalActual - totalBudgeted;
+  const variancePercent =
+    totalBudgeted > 0 ? Math.round((totalVariance / totalBudgeted) * 100) : 0;
+
+  const budgetPdf = await renderBudgetReportPdf(story.site.name, {
+    siteSummary: {
+      totalBudgeted,
+      totalActual,
+      totalDelivered,
+      totalCommitted,
+      totalPending,
+      totalVariance,
+      variancePercent,
+      plotCount: plotBudgetRows.length,
+      plotsOverBudget: plotBudgetRows.filter((p) => p.variance > 0).length,
+      plotsUnderBudget: plotBudgetRows.filter((p) => p.variance < 0).length,
+      plotsOnBudget: plotBudgetRows.filter((p) => p.variance === 0).length,
+    },
+    topOverruns: plotBudgetRows.slice(0, 10).map((p) => ({
+      plotName: p.plotNumber ? `Plot ${p.plotNumber}` : p.plotName,
+      name: "(plot total)",
+      budgeted: p.budgeted,
+      actual: p.actual,
+      variance: p.variance,
+      variancePercent:
+        p.budgeted > 0 ? Math.round((p.variance / p.budgeted) * 100) : 0,
+    })),
+    plots: plotBudgetRows,
+  });
+  archive.append(budgetPdf, { name: "05_Cost_Analysis/budget-vs-actual.pdf" });
+
+  // Cash-flow PDF — group orders by their dateOfOrder month.
+  const monthMap = new Map<
+    string,
+    { forecast: number; actual: number; committed: number }
+  >();
+  for (const o of allOrders) {
+    const dateRef = o.deliveredDate ?? o.expectedDeliveryDate;
+    if (!dateRef) continue;
+    const ym = `${dateRef.getUTCFullYear()}-${String(dateRef.getUTCMonth() + 1).padStart(2, "0")}`;
+    const cur = monthMap.get(ym) ?? { forecast: 0, actual: 0, committed: 0 };
+    cur.forecast += o.totalCost ?? 0;
+    if (o.status === "DELIVERED") cur.actual += o.totalCost ?? 0;
+    if (["ORDERED", "DELIVERED"].includes(o.status))
+      cur.committed += o.totalCost ?? 0;
+    monthMap.set(ym, cur);
+  }
+  const months = Array.from(monthMap.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([month, v]) => ({ month, ...v }));
+
+  const cashFlowPdf = await renderCashFlowPdf(story.site.name, {
+    months,
+    totals: {
+      committed: totalCommitted,
+      orderedOpen: allOrders
+        .filter((o) => o.status === "ORDERED")
+        .reduce((s, o) => s + (o.totalCost ?? 0), 0),
+      forecast: totalBudgeted,
+      actual: totalActual,
+    },
+  });
+  archive.append(cashFlowPdf, { name: "05_Cost_Analysis/cash-flow.pdf" });
+
+  // ─── 06_Reports — Delay report ───────────────────────────────────
+  const rainedOff = await prisma.rainedOffDay.findMany({
+    where: { siteId },
+    select: { type: true },
+  });
+  const totalRainDays = rainedOff.filter((r) => r.type === "RAIN").length;
+  const totalTemperatureDays = rainedOff.filter(
+    (r) => r.type === "TEMPERATURE",
+  ).length;
+
+  // Delayed jobs: leaf jobs where actualEndDate > endDate (planned).
+  const delayedJobsRaw = await prisma.job.findMany({
+    where: {
+      plot: { siteId },
+      actualEndDate: { not: null },
+      children: { none: {} },
+    },
+    select: {
+      name: true,
+      endDate: true,
+      actualEndDate: true,
+      weatherAffected: true,
+      plot: { select: { name: true, plotNumber: true } },
+    },
+  });
+  const delayedJobs = delayedJobsRaw
+    .filter((j) => j.endDate && j.actualEndDate && j.actualEndDate > j.endDate)
+    .map((j) => {
+      const days = Math.ceil(
+        (j.actualEndDate!.getTime() - j.endDate!.getTime()) / (24 * 60 * 60 * 1000),
+      );
+      return {
+        plotName: j.plot.plotNumber ? `Plot ${j.plot.plotNumber}` : j.plot.name,
+        name: j.name,
+        delayDays: days,
+        isWeatherExcused: !!j.weatherAffected,
+        weatherReasonType: null,
+        delayReason: null,
+      };
+    })
+    .sort((a, b) => b.delayDays - a.delayDays);
+
+  // Overdue deliveries (open orders past expected date).
+  const overdueDeliveriesRaw = await prisma.materialOrder.findMany({
+    where: {
+      OR: [{ siteId }, { job: { plot: { siteId } } }],
+      status: "ORDERED",
+      expectedDeliveryDate: { lt: new Date() },
+    },
+    select: {
+      itemsDescription: true,
+      expectedDeliveryDate: true,
+      supplier: { select: { name: true } },
+      job: { select: { name: true } },
+    },
+  });
+  const overdueDeliveries = overdueDeliveriesRaw.map((d) => ({
+    items: d.itemsDescription ?? "(unspecified)",
+    supplier: d.supplier?.name ?? "",
+    expectedDate: d.expectedDeliveryDate?.toISOString() ?? null,
+    job: d.job?.name ?? "(one-off order)",
+  }));
+
+  const delayPdf = await renderDelayReportPdf(story.site.name, {
+    totalWeatherImpactDays: rainedOff.length,
+    totalRainDays,
+    totalTemperatureDays,
+    delayedJobs,
+    overdueDeliveries,
+  });
+  archive.append(delayPdf, { name: "06_Reports/delay-report-final.pdf" });
 
   // Caller is expected to start streaming AFTER they've attached the
   // archive to a response, so we don't call finalize() here. Returning

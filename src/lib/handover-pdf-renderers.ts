@@ -682,3 +682,287 @@ export function renderReadmeTxt(
   lines.push("");
   return Buffer.from(lines.join("\n"), "utf-8");
 }
+
+// ──────────────────────────────────────────────────────────────────────
+// 05_Cost_Analysis/budget-vs-actual.pdf
+// ──────────────────────────────────────────────────────────────────────
+
+interface BudgetReportShape {
+  siteSummary: {
+    totalBudgeted: number;
+    totalActual: number;
+    totalDelivered: number;
+    totalCommitted: number;
+    totalPending: number;
+    totalVariance: number;
+    variancePercent: number;
+    plotCount: number;
+    plotsOverBudget: number;
+    plotsUnderBudget: number;
+    plotsOnBudget: number;
+  };
+  topOverruns: Array<{
+    plotName: string;
+    name: string;
+    budgeted: number;
+    actual: number;
+    variance: number;
+    variancePercent: number;
+  }>;
+  plots: Array<{
+    plotName: string;
+    plotNumber: string | null;
+    budgeted: number;
+    actual: number;
+    variance: number;
+  }>;
+}
+
+function fmtCurrency(n: number): string {
+  return `£${n.toLocaleString("en-GB", { maximumFractionDigits: 0 })}`;
+}
+
+export async function renderBudgetReportPdf(
+  siteName: string,
+  data: BudgetReportShape,
+): Promise<Buffer> {
+  const { jsPDF, autoTable } = await loadJsPdf();
+  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+
+  doc.setFontSize(18);
+  doc.text("Budget vs Actual", 14, 22);
+  doc.setFontSize(11);
+  doc.setTextColor(120);
+  doc.text(siteName, 14, 30);
+  doc.setFontSize(8);
+  doc.text(`Generated ${format(new Date(), "dd MMM yyyy HH:mm")}`, 14, 36);
+  doc.setTextColor(0);
+
+  doc.setFontSize(12);
+  doc.text("Site summary", 14, 48);
+  autoTable(doc, {
+    startY: 52,
+    body: [
+      ["Total budgeted", fmtCurrency(data.siteSummary.totalBudgeted)],
+      ["Total committed", fmtCurrency(data.siteSummary.totalCommitted)],
+      ["Total delivered", fmtCurrency(data.siteSummary.totalDelivered)],
+      ["Total actual", fmtCurrency(data.siteSummary.totalActual)],
+      [
+        "Variance (actual − budgeted)",
+        `${fmtCurrency(data.siteSummary.totalVariance)} (${data.siteSummary.variancePercent}%)`,
+      ],
+      ["Plots over budget", String(data.siteSummary.plotsOverBudget)],
+      ["Plots under budget", String(data.siteSummary.plotsUnderBudget)],
+      ["Plots on budget", String(data.siteSummary.plotsOnBudget)],
+    ],
+    styles: { fontSize: 10, cellPadding: 1.5 },
+    columnStyles: { 0: { cellWidth: 80, fontStyle: "bold" } },
+  });
+
+  if (data.topOverruns.length > 0) {
+    doc.setFontSize(12);
+    const lastY = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY ?? 100;
+    doc.text("Top overruns", 14, lastY + 12);
+    autoTable(doc, {
+      startY: lastY + 16,
+      head: [["Plot", "Job", "Budgeted", "Actual", "Variance", "%"]],
+      body: data.topOverruns.map((r) => [
+        r.plotName,
+        r.name,
+        fmtCurrency(r.budgeted),
+        fmtCurrency(r.actual),
+        fmtCurrency(r.variance),
+        `${r.variancePercent}%`,
+      ]),
+      styles: { fontSize: 8, cellPadding: 1 },
+      headStyles: { fillColor: [241, 245, 249], textColor: [51, 65, 85] },
+    });
+  }
+
+  if (data.plots.length > 0) {
+    doc.setFontSize(12);
+    const lastY = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY ?? 100;
+    doc.text("Per-plot summary", 14, lastY + 12);
+    autoTable(doc, {
+      startY: lastY + 16,
+      head: [["Plot", "Budgeted", "Actual", "Variance"]],
+      body: data.plots.map((p) => [
+        p.plotNumber ? `Plot ${p.plotNumber}` : p.plotName,
+        fmtCurrency(p.budgeted),
+        fmtCurrency(p.actual),
+        fmtCurrency(p.variance),
+      ]),
+      styles: { fontSize: 8, cellPadding: 1 },
+      headStyles: { fillColor: [241, 245, 249], textColor: [51, 65, 85] },
+    });
+  }
+
+  return pdfBuffer(doc);
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// 05_Cost_Analysis/cash-flow.pdf
+// ──────────────────────────────────────────────────────────────────────
+
+interface CashFlowShape {
+  months: Array<{
+    month: string;
+    forecast: number;
+    actual: number;
+    committed: number;
+  }>;
+  totals: {
+    committed: number;
+    orderedOpen: number;
+    forecast: number;
+    actual: number;
+  };
+}
+
+export async function renderCashFlowPdf(
+  siteName: string,
+  data: CashFlowShape,
+): Promise<Buffer> {
+  const { jsPDF, autoTable } = await loadJsPdf();
+  const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+
+  doc.setFontSize(18);
+  doc.text("Cash Flow", 14, 22);
+  doc.setFontSize(11);
+  doc.setTextColor(120);
+  doc.text(siteName, 14, 30);
+  doc.setFontSize(8);
+  doc.text(`Generated ${format(new Date(), "dd MMM yyyy HH:mm")}`, 14, 36);
+  doc.setTextColor(0);
+
+  doc.setFontSize(12);
+  doc.text("Site totals", 14, 48);
+  autoTable(doc, {
+    startY: 52,
+    body: [
+      ["Total forecast", fmtCurrency(data.totals.forecast)],
+      ["Total committed", fmtCurrency(data.totals.committed)],
+      ["Open orders", fmtCurrency(data.totals.orderedOpen)],
+      ["Total actual (delivered)", fmtCurrency(data.totals.actual)],
+    ],
+    styles: { fontSize: 10, cellPadding: 1.5 },
+    columnStyles: { 0: { cellWidth: 80, fontStyle: "bold" } },
+  });
+
+  if (data.months.length > 0) {
+    const lastY = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY ?? 100;
+    doc.setFontSize(12);
+    doc.text("By month", 14, lastY + 12);
+    autoTable(doc, {
+      startY: lastY + 16,
+      head: [["Month", "Forecast", "Committed", "Actual"]],
+      body: data.months.map((m) => [
+        m.month,
+        fmtCurrency(m.forecast),
+        fmtCurrency(m.committed),
+        fmtCurrency(m.actual),
+      ]),
+      styles: { fontSize: 9, cellPadding: 1.5 },
+      headStyles: { fillColor: [241, 245, 249], textColor: [51, 65, 85] },
+    });
+  }
+
+  return pdfBuffer(doc);
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// 06_Reports/delay-report-final.pdf
+// ──────────────────────────────────────────────────────────────────────
+
+interface DelayReportShape {
+  totalWeatherImpactDays: number;
+  totalRainDays: number;
+  totalTemperatureDays: number;
+  delayedJobs: Array<{
+    plotName: string;
+    name: string;
+    delayDays: number;
+    isWeatherExcused: boolean;
+    weatherReasonType: string | null;
+    delayReason: string | null;
+  }>;
+  overdueDeliveries: Array<{
+    items: string;
+    supplier: string;
+    expectedDate: string | null;
+    job: string;
+  }>;
+}
+
+export async function renderDelayReportPdf(
+  siteName: string,
+  data: DelayReportShape,
+): Promise<Buffer> {
+  const { jsPDF, autoTable } = await loadJsPdf();
+  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+
+  doc.setFontSize(18);
+  doc.text("Delay Report", 14, 22);
+  doc.setFontSize(11);
+  doc.setTextColor(120);
+  doc.text(siteName, 14, 30);
+  doc.setFontSize(8);
+  doc.text(`Generated ${format(new Date(), "dd MMM yyyy HH:mm")}`, 14, 36);
+  doc.setTextColor(0);
+
+  doc.setFontSize(12);
+  doc.text("Weather impact", 14, 48);
+  autoTable(doc, {
+    startY: 52,
+    body: [
+      ["Total weather impact days", String(data.totalWeatherImpactDays)],
+      ["  · Rain", String(data.totalRainDays)],
+      ["  · Temperature", String(data.totalTemperatureDays)],
+    ],
+    styles: { fontSize: 10, cellPadding: 1.5 },
+    columnStyles: { 0: { cellWidth: 100, fontStyle: "bold" } },
+  });
+
+  if (data.delayedJobs.length > 0) {
+    const lastY = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY ?? 80;
+    doc.setFontSize(12);
+    doc.text(`Delayed jobs (${data.delayedJobs.length})`, 14, lastY + 12);
+    autoTable(doc, {
+      startY: lastY + 16,
+      head: [["Plot", "Job", "Days late", "Weather?", "Reason"]],
+      body: data.delayedJobs.map((j) => [
+        j.plotName,
+        j.name,
+        String(j.delayDays),
+        j.isWeatherExcused ? (j.weatherReasonType || "Yes") : "No",
+        j.delayReason || "—",
+      ]),
+      styles: { fontSize: 8, cellPadding: 1 },
+      headStyles: { fillColor: [241, 245, 249], textColor: [51, 65, 85] },
+    });
+  }
+
+  if (data.overdueDeliveries.length > 0) {
+    const lastY = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY ?? 80;
+    doc.setFontSize(12);
+    doc.text(
+      `Overdue deliveries (${data.overdueDeliveries.length})`,
+      14,
+      lastY + 12,
+    );
+    autoTable(doc, {
+      startY: lastY + 16,
+      head: [["Items", "Supplier", "Job", "Expected"]],
+      body: data.overdueDeliveries.map((d) => [
+        d.items,
+        d.supplier,
+        d.job,
+        d.expectedDate ? safeDate(d.expectedDate) : "—",
+      ]),
+      styles: { fontSize: 8, cellPadding: 1 },
+      headStyles: { fillColor: [241, 245, 249], textColor: [51, 65, 85] },
+    });
+  }
+
+  return pdfBuffer(doc);
+}
