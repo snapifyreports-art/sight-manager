@@ -74,6 +74,30 @@ export async function POST(
       },
       include: { createdBy: { select: { id: true, name: true } } },
     });
+
+    // (May 2026 audit #196) Customer push — let the buyer know there's
+    // a new update. Best-effort; failure here doesn't fail the journal
+    // creation. Only fires for plots whose share is enabled.
+    void (async () => {
+      try {
+        const plot = await prisma.plot.findUnique({
+          where: { id },
+          select: { shareToken: true, shareEnabled: true, plotNumber: true, name: true },
+        });
+        if (plot?.shareToken && plot.shareEnabled) {
+          const { sendPushToPlotCustomers } = await import("@/lib/push");
+          await sendPushToPlotCustomers(id, {
+            title: "🏡 New update on your home",
+            body: text.length > 100 ? `${text.slice(0, 100)}…` : text,
+            url: `/progress/${plot.shareToken}`,
+            tag: `journal-${entry.id}`,
+          });
+        }
+      } catch (err) {
+        console.warn("[plot-journal] customer push failed:", err);
+      }
+    })();
+
     return NextResponse.json(entry, { status: 201 });
   } catch (err) {
     return apiError(err, "Failed to create journal entry");
