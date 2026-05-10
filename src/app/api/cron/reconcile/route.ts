@@ -36,6 +36,16 @@ export async function GET(req: NextRequest) {
   let plotsAdjusted = 0;
   let parentsScanned = 0;
   let parentsAdjusted = 0;
+  // (May 2026 audit #84) Capture per-item failures rather than letting
+  // one bad row crash the whole cron. The drift report still ships;
+  // failures are surfaced in the response + logged separately.
+  const plotErrors: Array<{ plotId: string; error: string }> = [];
+  const parentErrors: Array<{ jobId: string; error: string }> = [];
+  // (May 2026 audit #85) Track WHICH rows drifted, not just how many.
+  // When `description` keeps repeating "adjusted 4 plots" night after
+  // night, you need the IDs to chase down the leaking mutation path.
+  const driftedPlots: Array<{ plotId: string; before: number; after: number }> = [];
+  const driftedParents: string[] = [];
 
   // ---- Plot percent reconcile ----
   // Active plots only — completed plots don't move and we don't care
@@ -50,13 +60,29 @@ export async function GET(req: NextRequest) {
   for (const p of activePlots) {
     plotsScanned++;
     const before = p.buildCompletePercent;
-    await recomputePlotPercent(prisma, p.id);
-    const after = await prisma.plot.findUnique({
-      where: { id: p.id },
-      select: { buildCompletePercent: true },
-    });
-    if (after && Math.abs(after.buildCompletePercent - before) > 0.01) {
-      plotsAdjusted++;
+    try {
+      await recomputePlotPercent(prisma, p.id);
+      const after = await prisma.plot.findUnique({
+        where: { id: p.id },
+        select: { buildCompletePercent: true },
+      });
+      if (after && Math.abs(after.buildCompletePercent - before) > 0.01) {
+        plotsAdjusted++;
+        // Cap at 50 so a catastrophically broken night doesn't write
+        // a multi-megabyte event log row.
+        if (driftedPlots.length < 50) {
+          driftedPlots.push({
+            plotId: p.id,
+            before: Math.round(before * 100) / 100,
+            after: Math.round(after.buildCompletePercent * 100) / 100,
+          });
+        }
+      }
+    } catch (err) {
+      plotErrors.push({
+        plotId: p.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 
@@ -81,45 +107,72 @@ export async function GET(req: NextRequest) {
 
   for (const p of parentJobs) {
     parentsScanned++;
-    await recomputeParentFromChildren(prisma, p.id);
-    const after = await prisma.job.findUnique({
-      where: { id: p.id },
-      select: {
-        startDate: true,
-        endDate: true,
-        status: true,
-        actualStartDate: true,
-        actualEndDate: true,
-        originalStartDate: true,
-        originalEndDate: true,
-      },
-    });
-    if (
-      after &&
-      (after.startDate?.getTime() !== p.startDate?.getTime() ||
-        after.endDate?.getTime() !== p.endDate?.getTime() ||
-        after.status !== p.status ||
-        after.actualStartDate?.getTime() !== p.actualStartDate?.getTime() ||
-        after.actualEndDate?.getTime() !== p.actualEndDate?.getTime() ||
-        after.originalStartDate?.getTime() !== p.originalStartDate?.getTime() ||
-        after.originalEndDate?.getTime() !== p.originalEndDate?.getTime())
-    ) {
-      parentsAdjusted++;
+    try {
+      await recomputeParentFromChildren(prisma, p.id);
+      const after = await prisma.job.findUnique({
+        where: { id: p.id },
+        select: {
+          startDate: true,
+          endDate: true,
+          status: true,
+          actualStartDate: true,
+          actualEndDate: true,
+          originalStartDate: true,
+          originalEndDate: true,
+        },
+      });
+      if (
+        after &&
+        (after.startDate?.getTime() !== p.startDate?.getTime() ||
+          after.endDate?.getTime() !== p.endDate?.getTime() ||
+          after.status !== p.status ||
+          after.actualStartDate?.getTime() !== p.actualStartDate?.getTime() ||
+          after.actualEndDate?.getTime() !== p.actualEndDate?.getTime() ||
+          after.originalStartDate?.getTime() !== p.originalStartDate?.getTime() ||
+          after.originalEndDate?.getTime() !== p.originalEndDate?.getTime())
+      ) {
+        parentsAdjusted++;
+        if (driftedParents.length < 50) driftedParents.push(p.id);
+      }
+    } catch (err) {
+      parentErrors.push({
+        jobId: p.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 
   const durationMs = Date.now() - startedAt;
 
-  // Log only when something was actually adjusted — keeps the events
-  // log signal-rich. If you see this firing nightly, find the
-  // mutation path leaking and route it through the helpers.
+  // (May 2026 audit #85) Log only when something was actually adjusted
+  // — keeps the events log signal-rich. Includes the first few drifted
+  // IDs so a recurring entry ("adjusted 4 plots / X, Y, Z") points
+  // directly at the leaking mutation path rather than just incrementing
+  // a count.
   if (plotsAdjusted > 0 || parentsAdjusted > 0) {
+    const sampleIds = [
+      ...driftedPlots.slice(0, 5).map((d) => `plot:${d.plotId.slice(-6)}`),
+      ...driftedParents.slice(0, 5).map((id) => `job:${id.slice(-6)}`),
+    ].join(", ");
     await prisma.eventLog.create({
       data: {
         type: "USER_ACTION",
-        description: `Nightly reconcile: adjusted ${plotsAdjusted}/${plotsScanned} plot percents and ${parentsAdjusted}/${parentsScanned} parent rollups in ${durationMs}ms`,
+        description:
+          `Nightly reconcile: adjusted ${plotsAdjusted}/${plotsScanned} plot percents` +
+          ` and ${parentsAdjusted}/${parentsScanned} parent rollups in ${durationMs}ms` +
+          (sampleIds ? ` (sample: ${sampleIds})` : ""),
       },
     });
+  }
+
+  // (May 2026 audit #84) Surface per-item failures separately so a
+  // monitoring check can alert on errors without alerting on legit
+  // drift adjustments.
+  if (plotErrors.length > 0 || parentErrors.length > 0) {
+    console.error(
+      `[cron/reconcile] ${plotErrors.length} plot errors, ${parentErrors.length} parent errors`,
+      { plotErrors: plotErrors.slice(0, 10), parentErrors: parentErrors.slice(0, 10) },
+    );
   }
 
   return NextResponse.json({
@@ -127,6 +180,13 @@ export async function GET(req: NextRequest) {
     plotsAdjusted,
     parentsScanned,
     parentsAdjusted,
+    plotErrors: plotErrors.length,
+    parentErrors: parentErrors.length,
     durationMs,
+    // (audit #86) Sample of drifted IDs in the response so an operator
+    // can drill in immediately from the cron output without grepping
+    // the events log.
+    driftedPlotsSample: driftedPlots.slice(0, 10),
+    driftedParentsSample: driftedParents.slice(0, 10),
   });
 }
