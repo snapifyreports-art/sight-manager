@@ -408,8 +408,13 @@ export function EventsClient({
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
             {/* Search */}
             <div className="relative flex-1">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+              {/* (May 2026 a11y audit #19) Visually-hidden label +
+                  type="search" — see ContactsClient pattern. */}
+              <label htmlFor="events-search" className="sr-only">Search events</label>
               <Input
+                id="events-search"
+                type="search"
                 placeholder="Search events..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}

@@ -1319,8 +1319,14 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
 
         {/* Search */}
         <div className="relative">
-          <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+          {/* (May 2026 a11y audit #19) Visually-hidden label so screen
+              readers announce the input role; type="search" for native
+              clear affordance. */}
+          <label htmlFor="programme-search" className="sr-only">Search plots</label>
           <Input
+            id="programme-search"
+            type="search"
             placeholder="Search plots..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}

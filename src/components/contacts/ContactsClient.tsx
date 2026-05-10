@@ -261,8 +261,15 @@ export function ContactsClient({
       {/* Search */}
       <div className="flex items-center">
         <div className="relative w-full sm:max-w-xs">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+          {/* (May 2026 a11y audit #19) Visually-hidden label associates
+              the icon-decorated input with a name screen readers can
+              announce. type="search" gives the browser's native
+              "clear" affordance + correct keyboard behaviour. */}
+          <label htmlFor="contractors-search" className="sr-only">Search contractors</label>
           <Input
+            id="contractors-search"
+            type="search"
             placeholder="Search contractors..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
