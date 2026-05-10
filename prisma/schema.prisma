@@ -237,6 +237,9 @@ model Plot {
   oneOffOrders      MaterialOrder[] // back-relation for MaterialOrder.plotId (plot-level one-off)
   journalEntries    PlotJournalEntry[]
   ncrs              NCR[]
+  preStartChecks    PreStartCheck[]
+  variations        Variation[]
+  defectReports     DefectReport[]
 
   @@unique([siteId, plotNumber])
   @@index([siteId]) // hot path: every site page loads plots
@@ -968,6 +971,88 @@ enum NCRStatus {
   OPEN
   INVESTIGATING
   AWAITING_CORRECTION
+  RESOLVED
+  CLOSED
+}
+
+/// (May 2026 audit #175) Pre-start checklist items per plot. Free-form
+/// — admins add items as the plot progresses. Common entries: ground
+/// survey complete, services connected, scaffold inspected, etc.
+/// Future: link to job-action so completing a check is a side-effect.
+model PreStartCheck {
+  id          String    @id @default(cuid())
+  plotId      String
+  label       String
+  checked     Boolean   @default(false)
+  checkedAt   DateTime?
+  checkedById String?
+  sortOrder   Int       @default(0)
+  notes       String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  plot Plot @relation(fields: [plotId], references: [id], onDelete: Cascade)
+
+  @@index([plotId, sortOrder])
+}
+
+/// (May 2026 audit #169) Variations: customer-requested or designer-
+/// requested changes during the build. Each row tracks what changed,
+/// who requested it, cost impact, time impact, and approval status.
+model Variation {
+  id          String          @id @default(cuid())
+  plotId      String
+  ref         String? // VAR-001 style
+  title       String
+  description String?
+  requestedBy String? // free text — customer, designer, contractor
+  costDelta   Float? // £ change (positive = more cost)
+  daysDelta   Int? // working-day change
+  status      VariationStatus @default(REQUESTED)
+  approvedById String?
+  approvedAt  DateTime?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  plot Plot @relation(fields: [plotId], references: [id], onDelete: Cascade)
+
+  @@index([plotId])
+}
+
+enum VariationStatus {
+  REQUESTED
+  APPROVED
+  REJECTED
+  IMPLEMENTED
+}
+
+/// (May 2026 audit #177) Defect-liability tracker — post-handover
+/// defects raised during the warranty period. Distinct from snags
+/// (which are pre-handover); defects belong to the customer's
+/// warranty claim, not the build phase QA.
+model DefectReport {
+  id            String              @id @default(cuid())
+  plotId        String
+  ref           String? // DEF-001 style
+  title         String
+  description   String
+  status        DefectReportStatus  @default(REPORTED)
+  reportedAt    DateTime            @default(now())
+  resolvedAt    DateTime?
+  reportedById  String?
+  resolvedById  String?
+  contractorId  String? // assigned contractor (Contact.id)
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+
+  plot Plot @relation(fields: [plotId], references: [id], onDelete: Cascade)
+
+  @@index([plotId, status])
+}
+
+enum DefectReportStatus {
+  REPORTED
+  IN_PROGRESS
   RESOLVED
   CLOSED
 }
