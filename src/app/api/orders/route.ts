@@ -98,7 +98,11 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const order = await prisma.materialOrder.create({
+    // (May 2026 audit #80) Wrap order create + audit log in one tx.
+    // Pre-fix order creation succeeded then audit-log creation could
+    // fail leaving the order with no audit trail.
+    const order = await prisma.$transaction(async (tx) => {
+      const created = await tx.materialOrder.create({
       data: {
         supplierId,
         jobId,
@@ -152,15 +156,18 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    await prisma.eventLog.create({
-      data: {
-        type: "ORDER_PLACED",
-        description: `[${order.supplier.name}] Order created for ${order.job?.name ?? "one-off order"}`,
-        siteId: order.job?.plot.siteId ?? order.siteId ?? null,
-        plotId: order.job?.plotId ?? order.plotId ?? null,
-        jobId: order.jobId,
-        userId: session.user?.id || null,
-      },
+      await tx.eventLog.create({
+        data: {
+          type: "ORDER_PLACED",
+          description: `[${created.supplier.name}] Order created for ${created.job?.name ?? "one-off order"}`,
+          siteId: created.job?.plot.siteId ?? created.siteId ?? null,
+          plotId: created.job?.plotId ?? created.plotId ?? null,
+          jobId: created.jobId,
+          userId: session.user?.id || null,
+        },
+      });
+
+      return created;
     });
 
     return NextResponse.json(order, { status: 201 });

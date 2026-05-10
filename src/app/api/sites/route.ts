@@ -51,44 +51,49 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const site = await prisma.site.create({
-      data: {
-        name: name.trim(),
-        description: description?.trim() || null,
-        location: location?.trim() || null,
-        address: address?.trim() || null,
-        postcode: postcode?.trim() || null,
-        createdById: session.user.id,
-        ...(assignedToId ? { assignedToId } : {}),
-      },
-      include: {
-        createdBy: {
-          select: { id: true, name: true, email: true },
+    // (May 2026 audit #79) All-or-nothing: site create + UserSite grants
+    // + audit log in one transaction. Pre-fix three separate writes —
+    // mid-failure left a site that existed but had no UserSite or
+    // audit row, confusing the user who saw "error" then "site name
+    // already exists" on retry.
+    const site = await prisma.$transaction(async (tx) => {
+      const created = await tx.site.create({
+        data: {
+          name: name.trim(),
+          description: description?.trim() || null,
+          location: location?.trim() || null,
+          address: address?.trim() || null,
+          postcode: postcode?.trim() || null,
+          createdById: session.user.id,
+          ...(assignedToId ? { assignedToId } : {}),
         },
-        _count: {
-          select: { plots: true },
+        include: {
+          createdBy: {
+            select: { id: true, name: true, email: true },
+          },
+          _count: {
+            select: { plots: true },
+          },
         },
-      },
-    });
+      });
 
-    // Auto-grant UserSite access so non-admin creators/managers can see their own site.
-    // CEOs/DIRECTORs bypass UserSite entirely (site-access.ts), so these rows are a safety
-    // net for other roles — idempotent via skipDuplicates.
-    const grantees = new Set<string>([session.user.id]);
-    if (assignedToId && assignedToId !== session.user.id) grantees.add(assignedToId);
-    await prisma.userSite.createMany({
-      data: Array.from(grantees).map((userId) => ({ userId, siteId: site.id })),
-      skipDuplicates: true,
-    });
+      const grantees = new Set<string>([session.user.id]);
+      if (assignedToId && assignedToId !== session.user.id) grantees.add(assignedToId);
+      await tx.userSite.createMany({
+        data: Array.from(grantees).map((userId) => ({ userId, siteId: created.id })),
+        skipDuplicates: true,
+      });
 
-    // Log the event
-    await prisma.eventLog.create({
-      data: {
-        type: "SITE_CREATED",
-        description: `Site "${site.name}" was created`,
-        siteId: site.id,
-        userId: session.user.id,
-      },
+      await tx.eventLog.create({
+        data: {
+          type: "SITE_CREATED",
+          description: `Site "${created.name}" was created`,
+          siteId: created.id,
+          userId: session.user.id,
+        },
+      });
+
+      return created;
     });
 
     return NextResponse.json(site, { status: 201 });

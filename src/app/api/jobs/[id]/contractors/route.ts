@@ -131,7 +131,11 @@ export async function PUT(
         include: { contact: true },
         orderBy: { createdAt: "asc" },
       });
-    });
+    },
+    // (May 2026 audit #81) Bumped to 30s — replacing many contractor
+    // assignments at once was hitting the default 5s.
+    { timeout: 30_000, maxWait: 10_000 },
+    );
 
     return NextResponse.json(result);
   } catch (err) {
