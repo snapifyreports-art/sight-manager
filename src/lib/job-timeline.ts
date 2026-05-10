@@ -42,6 +42,36 @@
 
 import { differenceInWorkingDays } from "@/lib/working-days";
 
+/**
+ * (May 2026 audit #13 — helper migrations) Remap a date from the
+ * current-plan timeline back onto the original-plan timeline. Used
+ * by Cash Flow (when the user picks "original" date mode) so a
+ * delayed order's spend bucket is shown at the date it would have
+ * fallen on if nothing had slipped.
+ *
+ * Algorithm: how far through the current window does the date sit?
+ * Drop it the same fraction through the original window. Clamped
+ * so dates outside either window can't blow up.
+ *
+ * Lives here so every consumer that needs original-mode remapping
+ * hits the same code path — Cash Flow, Site Story variance, future
+ * Handover budget PDF.
+ */
+export function remapDateToOriginal(
+  date: Date,
+  jobStart: Date,
+  jobEnd: Date,
+  origStart: Date,
+  origEnd: Date,
+): Date {
+  const jobSpan = jobEnd.getTime() - jobStart.getTime();
+  const origSpan = origEnd.getTime() - origStart.getTime();
+  if (jobSpan <= 0 || origSpan <= 0) return date;
+  const fraction = (date.getTime() - jobStart.getTime()) / jobSpan;
+  const clamped = Math.max(0, Math.min(1, fraction));
+  return new Date(origStart.getTime() + clamped * origSpan);
+}
+
 // ── Input shapes ─────────────────────────────────────────────────────
 // Caller passes the bare minimum needed; helper doesn't query the DB.
 

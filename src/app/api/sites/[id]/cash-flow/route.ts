@@ -3,31 +3,14 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { format } from "date-fns";
 import { canAccessSite } from "@/lib/site-access";
+import { remapDateToOriginal } from "@/lib/job-timeline";
 
 export const dynamic = "force-dynamic";
 
-/**
- * Remap an order date to the original job timeline.
- * If the job was delayed, order dates shifted with it. This maps them back
- * proportionally: how far through the current job window was this date?
- * Place it the same fraction through the original window.
- */
-function remapToOriginal(
-  orderDate: Date,
-  jobStart: Date,
-  jobEnd: Date,
-  origStart: Date,
-  origEnd: Date
-): Date {
-  const jobSpan = jobEnd.getTime() - jobStart.getTime();
-  const origSpan = origEnd.getTime() - origStart.getTime();
-  if (jobSpan <= 0 || origSpan <= 0) return orderDate;
-
-  const fraction = (orderDate.getTime() - jobStart.getTime()) / jobSpan;
-  // Clamp fraction to [0,1] — orders can precede or follow the job window
-  const clamped = Math.max(0, Math.min(1, fraction));
-  return new Date(origStart.getTime() + clamped * origSpan);
-}
+// (May 2026 audit #13 helper migration) Local remapToOriginal removed —
+// routed through src/lib/job-timeline.ts so every original-mode
+// consumer hits the same code path. Site Story + future Handover
+// budget PDF will pick up the same helper.
 
 // GET /api/sites/[id]/cash-flow — cash flow data for a site
 export async function GET(
@@ -98,7 +81,7 @@ export async function GET(
     ) {
       return date;
     }
-    return remapToOriginal(
+    return remapDateToOriginal(
       date,
       new Date(job.startDate),
       new Date(job.endDate),

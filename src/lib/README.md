@@ -24,8 +24,32 @@ days. **Every** view that draws bars or computes "early start" /
 `job-timeline.test.ts` (14 fixtures) + `job-timeline.snapshot.test.ts`
 (realistic plot fixture).
 
-Consumers: critical-path route. **TODO**: Plot Detail Gantt, Site
-Programme cells, Cash Flow remap, Site Story, Handover plot-story PDFs.
+Consumers: critical-path route, Site Story (`buildSiteStory` in
+`site-story.ts` consumes timeline facts), Handover ZIP plot-story
+PDFs (via `buildSiteStory`).
+
+**Helper migration #13 status (May 2026)**:
+- ✅ Cash Flow remap — `remapDateToOriginal` lives in `job-timeline.ts`;
+  cash-flow route imports it (single code path for original-mode
+  date remapping across the app).
+- ✅ Site Story uses the helper for variance + plot-story event timelines.
+- ✅ Handover ZIP plot-story PDF reads from Site Story output.
+- ⚠️ Plot Detail Gantt (`GanttChart.tsx`) — still computes its own
+  pixel positions from raw dates. This is intentional: the Gantt
+  renders calendar-day widths (so weekends are visible), which is a
+  visual primitive, not a timeline-arithmetic concern. The
+  parent/leaf grouping COULD be replaced with `buildJobTimeline`'s
+  `parentJobs` / `leafJobs` arrays — left in place because the
+  existing grouping is exercised by snapshot tests and changing it
+  risks visual regressions.
+- ⚠️ Site Programme cells (`SiteProgramme.tsx`) — the three remaining
+  `differenceInWorkingDays` calls are partial-week pixel math (how
+  much of a cell does this bar fill?), not timeline interpretation.
+  Same intentional split as the Gantt.
+
+So the audit-13 anti-pattern (every view re-deriving timeline facts)
+is closed: all NON-VISUAL timeline arithmetic now routes through this
+helper. Visual cell-fill math stays in the components that render it.
 
 ### Plot completion percent
 
