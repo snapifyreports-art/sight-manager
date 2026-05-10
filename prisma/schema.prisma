@@ -1082,6 +1082,20 @@ enum DefectReportStatus {
   CLOSED
 }
 
+/// (May 2026 audit #56) White-label settings. Singleton row keyed on
+/// id="default" — exactly one app-wide brand because the installation
+/// is the tenant. Logo URL points at Supabase storage same as other
+/// docs; primaryColor is a hex string applied via a CSS variable on
+/// the dashboard layout.
+model AppSettings {
+  id           String   @id @default("default")
+  brandName    String   @default("Sight Manager")
+  logoUrl      String?
+  primaryColor String   @default("#2563eb")
+  supportEmail String?
+  updatedAt    DateTime @updatedAt
+}
+
 /// (May 2026 audit #166) Draw schedule — financial milestone payments
 /// the customer makes during the build (e.g. 10% deposit, 30% on damp
 /// proof course, 50% on roof complete, 10% on handover). Each row is
