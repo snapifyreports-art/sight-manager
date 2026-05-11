@@ -2062,7 +2062,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                             onClick={() => handleOrderAction(d.id, "DELIVERED")}
                           >
                             {isOrderPending(d.id) ? <Loader2 className="size-3 animate-spin" /> : <CheckCircle2 className="size-3" />}
-                            <span className="ml-1">Received</span>
+                            <span className="ml-1">Mark Received</span>
                           </Button>
                         </div>
                       ))}
@@ -2161,7 +2161,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                           onClick={() => handleOrderAction(d.id, "DELIVERED")}
                         >
                           {isOrderPending(d.id) ? <Loader2 className="size-3 animate-spin" /> : <CheckCircle2 className="size-3" />}
-                          <span className="ml-1">Received</span>
+                          <span className="ml-1">Mark Received</span>
                         </Button>
                       </div>
                     </div>
@@ -2930,7 +2930,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                               disabled={anyPending}
                               onClick={() => allIds.forEach((id) => handleOrderAction(id, "DELIVERED"))}>
                               {anyPending ? <Loader2 className="size-3 animate-spin" /> : <CheckCircle2 className="size-3" />}
-                              <span className="ml-1">Received</span>
+                              <span className="ml-1">Mark Received</span>
                             </Button>
                           </div>
                         </div>

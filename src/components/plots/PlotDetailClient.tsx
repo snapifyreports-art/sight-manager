@@ -758,7 +758,7 @@ function PlotOverview({
                       <Button variant="outline" size="sm"
                         className="h-6 shrink-0 border-green-200 px-2 text-[10px] text-green-700 hover:bg-green-50"
                         onClick={() => handleOrderStatus(order.id, "DELIVERED")}>
-                        <CheckCircle2 className="mr-1 size-2.5" />Received
+                        <CheckCircle2 className="mr-1 size-2.5" />Mark Received
                       </Button>
                     )}
                   </div>
@@ -783,7 +783,7 @@ function PlotOverview({
                       <Button variant="outline" size="sm"
                         className="h-6 shrink-0 border-green-200 px-2 text-[10px] text-green-700 hover:bg-green-50"
                         onClick={() => handleOrderStatus(order.id, "DELIVERED")}>
-                        <CheckCircle2 className="mr-1 size-2.5" />Received
+                        <CheckCircle2 className="mr-1 size-2.5" />Mark Received
                       </Button>
                     )}
                   </div>

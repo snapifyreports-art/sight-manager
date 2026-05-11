@@ -144,7 +144,7 @@ export function JobActionButtons({
               className={`${btnBase} border-blue-200 text-blue-700 hover:bg-blue-50`}
             >
               {isLoading("complete") ? <Loader2 className="size-3 animate-spin" /> : <CheckCircle2 className="size-3" />}
-              {!compact && <span>Complete</span>}
+              {!compact && <span>Mark Complete</span>}
             </button>
             {showExtend && (
               <button
