@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { randomBytes } from "crypto";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { templateJobsInclude } from "@/lib/template-includes";
@@ -154,6 +155,9 @@ export async function POST(request: NextRequest) {
         // Snapshot link back to the template — informational, no auto-sync.
         sourceTemplateId: template.id,
         sourceVariantId: resolvedVariantId,
+        // (#172) Auto-generate customer share link at create time.
+        shareToken: randomBytes(24).toString("base64url"),
+        shareEnabled: true,
       },
     });
 

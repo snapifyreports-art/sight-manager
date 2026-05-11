@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { randomBytes } from "crypto";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canAccessSite } from "@/lib/site-access";
@@ -63,6 +64,14 @@ export async function POST(
         houseType: houseType?.trim() || null,
         reservationType: reservationType?.trim() || null,
         siteId,
+        // (#172) Auto-generate the customer share link at plot-create
+        // time so admins never have to click "Generate" before they can
+        // share the link with a buyer. shareEnabled defaults to true —
+        // the token is 24-byte base64url, effectively un-guessable, and
+        // admins can disable any time. Same shape as
+        // /api/plots/[id]/customer-link POST.
+        shareToken: randomBytes(24).toString("base64url"),
+        shareEnabled: true,
       },
       include: {
         _count: {
