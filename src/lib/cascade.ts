@@ -10,8 +10,14 @@ import { addWorkingDays, differenceInWorkingDays, snapToWorkingDay } from "@/lib
  *        of working days. Working-day duration is preserved by construction
  *        (we call addWorkingDays on both start and end).
  *   I2 — addWorkingDays guarantees every result lands on a working day.
- *   I3 — Orders shift by the same working-day delta as their job; the
- *        order-to-delivery gap is preserved.
+ *   I3 — PENDING orders shift by the same working-day delta as their job;
+ *        the order-to-delivery gap is preserved.
+ *        (#176) ORDERED orders DO NOT shift — the supplier already
+ *        committed to a date and we can't time-travel the supplier.
+ *        Daily Brief showed ORDERED orders as overdue with shifted
+ *        past dates when a pull-forward had silently dragged them
+ *        backwards. Fix: lock ORDERED in place; if the manager wants
+ *        them moved they edit the order directly.
  *   I4 — COMPLETED jobs and DELIVERED/CANCELLED orders are excluded.
  *   I7 — No silent clamp to today. If a shift would put a job or pending
  *        order in the past, the result contains a conflict entry; the
@@ -208,6 +214,14 @@ export function calculateCascade(
     for (const order of jobOrders) {
       // I4: historical/cancelled orders never move.
       if (order.status === "DELIVERED" || order.status === "CANCELLED") continue;
+      // (#176) I3 update — ORDERED orders are locked to the supplier's
+      // committed delivery date. The cascade leaves them alone; the
+      // manager re-negotiates manually if the new programme demands a
+      // different date. Previously these silently shifted into the
+      // past, causing the Daily Brief to show them as overdue with
+      // stale dates that had no relation to anything the supplier
+      // agreed to.
+      if (order.status === "ORDERED") continue;
       // (#167) "Start anyway" override — the caller will mark these
       // ORDERED with dateOfOrder=today separately, so don't shift them
       // and don't flag them as conflicts.

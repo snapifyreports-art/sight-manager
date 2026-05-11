@@ -82,10 +82,21 @@ Every job's startDate and endDate lands on Mon-Fri. If a shift would land on
 Sat/Sun, the start AND the end both snap forward by the same number of calendar
 days so duration stays identical.
 
-**I3 — Orders ride with their job**
-For every order on a moved job, `dateOfOrder` and `expectedDeliveryDate` each
-shift by the same Δ calendar days as the job. The lead time gap
+**I3 — PENDING orders ride with their job; ORDERED orders stay put**
+For every PENDING order on a moved job, `dateOfOrder` and `expectedDeliveryDate`
+each shift by the same Δ working days as the job. The lead time gap
 (`expectedDeliveryDate − dateOfOrder`) is preserved.
+
+**ORDERED orders are locked to the supplier's committed delivery date.**
+Once an order has been placed, the supplier owns the date — the cascade
+cannot time-travel them. If a pull-forward demands an earlier delivery,
+the manager re-negotiates with the supplier and edits the order directly
+(or uses the "Start anyway — send orders now" override path which marks
+the order ORDERED with `dateOfOrder=today` and prompts for the new
+delivery date inline). Pre-#176 the cascade silently shifted ORDERED
+orders backwards, producing past `expectedDeliveryDate` values that
+Daily Brief then reported as "overdue" with dates the supplier never
+agreed to.
 
 **I4 — Completed jobs and delivered orders are immovable**
 A job with `status === "COMPLETED"` is never touched by a cascade.
