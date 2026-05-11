@@ -46,6 +46,30 @@ export interface SiteStory {
     snagsRaised: number;
     snagsResolved: number;
     snagsOpen: number;
+    /** (#174) Snag breakdown for the Story tab summary — by priority,
+     *  by location, by contractor; plus a recent-snag feed and the
+     *  median resolve time when resolved snags exist. */
+    snagsByPriority: { HIGH: number; MEDIUM: number; LOW: number };
+    snagsByLocation: { location: string; count: number }[];
+    snagsByContractor: {
+      contactId: string;
+      name: string;
+      company: string | null;
+      count: number;
+      openCount: number;
+      resolvedCount: number;
+    }[];
+    snagMedianResolveDays: number | null;
+    recentSnags: {
+      id: string;
+      description: string;
+      status: string;
+      priority: string;
+      location: string | null;
+      plotNumber: string | null;
+      raisedAt: string;
+      resolvedAt: string | null;
+    }[];
   };
   plotStories: PlotStory[];
   contractorPerformance: ContractorPerf[];
@@ -375,6 +399,89 @@ export async function buildSiteStory(
     snagSummary.find((s) => s.status === "RESOLVED")?._count ?? 0;
   const snagsOpen = snagsRaised - snagsResolved;
 
+  // (#174) Rich snag breakdown for the Story tab. Pull every snag for
+  // the site once and aggregate in memory — typical sites are < 500
+  // snags so this stays cheap.
+  const allSnags = await tx.snag.findMany({
+    where: { plotId: { in: plotIds } },
+    select: {
+      id: true,
+      description: true,
+      status: true,
+      priority: true,
+      location: true,
+      createdAt: true,
+      resolvedAt: true,
+      contactId: true,
+      contact: { select: { name: true, company: true } },
+      plot: { select: { plotNumber: true } },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+
+  const snagsByPriority = { HIGH: 0, MEDIUM: 0, LOW: 0 };
+  const locationCounts = new Map<string, number>();
+  const contractorAgg = new Map<
+    string,
+    {
+      contactId: string;
+      name: string;
+      company: string | null;
+      count: number;
+      openCount: number;
+      resolvedCount: number;
+    }
+  >();
+  const resolveDays: number[] = [];
+  for (const s of allSnags) {
+    const pri = (s.priority ?? "MEDIUM") as keyof typeof snagsByPriority;
+    if (pri in snagsByPriority) snagsByPriority[pri]++;
+    if (s.location) {
+      locationCounts.set(s.location, (locationCounts.get(s.location) ?? 0) + 1);
+    }
+    if (s.contactId && s.contact) {
+      const existing = contractorAgg.get(s.contactId) ?? {
+        contactId: s.contactId,
+        name: s.contact.name,
+        company: s.contact.company,
+        count: 0,
+        openCount: 0,
+        resolvedCount: 0,
+      };
+      existing.count++;
+      if (s.status === "RESOLVED" || s.status === "CLOSED") existing.resolvedCount++;
+      else existing.openCount++;
+      contractorAgg.set(s.contactId, existing);
+    }
+    if (s.resolvedAt && s.createdAt) {
+      const days =
+        (s.resolvedAt.getTime() - s.createdAt.getTime()) / (1000 * 60 * 60 * 24);
+      if (days >= 0) resolveDays.push(days);
+    }
+  }
+  const snagsByLocation = Array.from(locationCounts.entries())
+    .map(([location, count]) => ({ location, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 5);
+  const snagsByContractor = Array.from(contractorAgg.values())
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 8);
+  const snagMedianResolveDays = resolveDays.length > 0
+    ? Math.round(
+        ([...resolveDays].sort((a, b) => a - b)[Math.floor(resolveDays.length / 2)] ?? 0) * 10,
+      ) / 10
+    : null;
+  const recentSnags = allSnags.slice(0, 10).map((s) => ({
+    id: s.id,
+    description: s.description,
+    status: s.status,
+    priority: s.priority ?? "MEDIUM",
+    location: s.location,
+    plotNumber: s.plot.plotNumber,
+    raisedAt: s.createdAt.toISOString(),
+    resolvedAt: s.resolvedAt?.toISOString() ?? null,
+  }));
+
   // On-time completion = plots where every leaf job's actualEndDate
   // <= originalEndDate. Edge: plots not yet complete excluded.
   const onTimeCount = plots.filter((p) => {
@@ -651,6 +758,11 @@ export async function buildSiteStory(
       snagsRaised,
       snagsResolved,
       snagsOpen,
+      snagsByPriority,
+      snagsByLocation,
+      snagsByContractor,
+      snagMedianResolveDays,
+      recentSnags,
     },
     plotStories,
     contractorPerformance,

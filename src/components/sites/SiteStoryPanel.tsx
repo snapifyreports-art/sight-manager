@@ -64,6 +64,28 @@ interface StoryData {
     snagsRaised: number;
     snagsResolved: number;
     snagsOpen: number;
+    // (#174) Full snag breakdown for the in-tab summary.
+    snagsByPriority: { HIGH: number; MEDIUM: number; LOW: number };
+    snagsByLocation: { location: string; count: number }[];
+    snagsByContractor: Array<{
+      contactId: string;
+      name: string;
+      company: string | null;
+      count: number;
+      openCount: number;
+      resolvedCount: number;
+    }>;
+    snagMedianResolveDays: number | null;
+    recentSnags: Array<{
+      id: string;
+      description: string;
+      status: string;
+      priority: string;
+      location: string | null;
+      plotNumber: string | null;
+      raisedAt: string;
+      resolvedAt: string | null;
+    }>;
   };
   plotStories: Array<{
     id: string;
@@ -322,6 +344,148 @@ export function SiteStoryPanel({ siteId }: { siteId: string }) {
           </div>
         )}
       </section>
+
+      {/* ─── Snag summary ─────────────────────────────────── */}
+      {/* (#174) Full snag picture — priority mix, hot locations, the
+          contractors most often on the receiving end, median resolve
+          time, and the latest 10. So the Story tells the actual
+          quality story, not just a single aggregate count. */}
+      {data.variance.snagsRaised > 0 && (
+        <section className="rounded-xl border bg-white p-5">
+          <div className="mb-3 flex items-center gap-2">
+            <Wrench className="size-4 text-amber-600" aria-hidden />
+            <h3 className="text-sm font-semibold text-slate-700">
+              Snag summary
+            </h3>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                Raised total
+              </p>
+              <p className="mt-0.5 text-2xl font-bold text-slate-800">
+                {data.variance.snagsRaised}
+              </p>
+              <p className="text-[11px] text-slate-500">
+                {data.variance.snagsResolved} resolved · {data.variance.snagsOpen} open
+              </p>
+            </div>
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-amber-700">
+                Priority mix
+              </p>
+              <div className="mt-1 flex items-baseline gap-2 text-xs">
+                <span className="font-medium text-red-700">
+                  {data.variance.snagsByPriority.HIGH} high
+                </span>
+                <span className="font-medium text-amber-700">
+                  {data.variance.snagsByPriority.MEDIUM} med
+                </span>
+                <span className="font-medium text-slate-600">
+                  {data.variance.snagsByPriority.LOW} low
+                </span>
+              </div>
+            </div>
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-emerald-700">
+                Median resolve
+              </p>
+              <p className="mt-0.5 text-2xl font-bold text-emerald-800">
+                {data.variance.snagMedianResolveDays != null
+                  ? `${data.variance.snagMedianResolveDays}d`
+                  : "—"}
+              </p>
+              <p className="text-[11px] text-emerald-700/80">
+                across resolved snags
+              </p>
+            </div>
+          </div>
+
+          {data.variance.snagsByLocation.length > 0 && (
+            <div className="mt-4">
+              <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                Hot locations
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {data.variance.snagsByLocation.map((l) => (
+                  <span
+                    key={l.location}
+                    className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs"
+                  >
+                    <span className="font-medium">{l.location}</span>
+                    <span className="text-slate-500">×{l.count}</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {data.variance.snagsByContractor.length > 0 && (
+            <div className="mt-4">
+              <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                Snags by contractor
+              </p>
+              <div className="space-y-1.5">
+                {data.variance.snagsByContractor.map((c) => (
+                  <div
+                    key={c.contactId}
+                    className="flex items-center justify-between rounded-md border border-slate-100 bg-slate-50/50 px-2 py-1.5 text-xs"
+                  >
+                    <span className="truncate font-medium text-slate-700">
+                      {c.company || c.name}
+                    </span>
+                    <span className="shrink-0 text-slate-500">
+                      <span className="font-semibold text-slate-700">
+                        {c.count}
+                      </span>{" "}
+                      total · {c.openCount} open · {c.resolvedCount} resolved
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {data.variance.recentSnags.length > 0 && (
+            <div className="mt-4">
+              <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                Most recent
+              </p>
+              <ul className="divide-y divide-slate-100 rounded-md border border-slate-100">
+                {data.variance.recentSnags.map((s) => (
+                  <li
+                    key={s.id}
+                    className="flex flex-wrap items-baseline justify-between gap-2 px-2.5 py-1.5 text-xs"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-slate-700">
+                        <span className="font-medium text-slate-900">
+                          {s.plotNumber ? `Plot ${s.plotNumber}` : "Site"}
+                        </span>
+                        {s.location ? ` · ${s.location}` : ""}
+                        {" — "}
+                        {s.description}
+                      </p>
+                    </div>
+                    <span
+                      className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider ${
+                        s.status === "RESOLVED" || s.status === "CLOSED"
+                          ? "bg-emerald-100 text-emerald-700"
+                          : s.priority === "HIGH"
+                            ? "bg-red-100 text-red-700"
+                            : "bg-amber-100 text-amber-700"
+                      }`}
+                    >
+                      {s.status.replace(/_/g, " ").toLowerCase()}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </section>
+      )}
 
       {/* ─── Per-plot stories ─────────────────────────────── */}
       <section>
