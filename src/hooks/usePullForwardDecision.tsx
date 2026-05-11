@@ -30,7 +30,7 @@
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { format, addDays, startOfWeek, isAfter, isBefore, isSameDay } from "date-fns";
-import { Loader2, Zap, CalendarDays, Lock, CalendarClock, AlertTriangle, Truck } from "lucide-react";
+import { Loader2, Zap, CalendarDays, Lock, CalendarClock, AlertTriangle, Truck, Mail } from "lucide-react";
 import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 import {
   Dialog,
@@ -51,6 +51,8 @@ import {
   OrderDeliveryFollowUpDialog,
   type PendingDeliveryFollowUp,
 } from "@/components/orders/OrderDeliveryFollowUpDialog";
+import { useOrderEmail, type SendOrderGroupInput } from "@/hooks/useOrderEmail";
+import { fetchUrgentOrderEmailGroups } from "@/lib/urgent-order-email";
 
 export interface PullableJob {
   id: string;
@@ -106,6 +108,31 @@ export function usePullForwardDecision(onApplied?: () => void): Result {
   // list and the saved onApplied callback so the dialog can fire onDone.
   const [pendingDelivery, setPendingDelivery] = useState<PendingDeliveryFollowUp[] | null>(null);
 
+  // (#171) Urgent-email queue + delivery follow-up queued behind it. When
+  // the user picks "Start anyway — send orders now" we drain the queue
+  // one supplier at a time via onSent, then open the delivery follow-up
+  // dialog with the saved list.
+  const [emailQueue, setEmailQueue] = useState<SendOrderGroupInput[]>([]);
+  const [deliveryAfterEmail, setDeliveryAfterEmail] = useState<
+    PendingDeliveryFollowUp[] | null
+  >(null);
+
+  const orderEmail = useOrderEmail((mode) => {
+    if (mode !== "send") return;
+    // Pop the next supplier group; if none, open the delivery follow-up.
+    setEmailQueue((q) => {
+      const next = q.slice(1);
+      if (next.length > 0) {
+        // schedule the next opener — defer to avoid setState-in-render.
+        setTimeout(() => orderEmail.openSendOrderEmail(next[0]), 0);
+      } else if (deliveryAfterEmail) {
+        setPendingDelivery(deliveryAfterEmail);
+        setDeliveryAfterEmail(null);
+      }
+      return next;
+    });
+  });
+
   const close = useCallback(() => {
     setTarget(null);
     setConstraints(null);
@@ -146,7 +173,11 @@ export function usePullForwardDecision(onApplied?: () => void): Result {
     return () => { cancelled = true; };
   }, [target, close, toast]);
 
-  async function apply(dateISO: string, assumeOrdersSent?: string[]) {
+  async function apply(
+    dateISO: string,
+    assumeOrdersSent?: string[],
+    opts: { sendUrgentEmail?: boolean } = {},
+  ) {
     if (!target) return;
     setSubmitting(true);
     try {
@@ -169,24 +200,41 @@ export function usePullForwardDecision(onApplied?: () => void): Result {
           (data.ordersShifted > 0 ? ` — ${data.ordersShifted} order${data.ordersShifted !== 1 ? "s" : ""} re-dated` : "")
       );
 
-      // (#167) Overridden orders — open follow-up dialog to capture
-      // delivery status before fully closing. Use the order constraints
-      // we already have to enrich each row with the supplier name.
+      // (#167 / #171) Overridden orders — either:
+      //   (a) Just open the delivery follow-up (default "mark sent" path)
+      //   (b) Drain an urgent-email queue first, then follow-up
+      //       ("Start anyway — send orders now" path)
       const overridden = data.overriddenOrders ?? [];
-      if (overridden.length > 0 && constraints) {
-        const byId = new Map(constraints.orderConstraints.map((oc) => [oc.orderId, oc]));
-        setPendingDelivery(
-          overridden.map((o) => ({
-            id: o.id,
-            supplierName: byId.get(o.id)?.supplier ?? null,
-          })),
-        );
-        // Defer close until the follow-up dialog is dismissed so the
-        // user can see the resulting save toast in context.
+      if (overridden.length > 0) {
+        const byId = constraints
+          ? new Map(constraints.orderConstraints.map((oc) => [oc.orderId, oc]))
+          : new Map<string, { supplier: string }>();
+        const deliveryRows: PendingDeliveryFollowUp[] = overridden.map((o) => ({
+          id: o.id,
+          supplierName: byId.get(o.id)?.supplier ?? null,
+        }));
+
+        // Close the pull-forward dialog so the email or delivery dialog
+        // is the only thing on screen.
         setTarget(null);
         setConstraints(null);
         setPickedDate("");
         setUsePicker(false);
+
+        if (opts.sendUrgentEmail) {
+          // Build email groups by supplier and queue them. Delivery
+          // follow-up fires after the last email composer closes.
+          const groups = await fetchUrgentOrderEmailGroups(overridden.map((o) => o.id));
+          if (groups.length === 0) {
+            setPendingDelivery(deliveryRows);
+          } else {
+            setDeliveryAfterEmail(deliveryRows);
+            setEmailQueue(groups);
+            orderEmail.openSendOrderEmail(groups[0]);
+          }
+        } else {
+          setPendingDelivery(deliveryRows);
+        }
       } else {
         close();
         onApplied?.();
@@ -414,10 +462,13 @@ export function usePullForwardDecision(onApplied?: () => void): Result {
                     Apply
                   </Button>
                 </div>
-                {/* (#167) "Start anyway" override — appears when the
-                    only thing blocking the picked date is one or more
-                    PENDING orders. Predecessor blockers can't be
-                    overridden this way. */}
+                {/* (#167 / #171) "Start anyway" override — appears when
+                    the only thing blocking the picked date is one or
+                    more PENDING orders. Predecessor blockers can't be
+                    overridden this way. Two flavours:
+                      • mark sent (silent flip + delivery prompt)
+                      • send now (flip + open URGENT supplier email
+                        before the delivery prompt) */}
                 {pickedDate && (() => {
                   const candidate = new Date(pickedDate);
                   if (isNaN(candidate.getTime())) return null;
@@ -425,8 +476,8 @@ export function usePullForwardDecision(onApplied?: () => void): Result {
                   const ids = overrideableOrdersFor(candidate);
                   if (!ids) return null;
                   return (
-                    <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-2.5">
-                      <p className="mb-2 text-[11px] text-amber-800">
+                    <div className="mt-3 space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-2.5">
+                      <p className="text-[11px] text-amber-800">
                         Start on this day anyway — the {ids.length === 1 ? "blocking order" : `${ids.length} blocking orders`} will be marked as sent today and you&apos;ll set the delivery status next.
                       </p>
                       <Button
@@ -441,6 +492,20 @@ export function usePullForwardDecision(onApplied?: () => void): Result {
                           <Truck className="size-3.5" aria-hidden />
                         )}
                         Start anyway — mark {ids.length === 1 ? "order" : "orders"} sent
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="w-full border-amber-300 bg-white text-amber-800 hover:bg-amber-100"
+                        disabled={submitting}
+                        onClick={() => apply(pickedDate, ids, { sendUrgentEmail: true })}
+                      >
+                        {submitting ? (
+                          <Loader2 className="size-3.5 animate-spin" />
+                        ) : (
+                          <Mail className="size-3.5" aria-hidden />
+                        )}
+                        Start anyway — send {ids.length === 1 ? "order" : "orders"} now (URGENT)
                       </Button>
                     </div>
                   );
@@ -460,6 +525,7 @@ export function usePullForwardDecision(onApplied?: () => void): Result {
   const allDialogs = (
     <>
       {dialogs}
+      {orderEmail.dialogs}
       <OrderDeliveryFollowUpDialog
         orders={pendingDelivery}
         onClose={() => {

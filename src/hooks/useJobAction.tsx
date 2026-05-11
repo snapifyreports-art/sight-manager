@@ -2,10 +2,12 @@
 
 import { useState, useCallback, useEffect } from "react";
 import { differenceInCalendarDays, addDays, format } from "date-fns";
-import { AlertTriangle, Loader2, Truck } from "lucide-react";
+import { AlertTriangle, Loader2, Truck, Mail } from "lucide-react";
 import { addWorkingDays, differenceInWorkingDays, isWorkingDay, snapToWorkingDay } from "@/lib/working-days";
 import { useToast } from "@/components/ui/toast";
 import { OrderDeliveryFollowUpDialog } from "@/components/orders/OrderDeliveryFollowUpDialog";
+import { useOrderEmail, type SendOrderGroupInput } from "@/hooks/useOrderEmail";
+import { fetchUrgentOrderEmailGroups } from "@/lib/urgent-order-email";
 import {
   Dialog,
   DialogContent,
@@ -100,6 +102,25 @@ export function useJobAction(
   const [pendingDelivery, setPendingDelivery] = useState<
     { id: string; supplierName?: string | null }[] | null
   >(null);
+  // (#171) Urgent-email queue + delivery follow-up queued behind it.
+  // Drives the "Start anyway — send orders now" flow.
+  const [emailQueue, setEmailQueue] = useState<SendOrderGroupInput[]>([]);
+  const [deliveryAfterEmail, setDeliveryAfterEmail] = useState<
+    { id: string; supplierName?: string | null }[] | null
+  >(null);
+  const orderEmail = useOrderEmail((mode) => {
+    if (mode !== "send") return;
+    setEmailQueue((q) => {
+      const next = q.slice(1);
+      if (next.length > 0) {
+        setTimeout(() => orderEmail.openSendOrderEmail(next[0]), 0);
+      } else if (deliveryAfterEmail) {
+        setPendingDelivery(deliveryAfterEmail);
+        setDeliveryAfterEmail(null);
+      }
+      return next;
+    });
+  });
   const [cascadeLoading, setCascadeLoading] = useState(false);
 
   // ---- Late-start dialog ----
@@ -394,6 +415,7 @@ export function useJobAction(
       endDate: string | null,
       opts?: {
         assumeOrdersSent?: { id: string; supplierName?: string | null }[];
+        sendUrgentEmail?: boolean;
       },
     ) => {
       console.log("[CASCADE] executePullForward called:", { jobId: job.id, daysEarly, endDate });
@@ -439,16 +461,31 @@ export function useJobAction(
         await executeAction(job.id, "start", undefined, skipOrderProgression ? { skipOrderProgression: true } : undefined);
         setEarlyStartDialog(null);
         setSkipOrderProgression(false);
-        // (#167) If the server flipped orders to ORDERED, open the
-        // delivery follow-up prompt. Use supplierName from the original
-        // override list when we have it so the rows are recognisable.
+        // (#167 / #171) If the server flipped orders to ORDERED, either:
+        //   • default — open the delivery follow-up directly
+        //   • sendUrgentEmail — drain an email queue first, then follow-up
         if (overriddenOrders.length > 0) {
           const supplierById = new Map(
             (opts?.assumeOrdersSent ?? []).map((o) => [o.id, o.supplierName ?? null]),
           );
-          setPendingDelivery(
-            overriddenOrders.map((o) => ({ id: o.id, supplierName: supplierById.get(o.id) ?? null })),
-          );
+          const deliveryRows = overriddenOrders.map((o) => ({
+            id: o.id,
+            supplierName: supplierById.get(o.id) ?? null,
+          }));
+          if (opts?.sendUrgentEmail) {
+            const groups = await fetchUrgentOrderEmailGroups(
+              overriddenOrders.map((o) => o.id),
+            );
+            if (groups.length === 0) {
+              setPendingDelivery(deliveryRows);
+            } else {
+              setDeliveryAfterEmail(deliveryRows);
+              setEmailQueue(groups);
+              orderEmail.openSendOrderEmail(groups[0]);
+            }
+          } else {
+            setPendingDelivery(deliveryRows);
+          }
         }
       } catch (e) {
         console.error("[CASCADE] Exception:", e);
@@ -517,6 +554,25 @@ export function useJobAction(
     if (delta <= 0) return;
     await executePullForward(activeJob, delta, earlyStartDialog.endDate, {
       assumeOrdersSent: orders,
+    });
+  }, [earlyStartDialog, activeJob, customPullDate, customPullFeasibility, executePullForward]);
+
+  // (#171) Same as handlePullToCustomDateOverride but also opens the
+  // URGENT supplier email before the delivery follow-up. Mirrors the
+  // "send orders now" button in the dialog.
+  const handlePullToCustomDateOverrideAndEmail = useCallback(async () => {
+    if (!earlyStartDialog || !activeJob || !activeJob.endDate || !customPullDate) return;
+    const orders = customPullFeasibility?.overrideableOrders ?? [];
+    if (orders.length === 0) return;
+    const planned = new Date(activeJob.startDate ?? activeJob.endDate);
+    planned.setHours(0, 0, 0, 0);
+    const chosen = new Date(customPullDate);
+    chosen.setHours(0, 0, 0, 0);
+    const delta = differenceInWorkingDays(planned, chosen);
+    if (delta <= 0) return;
+    await executePullForward(activeJob, delta, earlyStartDialog.endDate, {
+      assumeOrdersSent: orders,
+      sendUrgentEmail: true,
     });
   }, [earlyStartDialog, activeJob, customPullDate, customPullFeasibility, executePullForward]);
 
@@ -1555,13 +1611,14 @@ export function useJobAction(
                             )}
                           </p>
                         )}
-                        {/* (#167) "Start anyway — mark order(s) sent"
-                            override. Only when ALL blockers are PENDING
-                            orders. */}
+                        {/* (#167 / #171) "Start anyway" override — two
+                            flavours: silent mark-sent OR send URGENT
+                            email composer. Only when ALL blockers are
+                            PENDING orders. */}
                         {customPullFeasibility?.status === "conflict" &&
                           (customPullFeasibility.overrideableOrders?.length ?? 0) > 0 && (
-                            <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-2.5">
-                              <p className="mb-1.5 text-[11px] text-amber-800">
+                            <div className="mt-2 space-y-1.5 rounded-lg border border-amber-200 bg-amber-50 p-2.5">
+                              <p className="text-[11px] text-amber-800">
                                 Start on this day anyway? The{" "}
                                 {customPullFeasibility.overrideableOrders!.length === 1
                                   ? "blocking order"
@@ -1585,6 +1642,24 @@ export function useJobAction(
                                   ? "order"
                                   : "orders"}{" "}
                                 sent
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-7 w-full border-amber-300 bg-white text-[11px] text-amber-800 hover:bg-amber-100"
+                                disabled={cascadeLoading}
+                                onClick={handlePullToCustomDateOverrideAndEmail}
+                              >
+                                {cascadeLoading ? (
+                                  <Loader2 className="size-3 animate-spin" aria-hidden />
+                                ) : (
+                                  <Mail className="size-3" aria-hidden />
+                                )}
+                                Start anyway — send{" "}
+                                {customPullFeasibility.overrideableOrders!.length === 1
+                                  ? "order"
+                                  : "orders"}{" "}
+                                now (URGENT)
                               </Button>
                             </div>
                           )}
@@ -1846,6 +1921,11 @@ export function useJobAction(
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* (#171) URGENT supplier email composer when "Send orders now"
+          is picked. Drains one supplier group at a time; delivery
+          follow-up fires once the queue is empty. */}
+      {orderEmail.dialogs}
 
       {/* (#167) Delivery follow-up after "Start anyway — mark order(s) sent" */}
       <OrderDeliveryFollowUpDialog

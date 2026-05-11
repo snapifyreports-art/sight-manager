@@ -96,6 +96,18 @@ export interface SendOrderGroupInput {
   }>;
   /** Unique site names covered by the orders in this group. */
   siteNames: string[];
+  /**
+   * (#171) Mark this as a "Start anyway — send orders now" email — the
+   * pull-forward override path. Adds the ASAP banner ("URGENT — We
+   * require the following materials as soon as possible…") at the top
+   * AND skips the post-send status flip (the orders are already
+   * ORDERED at this point, the server flipped them as part of the
+   * cascade override).
+   */
+  urgent?: boolean;
+  /** When true, skip the post-send setManyOrderStatus call. Used by the
+   *  pull-forward override which has already flipped the orders. */
+  skipStatusUpdate?: boolean;
 }
 
 // ── Hook ────────────────────────────────────────────────────────────────
@@ -234,20 +246,23 @@ export function useOrderEmail(onSent?: (mode: Mode) => void): Result {
       itemsDescriptionFallback: firstWithDescription?.itemsDescription ?? null,
       expectedDeliveryDate: earliestDelivery,
       orderDate: firstOrder.dateOfOrder ?? null,
+      urgentDelivery: group.urgent,
     });
 
     const plotCount = plotLabels.length;
-    const subject = `Material Order — ${firstJob.name} — ${firstSite.name}${plotCount > 1 ? ` (${plotCount} plots)` : ""}`;
+    const subject = `${group.urgent ? "URGENT " : ""}Material Order — ${firstJob.name} — ${firstSite.name}${plotCount > 1 ? ` (${plotCount} plots)` : ""}`;
 
     setDraft({
       mode: "send",
       recipient: group.contactEmail ?? "",
       subject,
       body,
-      eventDescription: `Sent bulk order to ${group.supplierName} — ${group.orders.length} order(s)`,
+      eventDescription: `Sent ${group.urgent ? "URGENT " : "bulk "}order to ${group.supplierName} — ${group.orders.length} order(s)`,
       eventSiteId: firstSite.id,
       eventJobId: firstJob.id,
-      orderIdsToMark: group.orders.map((o) => o.id),
+      // (#171) Skip the post-send status flip when caller has already
+      // marked these ORDERED server-side (pull-forward override path).
+      orderIdsToMark: group.skipStatusUpdate ? [] : group.orders.map((o) => o.id),
     });
   }, []);
 
