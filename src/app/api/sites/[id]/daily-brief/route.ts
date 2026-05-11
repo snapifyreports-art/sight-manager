@@ -5,6 +5,11 @@ import { startOfDay, endOfDay, subDays, addDays } from "date-fns";
 import { getServerCurrentDate } from "@/lib/dev-date";
 import { fetchWeatherForPostcode } from "@/lib/weather";
 import { canAccessSite } from "@/lib/site-access";
+import {
+  whereJobEndOverdue,
+  whereJobStartOverdue,
+  whereOrderOverdue,
+} from "@/lib/lateness";
 
 export const dynamic = "force-dynamic";
 
@@ -99,8 +104,7 @@ export async function GET(
     prisma.job.findMany({
       where: {
         plot: { siteId: id },
-        endDate: { lt: dayStart },
-        status: { not: "COMPLETED" },
+        ...whereJobEndOverdue(dayStart), // (#177) SSOT
         children: { none: {} },
       },
       select: {
@@ -110,12 +114,11 @@ export async function GET(
       },
       orderBy: { endDate: "asc" },
     }),
-    // Late starts: NOT_STARTED where startDate is before today
+    // Late starts — SSOT via whereJobStartOverdue
     prisma.job.findMany({
       where: {
         plot: { siteId: id },
-        status: "NOT_STARTED",
-        startDate: { lt: dayStart },
+        ...whereJobStartOverdue(dayStart),
         children: { none: {} },
       },
       select: {
@@ -227,8 +230,7 @@ export async function GET(
     prisma.materialOrder.findMany({
       where: {
         job: { plot: { siteId: id } },
-        expectedDeliveryDate: { lt: dayStart },
-        status: "ORDERED",
+        ...whereOrderOverdue(dayStart), // (#177) SSOT
       },
       select: {
         id: true, itemsDescription: true, expectedDeliveryDate: true,

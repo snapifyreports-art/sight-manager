@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { differenceInDays } from "date-fns";
 import { getServerCurrentDate } from "@/lib/dev-date";
 import { getUserSiteIds, canAccessSite } from "@/lib/site-access";
+import { isJobEndOverdue } from "@/lib/lateness";
 
 export const dynamic = "force-dynamic";
 
@@ -177,17 +178,11 @@ export async function GET(req: NextRequest) {
           totalPlots
         : 0;
 
-    // Count delayed jobs (endDate < today and not completed)
+    // (#177) Count delayed jobs via the SSOT helper — same definition
+    // used by Daily Brief, Tasks, Dashboard, Heatmap.
     const now = getServerCurrentDate(req);
     const delayedJobs = site.plots.reduce(
-      (sum, p) =>
-        sum +
-        p.jobs.filter(
-          (j) =>
-            j.status !== "COMPLETED" &&
-            j.endDate &&
-            new Date(j.endDate) < now
-        ).length,
+      (sum, p) => sum + p.jobs.filter((j) => isJobEndOverdue(j, now)).length,
       0
     );
 

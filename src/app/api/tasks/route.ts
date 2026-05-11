@@ -4,6 +4,11 @@ import { prisma } from "@/lib/prisma";
 import { addDays } from "date-fns";
 import { getServerCurrentDate } from "@/lib/dev-date";
 import { getUserSiteIds } from "@/lib/site-access";
+import {
+  whereJobEndOverdue,
+  whereJobStartOverdue,
+  whereOrderOverdue,
+} from "@/lib/lateness";
 
 export const dynamic = "force-dynamic";
 
@@ -86,21 +91,24 @@ export async function GET(req: NextRequest) {
       include: slimJobInclude,
       orderBy: { endDate: "asc" },
     }),
-    // 4. Overdue Jobs — IN_PROGRESS leaf jobs past their end date
+    // 4. Overdue Jobs — leaf jobs past their end date (any non-COMPLETED).
+    // (#177) Was narrower (`status: IN_PROGRESS`); broadened to match
+    // Daily Brief's definition so a job appears as "overdue" in
+    // exactly the same buckets across the app.
     prisma.job.findMany({
-      where: { ...siteAccess, ...leafOnly, status: "IN_PROGRESS", endDate: { lt: now } },
+      where: { ...siteAccess, ...leafOnly, ...whereJobEndOverdue(now) },
       include: slimJobInclude,
       orderBy: { endDate: "asc" },
     }),
     // 4b. Late Start — NOT_STARTED leaf jobs whose start date has passed
     prisma.job.findMany({
-      where: { ...siteAccess, ...leafOnly, status: "NOT_STARTED", startDate: { lt: now } },
+      where: { ...siteAccess, ...leafOnly, ...whereJobStartOverdue(now) },
       include: slimJobInclude,
       orderBy: { startDate: "asc" },
     }),
     // 5. Overdue Materials — ORDERED orders past expected delivery date
     prisma.materialOrder.findMany({
-      where: { ...siteAccessForOrder, status: "ORDERED", expectedDeliveryDate: { lt: now } },
+      where: { ...siteAccessForOrder, ...whereOrderOverdue(now) },
       include: richOrderInclude,
       orderBy: { expectedDeliveryDate: "asc" },
     }),

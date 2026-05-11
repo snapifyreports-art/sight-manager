@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { auth } from "@/lib/auth";
 import { getUserSiteIds } from "@/lib/site-access";
 import { DashboardClient, type DashboardData } from "@/components/dashboard/DashboardClient";
+import { whereJobEndOverdue } from "@/lib/lateness";
 
 export const dynamic = "force-dynamic";
 
@@ -98,14 +99,12 @@ export default async function DashboardPage() {
       },
     }),
 
-    // (May 2026 audit #46) At-Risk: overdue jobs (endDate passed,
-    // status not COMPLETED, leaf-only). Sorted by how overdue they
-    // are so the worst floats to the top.
+    // (May 2026 audit #46 / #177) At-Risk overdue jobs — same SSOT
+    // definition as Daily Brief and Tasks via whereJobEndOverdue.
     prisma.job.findMany({
       take: 8,
       where: {
-        endDate: { lt: new Date() },
-        status: { not: "COMPLETED" },
+        ...whereJobEndOverdue(new Date()),
         ...jobSiteWhere,
         children: { none: {} },
       },

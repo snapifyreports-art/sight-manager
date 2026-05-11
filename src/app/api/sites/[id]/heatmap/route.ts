@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { differenceInDays } from "date-fns";
 import { getServerCurrentDate } from "@/lib/dev-date";
 import { canAccessSite } from "@/lib/site-access";
+import { isJobEndOverdue, workingDaysEndOverdue } from "@/lib/lateness";
 
 export const dynamic = "force-dynamic";
 
@@ -32,12 +32,18 @@ export async function GET(
       plotNumber: true,
       name: true,
       houseType: true,
+      // (#177) Use the cached buildCompletePercent — same field every
+      // other view reads, no inline recalculation. The cache is kept
+      // current by recomputePlotPercent() on every job mutation.
+      buildCompletePercent: true,
       jobs: {
         select: {
           id: true,
           status: true,
           endDate: true,
         },
+        // Leaf-only — parent stage rollups would double-count.
+        where: { children: { none: {} } },
       },
       _count: {
         select: {
@@ -51,19 +57,20 @@ export async function GET(
   const heatmapData = plots.map((plot) => {
     const totalJobs = plot.jobs.length;
     const completedJobs = plot.jobs.filter((j) => j.status === "COMPLETED").length;
-    const overdueJobs = plot.jobs.filter(
-      (j) =>
-        j.endDate &&
-        new Date(j.endDate) < today &&
-        j.status !== "COMPLETED"
-    );
+    // (#177) SSOT via isJobEndOverdue — same definition as Daily
+    // Brief, Tasks, Dashboard. Previously this was an inline check
+    // that subtly diverged.
+    const overdueJobs = plot.jobs.filter((j) => isJobEndOverdue(j, today));
     const overdueJobCount = overdueJobs.length;
+    // (#177) Working days, not calendar days. Weekends don't make a
+    // job more behind; the RAG thresholds are calibrated in working
+    // days everywhere else.
     const maxOverdueDays = overdueJobs.reduce((max, j) => {
-      const days = differenceInDays(today, new Date(j.endDate!));
+      const days = workingDaysEndOverdue(j, today);
       return days > max ? days : max;
     }, 0);
 
-    const calcPercent = totalJobs > 0 ? (completedJobs / totalJobs) * 100 : 0;
+    const calcPercent = plot.buildCompletePercent;
     let ragStatus: "green" | "amber" | "red" | "grey" = "grey";
 
     const allNotStarted = plot.jobs.every((j) => j.status === "NOT_STARTED");
