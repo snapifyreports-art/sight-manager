@@ -12,8 +12,11 @@ import {
   Loader2,
   ChevronRight,
   Calendar,
+  LayoutGrid,
+  BarChart3,
 } from "lucide-react";
 import { getCurrentDateAtMidnight } from "@/lib/dev-date";
+import { MobileProgrammeGantt } from "@/components/programme/MobileProgrammeGantt";
 
 /**
  * (May 2026 mobile programme rebuild) Mobile-first vertical list view
@@ -125,6 +128,25 @@ export function MobileProgramme({ siteId }: { siteId: string }) {
   const [data, setData] = useState<ProgrammeSite | null>(null);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<"all" | "live" | "upcoming" | "complete">("all");
+  // (#178) Mobile view toggle — "gantt" is the new compact week-strip
+  // Gantt (Keith's "where's the Gantt gone" answer), "cards" is the
+  // existing card list. Default to Gantt because that's what people
+  // expect from the Programme tab. Persisted to localStorage.
+  const [view, setView] = useState<"gantt" | "cards">(() => {
+    if (typeof window === "undefined") return "gantt";
+    try {
+      const stored = localStorage.getItem("sight-manager-mobile-programme-view");
+      return stored === "cards" ? "cards" : "gantt";
+    } catch {
+      return "gantt";
+    }
+  });
+  function setViewPersisted(v: "gantt" | "cards") {
+    setView(v);
+    try {
+      localStorage.setItem("sight-manager-mobile-programme-view", v);
+    } catch {}
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -185,40 +207,70 @@ export function MobileProgramme({ siteId }: { siteId: string }) {
 
   return (
     <div className="space-y-3">
-      {/* Filter chips */}
-      <div className="-mx-1 flex gap-1 overflow-x-auto px-1">
-        {(["all", "live", "upcoming", "complete"] as const).map((f) => {
-          const label =
-            f === "all"
-              ? "All"
-              : f === "live"
-                ? "Live"
-                : f === "upcoming"
-                  ? "Upcoming"
-                  : "Complete";
-          return (
-            <button
-              key={f}
-              onClick={() => setFilter(f)}
-              className={`shrink-0 rounded-full border px-3 py-1 text-xs font-medium transition ${
-                filter === f
-                  ? "border-blue-500 bg-blue-50 text-blue-700"
-                  : "border-slate-200 bg-white text-slate-600"
-              }`}
-            >
-              {label}
-            </button>
-          );
-        })}
+      {/* (#178) View toggle — Gantt vs Cards. Gantt is the default. */}
+      <div className="flex items-center gap-2">
+        <div className="flex items-center gap-0.5 rounded-md border border-slate-200 bg-white p-0.5 text-xs">
+          <button
+            onClick={() => setViewPersisted("gantt")}
+            className={`inline-flex items-center gap-1 rounded px-2 py-1 font-medium transition ${
+              view === "gantt"
+                ? "bg-slate-900 text-white"
+                : "text-slate-600 hover:bg-slate-100"
+            }`}
+          >
+            <BarChart3 className="size-3" aria-hidden /> Gantt
+          </button>
+          <button
+            onClick={() => setViewPersisted("cards")}
+            className={`inline-flex items-center gap-1 rounded px-2 py-1 font-medium transition ${
+              view === "cards"
+                ? "bg-slate-900 text-white"
+                : "text-slate-600 hover:bg-slate-100"
+            }`}
+          >
+            <LayoutGrid className="size-3" aria-hidden /> Cards
+          </button>
+        </div>
+        {view === "cards" && (
+          <div className="-mx-1 flex flex-1 gap-1 overflow-x-auto px-1">
+            {(["all", "live", "upcoming", "complete"] as const).map((f) => {
+              const label =
+                f === "all"
+                  ? "All"
+                  : f === "live"
+                    ? "Live"
+                    : f === "upcoming"
+                      ? "Upcoming"
+                      : "Complete";
+              return (
+                <button
+                  key={f}
+                  onClick={() => setFilter(f)}
+                  className={`shrink-0 rounded-full border px-3 py-1 text-xs font-medium transition ${
+                    filter === f
+                      ? "border-blue-500 bg-blue-50 text-blue-700"
+                      : "border-slate-200 bg-white text-slate-600"
+                  }`}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
 
-      {plotsToShow.length === 0 && (
+      {/* (#178) Gantt view — week strip across all plots. */}
+      {view === "gantt" && <MobileProgrammeGantt data={data} />}
+
+      {view === "cards" && plotsToShow.length === 0 && (
         <div className="rounded-lg border border-dashed bg-white p-6 text-center text-sm text-muted-foreground">
           No plots match this filter.
         </div>
       )}
 
-      {/* Plot cards */}
+      {/* (#178) Plot cards — only when card view is selected. */}
+      {view === "cards" && (
       <ul className="space-y-2">
         {plotsToShow.map((p) => {
           const meta = STATUS_META[p.status] ?? STATUS_META.NOT_STARTED;
@@ -298,8 +350,11 @@ export function MobileProgramme({ siteId }: { siteId: string }) {
           );
         })}
       </ul>
+      )}
       <p className="text-center text-[10px] text-muted-foreground">
-        Plot list for {format(today, "EEEE d MMM")}. Tap a row to open the plot.
+        {view === "gantt"
+          ? `${data.plots.length} plot${data.plots.length === 1 ? "" : "s"} · scroll the strip horizontally · today highlighted`
+          : `Plot list for ${format(today, "EEEE d MMM")}. Tap a row to open the plot.`}
       </p>
     </div>
   );
