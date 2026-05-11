@@ -19,7 +19,6 @@ import {
 import { getCurrentDate, getCurrentDateAtMidnight } from "@/lib/dev-date";
 import { useDevDate } from "@/lib/dev-date-context";
 import { differenceInWorkingDays } from "@/lib/working-days";
-import { MobileProgramme } from "@/components/programme/MobileProgramme";
 import { Loader2, Columns3, ChevronRight, Download, FileText, Search, X, Camera, StickyNote, CalendarDays, Calendar, Layers, List, CheckSquare, Clock, ZoomIn, ZoomOut, Maximize2, Minimize2, Play } from "lucide-react";
 import Link from "next/link";
 import { getStageCode, getStageColor } from "@/lib/stage-codes";
@@ -1150,15 +1149,14 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
 
   return (
     <>
-      {/* (May 2026 mobile programme rebuild) Mobile-only list view —
-          the desktop Gantt below is hidden on small screens because
-          horizontal scroll on a phone is unusable. The MobileProgramme
-          renders one card per plot with progress + current/next stage,
-          tap-through to the plot detail. */}
-      <div className="md:hidden">
-        <MobileProgramme siteId={siteId} />
-      </div>
-      <div className={`hidden md:block ${isFullscreen ? "fixed inset-0 z-50 flex flex-col overflow-hidden bg-white" : "rounded-lg border bg-white"}`}>
+      {/* (#181) Desktop Gantt renders at every viewport — Keith picked
+          the literal-same-format option over a mobile-specific card
+          list. The toolbar wraps, the timeline scrolls horizontally on
+          touch, the left columns stay readable down to ~375px. The
+          MobileProgramme / MobileProgrammeGantt fallbacks have been
+          removed; if mobile becomes painful again the answer is to
+          improve THIS view, not fork it. */}
+      <div className={`${isFullscreen ? "fixed inset-0 z-50 flex flex-col overflow-hidden bg-white" : "rounded-lg border bg-white"}`}>
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-2 border-b px-3 py-2">
         <button
