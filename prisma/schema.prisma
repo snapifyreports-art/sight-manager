@@ -957,6 +957,14 @@ model ToolboxTalk {
   attendees    String? // free-text comma list — supports contractor names + worker names
   deliveredAt  DateTime @default(now())
   deliveredBy  String? // userId of the manager who ran it (nullable so future scripted entries are possible)
+  // (#175) Optional attached document — e.g. signed register, briefing
+  // slide deck, RAMS reference. Stored in the same Supabase photos
+  // bucket as job photos; we keep the original filename + size so the
+  // download link reads sensibly.
+  documentUrl       String?
+  documentFileName  String?
+  documentSize      Int?
+  documentMimeType  String?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 

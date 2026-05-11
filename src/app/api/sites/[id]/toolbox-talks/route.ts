@@ -3,13 +3,16 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canAccessSite } from "@/lib/site-access";
 import { apiError } from "@/lib/api-errors";
+import { getSupabase, PHOTOS_BUCKET } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
 /**
  * (May 2026 audit #176) Toolbox talk CRUD for a site.
  * GET — list newest-first.
- * POST — create. body: { topic, notes?, attendees?, deliveredAt? }
+ * POST — create. Accepts either JSON or multipart/form-data:
+ *   - JSON: { topic, notes?, attendees?, deliveredAt? }
+ *   - FormData: same fields + optional `document` file (#175)
  */
 
 async function authorise(siteId: string) {
@@ -47,8 +50,70 @@ export async function POST(
   const a = await authorise(id);
   if ("error" in a) return a.error;
 
-  const body = await req.json();
-  if (!body?.topic?.trim()) {
+  // (#175) Accept JSON for the no-attachment path; FormData for the
+  // doc-attached path. Branch on content-type.
+  const contentType = req.headers.get("content-type") || "";
+  let topic = "";
+  let notes: string | null = null;
+  let attendees: string | null = null;
+  let deliveredAt: Date = new Date();
+  let documentUrl: string | null = null;
+  let documentFileName: string | null = null;
+  let documentSize: number | null = null;
+  let documentMimeType: string | null = null;
+
+  if (contentType.includes("multipart/form-data")) {
+    const formData = await req.formData();
+    topic = String(formData.get("topic") || "").trim();
+    notes = String(formData.get("notes") || "") || null;
+    attendees = String(formData.get("attendees") || "") || null;
+    const deliveredAtStr = formData.get("deliveredAt");
+    if (typeof deliveredAtStr === "string" && deliveredAtStr) {
+      deliveredAt = new Date(deliveredAtStr);
+    }
+
+    const file = formData.get("document");
+    if (file instanceof File && file.size > 0) {
+      try {
+        const ext = file.name.split(".").pop() || "bin";
+        const storagePath = `toolbox/${id}/${Date.now()}-${Math.random()
+          .toString(36)
+          .slice(2, 8)}.${ext}`;
+        const arrayBuffer = await file.arrayBuffer();
+        const { error: uploadError } = await getSupabase()
+          .storage.from(PHOTOS_BUCKET)
+          .upload(storagePath, arrayBuffer, {
+            contentType: file.type || "application/octet-stream",
+            upsert: false,
+          });
+        if (uploadError) {
+          console.error("Toolbox doc upload error:", uploadError);
+          return NextResponse.json(
+            { error: "Upload failed" },
+            { status: 500 },
+          );
+        }
+        const {
+          data: { publicUrl },
+        } = getSupabase().storage.from(PHOTOS_BUCKET).getPublicUrl(storagePath);
+        documentUrl = publicUrl;
+        documentFileName = file.name || "document";
+        documentSize = file.size;
+        documentMimeType = file.type || null;
+      } catch (err) {
+        console.error("Toolbox doc handling error:", err);
+        return NextResponse.json({ error: "Upload failed" }, { status: 500 });
+      }
+    }
+  } else {
+    const body = await req.json();
+    topic = String(body?.topic || "").trim();
+    notes = body?.notes || null;
+    attendees = body?.attendees || null;
+    if (body?.deliveredAt) deliveredAt = new Date(body.deliveredAt);
+  }
+
+  if (!topic) {
     return NextResponse.json({ error: "topic is required" }, { status: 400 });
   }
 
@@ -56,11 +121,15 @@ export async function POST(
     const talk = await prisma.toolboxTalk.create({
       data: {
         siteId: id,
-        topic: body.topic.trim(),
-        notes: body.notes || null,
-        attendees: body.attendees || null,
-        deliveredAt: body.deliveredAt ? new Date(body.deliveredAt) : new Date(),
+        topic,
+        notes,
+        attendees,
+        deliveredAt,
         deliveredBy: a.session.user.id,
+        documentUrl,
+        documentFileName,
+        documentSize,
+        documentMimeType,
       },
     });
     await prisma.eventLog.create({
@@ -68,7 +137,7 @@ export async function POST(
         type: "USER_ACTION",
         siteId: id,
         userId: a.session.user.id,
-        description: `Toolbox talk logged: "${talk.topic}"`,
+        description: `Toolbox talk logged: "${talk.topic}"${documentUrl ? ` (with attached doc)` : ""}`,
       },
     });
     return NextResponse.json(talk, { status: 201 });

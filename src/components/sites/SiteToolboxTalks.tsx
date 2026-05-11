@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { format, parseISO } from "date-fns";
-import { Plus, HardHat, Loader2 } from "lucide-react";
+import { Plus, HardHat, Loader2, Paperclip, FileText, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -18,7 +18,10 @@ import {
 import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 
 /**
- * (May 2026 audit #176) Toolbox talk log per site.
+ * (May 2026 audit #176, #175) Toolbox talk log per site. Each talk can
+ * optionally carry one attached document (signed register, slide deck,
+ * RAMS reference) — uploaded to the Supabase photos bucket and shown
+ * inline on the talk card.
  */
 
 interface Talk {
@@ -27,6 +30,18 @@ interface Talk {
   notes: string | null;
   attendees: string | null;
   deliveredAt: string;
+  // (#175) Optional attachment.
+  documentUrl: string | null;
+  documentFileName: string | null;
+  documentSize: number | null;
+  documentMimeType: string | null;
+}
+
+function formatBytes(bytes: number | null): string {
+  if (bytes == null) return "";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 export function SiteToolboxTalks({ siteId }: { siteId: string }) {
@@ -38,6 +53,8 @@ export function SiteToolboxTalks({ siteId }: { siteId: string }) {
   const [notes, setNotes] = useState("");
   const [attendees, setAttendees] = useState("");
   const [deliveredAt, setDeliveredAt] = useState("");
+  const [docFile, setDocFile] = useState<File | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const toast = useToast();
 
   const refresh = async () => {
@@ -59,16 +76,33 @@ export function SiteToolboxTalks({ siteId }: { siteId: string }) {
     if (!topic.trim()) return;
     setSubmitting(true);
     try {
-      const res = await fetch(`/api/sites/${siteId}/toolbox-talks`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          topic: topic.trim(),
-          notes: notes || null,
-          attendees: attendees || null,
-          deliveredAt: deliveredAt || undefined,
-        }),
-      });
+      // (#175) If a doc is attached, send as FormData. Otherwise stay
+      // JSON for the simple case so existing callers / scripts still
+      // work unchanged.
+      let res: Response;
+      if (docFile) {
+        const fd = new FormData();
+        fd.append("topic", topic.trim());
+        if (notes) fd.append("notes", notes);
+        if (attendees) fd.append("attendees", attendees);
+        if (deliveredAt) fd.append("deliveredAt", deliveredAt);
+        fd.append("document", docFile);
+        res = await fetch(`/api/sites/${siteId}/toolbox-talks`, {
+          method: "POST",
+          body: fd,
+        });
+      } else {
+        res = await fetch(`/api/sites/${siteId}/toolbox-talks`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            topic: topic.trim(),
+            notes: notes || null,
+            attendees: attendees || null,
+            deliveredAt: deliveredAt || undefined,
+          }),
+        });
+      }
       if (!res.ok) {
         toast.error(await fetchErrorMessage(res, "Failed to log"));
         return;
@@ -78,6 +112,8 @@ export function SiteToolboxTalks({ siteId }: { siteId: string }) {
       setNotes("");
       setAttendees("");
       setDeliveredAt("");
+      setDocFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
       void refresh();
     } finally {
       setSubmitting(false);
@@ -130,6 +166,23 @@ export function SiteToolboxTalks({ siteId }: { siteId: string }) {
                   {t.notes}
                 </p>
               )}
+              {/* (#175) Inline doc download link. */}
+              {t.documentUrl && (
+                <a
+                  href={t.documentUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-700 hover:bg-blue-50 hover:text-blue-700"
+                >
+                  <FileText className="size-3 shrink-0" aria-hidden />
+                  <span className="truncate">{t.documentFileName || "Attachment"}</span>
+                  {t.documentSize != null && (
+                    <span className="shrink-0 text-slate-500">
+                      ({formatBytes(t.documentSize)})
+                    </span>
+                  )}
+                </a>
+              )}
             </div>
           ))}
         </div>
@@ -176,6 +229,54 @@ export function SiteToolboxTalks({ siteId }: { siteId: string }) {
                 onChange={(e) => setNotes(e.target.value)}
                 rows={3}
               />
+            </div>
+            {/* (#175) Optional document attachment — signed register,
+                slide deck, RAMS reference, anything you want kept with
+                the talk record. */}
+            <div>
+              <Label htmlFor="tb-doc">Attach a document (optional)</Label>
+              <div className="mt-1">
+                <input
+                  ref={fileInputRef}
+                  id="tb-doc"
+                  type="file"
+                  className="hidden"
+                  onChange={(e) => setDocFile(e.target.files?.[0] || null)}
+                />
+                {docFile ? (
+                  <div className="flex items-center justify-between gap-2 rounded-md border border-slate-200 bg-slate-50 px-2 py-1.5 text-xs">
+                    <span className="flex min-w-0 items-center gap-1.5">
+                      <FileText className="size-3.5 shrink-0 text-slate-500" aria-hidden />
+                      <span className="truncate">{docFile.name}</span>
+                      <span className="shrink-0 text-slate-400">
+                        ({formatBytes(docFile.size)})
+                      </span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDocFile(null);
+                        if (fileInputRef.current) fileInputRef.current.value = "";
+                      }}
+                      className="rounded p-0.5 text-slate-500 hover:bg-slate-200"
+                      aria-label="Remove attachment"
+                    >
+                      <X className="size-3" aria-hidden />
+                    </button>
+                  </div>
+                ) : (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="h-8 gap-1.5"
+                  >
+                    <Paperclip className="size-3.5" aria-hidden />
+                    Choose file…
+                  </Button>
+                )}
+              </div>
             </div>
           </div>
           <DialogFooter>
