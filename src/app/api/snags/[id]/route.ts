@@ -104,7 +104,13 @@ export async function PATCH(
       ...(location !== undefined && { location }),
       ...(description !== undefined && { description }),
       ...(jobId !== undefined && { jobId: jobId || null }),
-      ...(isResolving && {
+      // (#180) Set resolvedAt on RESOLVED → first time. Also set it on
+      // CLOSED if we somehow got there without going through RESOLVED
+      // (a snag dismissed directly from OPEN). Reports query
+      // resolvedAt for "snag age at close"; without this, an
+      // OPEN→CLOSED snag would have resolvedAt=null and be excluded.
+      ...((isResolving ||
+        (status === "CLOSED" && !existing.resolvedAt)) && {
         resolvedAt: now,
         resolvedById: session.user.id,
       }),

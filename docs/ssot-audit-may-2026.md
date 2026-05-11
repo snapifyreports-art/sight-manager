@@ -175,6 +175,133 @@ clamped patch. No mutation can save an impossible date ordering.
 
 ---
 
+## Concept: "Cache invalidation paths — does every mutation refresh derived caches?"
+
+There are two derived caches: `Plot.buildCompletePercent` and the
+parent-job date rollup (`startDate`/`endDate` re-derived from children).
+A mutation that should refresh either but doesn't = silent
+divergence — the cached number drifts from the live one.
+
+| Endpoint | Recompute plot percent? | Recompute parent? | Status |
+|---|---|---|---|
+| `/api/jobs/[id]/actions` | ✓ | ✓ | OK |
+| `/api/jobs/[id]/pull-forward` | ✓ | ✓ | OK |
+| `/api/jobs/[id]/delay` | ✓ | ✓ | OK |
+| `/api/jobs/[id]/cascade` | added (#180) | ✓ | Now OK; defensive matches delay's pattern |
+| `/api/sites/[id]/bulk-status` | ✓ | ✓ | OK |
+| `/api/sites/[id]/bulk-delay` | ✓ | ✓ | OK |
+| `/api/cron/reconcile` | ✓ (its whole job) | ✓ | OK |
+
+**Status**: ✅ Every mutation that changes a Job's status or dates
+now triggers both cache refreshes.
+
+---
+
+## Concept: "Bulk order status flips — same invariants as single-job?"
+
+The single-job action handler routes order flips through
+`enforceOrderInvariants` (batch 100). The bulk version
+(`/api/sites/[id]/bulk-status`) used `updateMany` for the same flips —
+blanket UPDATE that can't enforce per-row invariants. Same bug
+pattern, different endpoint.
+
+| Where | Was | Now |
+|---|---|---|
+| `bulk-status.ts` start branch (PENDING → ORDERED) | `updateMany({ jobId, status: "PENDING" }, { status: "ORDERED", dateOfOrder: now })` | per-row via `enforceOrderInvariants` |
+| `bulk-status.ts` complete branch (ORDERED → DELIVERED) | `updateMany({ jobId, status: "ORDERED" }, { status: "DELIVERED", deliveredDate: now })` | per-row via `enforceOrderInvariants` |
+
+**Status**: ✅ Fixed batch 100b. Same invariants enforced everywhere
+status flips.
+
+---
+
+## Concept: "Snag resolvedAt — set on every 'done' state?"
+
+A snag could go `OPEN → CLOSED` directly (manager dismisses without
+formal resolve). The status flip wrote `status = "CLOSED"` but left
+`resolvedAt` null. Reports that compute "snag age at close" or "time
+to resolve" filter on `resolvedAt IS NOT NULL` — these direct-close
+snags were silently excluded.
+
+| Status path | Sets resolvedAt? | Was | Now |
+|---|---|---|---|
+| OPEN → IN_PROGRESS → RESOLVED | ✓ | ✓ | ✓ |
+| OPEN → RESOLVED | ✓ | ✓ | ✓ |
+| RESOLVED → CLOSED | preserve (don't overwrite) | ✓ | ✓ |
+| OPEN → CLOSED (direct dismiss) | ✓ | ✗ left as null | ✓ set to now |
+
+Backfill script (`scripts/backfill-closed-snag-resolved-at.ts`)
+surfaces and repairs any existing rows where `status=CLOSED` and
+`resolvedAt=null`. Ran against prod-equiv: none found, so this is a
+preventative fix.
+
+**Status**: ✅ Fixed batch 100b.
+
+---
+
+## Concept: "Stored date fields and what writes them"
+
+Every persisted date, with its writer(s). Anything not listed here is
+either immutable (`createdAt @default(now())`) or a write that goes
+through one of the helpers above.
+
+| Model.field | Writer | Notes |
+|---|---|---|
+| `Job.startDate` / `endDate` | cascade, pull-forward, delay, bulk-delay, manual edit | All routes coalesce through `calculateCascade` for any multi-job shift. |
+| `Job.originalStartDate` / `originalEndDate` | first-shift only (cascade, pull-forward, delay, bulk-delay) | Set ONCE; never updated again. Baseline for variance reports. |
+| `Job.actualStartDate` | start action | Set on first IN_PROGRESS flip. Backdating supported via `actualStartDate` body param. |
+| `Job.actualEndDate` | complete action | Set on COMPLETED flip. |
+| `Job.signedOffAt` / `signedOffById` | signoff action | Always written together. |
+| `Site.completedAt` | site-status PUT to COMPLETED | Cleared on re-open. |
+| `MaterialOrder.dateOfOrder` | start action (auto-flip), orders PUT, bulk-status, cascade (PENDING shift) | All paths post-process through `enforceOrderInvariants`. |
+| `MaterialOrder.expectedDeliveryDate` | orders PUT, cascade (PENDING shift), invariants clamp | NEVER mutated by cascade for ORDERED orders (post-#176). |
+| `MaterialOrder.deliveredDate` | signoff (auto-flip), orders PUT, bulk-status | Through invariants helper. |
+| `Snag.resolvedAt` | snag PUT (RESOLVED or first CLOSED) | Same field carries both "resolved" and "closed without resolve" semantics post-#180. |
+| `Snag.resolvedById` | coupled with resolvedAt | Always written together. |
+| `Plot.buildCompletePercent` (cached) | `recomputePlotPercent` only | Every mutation that changes a job's status calls this. |
+
+**Status**: ✅ Clean — every date is written from one of a small set
+of named locations, and the locations are listed.
+
+---
+
+## Concept: "Derived dates — calculated, not stored. Who owns the calc?"
+
+Things that aren't stored but get computed from stored fields. Each
+has ONE canonical owner.
+
+| Derived value | Owner | Consumers |
+|---|---|---|
+| "Working days between two dates" | `src/lib/working-days.ts::differenceInWorkingDays` | every duration / lateness calc |
+| "Job duration" | `src/lib/job-timeline.ts::buildJobTimeline` | Programme, Plot Detail Gantt, Critical Path, Handover ZIP |
+| "Is overdue / is late-start" | `src/lib/lateness.ts` | Daily Brief, Tasks, Dashboard, Heatmap, Analytics |
+| "Working days overdue" | `src/lib/lateness.ts::workingDaysEndOverdue` | Heatmap RAG, Delay Report |
+| "Plot completion %" | `src/lib/plot-percent.ts::recomputePlotPercent` (writes the cache) | Heatmap, Analytics, dashboard widgets read the cached field |
+| "Parent job dates" | `src/lib/parent-job.ts::recomputeParentFromChildren` (writes the parent's `startDate`/`endDate`) | Programme parent rows, Critical Path |
+| "Plot current stage" | `src/lib/plot-stage.ts::getCurrentStage` | PlotDetailClient, SiteProgramme, MobileProgramme |
+| "Order invariants" | `src/lib/order-invariants.ts::enforceOrderInvariants` | Every order mutation |
+| "Snag median resolve time" | `src/lib/site-story.ts` (computed inline in the story aggregator) | Site Story tab |
+
+**Things deliberately NOT extracted into helpers** (one consumer each,
+or trivial inline):
+- "Snag age" — `formatDistanceToNow(snag.createdAt)`, single readable
+  line, only used in 2 places.
+- "Site age" — same.
+- "Plot age" — same.
+
+If any of these grows to a third consumer, extract.
+
+---
+
+## Things audited and found OK (don't touch)
+
+- Site-access scope (`getUserSiteIds` / `canAccessSite`) — one helper, every consumer routes through it.
+- Working-day vs calendar-day arithmetic — `working-days.ts` is the only working-day source; calendar days come from `date-fns` and are correctly used only for visual day-counts where weekends matter (e.g. "today is Friday 15 May" in display).
+- Auto-progression of orders on job start — flows through `enforceOrderInvariants` (batch 100).
+- `originalStart/End` once-only capture — by design; the move history lives in EventLog `SCHEDULE_CASCADED` rows, not by mutating originals.
+
+---
+
 ## The principle going forward
 
 Two rules, learned from the cases above:

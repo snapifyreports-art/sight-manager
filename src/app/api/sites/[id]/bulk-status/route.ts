@@ -103,20 +103,74 @@ export async function POST(
         });
       }
 
-      // Progress orders: start → ORDERED; complete+signoff → DELIVERED
+      // Progress orders: start → ORDERED; complete+signoff → DELIVERED.
+      // (#179/180) Per-row through enforceOrderInvariants so we
+      // can't write impossible date orderings (expectedDeliveryDate
+      // < dateOfOrder, etc.) — the bulk paths used to use updateMany
+      // which bypassed every invariant. Same fix as /api/jobs/[id]/actions.
       if (action === "start") {
-        await prisma.materialOrder.updateMany({
+        const { enforceOrderInvariants } = await import("@/lib/order-invariants");
+        const pending = await prisma.materialOrder.findMany({
           where: { jobId, status: "PENDING" },
-          data: { status: "ORDERED", dateOfOrder: now },
+          select: {
+            id: true,
+            dateOfOrder: true,
+            expectedDeliveryDate: true,
+            deliveredDate: true,
+            leadTimeDays: true,
+          },
         });
+        await Promise.all(
+          pending.map((o) => {
+            const patch = enforceOrderInvariants(
+              {
+                dateOfOrder: o.dateOfOrder,
+                expectedDeliveryDate: o.expectedDeliveryDate,
+                deliveredDate: o.deliveredDate,
+                leadTimeDays: o.leadTimeDays,
+              },
+              { dateOfOrder: now, status: "ORDERED", leadTimeDays: o.leadTimeDays },
+              now,
+            );
+            return prisma.materialOrder.update({
+              where: { id: o.id },
+              data: { status: "ORDERED", dateOfOrder: now, ...patch },
+            });
+          }),
+        );
       }
       if (action === "complete") {
-        // Bulk-status "complete" performs sign-off in one step (sets signedOffAt above),
-        // so remaining ORDERED orders are confirmed as delivered — mirrors signoff in /api/jobs/[id]/actions
-        await prisma.materialOrder.updateMany({
+        // Bulk-status "complete" performs sign-off in one step — mirror
+        // /api/jobs/[id]/actions signoff branch with same invariants.
+        const { enforceOrderInvariants } = await import("@/lib/order-invariants");
+        const ordered = await prisma.materialOrder.findMany({
           where: { jobId, status: "ORDERED" },
-          data: { status: "DELIVERED", deliveredDate: now },
+          select: {
+            id: true,
+            dateOfOrder: true,
+            expectedDeliveryDate: true,
+            deliveredDate: true,
+            leadTimeDays: true,
+          },
         });
+        await Promise.all(
+          ordered.map((o) => {
+            const patch = enforceOrderInvariants(
+              {
+                dateOfOrder: o.dateOfOrder,
+                expectedDeliveryDate: o.expectedDeliveryDate,
+                deliveredDate: o.deliveredDate,
+                leadTimeDays: o.leadTimeDays,
+              },
+              { deliveredDate: now, status: "DELIVERED" },
+              now,
+            );
+            return prisma.materialOrder.update({
+              where: { id: o.id },
+              data: { status: "DELIVERED", deliveredDate: now, ...patch },
+            });
+          }),
+        );
       }
 
       // Create job action record. (#10) Bulk "complete" performs both

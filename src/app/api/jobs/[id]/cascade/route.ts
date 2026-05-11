@@ -248,6 +248,17 @@ export async function PUT(
       Array.from(parentIds).map((pid) => recomputeParentFromChildren(prisma, pid))
     );
 
+    // (#180) Defensive plot-percent recompute — cascade only changes
+    // dates, not statuses, so the percent shouldn't change. But if a
+    // job's endDate moves across today and a downstream watcher reads
+    // a derived state from it (e.g. status auto-flips somewhere we
+    // haven't audited), the cache could drift. Match the pattern used
+    // by /api/jobs/[id]/delay and bulk-delay.
+    {
+      const { recomputePlotPercent } = await import("@/lib/plot-percent");
+      await recomputePlotPercent(prisma, job.plotId);
+    }
+
     await prisma.eventLog.create({
       data: {
         type: "SCHEDULE_CASCADED",
