@@ -56,6 +56,9 @@ export async function GET(
           },
         },
       },
+      // (#168) Chronological — sortOrder is the tiebreaker for jobs
+      // sharing a start date inside the same plot.
+      orderBy: [{ startDate: "asc" }, { sortOrder: "asc" }],
     }),
     prisma.job.findMany({
       where: {
@@ -78,6 +81,7 @@ export async function GET(
           select: { id: true, status: true },
         },
       },
+      orderBy: [{ endDate: "asc" }, { sortOrder: "asc" }],
     }),
   ]);
 
@@ -157,6 +161,8 @@ export async function GET(
           take: 1,
         },
       },
+      // (#168) Chronological — surfaces jobs by their planned start.
+      orderBy: [{ startDate: "asc" }, { sortOrder: "asc" }],
     }),
     prisma.materialOrder.findMany({
       where: {
@@ -334,6 +340,8 @@ export async function GET(
         assignedTo: { select: { name: true } },
         contractors: { include: { contact: { select: { name: true, company: true } } } },
       },
+      // (#168) Chronological sort everywhere a job list is rendered.
+      orderBy: [{ startDate: "asc" }, { sortOrder: "asc" }],
     }),
     // Jobs in progress with no contractor
     prisma.job.findMany({
@@ -348,6 +356,7 @@ export async function GET(
         plot: { select: { plotNumber: true, name: true, siteId: true } },
         assignedTo: { select: { name: true } },
       },
+      orderBy: [{ startDate: "asc" }, { sortOrder: "asc" }],
       take: 20,
     }),
     // Jobs in progress with no internal assignee
@@ -362,6 +371,7 @@ export async function GET(
         id: true, name: true, plotId: true,
         plot: { select: { plotNumber: true, name: true, siteId: true } },
       },
+      orderBy: [{ startDate: "asc" }, { sortOrder: "asc" }],
       take: 20,
     }),
     // Completed jobs with no sign-off documentation
@@ -380,6 +390,7 @@ export async function GET(
         plot: { select: { plotNumber: true, name: true, siteId: true } },
         _count: { select: { photos: true } },
       },
+      orderBy: [{ endDate: "asc" }, { sortOrder: "asc" }],
       take: 20,
     }),
     // Jobs completed but NOT signed off
@@ -535,6 +546,8 @@ export async function GET(
           },
         },
       },
+      // (#168) Chronological — keeps the brief in start-date order.
+      orderBy: [{ startDate: "asc" }, { sortOrder: "asc" }],
     }),
     // Inactive plots: plots with NO in-progress jobs (need attention)
     prisma.plot.findMany({

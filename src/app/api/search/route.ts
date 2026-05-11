@@ -85,6 +85,8 @@ export async function GET(request: NextRequest) {
           },
         },
       },
+      // (#168) Chronological — never present jobs in undefined order.
+      orderBy: [{ startDate: "asc" }, { sortOrder: "asc" }],
       take: 5,
     }),
 

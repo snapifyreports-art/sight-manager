@@ -26,7 +26,9 @@ export async function GET() {
       contractors: { include: { contact: { select: { id: true, name: true, company: true } } } },
       _count: { select: { orders: true } },
     },
-    orderBy: { updatedAt: "desc" },
+    // (#168) Chronological by start date — sortOrder as tiebreaker for
+    // jobs that share a start date inside a plot.
+    orderBy: [{ startDate: "asc" }, { sortOrder: "asc" }],
   });
 
   return NextResponse.json(jobs);

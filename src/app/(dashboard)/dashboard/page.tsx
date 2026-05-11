@@ -72,10 +72,13 @@ export default async function DashboardPage() {
       },
     }),
 
-    // Jobs for traffic light display (filtered, leaf-only)
+    // Jobs for traffic light display (filtered, leaf-only).
+    // (#168) Sort chronologically by startDate so the dashboard reads
+    // like the programme itself — Keith expects every job list in the
+    // app to be in start-date order with sortOrder as a tiebreaker.
     prisma.job.findMany({
       take: 12,
-      orderBy: { updatedAt: "desc" },
+      orderBy: [{ startDate: "asc" }, { sortOrder: "asc" }],
       where: {
         status: { in: ["IN_PROGRESS", "ON_HOLD", "NOT_STARTED"] },
         ...jobSiteWhere,

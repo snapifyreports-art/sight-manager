@@ -53,6 +53,9 @@ export async function GET(
         },
       },
     },
+    // (#168) Sort by job startDate ascending so the contractor sees
+    // their work in the order it'll happen.
+    orderBy: { job: { startDate: "asc" } },
   });
 
   const jobs = jobContractors.map((jc) => ({

@@ -73,15 +73,16 @@ export default async function ContractorSharePage({
     },
   });
 
-  const jobs = jobContractors.map((jc) => jc.job);
+  // (#168) Chronological by startDate everywhere a job list appears.
+  const byStartDate = (a: { startDate: Date | null }, b: { startDate: Date | null }) => {
+    if (!a.startDate && !b.startDate) return 0;
+    if (!a.startDate) return 1;
+    if (!b.startDate) return -1;
+    return a.startDate.getTime() - b.startDate.getTime();
+  };
+  const jobs = jobContractors.map((jc) => jc.job).sort(byStartDate);
   const liveJobs = jobs.filter((j) => j.status === "IN_PROGRESS");
-  const nextJobs = jobs
-    .filter((j) => j.status === "NOT_STARTED")
-    .sort((a, b) => {
-      if (!a.startDate) return 1;
-      if (!b.startDate) return -1;
-      return a.startDate.getTime() - b.startDate.getTime();
-    });
+  const nextJobs = jobs.filter((j) => j.status === "NOT_STARTED");
   const completedJobs = jobs.filter((j) => j.status === "COMPLETED");
 
   const openSnags = await prisma.snag.findMany({
