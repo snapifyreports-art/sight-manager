@@ -5,6 +5,7 @@ import { getServerCurrentDate } from "@/lib/dev-date";
 import { sessionHasPermission } from "@/lib/permissions";
 import { canAccessSite, getUserSiteIds } from "@/lib/site-access";
 import { apiError } from "@/lib/api-errors";
+import { enforceOrderInvariants } from "@/lib/order-invariants";
 
 export const dynamic = "force-dynamic";
 
@@ -209,6 +210,31 @@ export async function PUT(
       data.dateOfOrder = getServerCurrentDate(req);
     }
   }
+
+  // (#179) Enforce date invariants — the math should be the math.
+  // Before this, the PENDING→DELIVERED bridge could leave the order
+  // with deliveredDate=today but expectedDeliveryDate weeks in the
+  // future (set previously by cascade), producing "delivered 8 months
+  // early" artifacts in reports. The helper clamps so the date
+  // ordering is always consistent.
+  const today = getServerCurrentDate(req);
+  const invariantPatch = enforceOrderInvariants(
+    {
+      dateOfOrder: existing.dateOfOrder,
+      expectedDeliveryDate: existing.expectedDeliveryDate,
+      deliveredDate: existing.deliveredDate,
+      leadTimeDays: existing.leadTimeDays,
+    },
+    {
+      dateOfOrder: data.dateOfOrder as Date | undefined,
+      expectedDeliveryDate: data.expectedDeliveryDate as Date | null | undefined,
+      deliveredDate: data.deliveredDate as Date | null | undefined,
+      status: data.status as string | undefined,
+      leadTimeDays: existing.leadTimeDays,
+    },
+    today,
+  );
+  Object.assign(data, invariantPatch);
 
   try {
     // Create event log for status changes

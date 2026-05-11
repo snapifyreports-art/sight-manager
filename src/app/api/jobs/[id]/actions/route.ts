@@ -126,11 +126,42 @@ export async function POST(
     if (action === "start") {
       // Progress PENDING material orders to ORDERED — unless user chose "start anyway"
       // (user wants to handle orders themselves via Daily Brief / Orders page)
+      // (#179) Per-order rather than updateMany so the invariants
+      // helper can recompute expectedDeliveryDate from each order's
+      // own leadTimeDays. Previously this set dateOfOrder=now but
+      // left expectedDeliveryDate at the old (template-derived) value
+      // — if the job started late, expectedDeliveryDate could be
+      // BEFORE dateOfOrder (impossible), inflating "overdue" counts.
       if (!skipOrderProgression) {
-        await prisma.materialOrder.updateMany({
+        const { enforceOrderInvariants } = await import("@/lib/order-invariants");
+        const pending = await prisma.materialOrder.findMany({
           where: { jobId: id, status: "PENDING" },
-          data: { status: "ORDERED", dateOfOrder: now },
+          select: {
+            id: true,
+            dateOfOrder: true,
+            expectedDeliveryDate: true,
+            deliveredDate: true,
+            leadTimeDays: true,
+          },
         });
+        await Promise.all(
+          pending.map((o) => {
+            const patch = enforceOrderInvariants(
+              {
+                dateOfOrder: o.dateOfOrder,
+                expectedDeliveryDate: o.expectedDeliveryDate,
+                deliveredDate: o.deliveredDate,
+                leadTimeDays: o.leadTimeDays,
+              },
+              { dateOfOrder: now, status: "ORDERED", leadTimeDays: o.leadTimeDays },
+              now,
+            );
+            return prisma.materialOrder.update({
+              where: { id: o.id },
+              data: { status: "ORDERED", dateOfOrder: now, ...patch },
+            });
+          }),
+        );
       }
       // If the plot was awaiting a restart/contractor decision, clear both flags
       if (existing.plot.awaitingRestart || existing.plot.awaitingContractorConfirmation) {
@@ -173,11 +204,43 @@ export async function POST(
       },
     });
     // Sign-off is the explicit approval — materials are confirmed used on site
-    // Progress any remaining ORDERED orders to DELIVERED
-    await prisma.materialOrder.updateMany({
-      where: { jobId: id, status: "ORDERED" },
-      data: { status: "DELIVERED", deliveredDate: now },
-    });
+    // Progress any remaining ORDERED orders to DELIVERED.
+    // (#179) Per-order with invariants check — deliveredDate must
+    // never be < dateOfOrder. Previously updateMany set
+    // deliveredDate=now blindly; if an order had a future dateOfOrder
+    // (e.g. after a cascade that pushed it later), this would record
+    // a delivery before placement.
+    {
+      const { enforceOrderInvariants } = await import("@/lib/order-invariants");
+      const ordered = await prisma.materialOrder.findMany({
+        where: { jobId: id, status: "ORDERED" },
+        select: {
+          id: true,
+          dateOfOrder: true,
+          expectedDeliveryDate: true,
+          deliveredDate: true,
+          leadTimeDays: true,
+        },
+      });
+      await Promise.all(
+        ordered.map((o) => {
+          const patch = enforceOrderInvariants(
+            {
+              dateOfOrder: o.dateOfOrder,
+              expectedDeliveryDate: o.expectedDeliveryDate,
+              deliveredDate: o.deliveredDate,
+              leadTimeDays: o.leadTimeDays,
+            },
+            { deliveredDate: now, status: "DELIVERED" },
+            now,
+          );
+          return prisma.materialOrder.update({
+            where: { id: o.id },
+            data: { status: "DELIVERED", deliveredDate: now, ...patch },
+          });
+        }),
+      );
+    }
   } else {
     job = await prisma.job.findUnique({
       where: { id },

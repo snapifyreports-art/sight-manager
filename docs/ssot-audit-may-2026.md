@@ -148,6 +148,33 @@ included parent-stage rollups and another didn't.
 
 ---
 
+## Concept: "Order date invariants"
+
+Keith pushed back: _"these are basics, it's just maths"_. Asked: are
+the other functional flows (start, expand, push back, deliver early)
+clean too? They weren't. Four more silent-mutation bugs surfaced:
+
+| Where | Was | Now |
+|---|---|---|
+| `/api/orders/[id]` PUT, PENDING → DELIVERED bridge | Set `dateOfOrder=today, deliveredDate=today` but left `expectedDeliveryDate` at whatever the cascade had pushed it to. Could be months in the future, producing "delivered 8 months early" artifacts in reports. | Invariant helper clamps `expectedDeliveryDate >= dateOfOrder`. |
+| `/api/jobs/[id]/actions` start auto-progression | PENDING → ORDERED with `dateOfOrder=today`, `expectedDeliveryDate` unchanged. If job started late, `expectedDeliveryDate` could end up < `dateOfOrder` (impossible). | Per-order recompute via `enforceOrderInvariants` — pushes `expectedDeliveryDate` to `dateOfOrder + leadTimeDays` if it would otherwise violate. |
+| `/api/jobs/[id]/actions` sign-off auto-progression | ORDERED → DELIVERED with `deliveredDate=today`, blind. If `dateOfOrder` was in the future (post-cascade), `deliveredDate < dateOfOrder`. | Per-order with invariants — clamps `deliveredDate` to `dateOfOrder` if needed. |
+| Multiple flows using `updateMany` for status flips | One blanket UPDATE — can't enforce per-row invariants. | Per-row `findMany` + `Promise.all` with invariants applied to each. |
+
+**Canonical**: `src/lib/order-invariants.ts` defines:
+
+- **INV-1**: `dateOfOrder <= expectedDeliveryDate`
+- **INV-2**: `dateOfOrder <= deliveredDate` (when DELIVERED)
+- **INV-3** (helper): `recomputeExpectedDeliveryOnSend(today, leadTime)` — used on auto-progression to keep the math honest.
+
+Every order-mutation flow now routes proposed changes through
+`enforceOrderInvariants(current, patch, today)` which returns a
+clamped patch. No mutation can save an impossible date ordering.
+
+**Status**: ✅ Fixed batch 100.
+
+---
+
 ## The principle going forward
 
 Two rules, learned from the cases above:
