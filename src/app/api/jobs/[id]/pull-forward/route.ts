@@ -278,7 +278,10 @@ export async function POST(
     }
 
     const { id } = await params;
-    const body = await req.json() as { newStartDate: string };
+    const body = await req.json() as {
+      newStartDate: string;
+      assumeOrdersSent?: string[];
+    };
 
     if (!body.newStartDate) {
       return NextResponse.json({ error: "newStartDate required" }, { status: 400 });
@@ -288,6 +291,7 @@ export async function POST(
       return NextResponse.json({ error: "Invalid newStartDate" }, { status: 400 });
     }
     newStart.setHours(0, 0, 0, 0);
+    const overrideOrderIds = new Set(body.assumeOrdersSent ?? []);
 
     const job = await prisma.job.findUnique({
       where: { id },
@@ -327,6 +331,15 @@ export async function POST(
       where: { jobId: id, status: "PENDING" },
     });
 
+    // (#167) "Start anyway" override — for any PENDING order whose id is
+    // in assumeOrdersSent, don't shift it; instead mark it ORDERED with
+    // dateOfOrder=today inside the transaction. Track the IDs so we can
+    // return them to the client for the delivery follow-up prompt.
+    const today = getServerCurrentDate(req);
+    today.setHours(0, 0, 0, 0);
+    const ordersToShift = pendingOrders.filter((o) => !overrideOrderIds.has(o.id));
+    const ordersToOverride = pendingOrders.filter((o) => overrideOrderIds.has(o.id));
+
     await prisma.$transaction(async (tx) => {
       await tx.job.update({
         where: { id },
@@ -338,7 +351,7 @@ export async function POST(
         },
       });
 
-      for (const o of pendingOrders) {
+      for (const o of ordersToShift) {
         const newOrderDate = addWorkingDays(o.dateOfOrder, shift);
         const newDelivery = o.expectedDeliveryDate
           ? addWorkingDays(o.expectedDeliveryDate, shift)
@@ -346,6 +359,13 @@ export async function POST(
         await tx.materialOrder.update({
           where: { id: o.id },
           data: { dateOfOrder: newOrderDate, expectedDeliveryDate: newDelivery },
+        });
+      }
+
+      for (const o of ordersToOverride) {
+        await tx.materialOrder.update({
+          where: { id: o.id },
+          data: { status: "ORDERED", dateOfOrder: today },
         });
       }
 
@@ -393,7 +413,10 @@ export async function POST(
       newStartDate: newStart.toISOString(),
       newEndDate: newEnd.toISOString(),
       workingDaysPulledForward: Math.abs(shift),
-      ordersShifted: pendingOrders.length,
+      ordersShifted: ordersToShift.length,
+      // (#167) IDs of orders just flipped to ORDERED so the client can
+      // prompt for delivery state (today / new date).
+      overriddenOrders: ordersToOverride.map((o) => ({ id: o.id })),
     });
   } catch (err) {
     return apiError(err, "Failed to pull job forward");

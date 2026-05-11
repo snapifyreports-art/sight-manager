@@ -2,9 +2,10 @@
 
 import { useState, useCallback, useEffect } from "react";
 import { differenceInCalendarDays, addDays, format } from "date-fns";
-import { AlertTriangle, Loader2 } from "lucide-react";
+import { AlertTriangle, Loader2, Truck } from "lucide-react";
 import { addWorkingDays, differenceInWorkingDays, isWorkingDay, snapToWorkingDay } from "@/lib/working-days";
 import { useToast } from "@/components/ui/toast";
+import { OrderDeliveryFollowUpDialog } from "@/components/orders/OrderDeliveryFollowUpDialog";
 import {
   Dialog,
   DialogContent,
@@ -85,7 +86,19 @@ export function useJobAction(
   // User-picked custom start date for "Pull to specific date" option.
   const [customPullDate, setCustomPullDate] = useState<string>("");
   const [customPullFeasibility, setCustomPullFeasibility] = useState<
-    { status: "checking" | "ok" | "conflict"; reason?: string; earliestStart?: Date | null } | null
+    {
+      status: "checking" | "ok" | "conflict";
+      reason?: string;
+      earliestStart?: Date | null;
+      /** (#167) When non-empty AND status="conflict", the dialog offers
+       *  "Start anyway — mark order(s) sent". */
+      overrideableOrders?: { id: string; supplierName?: string | null }[];
+    } | null
+  >(null);
+  // (#167) Delivery follow-up populated once a "Start anyway" cascade
+  // commits — drives <OrderDeliveryFollowUpDialog>.
+  const [pendingDelivery, setPendingDelivery] = useState<
+    { id: string; supplierName?: string | null }[] | null
   >(null);
   const [cascadeLoading, setCascadeLoading] = useState(false);
 
@@ -254,7 +267,16 @@ export function useJobAction(
   // Returns ok:true if safe, or ok:false with a human-readable reason.
   const previewPullForward = useCallback(
     async (jobId: string, endDate: string, daysEarly: number):
-      Promise<{ ok: boolean; reason?: string; shiftGapDays?: number }> => {
+      Promise<{
+        ok: boolean;
+        reason?: string;
+        shiftGapDays?: number;
+        /** (#167) Order-conflict details so the dialog can offer the
+         *  "Start anyway — mark order(s) sent" override. Empty when the
+         *  conflict isn't order-driven (e.g. a downstream job is the
+         *  blocker — that can't be overridden this way). */
+        overrideableOrders?: { id: string; supplierName?: string | null }[];
+      }> => {
       try {
         const newEnd = addWorkingDays(new Date(endDate), -daysEarly)
           .toLocaleDateString("en-CA");
@@ -289,7 +311,24 @@ export function useJobAction(
             const gap = differenceInWorkingDays(today, proposed);
             if (gap > shiftGapDays) shiftGapDays = gap;
           }
-          return { ok: false, reason, shiftGapDays };
+
+          // (#167) Override is offered ONLY when EVERY conflict is an
+          // order_in_past — a single downstream job_in_past makes the
+          // override insufficient (overriding orders won't help a job
+          // that's blocked by a different job).
+          const onlyOrders =
+            data.conflicts.length > 0 &&
+            data.conflicts.every((c: { kind: string }) => c.kind === "order_in_past");
+          const overrideableOrders = onlyOrders
+            ? data.conflicts
+                .filter((c: { kind: string; orderId?: string }) => c.kind === "order_in_past" && c.orderId)
+                .map((c: { orderId: string; supplierName?: string }) => ({
+                  id: c.orderId,
+                  supplierName: c.supplierName ?? null,
+                }))
+            : [];
+
+          return { ok: false, reason, shiftGapDays, overrideableOrders };
         }
         return { ok: true };
       } catch (e) {
@@ -349,10 +388,18 @@ export function useJobAction(
   // `daysEarly` is in WORKING days — matches the cascade engine (see
   // docs/cascade-spec.md). Caller computes this via differenceInWorkingDays.
   const executePullForward = useCallback(
-    async (job: JobForAction, daysEarly: number, endDate: string | null) => {
+    async (
+      job: JobForAction,
+      daysEarly: number,
+      endDate: string | null,
+      opts?: {
+        assumeOrdersSent?: { id: string; supplierName?: string | null }[];
+      },
+    ) => {
       console.log("[CASCADE] executePullForward called:", { jobId: job.id, daysEarly, endDate });
       setCascadeLoading(true);
       try {
+        let overriddenOrders: { id: string }[] = [];
         if (endDate) {
           const newEnd = addWorkingDays(new Date(endDate), -daysEarly)
             .toLocaleDateString("en-CA");
@@ -360,7 +407,11 @@ export function useJobAction(
           const cascadeRes = await fetch(`/api/jobs/${job.id}/cascade`, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ newEndDate: newEnd, confirm: true }),
+            body: JSON.stringify({
+              newEndDate: newEnd,
+              confirm: true,
+              assumeOrdersSent: opts?.assumeOrdersSent?.map((o) => o.id),
+            }),
           });
           if (!cascadeRes.ok) {
             // Surface conflicts (409) and real errors distinctly.
@@ -379,12 +430,26 @@ export function useJobAction(
           }
           const cascadeResult = await cascadeRes.json();
           console.log("[CASCADE] SUCCESS:", cascadeResult);
+          if (Array.isArray(cascadeResult?.overriddenOrders)) {
+            overriddenOrders = cascadeResult.overriddenOrders;
+          }
         } else {
           console.warn("[CASCADE] No endDate — skipping cascade!");
         }
         await executeAction(job.id, "start", undefined, skipOrderProgression ? { skipOrderProgression: true } : undefined);
         setEarlyStartDialog(null);
         setSkipOrderProgression(false);
+        // (#167) If the server flipped orders to ORDERED, open the
+        // delivery follow-up prompt. Use supplierName from the original
+        // override list when we have it so the rows are recognisable.
+        if (overriddenOrders.length > 0) {
+          const supplierById = new Map(
+            (opts?.assumeOrdersSent ?? []).map((o) => [o.id, o.supplierName ?? null]),
+          );
+          setPendingDelivery(
+            overriddenOrders.map((o) => ({ id: o.id, supplierName: supplierById.get(o.id) ?? null })),
+          );
+        }
       } catch (e) {
         console.error("[CASCADE] Exception:", e);
         toast.error(`Pull forward error: ${e instanceof Error ? e.message : String(e)}`);
@@ -392,7 +457,7 @@ export function useJobAction(
         setCascadeLoading(false);
       }
     },
-    [executeAction, skipOrderProgression]
+    [executeAction, skipOrderProgression, toast]
   );
 
   const handlePullForward = useCallback(async () => {
@@ -437,6 +502,24 @@ export function useJobAction(
     await executePullForward(activeJob, delta, earlyStartDialog.endDate);
   }, [earlyStartDialog, activeJob, customPullDate, executePullForward]);
 
+  // (#167) "Start anyway — mark order(s) sent" override for the custom
+  // date in the Starting Early dialog. Only callable when the preflight
+  // returned an order-only conflict.
+  const handlePullToCustomDateOverride = useCallback(async () => {
+    if (!earlyStartDialog || !activeJob || !activeJob.endDate || !customPullDate) return;
+    const orders = customPullFeasibility?.overrideableOrders ?? [];
+    if (orders.length === 0) return;
+    const planned = new Date(activeJob.startDate ?? activeJob.endDate);
+    planned.setHours(0, 0, 0, 0);
+    const chosen = new Date(customPullDate);
+    chosen.setHours(0, 0, 0, 0);
+    const delta = differenceInWorkingDays(planned, chosen);
+    if (delta <= 0) return;
+    await executePullForward(activeJob, delta, earlyStartDialog.endDate, {
+      assumeOrdersSent: orders,
+    });
+  }, [earlyStartDialog, activeJob, customPullDate, customPullFeasibility, executePullForward]);
+
   // Re-run preflight when user changes the custom date.
   useEffect(() => {
     if (!earlyStartDialog || !activeJob || !activeJob.endDate || !customPullDate || !activeJob.startDate) {
@@ -472,6 +555,7 @@ export function useJobAction(
           status: "conflict",
           reason: result.reason,
           earliestStart,
+          overrideableOrders: result.overrideableOrders ?? [],
         });
       }
     })();
@@ -1471,6 +1555,39 @@ export function useJobAction(
                             )}
                           </p>
                         )}
+                        {/* (#167) "Start anyway — mark order(s) sent"
+                            override. Only when ALL blockers are PENDING
+                            orders. */}
+                        {customPullFeasibility?.status === "conflict" &&
+                          (customPullFeasibility.overrideableOrders?.length ?? 0) > 0 && (
+                            <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-2.5">
+                              <p className="mb-1.5 text-[11px] text-amber-800">
+                                Start on this day anyway? The{" "}
+                                {customPullFeasibility.overrideableOrders!.length === 1
+                                  ? "blocking order"
+                                  : `${customPullFeasibility.overrideableOrders!.length} blocking orders`}{" "}
+                                will be marked as sent today and you&apos;ll set
+                                the delivery status next.
+                              </p>
+                              <Button
+                                size="sm"
+                                className="h-7 w-full bg-amber-600 text-xs hover:bg-amber-700"
+                                disabled={cascadeLoading}
+                                onClick={handlePullToCustomDateOverride}
+                              >
+                                {cascadeLoading ? (
+                                  <Loader2 className="size-3 animate-spin" aria-hidden />
+                                ) : (
+                                  <Truck className="size-3" aria-hidden />
+                                )}
+                                Start anyway — mark{" "}
+                                {customPullFeasibility.overrideableOrders!.length === 1
+                                  ? "order"
+                                  : "orders"}{" "}
+                                sent
+                              </Button>
+                            </div>
+                          )}
                       </div>
                     </div>
                   </div>
@@ -1729,6 +1846,12 @@ export function useJobAction(
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* (#167) Delivery follow-up after "Start anyway — mark order(s) sent" */}
+      <OrderDeliveryFollowUpDialog
+        orders={pendingDelivery}
+        onClose={() => setPendingDelivery(null)}
+      />
     </>
   );
 

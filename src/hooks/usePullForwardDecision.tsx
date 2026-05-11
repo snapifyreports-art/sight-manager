@@ -30,7 +30,7 @@
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { format, addDays, startOfWeek, isAfter, isBefore, isSameDay } from "date-fns";
-import { Loader2, Zap, CalendarDays, Lock, CalendarClock, AlertTriangle } from "lucide-react";
+import { Loader2, Zap, CalendarDays, Lock, CalendarClock, AlertTriangle, Truck } from "lucide-react";
 import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 import {
   Dialog,
@@ -47,6 +47,10 @@ import { cn } from "@/lib/utils";
 import { getCurrentDateAtMidnight } from "@/lib/dev-date";
 import { toDateKey, parseServerDateToLocal } from "@/lib/dates";
 import { HelpTip } from "@/components/shared/HelpTip";
+import {
+  OrderDeliveryFollowUpDialog,
+  type PendingDeliveryFollowUp,
+} from "@/components/orders/OrderDeliveryFollowUpDialog";
 
 export interface PullableJob {
   id: string;
@@ -97,6 +101,11 @@ export function usePullForwardDecision(onApplied?: () => void): Result {
   const [usePicker, setUsePicker] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
+  // (#167) Delivery follow-up state — populated after a "Start anyway"
+  // override flips PENDING orders to ORDERED. The hook keeps the pending
+  // list and the saved onApplied callback so the dialog can fire onDone.
+  const [pendingDelivery, setPendingDelivery] = useState<PendingDeliveryFollowUp[] | null>(null);
+
   const close = useCallback(() => {
     setTarget(null);
     setConstraints(null);
@@ -137,14 +146,14 @@ export function usePullForwardDecision(onApplied?: () => void): Result {
     return () => { cancelled = true; };
   }, [target, close, toast]);
 
-  async function apply(dateISO: string) {
+  async function apply(dateISO: string, assumeOrdersSent?: string[]) {
     if (!target) return;
     setSubmitting(true);
     try {
       const res = await fetch(`/api/jobs/${target.id}/pull-forward`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ newStartDate: dateISO }),
+        body: JSON.stringify({ newStartDate: dateISO, assumeOrdersSent }),
       });
       if (!res.ok) {
         toast.error(await fetchErrorMessage(res, "Failed to pull forward"));
@@ -153,13 +162,35 @@ export function usePullForwardDecision(onApplied?: () => void): Result {
       const data = await res.json() as {
         workingDaysPulledForward: number;
         ordersShifted: number;
+        overriddenOrders?: { id: string }[];
       };
       toast.success(
         `Pulled forward ${data.workingDaysPulledForward} working day${data.workingDaysPulledForward !== 1 ? "s" : ""}` +
           (data.ordersShifted > 0 ? ` — ${data.ordersShifted} order${data.ordersShifted !== 1 ? "s" : ""} re-dated` : "")
       );
-      close();
-      onApplied?.();
+
+      // (#167) Overridden orders — open follow-up dialog to capture
+      // delivery status before fully closing. Use the order constraints
+      // we already have to enrich each row with the supplier name.
+      const overridden = data.overriddenOrders ?? [];
+      if (overridden.length > 0 && constraints) {
+        const byId = new Map(constraints.orderConstraints.map((oc) => [oc.orderId, oc]));
+        setPendingDelivery(
+          overridden.map((o) => ({
+            id: o.id,
+            supplierName: byId.get(o.id)?.supplier ?? null,
+          })),
+        );
+        // Defer close until the follow-up dialog is dismissed so the
+        // user can see the resulting save toast in context.
+        setTarget(null);
+        setConstraints(null);
+        setPickedDate("");
+        setUsePicker(false);
+      } else {
+        close();
+        onApplied?.();
+      }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to pull forward");
     } finally {
@@ -210,6 +241,35 @@ export function usePullForwardDecision(onApplied?: () => void): Result {
 
   // Hide "today" option if today IS the current start (it's the same as Keep)
   const showTodayOption = !current || !isSameDay(today, current);
+
+  // (#167) Predecessor end date — used to gate the "Start anyway" override.
+  // Override is only valid when the blocker is purely orders, not a
+  // predecessor that hasn't finished yet.
+  const predecessorEnd = constraints?.predecessor?.signedOffAt
+    ? parseServerDateToLocal(constraints.predecessor.signedOffAt)
+    : constraints?.predecessor?.actualEndDate
+      ? parseServerDateToLocal(constraints.predecessor.actualEndDate)
+      : constraints?.predecessor?.endDate
+        ? parseServerDateToLocal(constraints.predecessor.endDate)
+        : null;
+
+  /**
+   * For a candidate date, return the list of order IDs whose delivery is
+   * still later than that date — i.e. the orders the user would override
+   * by clicking "Start anyway". Returns null if a non-order blocker
+   * (predecessor) is in the way, since we can't override that.
+   */
+  function overrideableOrdersFor(candidate: Date): string[] | null {
+    if (!constraints) return null;
+    if (predecessorEnd && isAfter(predecessorEnd, candidate)) return null;
+    if (isBefore(candidate, today)) return null;
+    const blocking = constraints.orderConstraints.filter((oc) => {
+      if (!oc.earliestDelivery) return false;
+      const d = parseServerDateToLocal(oc.earliestDelivery);
+      return isAfter(d, candidate);
+    });
+    return blocking.length > 0 ? blocking.map((oc) => oc.orderId) : null;
+  }
 
   const dialogs = (
     <Dialog open={!!target} onOpenChange={(o) => { if (!o) close(); }}>
@@ -354,6 +414,37 @@ export function usePullForwardDecision(onApplied?: () => void): Result {
                     Apply
                   </Button>
                 </div>
+                {/* (#167) "Start anyway" override — appears when the
+                    only thing blocking the picked date is one or more
+                    PENDING orders. Predecessor blockers can't be
+                    overridden this way. */}
+                {pickedDate && (() => {
+                  const candidate = new Date(pickedDate);
+                  if (isNaN(candidate.getTime())) return null;
+                  if (validateDate(candidate).ok) return null;
+                  const ids = overrideableOrdersFor(candidate);
+                  if (!ids) return null;
+                  return (
+                    <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-2.5">
+                      <p className="mb-2 text-[11px] text-amber-800">
+                        Start on this day anyway — the {ids.length === 1 ? "blocking order" : `${ids.length} blocking orders`} will be marked as sent today and you&apos;ll set the delivery status next.
+                      </p>
+                      <Button
+                        size="sm"
+                        className="w-full bg-amber-600 hover:bg-amber-700"
+                        disabled={submitting}
+                        onClick={() => apply(pickedDate, ids)}
+                      >
+                        {submitting ? (
+                          <Loader2 className="size-3.5 animate-spin" />
+                        ) : (
+                          <Truck className="size-3.5" aria-hidden />
+                        )}
+                        Start anyway — mark {ids.length === 1 ? "order" : "orders"} sent
+                      </Button>
+                    </div>
+                  );
+                })()}
               </div>
             )}
           </div>
@@ -366,7 +457,20 @@ export function usePullForwardDecision(onApplied?: () => void): Result {
     </Dialog>
   );
 
-  return { openPullForwardDialog, isLoading: submitting, dialogs };
+  const allDialogs = (
+    <>
+      {dialogs}
+      <OrderDeliveryFollowUpDialog
+        orders={pendingDelivery}
+        onClose={() => {
+          setPendingDelivery(null);
+          onApplied?.();
+        }}
+      />
+    </>
+  );
+
+  return { openPullForwardDialog, isLoading: submitting, dialogs: allDialogs };
 }
 
 // ─── Option button — shared tile for each of the 4 choices ─────────────────

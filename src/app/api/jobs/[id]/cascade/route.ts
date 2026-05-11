@@ -59,7 +59,10 @@ export async function POST(
 
   const { id } = await params;
   const body = await req.json();
-  const { newEndDate } = body;
+  const { newEndDate, assumeOrdersSent } = body as {
+    newEndDate: string;
+    assumeOrdersSent?: string[];
+  };
 
   if (!newEndDate) {
     return NextResponse.json({ error: "newEndDate is required" }, { status: 400 });
@@ -84,14 +87,30 @@ export async function POST(
   });
   const allOrders = await prisma.materialOrder.findMany({
     where: { jobId: { in: allPlotJobs.map((j) => j.id) } },
+    include: { supplier: { select: { name: true } } },
   });
 
   const { jobs, orders } = buildCascadeArgs(allPlotJobs, allOrders);
-  const result = calculateCascade(id, new Date(newEndDate), jobs, orders);
+  const result = calculateCascade(
+    id,
+    new Date(newEndDate),
+    jobs,
+    orders,
+    new Set(assumeOrdersSent ?? []),
+  );
+
+  // (#167) Enrich order_in_past conflicts with supplier name so the
+  // "Start anyway" UI can name the supplier it's about to flip to SENT.
+  const orderById = new Map(allOrders.map((o) => [o.id, o]));
+  const enrichedConflicts = result.conflicts.map((c) => {
+    if (c.kind !== "order_in_past" || !c.orderId) return c;
+    const o = orderById.get(c.orderId);
+    return o ? { ...c, supplierName: o.supplier?.name } : c;
+  });
 
   return NextResponse.json({
     preview: true,
-    ...JSON.parse(JSON.stringify(result)),
+    ...JSON.parse(JSON.stringify({ ...result, conflicts: enrichedConflicts })),
   });
 }
 
@@ -107,7 +126,12 @@ export async function PUT(
 
   const { id } = await params;
   const body = await req.json();
-  const { newEndDate, confirm, force } = body;
+  const { newEndDate, confirm, force, assumeOrdersSent } = body as {
+    newEndDate: string;
+    confirm: boolean;
+    force?: boolean;
+    assumeOrdersSent?: string[];
+  };
 
   if (!newEndDate || !confirm) {
     return NextResponse.json(
@@ -137,8 +161,15 @@ export async function PUT(
     where: { jobId: { in: allPlotJobs.map((j) => j.id) } },
   });
 
+  const overrideOrderIds = new Set(assumeOrdersSent ?? []);
   const { jobs: cascadeJobs, orders: cascadeOrders } = buildCascadeArgs(allPlotJobs, allOrders);
-  const result = calculateCascade(id, new Date(newEndDate), cascadeJobs, cascadeOrders);
+  const result = calculateCascade(
+    id,
+    new Date(newEndDate),
+    cascadeJobs,
+    cascadeOrders,
+    overrideOrderIds,
+  );
 
   // I7: block the apply if there are conflicts unless force=true.
   if (result.conflicts.length > 0 && !force) {
@@ -157,6 +188,15 @@ export async function PUT(
     // `allPlotJobs` was already fetched with parentId in scope — use it
     // instead of issuing one findUnique per updated job (previously N+1).
     const jobMap = new Map(allPlotJobs.map((j) => [j.id, j]));
+
+    // (#167) "Start anyway" override — flip the supplied orders to ORDERED
+    // with dateOfOrder=today before applying the cascade. Only flip orders
+    // currently PENDING — anything else is already past the gate.
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const overriddenOrders = allOrders.filter(
+      (o) => overrideOrderIds.has(o.id) && o.status === "PENDING",
+    );
 
     // Run job + order updates concurrently (both resolve against the same
     // plot, so there's no cross-write hazard worth a transaction).
@@ -184,6 +224,12 @@ export async function PUT(
             dateOfOrder: update.newOrderDate,
             expectedDeliveryDate: update.newDeliveryDate,
           },
+        })
+      ),
+      ...overriddenOrders.map((o) =>
+        prisma.materialOrder.update({
+          where: { id: o.id },
+          data: { status: "ORDERED", dateOfOrder: today },
         })
       ),
     ]);
@@ -218,6 +264,9 @@ export async function PUT(
       deltaDays: result.deltaDays,
       jobsUpdated: result.jobUpdates.length,
       ordersUpdated: result.orderUpdates.length,
+      // (#167) Tell the client which orders were just flipped so it can
+      // show the "mark delivered today / set new delivery date" prompt.
+      overriddenOrders: overriddenOrders.map((o) => ({ id: o.id })),
       conflicts: JSON.parse(JSON.stringify(result.conflicts)), // included for visibility, caller opted in via force
     });
   } catch (err) {

@@ -100,7 +100,15 @@ export function calculateCascade(
   triggerJobId: string,
   newEndDate: Date,
   allPlotJobs: CascadeJob[],
-  allOrders: CascadeOrder[]
+  allOrders: CascadeOrder[],
+  /**
+   * (May 2026 #167) Orders the caller has elected to "force as already
+   * sent" — used by the Pull Forward "Start anyway" override. Orders
+   * whose id appears here are skipped by both the order_in_past conflict
+   * check AND the orderUpdates shift: the cascade caller will mark them
+   * ORDERED with dateOfOrder=today instead of shifting their schedule.
+   */
+  assumeOrdersSent: Set<string> = new Set(),
 ): CascadeResult {
   const trigger = allPlotJobs.find((j) => j.id === triggerJobId);
   if (!trigger || !trigger.endDate) {
@@ -200,6 +208,10 @@ export function calculateCascade(
     for (const order of jobOrders) {
       // I4: historical/cancelled orders never move.
       if (order.status === "DELIVERED" || order.status === "CANCELLED") continue;
+      // (#167) "Start anyway" override — the caller will mark these
+      // ORDERED with dateOfOrder=today separately, so don't shift them
+      // and don't flag them as conflicts.
+      if (assumeOrdersSent.has(order.id)) continue;
 
       const newOrderDate = addWorkingDays(order.dateOfOrder, deltaDays);
       const newDeliveryDate = order.expectedDeliveryDate
