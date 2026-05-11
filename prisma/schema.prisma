@@ -415,6 +415,12 @@ model MaterialOrder {
   automated            Boolean     @default(false)
   // oneOff orders are site- or plot-level orders not tied to a specific template job
   oneOff               Boolean     @default(false)
+  // (#169) Split-out flag — true when the manager has extracted this
+  // order from a visual group so it can be re-dated independently
+  // (e.g. when one plot is pulled forward). UI groups orders by
+  // supplier + job.name + (isSplit ? id : "default") so split orders
+  // fall into their own row instead of bundling with siblings.
+  isSplit              Boolean     @default(false)
   status               OrderStatus @default(PENDING)
   expectedDeliveryDate DateTime?
   deliveredDate        DateTime?

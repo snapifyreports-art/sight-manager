@@ -108,6 +108,8 @@ interface Order {
   orderType: string | null;
   automated: boolean;
   status: string;
+  // (#169) True when manager has extracted this order from its group.
+  isSplit?: boolean;
   expectedDeliveryDate: string | null;
   deliveredDate: string | null;
   leadTimeDays: number | null;

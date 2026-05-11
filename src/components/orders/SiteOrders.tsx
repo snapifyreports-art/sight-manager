@@ -16,6 +16,7 @@ import {
   ChevronLeft,
   TriangleAlert,
   Trash2,
+  Scissors,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
@@ -66,6 +67,9 @@ interface SiteOrder {
   deliveredDate: string | null;
   leadTimeDays: number | null;
   automated: boolean;
+  // (#169) True when manager has extracted this order from its visual
+  // group so it can be re-dated independently.
+  isSplit?: boolean;
   supplier: { id: string; name: string; contactEmail: string | null; contactName: string | null; accountNumber: string | null };
   job: {
     id: string;
@@ -165,6 +169,30 @@ export function SiteOrders({ siteId }: SiteOrdersProps) {
   const [siteInfo, setSiteInfo] = useState<{ name: string; address: string | null; postcode: string | null } | null>(null);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("all");
+  // (#169) Picker for split-out — when set, opens a small dialog listing
+  // the group's plots with a "Split out" button per chip.
+  const [splitPickerGroup, setSplitPickerGroup] = useState<SiteOrder[] | null>(null);
+  const [splittingId, setSplittingId] = useState<string | null>(null);
+
+  const handleSplitOut = async (orderId: string) => {
+    setSplittingId(orderId);
+    try {
+      const res = await fetch(`/api/orders/${orderId}/split`, { method: "POST" });
+      if (!res.ok) {
+        toast.error(await fetchErrorMessage(res, "Couldn't split order"));
+        return;
+      }
+      setOrders((prev) =>
+        prev.map((o) => (o.id === orderId ? { ...o, isSplit: true } : o)),
+      );
+      setSplitPickerGroup(null);
+      toast.success("Order split out — you can re-date it independently now");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't split order");
+    } finally {
+      setSplittingId(null);
+    }
+  };
 
   const { setManyOrderStatus, isPending: isStatusPending } = useOrderStatus({
     onChange: (orderId, newStatus) => {
@@ -440,7 +468,12 @@ export function SiteOrders({ siteId }: SiteOrdersProps) {
   const groupedOrders = useMemo(() => {
     const groupMap = new Map<string, SiteOrder[]>();
     for (const order of filtered) {
-      const key = `${order.supplier.id}__${order.job.name}`;
+      // (#169) Split orders fall into their own singleton group so they
+      // can be acted on (re-dated, marked sent) independently of the
+      // sibling orders they were extracted from.
+      const key = order.isSplit
+        ? `split__${order.id}`
+        : `${order.supplier.id}__${order.job.name}`;
       const existing = groupMap.get(key) ?? [];
       existing.push(order);
       groupMap.set(key, existing);
@@ -752,6 +785,20 @@ export function SiteOrders({ siteId }: SiteOrdersProps) {
                       </>
                     )}
                   </div>
+                )}
+                {/* (#169) Split-out — only when this card bundles more
+                    than one plot's order. Splitting lets the manager
+                    re-date a single plot's order without touching the
+                    siblings (e.g. when one plot is pulled forward). */}
+                {group.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => setSplitPickerGroup(group)}
+                    className="-mt-1 mb-2 mx-3 flex items-center gap-1 self-start rounded text-[10px] text-slate-500 hover:text-slate-700"
+                  >
+                    <Scissors className="size-2.5" aria-hidden />
+                    Split out a plot
+                  </button>
                 )}
               </Card>
             );
@@ -1227,6 +1274,61 @@ export function SiteOrders({ siteId }: SiteOrdersProps) {
       </Dialog>
 
       {orderEmailDialogs}
+
+      {/* (#169) Split-out picker — lists every plot in the group with a
+          "Split out" button so the manager can extract just one. */}
+      <Dialog
+        open={!!splitPickerGroup}
+        onOpenChange={(o) => {
+          if (!o) setSplitPickerGroup(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Scissors className="size-4 text-slate-600" aria-hidden />
+              Split out a plot
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-xs text-muted-foreground">
+            Each split order becomes its own row. You can then re-date,
+            mark sent, or mark delivered independently of the others.
+          </p>
+          <div className="grid grid-cols-2 gap-2 py-2 sm:grid-cols-3">
+            {splitPickerGroup?.map((o) => (
+              <Button
+                key={o.id}
+                variant="outline"
+                size="sm"
+                className="h-9 justify-between gap-1 px-3 text-xs"
+                disabled={splittingId === o.id}
+                onClick={() => handleSplitOut(o.id)}
+              >
+                <span>
+                  {o.job.plot.plotNumber
+                    ? `P${o.job.plot.plotNumber}`
+                    : o.job.plot.name}
+                </span>
+                {splittingId === o.id ? (
+                  <Loader2 className="size-3 animate-spin" aria-hidden />
+                ) : (
+                  <Scissors className="size-3" aria-hidden />
+                )}
+              </Button>
+            ))}
+          </div>
+          <DialogFooter>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setSplitPickerGroup(null)}
+              disabled={!!splittingId}
+            >
+              Done
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
