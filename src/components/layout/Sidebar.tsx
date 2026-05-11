@@ -261,7 +261,14 @@ function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: boolean; on
                 if (id) {
                   window.location.href = `/sites/${id}?tab=${currentTab}`;
                 } else {
-                  window.location.href = "/sites";
+                  // (#170) Switching to "All sites" while inside a
+                  // per-site tab — preserve which tab the user was on
+                  // by routing to /sites?pickFor=<tab>. The sites page
+                  // shows a "Pick a site to view its <Tab>" banner and
+                  // forwards them straight to that tab once they pick.
+                  // Without this they landed on a generic sites list
+                  // with no context (Keith called this a 404).
+                  window.location.href = `/sites?pickFor=${currentTab}`;
                 }
               } else {
                 // Everywhere else, update ?site= in-place (never navigate away)
