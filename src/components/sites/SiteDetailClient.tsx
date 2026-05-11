@@ -211,6 +211,33 @@ function getSiteStatusConfig(status: string) {
   return SITE_STATUS_CONFIG[status] ?? SITE_STATUS_CONFIG.ACTIVE;
 }
 
+// (#173) Tab allowlists for the site-header quick actions. Header
+// buttons that appear on every tab create noise on admin/reporting/
+// closure pages where the action makes no sense.
+//
+//   Raise Snag — only on operational tabs where a manager would
+//     plausibly spot a defect mid-task and want to log it instantly.
+//     The Snags tab itself uses its own in-tab button (excluded here).
+//
+//   Edit Site — only on the main landing tabs where a manager might
+//     realise the site metadata (address, postcode, assignee, etc.)
+//     needs fixing. Hidden on every drill-down/admin/reporting page.
+const RAISE_SNAG_TABS = new Set([
+  "daily-brief",
+  "programme",
+  "plots",
+  "orders",
+  "contractor-comms",
+  "weekly-report",
+  "day-sheets",
+  "calendar",
+]);
+const EDIT_SITE_TABS = new Set([
+  "daily-brief",
+  "plots",
+  "programme",
+]);
+
 // ---------- Site Snags Sub-Component ----------
 
 function SiteSnags({ siteId, plots, initialSnagId }: { siteId: string; plots: Array<{ id: string; name: string; plotNumber: string | null }>; initialSnagId?: string }) {
@@ -891,12 +918,12 @@ export function SiteDetailClient({
                 notification opt-in. Star toggle that POST/DELETEs to
                 /api/sites/[id]/watch. */}
             <WatchToggle siteId={site.id} siteName={site.name} />
-            {/* Quick Raise Snag — hidden on the Snags tab itself (where
-                the SnagsTab's own button takes over). One source of truth:
-                on every other tab you use the header button, on the Snags
-                tab you use the in-tab button. No duplicate.
-                Keith Apr 2026 UX audit + follow-up bug report. */}
-            {activeTab !== "snags" && (
+            {/* (#173) Quick Raise Snag — only on operational tabs where
+                a manager might spot an issue in flight. Hidden on the
+                Snags tab (in-tab button takes over) and on every
+                admin/reporting/closure tab where the action would be
+                noise. */}
+            {RAISE_SNAG_TABS.has(activeTab) && (
               <Button
                 variant="outline"
                 size="sm"
@@ -1711,19 +1738,27 @@ export function SiteDetailClient({
                 }
               }}
             >
-              <Button
-                variant="outline"
-                onClick={() => setEditDialogOpen(true)}
-                className={sitePostcodeInvalid ? "border-amber-400" : ""}
-              >
-                <Pencil className="size-4" />
-                Edit
-                {sitePostcodeInvalid && (
-                  <span className="relative -mr-1 ml-0.5">
-                    <AlertTriangle className="size-3.5 text-amber-500" />
-                  </span>
-                )}
-              </Button>
+              {/* (#173) Edit Site is an admin action — only show on the
+                  main landing tabs where a manager would naturally
+                  want to fix site metadata. Hide on every operational
+                  drill-down (orders, snags, reports, etc.). The
+                  postcode-invalid amber dot remains visible across
+                  tabs via the Site header banner. */}
+              {EDIT_SITE_TABS.has(activeTab) && (
+                <Button
+                  variant="outline"
+                  onClick={() => setEditDialogOpen(true)}
+                  className={sitePostcodeInvalid ? "border-amber-400" : ""}
+                >
+                  <Pencil className="size-4" />
+                  Edit
+                  {sitePostcodeInvalid && (
+                    <span className="relative -mr-1 ml-0.5">
+                      <AlertTriangle className="size-3.5 text-amber-500" />
+                    </span>
+                  )}
+                </Button>
+              )}
               <DialogContent className="sm:max-w-md">
                 <DialogHeader>
                   <DialogTitle>Edit Site</DialogTitle>
