@@ -19,18 +19,29 @@ export default async function DashboardLayout({
     redirect("/login");
   }
 
-  // (May 2026 audit #56) Apply tenant branding via inline style.
-  // Server-rendered so no flash on first paint. Settings cache is
-  // fast enough to not need memoisation; one tenant, one row.
+  // (May 2026 audit #56 + audit K-1) Apply tenant branding via inline
+  // style. Pre-fix only `--brand-primary` was set, which nothing in
+  // the Tailwind theme actually consumed — changing the colour in
+  // Settings did nothing visible. Now also override the canonical
+  // design-system tokens so buttons, ring focus, sidebar primary, and
+  // chart accent all pick up the tenant colour. Browsers accept hex
+  // alongside the default oklch values without any conversion.
   const settings = await prisma.appSettings
     .findUnique({ where: { id: "default" } })
     .catch(() => null);
   const primaryColor = settings?.primaryColor ?? "#2563eb";
+  const brandStyle = {
+    "--brand-primary": primaryColor,
+    "--primary": primaryColor,
+    "--ring": primaryColor,
+    "--sidebar-primary": primaryColor,
+    "--chart-1": primaryColor,
+  } as React.CSSProperties;
 
   return (
     <div
       className="flex h-screen flex-col overflow-hidden"
-      style={{ "--brand-primary": primaryColor } as React.CSSProperties}
+      style={brandStyle}
     >
       <OfflineIndicator />
       <NotificationBlockedBanner />

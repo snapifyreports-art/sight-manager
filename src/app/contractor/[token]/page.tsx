@@ -1,6 +1,5 @@
-import { notFound } from "next/navigation";
 import { format, parseISO, addDays, startOfWeek, isWithinInterval } from "date-fns";
-import { HardHat, PlayCircle, Clock, AlertTriangle, CheckCircle2, Phone, Mail, Building2, Package, Truck, FileText, Download, ExternalLink, CalendarDays, Briefcase } from "lucide-react";
+import { HardHat, PlayCircle, Clock, AlertTriangle, CheckCircle2, Phone, Mail, Building2, Package, Truck, FileText, Download, ExternalLink, CalendarDays, Briefcase, LinkIcon } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { verifyContractorToken } from "@/lib/share-token";
 import { SnagSignOffCard } from "./SnagSignOffCard";
@@ -35,6 +34,27 @@ const PRIORITY_COLOR: Record<string, string> = {
   LOW: "bg-slate-100 text-slate-600",
 };
 
+// (May 2026 audit O-7 / O-8) Friendly "link not active" page replacing
+// the previous `notFound()` calls — pre-fix an expired or revoked link
+// dropped the user on a generic 404 with no actionable message.
+function LinkInactiveCard({ reason }: { reason: string }) {
+  return (
+    <main className="flex min-h-screen items-center justify-center bg-gradient-to-b from-slate-50 to-white p-4">
+      <div className="max-w-md rounded-2xl border bg-white p-8 text-center shadow-sm">
+        <LinkIcon className="mx-auto size-12 text-amber-400" />
+        <h1 className="mt-4 text-xl font-semibold text-slate-800">
+          This link isn&apos;t active
+        </h1>
+        <p className="mt-2 text-sm text-slate-500">{reason}</p>
+        <p className="mt-4 text-xs text-slate-400">
+          Ask the site team to send you a fresh link. If you think this is a
+          mistake, get in touch with them directly.
+        </p>
+      </div>
+    </main>
+  );
+}
+
 export default async function ContractorSharePage({
   params,
 }: {
@@ -43,7 +63,11 @@ export default async function ContractorSharePage({
   const { token } = await params;
 
   const payload = verifyContractorToken(token);
-  if (!payload) notFound();
+  if (!payload) {
+    return (
+      <LinkInactiveCard reason="The link may have expired, or the token is no longer valid." />
+    );
+  }
 
   const { contactId, siteId } = payload;
 
@@ -58,7 +82,11 @@ export default async function ContractorSharePage({
     }),
   ]);
 
-  if (!contact || !site) notFound();
+  if (!contact || !site) {
+    return (
+      <LinkInactiveCard reason="The contact or site this link refers to is no longer available." />
+    );
+  }
 
   const jobContractors = await prisma.jobContractor.findMany({
     where: { contactId, job: { plot: { siteId } } },
