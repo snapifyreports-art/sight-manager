@@ -20,7 +20,24 @@ export function checkCronAuth(authHeader: string | null): { ok: boolean; reason?
       // Refuse — means anyone can hit the endpoint otherwise.
       return { ok: false, reason: "CRON_SECRET is not set on the server" };
     }
-    // In dev, allow Bearer dev-cron so local cron testing works.
+    // (May 2026 audit B-P1-43) Pre-fix this fell through to "Bearer
+    // dev-cron" whenever CRON_SECRET was empty AND NODE_ENV wasn't
+    // strictly "production". Someone deploying via a non-Vercel path
+    // (Docker, self-hosted Node) might end up with NODE_ENV=development
+    // even in prod — and anyone hitting cron endpoints with "Bearer
+    // dev-cron" could trigger lateness opens / cascade-reconcile /
+    // weather alerts across the whole DB.
+    //
+    // Now: even in dev, require explicit opt-in via
+    // ALLOW_DEV_CRON_FALLBACK=1. Local devs set it in .env.local; no
+    // staging / prod ever has it.
+    if (process.env.ALLOW_DEV_CRON_FALLBACK !== "1") {
+      return {
+        ok: false,
+        reason:
+          "CRON_SECRET is not set + ALLOW_DEV_CRON_FALLBACK not enabled — refusing",
+      };
+    }
     return { ok: authHeader === "Bearer dev-cron" };
   }
 

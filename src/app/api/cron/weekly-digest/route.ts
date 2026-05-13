@@ -265,7 +265,12 @@ export async function GET(req: NextRequest) {
         // immediately sees the headline "you're 12 WD behind, mostly weather".
         const latenessFooter =
           s.latenessDaysLost > 0
-            ? `<div style="margin-top:8px;font-size:12px;color:#92400e;"><strong>${s.latenessDaysLost} working day${s.latenessDaysLost !== 1 ? "s" : ""} lost</strong>${s.latenessTopReason ? ` — top reason: ${s.latenessTopReason.replace(/_/g, " ").toLowerCase()}` : ""}</div>`
+            ? // (May 2026 audit B-P1-41) Clarify "lost" is cumulative
+              // across all currently-open events for the site, not just
+              // events that went late this week. Pre-fix the heading
+              // implied this-week-only and a manager reading the email
+              // alongside the in-app LatenessSummary couldn't reconcile.
+              `<div style="margin-top:8px;font-size:12px;color:#92400e;"><strong>${s.latenessDaysLost} working day${s.latenessDaysLost !== 1 ? "s" : ""} lost</strong> (open across the site)${s.latenessTopReason ? ` — top reason: ${s.latenessTopReason.replace(/_/g, " ").toLowerCase()}` : ""}</div>`
             : "";
         if (!cells && !latenessFooter) return ""; // site had no activity — skip
         return `
