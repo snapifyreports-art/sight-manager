@@ -5,6 +5,13 @@ import { getServerCurrentDate } from "@/lib/dev-date";
 import { differenceInDays } from "date-fns";
 import { canAccessSite } from "@/lib/site-access";
 
+// (May 2026 audit B-P1-5) Snag age is CALENDAR-day intentionally — a
+// snag sitting open over a weekend is still 2 days older. The rest of
+// the app uses working-days for "days late" (jobs / orders), but
+// "days open" on a snag is a pure age count. Weekly Digest's stale-
+// snag > 30 days threshold uses calendar too — consistent within
+// the snag reporting surface.
+
 export const dynamic = "force-dynamic";
 
 // GET /api/sites/[id]/snag-report — snag ageing analytics

@@ -584,13 +584,16 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
   // "Review next steps" as a manual-trigger replacement for the old
   // auto-opening PostCompletionDialog).
   const toast = useToast();
-  // Local inline toast banner at bottom of page — legacy, kept for the
-  // many pre-existing showToast call sites. New code should prefer the
-  // global toast above.
-  const [localToast, setLocalToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
+  // (May 2026 audit UX-P1) Three toast systems coexisted before this
+  // batch: `useToast` (global, top-right), a `localToast` bottom-banner,
+  // and the `showToast` legacy helper. Errors showed at different
+  // screen positions depending on which code path triggered. Now
+  // `showToast` is a thin wrapper that delegates to the global toast
+  // — the local banner is dropped. All existing call sites keep
+  // working; the surface is just unified.
   const showToast = (message: string, type: "success" | "error" = "error") => {
-    setLocalToast({ message, type });
-    setTimeout(() => setLocalToast(null), 4000);
+    if (type === "success") toast.success(message);
+    else toast.error(message);
   };
 
 
@@ -3511,25 +3514,8 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
         </DialogContent>
       </Dialog>
 
-      {/* Legacy inline toast banner — still rendered for existing showToast
-          callsites. New sign-off flow uses the global useToast system. */}
-      {localToast && (
-        <div
-          className={cn(
-            "fixed bottom-4 right-4 z-50 flex items-center gap-2 rounded-lg px-4 py-3 text-sm font-medium shadow-lg",
-            localToast.type === "success"
-              ? "bg-green-600 text-white"
-              : "bg-red-600 text-white"
-          )}
-        >
-          {localToast.type === "success" ? (
-            <CheckCircle2 className="size-4 shrink-0" />
-          ) : (
-            <AlertTriangle className="size-4 shrink-0" />
-          )}
-          {localToast.message}
-        </div>
-      )}
+      {/* (May 2026 audit UX-P1) Legacy bottom-right toast banner removed
+          — showToast now delegates to the global useToast above. */}
       {jobActionDialogs}
 
       {/* Inline Snag Dialog */}
