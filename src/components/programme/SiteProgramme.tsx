@@ -575,6 +575,19 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
     [siteId, rainedOffPopover, rainedOffType]
   );
 
+  // (May 2026 audit SM-P1) Close the weather-impact popover on Escape.
+  // Pre-fix the popover caught click-outside on the backdrop but
+  // nothing handled Escape — keyboard-only users were trapped after
+  // tabbing into the popover. Backdrop click + Escape now both close.
+  useEffect(() => {
+    if (!rainedOffPopover) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setRainedOffPopover(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [rainedOffPopover]);
+
   // Derive unique filter options from data
   const filterOptions = useMemo(() => {
     if (!site) return { houseTypes: [], stageCodes: [] };

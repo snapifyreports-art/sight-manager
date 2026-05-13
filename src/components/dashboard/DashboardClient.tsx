@@ -357,10 +357,25 @@ function StatsCards({
 
 // ---------- Muted Sites Panel ----------
 //
-// (#183) Renders the sites the current user has explicitly MUTED
-// (post-Watch-to-Mute flip). Default is now "subscribed to every site
-// you have access to" — this panel surfaces only the exceptions, so
-// the user can unmute quickly if they over-muted.
+// (#183) IMPORTANT — semantic flip:
+//
+//   Prisma model name : WatchedSite (legacy — can't change without migration)
+//   Component name    : WatchedSitesPanel (legacy — keeping for diff cleanliness)
+//   Variable name     : sites / watchedSites
+//
+//   ACTUAL semantic   : these are sites the user has explicitly MUTED.
+//
+// Default is "subscribed to every site you have access to" (May 2026
+// flip — pre-fix users had to opt-IN to receive any notifications,
+// resulting in silent no-deliveries). A WatchedSite row now means
+// "user has opted OUT of this site's pushes". The panel renders
+// only those exceptions so the user can quickly unmute if they
+// over-muted.
+//
+// (May 2026 audit SM-P1) Future maintainers: do NOT add "watch"
+// behavior here without first migrating the Prisma model name.
+// Search for "muted" first to find every consumer that reads the
+// row as "opt-out".
 
 function WatchedSitesPanel({ sites }: { sites: WatchedSite[] }) {
   if (sites.length === 0) {
