@@ -141,8 +141,23 @@ export function CustomerNotifyToggle({ token }: { token: string }) {
     }
   }
 
-  if (state === "loading" || state === "unsupported" || state === "denied") {
+  if (state === "loading" || state === "unsupported") {
     return null;
+  }
+
+  // (May 2026 audit O-P1) Render an explainer line when the browser
+  // permission has been DENIED. Pre-fix the toggle just disappeared
+  // when denied — buyer thought the button was broken with no
+  // direction on what to do. Now they see a one-line message
+  // pointing them at browser settings.
+  if (state === "denied") {
+    return (
+      <p className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1.5 text-xs text-slate-600">
+        <BellOff className="size-3.5" aria-hidden />
+        Notifications blocked — re-enable in your browser settings to get
+        updates.
+      </p>
+    );
   }
 
   const subscribed = state === "subscribed";

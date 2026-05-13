@@ -28,6 +28,7 @@ import {
   Mail,
   FileCheck,
   Truck,
+  CalendarPlus,
 } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -777,19 +778,24 @@ function SubscribeButton({ siteId }: { siteId: string }) {
     }
   };
 
+  // (May 2026 audit O-P1) Mail icon misled users — they thought
+  // "Subscribe" meant email-this-calendar. CalendarPlus + clearer
+  // "Add to calendar" label points at the actual action: pasting the
+  // copied URL into Outlook / Google / Apple Calendar's
+  // subscribe-by-URL feature.
   return (
     <Button
       variant="outline"
       size="sm"
       onClick={onClick}
       disabled={state === "loading"}
-      title="Copy iCal subscription URL"
+      title="Copy iCal subscription URL — paste into Outlook / Google / Apple Calendar"
       aria-label="Copy iCal subscription URL"
     >
       {state === "loading" ? (
         <Loader2 className="size-4 animate-spin" aria-hidden="true" />
       ) : (
-        <Mail className="size-4" aria-hidden="true" />
+        <CalendarPlus className="size-4" aria-hidden="true" />
       )}
       {state === "copied"
         ? "URL copied!"
@@ -797,7 +803,7 @@ function SubscribeButton({ siteId }: { siteId: string }) {
           ? "Failed"
           : state === "loading"
             ? "Generating…"
-            : "Subscribe"}
+            : "Add to calendar"}
     </Button>
   );
 }

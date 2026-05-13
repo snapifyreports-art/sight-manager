@@ -38,6 +38,22 @@ export default function ResetPasswordPage({
   const passwordTooShort = password.length > 0 && password.length < MIN_PASSWORD_LENGTH;
   const passwordsMismatch = confirm.length > 0 && password !== confirm;
 
+  // (May 2026 audit O-P1) Cheap client-side shape check on the token.
+  // Pre-fix a user with a mangled URL (email line-wrap chopped the
+  // token) had to type a password and submit before the API responded
+  // with "this link is invalid". Now we surface the same error before
+  // the form even renders so they can re-request a link immediately.
+  // Token format is "<data>.<signature>" both base64url, ≥40 chars.
+  const tokenLooksValid = (() => {
+    if (!token || token.length < 40) return false;
+    const dotAt = token.lastIndexOf(".");
+    if (dotAt < 1 || dotAt >= token.length - 1) return false;
+    const dataPart = token.slice(0, dotAt);
+    const sigPart = token.slice(dotAt + 1);
+    // base64url charset: A-Z a-z 0-9 - _
+    return /^[A-Za-z0-9_-]+$/.test(dataPart) && /^[A-Za-z0-9_-]+$/.test(sigPart);
+  })();
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
@@ -92,6 +108,19 @@ export default function ResetPasswordPage({
           <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
             <p className="font-semibold">Password updated</p>
             <p className="mt-1">Redirecting to login…</p>
+          </div>
+        ) : !tokenLooksValid ? (
+          <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+            <p className="font-semibold">This reset link looks broken</p>
+            <p className="mt-1">
+              The URL appears mangled — your email client may have
+              wrapped or truncated it. Open the original message and
+              try the link again, or request a new one from{" "}
+              <a href="/forgot-password" className="underline">
+                Forgot password
+              </a>
+              .
+            </p>
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
