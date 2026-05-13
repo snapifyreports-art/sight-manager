@@ -78,6 +78,14 @@ export async function POST(
     return ja.sortOrder - jb.sortOrder;
   });
 
+  // (May 2026 audit B-P1-27) Dedupe NEXT_STAGE_READY pushes across the
+  // batch — when every job on a plot has the same assignedToId
+  // (typical: cascaded from the site assignee), bulk-completing 5 jobs
+  // pre-fix blasted 5 separate "next stage ready" notifications to the
+  // same person. We track (plotId|assignedToId) keys that have already
+  // been pushed and skip duplicates within this single batch.
+  const nextStagePushKeysFired = new Set<string>();
+
   // Process sequentially to respect Supabase connection limits
   for (const jobId of sortedJobIds) {
     try {
@@ -373,6 +381,12 @@ export async function POST(
           const nextJobs = allPlotJobs.filter((j) => j.sortOrder === nextSortOrder);
           for (const nj of nextJobs) {
             if (nj.assignedToId) {
+              // Dedupe per (plot, recipient) so the same person doesn't
+              // get spammed when a chain of sibling jobs all complete in
+              // the same batch on the same plot.
+              const dedupeKey = `${job.plotId}|${nj.assignedToId}`;
+              if (nextStagePushKeysFired.has(dedupeKey)) continue;
+              nextStagePushKeysFired.add(dedupeKey);
               sendPushToUser(nj.assignedToId, "NEXT_STAGE_READY", {
                 title: "Next Stage Ready",
                 body: `"${job.name}" is complete — "${nj.name}" can begin`,
