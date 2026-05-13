@@ -83,126 +83,94 @@ export async function GET(req: NextRequest) {
   let skippedQuiet = 0;
   const failed: Array<{ userId: string; error: string }> = [];
 
-  for (const u of users) {
-    // (#183) Default: subscribed to every accessible + assigned site.
-    // Subtract any WatchedSite rows (now meaning "muted").
-    const mutedIds = new Set(u.watchedSites.map((w) => w.siteId));
-    const siteIds = Array.from(
-      new Set([
-        ...u.siteAccess.map((a) => a.siteId),
-        ...u.assignedSites.map((s) => s.id),
-      ]),
-    ).filter((id) => !mutedIds.has(id));
-    if (siteIds.length === 0) continue;
+  // (May 2026 audit P-P0) Build per-site summaries ONCE before the
+  // user loop. Pre-fix the per-user loop ran 10 count queries per
+  // site for each user — 30 users × 5 sites × 10 metrics = 1,500
+  // round-trips on a small portfolio. Now: collect every site any
+  // user is subscribed to, fan-out the same 10 metrics once per
+  // site, build a Map<siteId, SiteSummary>, then the user loop just
+  // pulls from the map. Worst case becomes O(sites × metrics)
+  // instead of O(users × sites × metrics).
+  type SiteSummary = {
+    siteId: string;
+    siteName: string;
+    jobsStarted: number;
+    jobsCompleted: number;
+    snagsRaised: number;
+    snagsResolved: number;
+    photos: number;
+    delays: number;
+    staleSnags: number;
+    latenessOpened: number;
+    latenessResolved: number;
+    latenessDaysLost: number;
+    latenessTopReason: string | null;
+  };
 
-    // Fetch site names + per-site activity counts in parallel.
-    const sites = await prisma.site.findMany({
-      where: { id: { in: siteIds }, status: { not: "COMPLETED" } },
+  const allSubscribedSiteIds = Array.from(
+    new Set(
+      users.flatMap((u) => {
+        const muted = new Set(u.watchedSites.map((w) => w.siteId));
+        return [
+          ...u.siteAccess.map((a) => a.siteId),
+          ...u.assignedSites.map((s) => s.id),
+        ].filter((id) => !muted.has(id));
+      }),
+    ),
+  );
+
+  const summariesMap = new Map<string, SiteSummary>();
+  if (allSubscribedSiteIds.length > 0) {
+    const sitesForSummaries = await prisma.site.findMany({
+      where: { id: { in: allSubscribedSiteIds }, status: { not: "COMPLETED" } },
       select: { id: true, name: true },
-      orderBy: { name: "asc" },
     });
-    if (sites.length === 0) continue;
-
-    type SiteSummary = {
-      siteId: string;
-      siteName: string;
-      jobsStarted: number;
-      jobsCompleted: number;
-      snagsRaised: number;
-      snagsResolved: number;
-      photos: number;
-      delays: number;
-      // (May 2026 audit #145) Stale-snag count: open snags older than
-      // 30 days. Surfaces things slipping through the cracks.
-      staleSnags: number;
-      // (#191) Lateness summary for the week.
-      latenessOpened: number;
-      latenessResolved: number;
-      latenessDaysLost: number;
-      latenessTopReason: string | null;
-    };
-
-    const summaries: SiteSummary[] = await Promise.all(
-      sites.map(async (s) => {
-        const [jobsStarted, jobsCompleted, snagsRaised, snagsResolved, photos, delays, staleSnags, latenessOpenedThisWeek, latenessResolvedThisWeek, openLatenessForWeek] =
+    await Promise.all(
+      sitesForSummaries.map(async (s) => {
+        const [jobsStarted, jobsCompleted, snagsRaised, snagsResolved, photos, delays, staleSnags, latenessOpenedThisWeek, latenessResolvedThisWeek, openLatenessForSite] =
           await Promise.all([
             prisma.job.count({
-              where: {
-                plot: { siteId: s.id },
-                actualStartDate: { gte: weekStart, lt: todayStart },
-                children: { none: {} },
-              },
+              where: { plot: { siteId: s.id }, actualStartDate: { gte: weekStart, lt: todayStart }, children: { none: {} } },
             }),
             prisma.job.count({
-              where: {
-                plot: { siteId: s.id },
-                actualEndDate: { gte: weekStart, lt: todayStart },
-                children: { none: {} },
-              },
+              where: { plot: { siteId: s.id }, actualEndDate: { gte: weekStart, lt: todayStart }, children: { none: {} } },
             }),
             prisma.snag.count({
-              where: {
-                plot: { siteId: s.id },
-                createdAt: { gte: weekStart, lt: todayStart },
-              },
+              where: { plot: { siteId: s.id }, createdAt: { gte: weekStart, lt: todayStart } },
             }),
             prisma.snag.count({
-              where: {
-                plot: { siteId: s.id },
-                status: { in: ["RESOLVED", "CLOSED"] },
-                resolvedAt: { gte: weekStart, lt: todayStart },
-              },
+              where: { plot: { siteId: s.id }, status: { in: ["RESOLVED", "CLOSED"] }, resolvedAt: { gte: weekStart, lt: todayStart } },
             }),
             prisma.jobPhoto.count({
-              where: {
-                job: { plot: { siteId: s.id } },
-                createdAt: { gte: weekStart, lt: todayStart },
-              },
+              where: { job: { plot: { siteId: s.id } }, createdAt: { gte: weekStart, lt: todayStart } },
             }),
             prisma.eventLog.count({
-              where: {
-                siteId: s.id,
-                type: "SCHEDULE_CASCADED",
-                createdAt: { gte: weekStart, lt: todayStart },
-              },
+              where: { siteId: s.id, type: "SCHEDULE_CASCADED", createdAt: { gte: weekStart, lt: todayStart } },
             }),
             prisma.snag.count({
-              where: {
-                plot: { siteId: s.id },
-                status: { in: ["OPEN", "IN_PROGRESS"] },
-                createdAt: { lt: subDays(todayStart, 30) },
-              },
+              where: { plot: { siteId: s.id }, status: { in: ["OPEN", "IN_PROGRESS"] }, createdAt: { lt: subDays(todayStart, 30) } },
             }),
-            // (#191) Lateness events opened this week on the site.
             prisma.latenessEvent.count({
-              where: {
-                siteId: s.id,
-                wentLateOn: { gte: weekStart, lt: todayStart },
-              },
+              where: { siteId: s.id, wentLateOn: { gte: weekStart, lt: todayStart } },
             }),
-            // (#191) Lateness events resolved this week.
             prisma.latenessEvent.count({
-              where: {
-                siteId: s.id,
-                resolvedAt: { gte: weekStart, lt: todayStart },
-              },
+              where: { siteId: s.id, resolvedAt: { gte: weekStart, lt: todayStart } },
             }),
-            // (#191) Open lateness events at end of week + their reasons,
-            // so the digest can summarise total WD lost + top reason.
             prisma.latenessEvent.findMany({
               where: { siteId: s.id, resolvedAt: null },
               select: { daysLate: true, reasonCode: true },
             }),
           ]);
-        // Aggregate the latenessForWeek list into total WD + top reason.
-        const latenessDaysLost = openLatenessForWeek.reduce((sum, e) => sum + e.daysLate, 0);
+
+        const latenessDaysLost = openLatenessForSite.reduce((sum, e) => sum + e.daysLate, 0);
         const reasonCounts = new Map<string, number>();
-        for (const e of openLatenessForWeek) {
+        for (const e of openLatenessForSite) {
           reasonCounts.set(e.reasonCode, (reasonCounts.get(e.reasonCode) ?? 0) + e.daysLate);
         }
         const sortedReasons = Array.from(reasonCounts.entries()).sort((a, b) => b[1] - a[1]);
         const latenessTopReason = sortedReasons.length > 0 ? sortedReasons[0][0] : null;
-        return {
+
+        summariesMap.set(s.id, {
           siteId: s.id,
           siteName: s.name,
           jobsStarted,
@@ -216,9 +184,31 @@ export async function GET(req: NextRequest) {
           latenessResolved: latenessResolvedThisWeek,
           latenessDaysLost,
           latenessTopReason,
-        };
+        });
       }),
     );
+  }
+
+  for (const u of users) {
+    // (#183) Default: subscribed to every accessible + assigned site.
+    // Subtract any WatchedSite rows (now meaning "muted").
+    const mutedIds = new Set(u.watchedSites.map((w) => w.siteId));
+    const siteIds = Array.from(
+      new Set([
+        ...u.siteAccess.map((a) => a.siteId),
+        ...u.assignedSites.map((s) => s.id),
+      ]),
+    ).filter((id) => !mutedIds.has(id));
+    if (siteIds.length === 0) continue;
+
+    // (May 2026 audit P-P0) Pull from the pre-built summariesMap
+    // — zero DB queries per user. Filter to the user's accessible +
+    // assigned (minus muted) sites and sort by name for the email.
+    const summaries: SiteSummary[] = siteIds
+      .map((id) => summariesMap.get(id))
+      .filter((s): s is SiteSummary => s !== undefined)
+      .sort((a, b) => a.siteName.localeCompare(b.siteName));
+    if (summaries.length === 0) continue;
 
     const totalActivity = summaries.reduce(
       (acc, s) =>
