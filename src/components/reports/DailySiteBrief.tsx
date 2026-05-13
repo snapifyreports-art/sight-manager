@@ -1369,125 +1369,162 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
         </div>
       )}
 
-      {/* (#187) Weather impact strip — two prominent cards. Card 1
-          covers today (rained off / not rained off). Card 2 covers
-          tomorrow (pre-mark if forecast looks bad / view forecast).
-          Pre-fix this was a single small button up top + a tiny
-          banner; Keith called it terrible on both mobile and desktop. */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        {/* Today card */}
-        <div
-          className={cn(
-            "rounded-lg border p-3",
-            data.isRainedOff
-              ? "border-blue-200 bg-blue-50"
-              : "border-slate-200 bg-white",
-          )}
-        >
-          <div className="flex items-start gap-2">
-            <CloudRain
-              className={cn(
-                "size-5 shrink-0",
-                data.isRainedOff ? "text-blue-700" : "text-slate-400",
-              )}
-              aria-hidden
-            />
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium">
-                Today —{" "}
-                {data.isRainedOff ? (
-                  <span className="text-blue-700">rained off</span>
-                ) : (
-                  <span className="text-slate-700">working day</span>
-                )}
-              </p>
-              {data.isRainedOff && data.rainedOffNote && (
-                <p className="mt-0.5 text-xs text-blue-800/80">{data.rainedOffNote}</p>
-              )}
-              {!data.isRainedOff && (
-                <p className="mt-0.5 text-xs text-muted-foreground">
-                  Mark the day as rained off to push every job and PENDING order back by one working day.
-                </p>
-              )}
-            </div>
-          </div>
-          <div className="mt-3 print:hidden">
-            {data.isRainedOff ? (
-              <Button
-                variant="outline"
-                size="sm"
-                className="w-full border-blue-200 bg-white text-blue-700 hover:bg-blue-100"
-                onClick={handleUndoRainedOff}
-              >
-                Undo rained off
-              </Button>
-            ) : (
-              <Button
-                size="sm"
-                className="w-full bg-blue-600 text-white hover:bg-blue-700"
-                onClick={() => setRainedOffDialogOpen(true)}
-              >
-                <CloudRain className="mr-1 size-3.5" aria-hidden />
-                Mark today rained off
-              </Button>
+      {/* (#187/190) Weather + Rain Strategy — single consolidated
+          block. Two prominent cards (today / tomorrow) each with
+          their action button, plus an optional 5-day forecast strip
+          below. Pre-fix this lived in TWO places: a small banner up
+          top + a separate "Weather forecast widget" further down,
+          duplicating today and tomorrow. Now there's exactly one. */}
+      <div className="space-y-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {/* Today card */}
+          <div
+            className={cn(
+              "rounded-lg border p-3",
+              data.isRainedOff
+                ? "border-blue-200 bg-blue-50"
+                : "border-slate-200 bg-white",
             )}
-          </div>
-        </div>
-
-        {/* Tomorrow card — pre-mark, plus a forecast preview if we have one */}
-        {(() => {
-          const tomorrow = data.weather?.forecast?.[0];
-          const tomorrowIsBad = tomorrow && ["rain", "snow", "thunder"].includes(tomorrow.category);
-          return (
-            <div
-              className={cn(
-                "rounded-lg border p-3",
-                tomorrowIsBad ? "border-amber-200 bg-amber-50" : "border-slate-200 bg-white",
-              )}
-            >
-              <div className="flex items-start gap-2">
+          >
+            <div className="flex items-start gap-2">
+              {data.weather ? (
+                <WeatherIcon
+                  category={data.weather.today.category}
+                  className={cn(
+                    "size-6 shrink-0",
+                    data.isRainedOff ? "text-blue-700" : "text-slate-500",
+                  )}
+                />
+              ) : (
                 <CloudRain
                   className={cn(
                     "size-5 shrink-0",
-                    tomorrowIsBad ? "text-amber-700" : "text-slate-400",
+                    data.isRainedOff ? "text-blue-700" : "text-slate-400",
                   )}
                   aria-hidden
                 />
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium">
-                    Tomorrow{tomorrow ? ` — ${tomorrow.category}` : ""}
+              )}
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium">
+                  Today —{" "}
+                  {data.isRainedOff ? (
+                    <span className="text-blue-700">rained off</span>
+                  ) : (
+                    <span className="text-slate-700">
+                      {data.weather
+                        ? CATEGORY_LABELS[data.weather.today.category] || data.weather.today.category
+                        : "working day"}
+                    </span>
+                  )}
+                </p>
+                {data.weather && (
+                  <p className="text-xs text-muted-foreground">
+                    {Math.round(data.weather.today.tempMin)}°–{Math.round(data.weather.today.tempMax)}°C
                   </p>
-                  <p className="mt-0.5 text-xs text-muted-foreground">
-                    {tomorrowIsBad
-                      ? "Forecast looks bad. Pre-mark to push the programme proactively so contractors plan around it."
-                      : "Pre-mark tomorrow rained off if you already know it's going to be a write-off."}
-                  </p>
-                </div>
+                )}
+                {data.isRainedOff && data.rainedOffNote && (
+                  <p className="mt-0.5 text-xs text-blue-800/80">{data.rainedOffNote}</p>
+                )}
               </div>
-              <div className="mt-3 print:hidden">
+            </div>
+            <div className="mt-3 print:hidden">
+              {data.isRainedOff ? (
                 <Button
                   variant="outline"
                   size="sm"
-                  className={cn(
-                    "w-full",
-                    tomorrowIsBad
-                      ? "border-amber-300 bg-white text-amber-800 hover:bg-amber-100"
-                      : "border-slate-200",
-                  )}
-                  onClick={() => {
-                    // Step the date picker forward and open the mark
-                    // dialog so the user can confirm + add a note.
-                    setDate((d) => new Date(d.getTime() + 86400000));
-                    setRainedOffDialogOpen(true);
-                  }}
+                  className="w-full border-blue-200 bg-white text-blue-700 hover:bg-blue-100"
+                  onClick={handleUndoRainedOff}
+                >
+                  Undo rained off
+                </Button>
+              ) : (
+                <Button
+                  size="sm"
+                  className="w-full bg-blue-600 text-white hover:bg-blue-700"
+                  onClick={() => setRainedOffDialogOpen(true)}
                 >
                   <CloudRain className="mr-1 size-3.5" aria-hidden />
-                  Pre-mark tomorrow rained off
+                  Mark today rained off
                 </Button>
-              </div>
+              )}
             </div>
-          );
-        })()}
+          </div>
+
+          {/* Tomorrow card */}
+          {(() => {
+            const tomorrow = data.weather?.forecast?.[0];
+            const tomorrowIsBad = tomorrow && ["rain", "snow", "thunder"].includes(tomorrow.category);
+            return (
+              <div
+                className={cn(
+                  "rounded-lg border p-3",
+                  tomorrowIsBad ? "border-amber-200 bg-amber-50" : "border-slate-200 bg-white",
+                )}
+              >
+                <div className="flex items-start gap-2">
+                  {tomorrow ? (
+                    <WeatherIcon
+                      category={tomorrow.category}
+                      className={cn(
+                        "size-6 shrink-0",
+                        tomorrowIsBad ? "text-amber-700" : "text-slate-500",
+                      )}
+                    />
+                  ) : (
+                    <CloudRain className="size-5 shrink-0 text-slate-400" aria-hidden />
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium">
+                      Tomorrow{tomorrow ? ` — ${CATEGORY_LABELS[tomorrow.category] || tomorrow.category}` : ""}
+                    </p>
+                    {tomorrow && (
+                      <p className="text-xs text-muted-foreground">
+                        {Math.round(tomorrow.tempMin)}°–{Math.round(tomorrow.tempMax)}°C
+                      </p>
+                    )}
+                  </div>
+                </div>
+                <div className="mt-3 print:hidden">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className={cn(
+                      "w-full",
+                      tomorrowIsBad
+                        ? "border-amber-300 bg-white text-amber-800 hover:bg-amber-100"
+                        : "border-slate-200",
+                    )}
+                    onClick={() => {
+                      setDate((d) => new Date(d.getTime() + 86400000));
+                      setRainedOffDialogOpen(true);
+                    }}
+                  >
+                    <CloudRain className="mr-1 size-3.5" aria-hidden />
+                    Pre-mark tomorrow rained off
+                  </Button>
+                </div>
+              </div>
+            );
+          })()}
+        </div>
+
+        {/* 5-day forecast strip — kept compact under the cards */}
+        {data.weather && data.weather.forecast.length > 1 && (
+          <div className="flex items-center gap-3 overflow-x-auto rounded-lg border bg-slate-50/50 px-3 py-2">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+              Next days
+            </span>
+            {data.weather.forecast.slice(1).map((day) => (
+              <div key={day.date} className="flex shrink-0 items-center gap-1.5 text-xs">
+                <span className="font-medium text-slate-600">
+                  {format(new Date(day.date + "T12:00:00"), "EEE")}
+                </span>
+                <WeatherIcon category={day.category} className="size-3.5 text-slate-500" />
+                <span className="text-muted-foreground">{Math.round(day.tempMax)}°</span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Summary pills — Keith May 2026: hide zero-count pills so the
@@ -1583,124 +1620,6 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
         );
       })()}
 
-      {/* Weather forecast widget */}
-      {data.weather && (() => {
-        const tomorrow = data.weather.forecast[0];
-        const tomorrowIsBad = tomorrow && ["rain", "snow", "thunder"].includes(tomorrow.category);
-        const todayIsBad = ["rain", "snow", "thunder"].includes(data.weather.today.category);
-        const allDays = [data.weather.today, ...data.weather.forecast];
-        const badDays = allDays.filter((d) => ["rain", "snow", "thunder"].includes(d.category));
-        return (
-          <Card className={todayIsBad ? "border-blue-300 bg-blue-50/40" : ""}>
-            <CardContent className="p-4">
-              <div className="flex flex-col items-start gap-4 sm:flex-row sm:flex-wrap">
-                {/* Today's weather — main */}
-                <div className="flex items-center gap-3">
-                  <div className={`rounded-lg p-2.5 ${todayIsBad ? "bg-blue-100" : "bg-blue-50"}`}>
-                    <WeatherIcon category={data.weather.today.category} className="size-8 text-blue-600" />
-                  </div>
-                  <div>
-                    <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Today</p>
-                    <p className="text-base font-semibold">
-                      {CATEGORY_LABELS[data.weather.today.category] || data.weather.today.category}
-                    </p>
-                    <p className="flex items-center gap-1 text-xs text-muted-foreground">
-                      <Thermometer className="size-3" />
-                      {Math.round(data.weather.today.tempMin)}° – {Math.round(data.weather.today.tempMax)}°C
-                    </p>
-                  </div>
-                </div>
-
-                {/* Tomorrow — highlighted */}
-                {tomorrow && (
-                  <>
-                    <div className="hidden h-14 border-l sm:block" />
-                    <div className={`flex items-center gap-3 rounded-lg px-3 py-2 ${tomorrowIsBad ? "bg-amber-50 ring-1 ring-amber-200" : "bg-slate-50"}`}>
-                      <div className={`rounded-lg p-2 ${tomorrowIsBad ? "bg-amber-100" : "bg-slate-100"}`}>
-                        <WeatherIcon category={tomorrow.category} className={`size-7 ${tomorrowIsBad ? "text-amber-600" : "text-slate-500"}`} />
-                      </div>
-                      <div>
-                        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Tomorrow</p>
-                        <p className={`text-sm font-semibold ${tomorrowIsBad ? "text-amber-700" : ""}`}>
-                          {CATEGORY_LABELS[tomorrow.category] || tomorrow.category}
-                        </p>
-                        <p className="flex items-center gap-1 text-xs text-muted-foreground">
-                          <Thermometer className="size-3" />
-                          {Math.round(tomorrow.tempMin)}° – {Math.round(tomorrow.tempMax)}°C
-                        </p>
-                      </div>
-                      {tomorrowIsBad && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="ml-2 h-7 border-amber-300 bg-white px-2 text-xs sm:text-[10px] text-amber-700 hover:bg-amber-50"
-                          onClick={() => {
-                            setDate(addDays(date, 1));
-                            setTimeout(() => setRainedOffDialogOpen(true), 50);
-                          }}
-                        >
-                          <CloudRain className="mr-1 size-3" />
-                          Pre-mark
-                        </Button>
-                      )}
-                    </div>
-                  </>
-                )}
-
-                {/* Remaining forecast days */}
-                {data.weather.forecast.length > 1 && (
-                  <>
-                    <div className="hidden h-14 border-l sm:block" />
-                    <div className="hidden gap-4 sm:flex">
-                      {data.weather.forecast.slice(1).map((day) => (
-                        <div key={day.date} className="flex flex-col items-center gap-1 text-center">
-                          <span className="text-[10px] font-medium text-muted-foreground">
-                            {format(new Date(day.date + "T12:00:00"), "EEE")}
-                          </span>
-                          <WeatherIcon category={day.category} className="size-4 text-slate-500" />
-                          <span className="text-[10px] text-muted-foreground">
-                            {Math.round(day.tempMax)}°
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                )}
-              </div>
-
-              {/* Rain day action banner */}
-              {todayIsBad && !data.isRainedOff && (
-                <div className="mt-3 flex flex-col gap-2 rounded-lg border border-blue-200 bg-blue-100 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="flex items-center gap-2 text-sm text-blue-800">
-                    <CloudRain className="size-4 shrink-0" />
-                    <span className="font-medium">Rain today — do you want to mark this as a rained off day?</span>
-                  </div>
-                  <Button
-                    size="sm"
-                    className="w-full shrink-0 bg-blue-600 text-white hover:bg-blue-700 sm:w-auto"
-                    onClick={() => setRainedOffDialogOpen(true)}
-                  >
-                    Mark Rained Off
-                  </Button>
-                </div>
-              )}
-
-              {/* General weather warning */}
-              {!todayIsBad && badDays.length > 0 && (
-                <div className="mt-3 flex items-center gap-2 rounded border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-700">
-                  <AlertTriangle className="size-3.5 shrink-0" />
-                  <span>
-                    Outdoor jobs may be affected —{" "}
-                    {badDays
-                      .map((d) => format(new Date(d.date + "T12:00:00"), "EEE"))
-                      .join(", ")}
-                  </span>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        );
-      })()}
 
       {/* ═══════════════ ALERTS ═══════════════ */}
       {(() => {

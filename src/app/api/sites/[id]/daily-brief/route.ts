@@ -514,18 +514,14 @@ export async function GET(
     }
   }
 
-  // Overdue deliveries
-  for (const d of overdueDeliveries) {
-    needsAttention.push({
-      id: d.id,
-      type: "order",
-      title: d.itemsDescription ?? "Unnamed order",
-      subtitle: d.job?.plot?.plotNumber
-        ? `Plot ${d.job.plot.plotNumber} — ${d.supplier?.name ?? "Unknown supplier"}`
-        : d.supplier?.name ?? "Unknown supplier",
-      missing: ["Overdue delivery"],
-    });
-  }
+  // (#190) Overdue deliveries are NOT a needsAttention item — they're
+  // already rendered in the Materials > Overdue section with the
+  // Mark Received button. Pre-fix this push duplicated each overdue
+  // delivery, then rendered as a "Fix: Overdue delivery" button in
+  // the Needs Attention card that didn't actually do anything. Keith
+  // pointed out the confusion. Needs Attention is strictly for items
+  // with MISSING data (assignee, contractor, photos, sign-off
+  // notes) — not for items with a stale or overdue state.
 
   // Batch 4
   const [recentEvents, totalPlots, allJobs, pendingSignOffsRaw, awaitingRestartRaw] = await Promise.all([
