@@ -118,6 +118,56 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    // (May 2026 audit O-2) Fire an invite email so the new user has a
+    // self-service path to set their own password. Pre-fix the admin
+    // had to "verbally share" the password they just set — terrible UX
+    // and a security risk (passwords shared via Slack/email/post-it).
+    // Best-effort: failure here doesn't fail user creation. Uses the
+    // same reset-token flow as forgot-password since the URL + token
+    // semantics are identical (request-reset's own comment says so).
+    try {
+      const { signResetToken } = await import("@/lib/share-token");
+      const { sendEmail } = await import("@/lib/email");
+      const exp = Date.now() + 7 * 24 * 60 * 60 * 1000; // 7 days for invites
+      const token = signResetToken({ userId: user.id, email: user.email, exp });
+      const baseUrl =
+        req.headers.get("origin") ??
+        process.env.NEXTAUTH_URL ??
+        "https://sight-manager.vercel.app";
+      const inviteUrl = `${baseUrl}/reset-password/${token}`;
+      await sendEmail({
+        to: user.email,
+        subject: "Welcome to Sight Manager — set your password",
+        html: `<!DOCTYPE html>
+<html>
+<body style="margin:0;padding:0;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+  <div style="max-width:540px;margin:32px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
+    <div style="background:linear-gradient(135deg,#2563eb,#4f46e5);padding:24px 32px;">
+      <h1 style="margin:0;color:#fff;font-size:18px;font-weight:700;">Sight Manager</h1>
+      <p style="margin:4px 0 0;color:#bfdbfe;font-size:13px;">Welcome</p>
+    </div>
+    <div style="padding:32px;">
+      <p style="margin:0 0 16px;color:#0f172a;font-size:14px;">Hi ${user.name},</p>
+      <p style="margin:0 0 16px;color:#475569;font-size:14px;line-height:1.55;">
+        Your Sight Manager account has been created. Click the button below to set your password and sign in. The link is valid for 7 days.
+      </p>
+      <div style="margin:24px 0;text-align:center;">
+        <a href="${inviteUrl}" style="background:#2563eb;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-size:14px;font-weight:600;">Set your password</a>
+      </div>
+      <p style="margin:16px 0 0;color:#64748b;font-size:12px;line-height:1.55;">
+        If you weren't expecting this email, you can safely ignore it.
+      </p>
+    </div>
+  </div>
+</body>
+</html>`,
+      });
+    } catch (emailErr) {
+      // Don't block user creation on email failure — admin can resend later
+      // via the "Resend invite" button.
+      console.error("[users POST] welcome email failed:", emailErr);
+    }
+
     return NextResponse.json(user, { status: 201 });
   } catch (err) {
     return apiError(err, "Failed to create user");

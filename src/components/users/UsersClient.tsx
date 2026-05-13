@@ -10,6 +10,7 @@ import {
   Trash2,
   Shield,
   Mail,
+  MailPlus,
   Phone,
   Building,
   UserPlus,
@@ -372,6 +373,28 @@ export function UsersClient({
     setDialogOpen(true);
   }
 
+  // (May 2026 audit O-3) Resend the invite/password-reset email for a
+  // user. Hits the existing /api/auth/request-reset endpoint, which is
+  // explicitly designed to double as a "resend invite" entry point —
+  // same token + URL + email as the welcome flow. Pre-fix the UI had
+  // no surface for this, so admins had to manually share passwords or
+  // re-create users.
+  async function handleResendInvite(user: UserData) {
+    try {
+      const res = await fetch("/api/auth/request-reset", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: user.email }),
+      });
+      if (!res.ok) {
+        throw new Error(await fetchErrorMessage(res, "Failed to resend invite"));
+      }
+      toast.success(`Invite resent to ${user.email}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to resend invite");
+    }
+  }
+
   // Open edit dialog
   function handleOpenEdit(user: UserData) {
     setEditingUser(user);
@@ -595,7 +618,7 @@ export function UsersClient({
                 </div>
 
                 {/* Actions */}
-                <div className="mt-3 flex items-center gap-1 border-t pt-3">
+                <div className="mt-3 flex flex-wrap items-center gap-1 border-t pt-3">
                   <Button
                     variant="ghost"
                     size="xs"
@@ -612,6 +635,17 @@ export function UsersClient({
                     <Shield className="size-3" />
                     <span className="hidden sm:inline">Permissions</span>
                   </Button>
+                  {user.id !== currentUserId && (
+                    <Button
+                      variant="ghost"
+                      size="xs"
+                      onClick={() => handleResendInvite(user)}
+                      title="Resend invite / password-reset email"
+                    >
+                      <MailPlus className="size-3" />
+                      <span className="hidden sm:inline">Resend invite</span>
+                    </Button>
+                  )}
                   {user.id !== currentUserId && (
                     <Button
                       variant="ghost"
