@@ -59,32 +59,41 @@ export async function GET(req: NextRequest) {
     select: { id: true, buildCompletePercent: true },
   });
 
-  for (const p of activePlots) {
-    plotsScanned++;
-    const before = p.buildCompletePercent;
-    try {
-      // (May 2026 audit P-P0-9) recomputePlotPercent now returns the
-      // new percent so we don't need a second findUnique to detect
-      // drift — halves the round-trip count on this pass.
-      const after = await recomputePlotPercent(prisma, p.id);
-      if (Math.abs(after - before) > 0.01) {
-        plotsAdjusted++;
-        // Cap at 50 so a catastrophically broken night doesn't write
-        // a multi-megabyte event log row.
-        if (driftedPlots.length < 50) {
-          driftedPlots.push({
+  // (May 2026 audit P-P0) Process in chunks of 10 in parallel rather
+  // than strictly serially. Each recompute is one query (after the
+  // P-P0-9 fix); 10 concurrent fits comfortably under Prisma's
+  // default 10-connection Supabase pool. At 50 plots that's
+  // 5 sequential rounds of 10 instead of 50 sequential rounds —
+  // ~5× speedup on this pass alone. Errors per plot stay scoped.
+  const PLOT_BATCH = 10;
+  for (let i = 0; i < activePlots.length; i += PLOT_BATCH) {
+    const batch = activePlots.slice(i, i + PLOT_BATCH);
+    await Promise.all(
+      batch.map(async (p) => {
+        plotsScanned++;
+        const before = p.buildCompletePercent;
+        try {
+          const after = await recomputePlotPercent(prisma, p.id);
+          if (Math.abs(after - before) > 0.01) {
+            plotsAdjusted++;
+            // Cap at 50 so a catastrophically broken night doesn't
+            // write a multi-megabyte event log row.
+            if (driftedPlots.length < 50) {
+              driftedPlots.push({
+                plotId: p.id,
+                before: Math.round(before * 100) / 100,
+                after: Math.round(after * 100) / 100,
+              });
+            }
+          }
+        } catch (err) {
+          plotErrors.push({
             plotId: p.id,
-            before: Math.round(before * 100) / 100,
-            after: Math.round(after * 100) / 100,
+            error: err instanceof Error ? err.message : String(err),
           });
         }
-      }
-    } catch (err) {
-      plotErrors.push({
-        plotId: p.id,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
+      }),
+    );
   }
 
   // ---- Parent-job rollup reconcile ----
@@ -106,29 +115,36 @@ export async function GET(req: NextRequest) {
     },
   });
 
-  for (const p of parentJobs) {
-    parentsScanned++;
-    try {
-      // (May 2026 audit P-P0-9) recomputeParentFromChildren now returns
-      // the recomputed values — drop the redundant findUnique pass.
-      const after = await recomputeParentFromChildren(prisma, p.id);
-      if (
-        after &&
-        (after.startDate?.getTime() !== p.startDate?.getTime() ||
-          after.endDate?.getTime() !== p.endDate?.getTime() ||
-          after.status !== p.status ||
-          after.actualStartDate?.getTime() !== p.actualStartDate?.getTime() ||
-          after.actualEndDate?.getTime() !== p.actualEndDate?.getTime())
-      ) {
-        parentsAdjusted++;
-        if (driftedParents.length < 50) driftedParents.push(p.id);
-      }
-    } catch (err) {
-      parentErrors.push({
-        jobId: p.id,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
+  // (May 2026 audit P-P0) Same parallel-batch pattern as the plot pass.
+  // 300 parents × 1 round-trip serial = 30s+ of wall time at scale;
+  // batches of 10 = 30 sequential rounds.
+  const PARENT_BATCH = 10;
+  for (let i = 0; i < parentJobs.length; i += PARENT_BATCH) {
+    const batch = parentJobs.slice(i, i + PARENT_BATCH);
+    await Promise.all(
+      batch.map(async (p) => {
+        parentsScanned++;
+        try {
+          const after = await recomputeParentFromChildren(prisma, p.id);
+          if (
+            after &&
+            (after.startDate?.getTime() !== p.startDate?.getTime() ||
+              after.endDate?.getTime() !== p.endDate?.getTime() ||
+              after.status !== p.status ||
+              after.actualStartDate?.getTime() !== p.actualStartDate?.getTime() ||
+              after.actualEndDate?.getTime() !== p.actualEndDate?.getTime())
+          ) {
+            parentsAdjusted++;
+            if (driftedParents.length < 50) driftedParents.push(p.id);
+          }
+        } catch (err) {
+          parentErrors.push({
+            jobId: p.id,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }),
+    );
   }
 
   // (#189) Sequential-overlap reconcile — fix plots where a still-
