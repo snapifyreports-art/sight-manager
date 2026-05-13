@@ -207,52 +207,100 @@ export async function GET(req: NextRequest) {
   }
 
   // ----- Resolve events whose targets are no longer late -----
-  // Find all open events; for each, check the target's current state.
+  // (May 2026 audit P-P0) Pre-fix this did `findUnique` per event,
+  // PLUS `resolveLateness` per event (which does another findMany +
+  // updateMany internally). At 300 open events that's ~600+ round-
+  // trips. New flow: bulk-fetch the target state in two queries
+  // (one per target type), classify in memory, then a single
+  // updateMany to flip resolvedAt + a single createMany for the
+  // breadcrumb EventLog rows.
   const openEvents = await prisma.latenessEvent.findMany({
     where: { resolvedAt: null, siteId: { in: siteIds } },
-    select: { id: true, kind: true, targetType: true, targetId: true },
+    select: { id: true, kind: true, targetType: true, targetId: true, siteId: true, plotId: true, jobId: true },
   });
+
+  const openJobIds = openEvents.filter((e) => e.targetType === "job").map((e) => e.targetId);
+  const openOrderIds = openEvents.filter((e) => e.targetType === "order").map((e) => e.targetId);
+
+  const [openJobs, openOrders] = await Promise.all([
+    openJobIds.length === 0
+      ? Promise.resolve([] as Array<{ id: string; status: string; startDate: Date | null; endDate: Date | null }>)
+      : prisma.job.findMany({
+          where: { id: { in: openJobIds } },
+          select: { id: true, status: true, startDate: true, endDate: true },
+        }),
+    openOrderIds.length === 0
+      ? Promise.resolve([] as Array<{ id: string; status: string; expectedDeliveryDate: Date | null; dateOfOrder: Date }>)
+      : prisma.materialOrder.findMany({
+          where: { id: { in: openOrderIds } },
+          select: { id: true, status: true, expectedDeliveryDate: true, dateOfOrder: true },
+        }),
+  ]);
+  const jobById = new Map(openJobs.map((j) => [j.id, j]));
+  const orderById = new Map(openOrders.map((o) => [o.id, o]));
+
+  // Classify which events should resolve.
+  const eventsToResolve: Array<typeof openEvents[number]> = [];
   for (const ev of openEvents) {
+    let isResolved = false;
+    if (ev.targetType === "job") {
+      const job = jobById.get(ev.targetId);
+      if (!job) {
+        isResolved = true; // target deleted
+      } else if (ev.kind === "JOB_END_OVERDUE") {
+        if (job.status === "COMPLETED") isResolved = true;
+        else if (job.endDate && job.endDate >= today) isResolved = true;
+      } else if (ev.kind === "JOB_START_OVERDUE") {
+        if (job.status !== "NOT_STARTED") isResolved = true;
+        else if (job.startDate && job.startDate >= today) isResolved = true;
+      }
+    } else if (ev.targetType === "order") {
+      const order = orderById.get(ev.targetId);
+      if (!order) {
+        isResolved = true;
+      } else if (ev.kind === "ORDER_DELIVERY_OVERDUE") {
+        if (order.status === "DELIVERED" || order.status === "CANCELLED") isResolved = true;
+        else if (order.expectedDeliveryDate && order.expectedDeliveryDate >= today) isResolved = true;
+      } else if (ev.kind === "ORDER_SEND_OVERDUE") {
+        if (order.status !== "PENDING") isResolved = true;
+        else if (order.dateOfOrder >= today) isResolved = true;
+      }
+    }
+    if (isResolved) eventsToResolve.push(ev);
+  }
+
+  // Bulk-flip resolvedAt + bulk-emit breadcrumbs. The
+  // LATENESS_RESOLVED EventLog row stays parallel to the existing
+  // helper's output so timeline consumers see the same shape.
+  if (eventsToResolve.length > 0) {
     try {
-      let isResolved = false;
-      if (ev.targetType === "job") {
-        const job = await prisma.job.findUnique({
-          where: { id: ev.targetId },
-          select: { status: true, startDate: true, endDate: true },
-        });
-        if (!job) {
-          // Target deleted — resolve to avoid orphan.
-          isResolved = true;
-        } else if (ev.kind === "JOB_END_OVERDUE") {
-          if (job.status === "COMPLETED") isResolved = true;
-          else if (job.endDate && job.endDate >= today) isResolved = true;
-        } else if (ev.kind === "JOB_START_OVERDUE") {
-          if (job.status !== "NOT_STARTED") isResolved = true;
-          else if (job.startDate && job.startDate >= today) isResolved = true;
-        }
-      } else if (ev.targetType === "order") {
-        const order = await prisma.materialOrder.findUnique({
-          where: { id: ev.targetId },
-          select: { status: true, expectedDeliveryDate: true, dateOfOrder: true },
-        });
-        if (!order) {
-          isResolved = true;
-        } else if (ev.kind === "ORDER_DELIVERY_OVERDUE") {
-          if (order.status === "DELIVERED" || order.status === "CANCELLED") isResolved = true;
-          else if (order.expectedDeliveryDate && order.expectedDeliveryDate >= today) isResolved = true;
-        } else if (ev.kind === "ORDER_SEND_OVERDUE") {
-          if (order.status !== "PENDING") isResolved = true;
-          else if (order.dateOfOrder >= today) isResolved = true;
-        }
-      }
-      if (isResolved) {
-        const r = await resolveLateness(prisma, ev.targetType as "job" | "order", ev.targetId, today);
-        resolved += r.resolved;
-      }
+      await prisma.$transaction([
+        prisma.latenessEvent.updateMany({
+          where: { id: { in: eventsToResolve.map((e) => e.id) } },
+          data: { resolvedAt: today },
+        }),
+        prisma.eventLog.createMany({
+          data: eventsToResolve.map((e) => ({
+            type: "LATENESS_RESOLVED" as const,
+            description: `Lateness resolved: ${e.kind} on ${e.targetType} ${e.targetId.slice(0, 8)}`,
+            siteId: e.siteId,
+            plotId: e.plotId,
+            jobId: e.jobId,
+          })),
+        }),
+      ]);
+      resolved = eventsToResolve.length;
     } catch (e) {
-      errors.push({ target: `${ev.targetType}:${ev.targetId}`, error: e instanceof Error ? e.message : String(e) });
+      errors.push({
+        target: "bulk-resolve",
+        error: e instanceof Error ? e.message : String(e),
+      });
     }
   }
+  // `resolveLateness` is no longer imported in the bulk path — kept
+  // available via @/lib/lateness-event for non-cron callers (mutation
+  // routes that resolve a single target inline).
+  void resolveLateness;
 
   const durationMs = Date.now() - startedAt;
 
