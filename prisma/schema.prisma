@@ -230,6 +230,11 @@ model RainedOffDay {
   site Site @relation(fields: [siteId], references: [id], onDelete: Cascade)
 
   @@unique([siteId, date, type])
+  // (May 2026 audit S-P1) Cross-site "all rained-off days in range"
+  // queries (weather cron + analytics) couldn't use the composite
+  // unique index since they don't filter by siteId. Single-column
+  // date index keeps the scan tight.
+  @@index([date])
 }
 
 model Plot {
