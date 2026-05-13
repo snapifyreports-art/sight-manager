@@ -1379,11 +1379,16 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
 
   return (
     <div className="space-y-4">
-      {/* Date + print */}
+      {/* Date + print.
+          (May 2026 audit UX-P2) Promoted the date from <p> to <h1> so
+          assistive tech has a top-level landmark for the page. The
+          Daily Brief is the most-touched reporting view; previously
+          screen readers landed on the chrome header "Dashboard" and
+          had to hunt for the actual page heading. */}
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-sm font-semibold sm:text-lg">
+        <h1 className="text-sm font-semibold sm:text-lg">
           {format(date, "EEEE, d MMMM yyyy")}
-        </p>
+        </h1>
         <Button
           variant="outline"
           size="sm"
