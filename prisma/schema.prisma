@@ -426,6 +426,7 @@ model Supplier {
   orders         MaterialOrder[]
   templateOrders TemplateOrder[]
   materials      SupplierMaterial[]
+  latenessEvents LatenessEvent[]
 }
 
 model SupplierMaterial {
@@ -1254,18 +1255,28 @@ model LatenessEvent {
   reasonNote          String?
 
   /// Which contractor or supplier carried the slip, if attributable.
-  attributedContactId String?
-  recordedById        String?        // user who set the reason
+  /// (May 2026 audit S-P1 / FC-P0) Pre-fix only `attributedContactId`
+  /// existed — pointed at the Contact table. Material suppliers live
+  /// in a separate Supplier table, so order-driven lateness (the
+  /// cron auto-attributes via order.contactId, but most orders don't
+  /// have a Contact assigned) never gained supplier attribution.
+  /// Added `attributedSupplierId` as a parallel field. UI + analytics
+  /// queries the union. A future schema refactor will unify Supplier
+  /// into Contact and collapse these two fields back into one.
+  attributedContactId  String?
+  attributedSupplierId String?
+  recordedById         String?        // user who set the reason
 
   createdAt           DateTime       @default(now())
   updatedAt           DateTime       @updatedAt
 
-  site              Site           @relation(fields: [siteId], references: [id], onDelete: Cascade)
-  plot              Plot?          @relation(fields: [plotId], references: [id], onDelete: SetNull)
-  job               Job?           @relation(fields: [jobId], references: [id], onDelete: SetNull)
-  order             MaterialOrder? @relation(fields: [orderId], references: [id], onDelete: SetNull)
-  attributedContact Contact?       @relation(fields: [attributedContactId], references: [id], onDelete: SetNull)
-  recordedBy        User?          @relation("LatenessEventRecorder", fields: [recordedById], references: [id], onDelete: SetNull)
+  site               Site           @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  plot               Plot?          @relation(fields: [plotId], references: [id], onDelete: SetNull)
+  job                Job?           @relation(fields: [jobId], references: [id], onDelete: SetNull)
+  order              MaterialOrder? @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  attributedContact  Contact?       @relation(fields: [attributedContactId], references: [id], onDelete: SetNull)
+  attributedSupplier Supplier?      @relation(fields: [attributedSupplierId], references: [id], onDelete: SetNull)
+  recordedBy         User?          @relation("LatenessEventRecorder", fields: [recordedById], references: [id], onDelete: SetNull)
 
   /// One open event per (target, kind, day-it-went-late). The cron's
   /// upsert relies on this so it never creates duplicates.
@@ -1273,6 +1284,7 @@ model LatenessEvent {
   @@index([siteId, wentLateOn])
   @@index([resolvedAt])
   @@index([attributedContactId])
+  @@index([attributedSupplierId])
   @@index([reasonCode])
   @@index([plotId])
   @@index([jobId])

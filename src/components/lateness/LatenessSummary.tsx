@@ -28,6 +28,8 @@ export interface LatenessEventDTO {
   reasonNote: string | null;
   attributedContactId: string | null;
   attributedContact: { id: string; name: string; company: string | null } | null;
+  attributedSupplierId: string | null;
+  attributedSupplier: { id: string; name: string } | null;
   recordedBy: { id: string; name: string } | null;
   job: { id: string; name: string } | null;
   plot: { id: string; plotNumber: string | null; name: string } | null;
@@ -76,11 +78,17 @@ export interface ContactOption {
   company: string | null;
 }
 
+export interface SupplierOption {
+  id: string;
+  name: string;
+}
+
 export function LatenessSummary(props: Props) {
   const { status = "open", compact = false } = props;
   const toast = useToast();
   const [events, setEvents] = useState<LatenessEventDTO[] | null>(null);
   const [contacts, setContacts] = useState<ContactOption[]>([]);
+  const [suppliers, setSuppliers] = useState<SupplierOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState(false);
 
@@ -110,22 +118,33 @@ export function LatenessSummary(props: Props) {
   // Managers had to leave the screen, go to the contact's page, and
   // attribute there. Now a Select renders alongside the reason
   // dropdown so attribution happens inline.
+  //
+  // (May 2026 audit S-P1) Suppliers also fetched in parallel so the
+  // picker offers BOTH "Contractor (Contact)" and "Supplier" pools.
+  // The attributedContactId / attributedSupplierId fields are
+  // parallel; UI lets the manager pick one of either pool.
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/contacts?type=CONTRACTOR", { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : []))
-      .then((rows: Array<{ id: string; name: string; company: string | null }>) => {
-        if (cancelled) return;
-        setContacts(
-          rows
-            .map((r) => ({ id: r.id, name: r.name, company: r.company }))
-            .sort((a, b) => (a.company || a.name).localeCompare(b.company || b.name)),
-        );
-      })
-      .catch(() => {
-        /* contractor list is a nice-to-have; if it fails the picker
-           still shows the reason editor without contractor select */
-      });
+    Promise.all([
+      fetch("/api/contacts?type=CONTRACTOR", { cache: "no-store" })
+        .then((r) => (r.ok ? r.json() : []))
+        .catch(() => []),
+      fetch("/api/suppliers", { cache: "no-store" })
+        .then((r) => (r.ok ? r.json() : []))
+        .catch(() => []),
+    ]).then(([contactRows, supplierRows]) => {
+      if (cancelled) return;
+      setContacts(
+        (contactRows as Array<{ id: string; name: string; company: string | null }>)
+          .map((r) => ({ id: r.id, name: r.name, company: r.company }))
+          .sort((a, b) => (a.company || a.name).localeCompare(b.company || b.name)),
+      );
+      setSuppliers(
+        (supplierRows as Array<{ id: string; name: string }>)
+          .map((s) => ({ id: s.id, name: s.name }))
+          .sort((a, b) => a.name.localeCompare(b.name)),
+      );
+    });
     return () => {
       cancelled = true;
     };
@@ -222,7 +241,7 @@ export function LatenessSummary(props: Props) {
           )}
           <ul className="divide-y">
             {events.map((e) => (
-              <LatenessRow key={e.id} event={e} contacts={contacts} onChange={refresh} toast={toast} />
+              <LatenessRow key={e.id} event={e} contacts={contacts} suppliers={suppliers} onChange={refresh} toast={toast} />
             ))}
           </ul>
         </div>
@@ -234,11 +253,13 @@ export function LatenessSummary(props: Props) {
 function LatenessRow({
   event,
   contacts,
+  suppliers,
   onChange,
   toast,
 }: {
   event: LatenessEventDTO;
   contacts: ContactOption[];
+  suppliers: SupplierOption[];
   onChange: () => void;
   toast: ReturnType<typeof useToast>;
 }) {
@@ -247,6 +268,9 @@ function LatenessRow({
   const [reasonNote, setReasonNote] = useState(event.reasonNote ?? "");
   const [attributedContactId, setAttributedContactId] = useState<string>(
     event.attributedContactId ?? "",
+  );
+  const [attributedSupplierId, setAttributedSupplierId] = useState<string>(
+    event.attributedSupplierId ?? "",
   );
   const [saving, setSaving] = useState(false);
 
@@ -272,6 +296,7 @@ function LatenessRow({
           reasonNote: reasonNote || null,
           // null clears attribution; empty string passes "no choice".
           attributedContactId: attributedContactId || null,
+          attributedSupplierId: attributedSupplierId || null,
         }),
       });
       if (!res.ok) {
@@ -329,6 +354,15 @@ function LatenessRow({
               {event.attributedContact.company || event.attributedContact.name}
             </span>
           )}
+          {/* (May 2026 audit S-P1) Supplier badge — distinct colour from
+              contractor so the manager can see at a glance whether the
+              slip is attributed to a contractor or a supplier. */}
+          {event.attributedSupplier && (
+            <span className="inline-flex items-center gap-1 rounded-full border border-orange-200 bg-orange-50 px-2 py-0.5 text-xs text-orange-700">
+              <User className="size-3" aria-hidden />
+              {event.attributedSupplier.name}
+            </span>
+          )}
           {event.reasonNote && (
             <span className="text-[11px] italic text-muted-foreground">
               &ldquo;{event.reasonNote}&rdquo;
@@ -376,6 +410,24 @@ function LatenessRow({
               ))}
             </select>
           )}
+          {/* (May 2026 audit S-P1) Supplier picker — parallel to the
+              contractor picker above. Manager picks one or the other
+              depending on whose responsibility the slip is. */}
+          {suppliers.length > 0 && (
+            <select
+              value={attributedSupplierId}
+              onChange={(e) => setAttributedSupplierId(e.target.value)}
+              className="w-full rounded border bg-white px-2 py-1.5 text-xs"
+              aria-label="Attribute to supplier"
+            >
+              <option value="">— No supplier attribution —</option>
+              {suppliers.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+          )}
           <input
             type="text"
             value={reasonNote}
@@ -395,6 +447,7 @@ function LatenessRow({
                 setReasonCode(event.reasonCode);
                 setReasonNote(event.reasonNote ?? "");
                 setAttributedContactId(event.attributedContactId ?? "");
+                setAttributedSupplierId(event.attributedSupplierId ?? "");
                 setEditing(false);
               }}
               disabled={saving}

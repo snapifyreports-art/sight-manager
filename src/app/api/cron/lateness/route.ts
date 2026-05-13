@@ -153,9 +153,12 @@ export async function GET(req: NextRequest) {
       if (!siteIds.includes(siteId)) continue;
       ordersScanned++;
       const plotId = o.job?.plotId ?? o.plotId ?? null;
-      // Material suppliers don't usually have a Contact row; the
-      // supplier's primary contact (if any) carries attribution.
       const attributedContactId = o.contactId ?? null;
+      // (May 2026 audit S-P1) Auto-attribute to the Supplier — every
+      // MaterialOrder has supplierId, so order-driven lateness now
+      // gets attribution day-one without manager intervention. The
+      // Analytics widget's supplier section finally populates.
+      const attributedSupplierId = o.supplierId ?? null;
 
       if (o.status === "ORDERED" && o.expectedDeliveryDate && o.expectedDeliveryDate < today) {
         const wentLateOn = new Date(o.expectedDeliveryDate);
@@ -174,6 +177,7 @@ export async function GET(req: NextRequest) {
           daysLate,
           reasonCode: "MATERIAL_LATE",
           attributedContactId,
+          attributedSupplierId,
         });
         if (r.created) opened++;
         else updated++;

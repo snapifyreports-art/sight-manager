@@ -67,6 +67,10 @@ export async function PATCH(
     if (body.attributedContactId !== undefined) {
       data.attributedContactId = body.attributedContactId || null;
     }
+    // (May 2026 audit S-P1) Supplier attribution parallel to contact.
+    if (body.attributedSupplierId !== undefined) {
+      data.attributedSupplierId = body.attributedSupplierId || null;
+    }
     if (Object.keys(data).length === 0) {
       return NextResponse.json({ error: "Nothing to update" }, { status: 400 });
     }

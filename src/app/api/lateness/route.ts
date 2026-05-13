@@ -101,6 +101,10 @@ export async function GET(req: NextRequest) {
         },
       },
       attributedContact: { select: { id: true, name: true, company: true } },
+      // (May 2026 audit S-P1) Include supplier attribution in the
+      // response so the LatenessSummary picker can render both
+      // contractor + supplier options.
+      attributedSupplier: { select: { id: true, name: true } },
       recordedBy: { select: { id: true, name: true } },
     },
   });

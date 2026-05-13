@@ -1133,6 +1133,10 @@ interface LatenessAnalytics {
   byReason: Array<{ reason: string; openDays: number; resolvedDays: number; count: number }>;
   bySite: Array<{ siteId: string; siteName: string; openCount: number; openDays: number; resolvedCount: number; resolvedDays: number }>;
   byContractor: Array<{ contactId: string; name: string; company: string | null; count: number; days: number }>;
+  // (May 2026 audit S-P1) Supplier attribution parallel to contractor.
+  // Order-driven lateness is auto-attributed to the order's supplier
+  // by the cron, so this section is meaningful day one.
+  bySupplier?: Array<{ supplierId: string; name: string; count: number; days: number }>;
   totals: { openCount: number; openDays: number; resolvedCount: number; resolvedDays: number };
 }
 
@@ -1250,7 +1254,7 @@ function LatenessWidget() {
         {data.byContractor.length > 0 && (
           <div>
             <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Lateness attributed to contractor / supplier
+              Lateness attributed to contractor
             </p>
             <ul className="divide-y divide-slate-100 rounded-md border">
               {data.byContractor.map((c) => (
@@ -1260,6 +1264,28 @@ function LatenessWidget() {
                   </Link>
                   <span className="text-muted-foreground">
                     <span className="font-semibold text-slate-700">{c.days}</span> WD · {c.count} event{c.count === 1 ? "" : "s"}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* (May 2026 audit S-P1) By supplier — auto-populated by the
+            lateness cron for every late delivery. */}
+        {data.bySupplier && data.bySupplier.length > 0 && (
+          <div>
+            <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Lateness attributed to supplier
+            </p>
+            <ul className="divide-y divide-slate-100 rounded-md border">
+              {data.bySupplier.map((s) => (
+                <li key={s.supplierId} className="flex items-center justify-between px-3 py-1.5 text-xs">
+                  <Link href={`/suppliers/${s.supplierId}`} className="font-medium text-orange-700 hover:underline">
+                    {s.name}
+                  </Link>
+                  <span className="text-muted-foreground">
+                    <span className="font-semibold text-slate-700">{s.days}</span> WD · {s.count} event{s.count === 1 ? "" : "s"}
                   </span>
                 </li>
               ))}

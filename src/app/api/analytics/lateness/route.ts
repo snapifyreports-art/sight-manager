@@ -36,6 +36,9 @@ export async function GET(req: NextRequest) {
       reasonCode: true,
       attributedContactId: true,
       attributedContact: { select: { id: true, name: true, company: true } },
+      // (May 2026 audit S-P1) Supplier attribution parallel to contact.
+      attributedSupplierId: true,
+      attributedSupplier: { select: { id: true, name: true } },
       site: { select: { id: true, name: true } },
     },
   });
@@ -92,6 +95,26 @@ export async function GET(req: NextRequest) {
   }
   const byContractor = Array.from(contractorMap.values()).sort((a, b) => b.days - a.days).slice(0, 10);
 
+  // (May 2026 audit S-P1) by supplier — parallel to byContractor. The
+  // lateness cron auto-attributes order-driven slips to the order's
+  // supplier, so this section finally has data for the largest
+  // bucket (delivery overdue).
+  const supplierMap = new Map<string, { supplierId: string; name: string; count: number; days: number }>();
+  for (const e of events) {
+    if (!e.attributedSupplierId || !e.attributedSupplier) continue;
+    const key = e.attributedSupplierId;
+    const r = supplierMap.get(key) ?? {
+      supplierId: e.attributedSupplierId,
+      name: e.attributedSupplier.name,
+      count: 0,
+      days: 0,
+    };
+    r.count++;
+    r.days += e.daysLate;
+    supplierMap.set(key, r);
+  }
+  const bySupplier = Array.from(supplierMap.values()).sort((a, b) => b.days - a.days).slice(0, 10);
+
   const openTotals = events.filter((e) => !e.resolvedAt);
   const resolvedTotals = events.filter((e) => e.resolvedAt);
   const totals = {
@@ -101,5 +124,5 @@ export async function GET(req: NextRequest) {
     resolvedDays: resolvedTotals.reduce((s, e) => s + e.daysLate, 0),
   };
 
-  return NextResponse.json({ byReason, bySite, byContractor, totals });
+  return NextResponse.json({ byReason, bySite, byContractor, bySupplier, totals });
 }

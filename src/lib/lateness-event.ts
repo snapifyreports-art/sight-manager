@@ -43,6 +43,10 @@ export interface OpenLatenessArgs {
   reasonCode?: LatenessReason;
   reasonNote?: string | null;
   attributedContactId?: string | null;
+  /** (May 2026 audit S-P1) Material suppliers aren't Contact rows;
+   *  parallel field so order-driven lateness can be attributed to
+   *  the supplier directly. */
+  attributedSupplierId?: string | null;
   recordedById?: string | null;
 }
 
@@ -93,6 +97,11 @@ export async function openOrUpdateLateness(
         ? { connect: { id: args.attributedContactId } }
         : { disconnect: true };
     }
+    if (args.attributedSupplierId !== undefined) {
+      data.attributedSupplier = args.attributedSupplierId
+        ? { connect: { id: args.attributedSupplierId } }
+        : { disconnect: true };
+    }
     if (Object.keys(data).length > 0) {
       await db.latenessEvent.update({ where: { id: existing.id }, data });
     }
@@ -132,6 +141,7 @@ export async function openOrUpdateLateness(
       reasonCode: args.reasonCode ?? "OTHER",
       reasonNote: args.reasonNote ?? null,
       attributedContactId: args.attributedContactId ?? null,
+      attributedSupplierId: args.attributedSupplierId ?? null,
       recordedById: args.recordedById ?? null,
     },
     select: { id: true },
