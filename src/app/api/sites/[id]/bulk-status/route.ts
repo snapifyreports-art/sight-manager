@@ -80,6 +80,16 @@ export async function POST(
         updateData.actualStartDate = now;
       }
       if (action === "complete") {
+        // (May 2026 audit B-8) Backfill actualStartDate when a job is
+        // completed without ever having a start stamped. Previously a
+        // bulk-complete on a job that was IN_PROGRESS but had no
+        // actualStartDate (corrupted by a half-failed earlier write or
+        // legacy data) would leave it COMPLETED with end-date set but
+        // no start-date, breaking lateness math + Story tab variance.
+        // Fall back to the planned startDate, then to now.
+        if (!job.actualStartDate) {
+          updateData.actualStartDate = job.startDate ?? now;
+        }
         updateData.actualEndDate = now;
         updateData.signedOffById = session.user.id;
         updateData.signedOffAt = now;

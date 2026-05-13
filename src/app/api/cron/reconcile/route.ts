@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { recomputePlotPercent } from "@/lib/plot-percent";
 import { recomputeParentFromChildren } from "@/lib/parent-job";
 import { calculateCascade } from "@/lib/cascade";
+import { getServerCurrentDate } from "@/lib/dev-date";
 
 export const dynamic = "force-dynamic";
 
@@ -164,7 +165,12 @@ export async function GET(req: NextRequest) {
   let overlapJobsShifted = 0;
   const overlapEvents: Array<{ plotId: string; triggerJobName: string; deltaDays: number; jobsShifted: number; reason: string }> = [];
   try {
-    const todayMidnight = new Date();
+    // (May 2026 audit B-7) Pre-fix the overlap pass used raw `new Date()`
+    // which bypasses the dev-date harness — every other cron uses
+    // `getServerCurrentDate(req)`. In dev (simulated date) the overlap
+    // detection ran against today instead of the simulated day, missing
+    // overlaps the user was actually trying to test for.
+    const todayMidnight = getServerCurrentDate(req);
     todayMidnight.setHours(0, 0, 0, 0);
     const overlapPlots = await prisma.plot.findMany({
       where: { site: { status: { not: "COMPLETED" } } },

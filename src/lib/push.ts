@@ -2,12 +2,28 @@ import webpush from "web-push";
 import { prisma } from "./prisma";
 import type { NotificationType } from "@prisma/client";
 
-function configureWebPush() {
-  webpush.setVapidDetails(
-    process.env.VAPID_SUBJECT!,
-    process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!,
-    process.env.VAPID_PRIVATE_KEY!
-  );
+// (May 2026 audit O-4) VAPID env vars used to be non-null-asserted —
+// any missing var would throw inside `setVapidDetails` and 500 the
+// route that triggered the push. Now we check + log + return false
+// so callers can degrade gracefully (fan-out is best-effort).
+function configureWebPush(): boolean {
+  const subject = process.env.VAPID_SUBJECT;
+  const publicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+  const privateKey = process.env.VAPID_PRIVATE_KEY;
+  if (!subject || !publicKey || !privateKey) {
+    console.warn(
+      "[push] VAPID env vars missing — push disabled. " +
+        `Have: subject=${!!subject} public=${!!publicKey} private=${!!privateKey}`,
+    );
+    return false;
+  }
+  try {
+    webpush.setVapidDetails(subject, publicKey, privateKey);
+    return true;
+  } catch (err) {
+    console.error("[push] setVapidDetails failed:", err);
+    return false;
+  }
 }
 
 interface PushPayload {
@@ -28,7 +44,7 @@ export async function sendPushToUser(
   type: NotificationType,
   payload: PushPayload
 ) {
-  configureWebPush();
+  if (!configureWebPush()) return;
   // Check if user has this notification type enabled
   const pref = await prisma.notificationPreference.findUnique({
     where: { userId_type: { userId, type } },
@@ -95,7 +111,7 @@ export async function sendPushToSiteAudience(
   type: NotificationType,
   payload: PushPayload,
 ) {
-  configureWebPush();
+  if (!configureWebPush()) return;
 
   // (#183) Default-include every user with access to the site.
   // Previously this required users to explicitly "Watch" a site to
@@ -192,7 +208,7 @@ export async function sendPushToPlotCustomers(
   plotId: string,
   payload: PushPayload,
 ) {
-  configureWebPush();
+  if (!configureWebPush()) return;
   const subs = await prisma.customerPushSubscription.findMany({
     where: { plotId },
   });
@@ -226,7 +242,7 @@ export async function sendPushToAll(
   type: NotificationType,
   payload: PushPayload
 ) {
-  configureWebPush();
+  if (!configureWebPush()) return;
   // Get user IDs that have explicitly disabled this notification type
   const disabledPrefs = await prisma.notificationPreference.findMany({
     where: { type, enabled: false },

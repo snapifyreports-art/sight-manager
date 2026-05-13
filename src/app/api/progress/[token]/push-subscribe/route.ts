@@ -3,6 +3,59 @@ import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
 
+// (May 2026 audit O-12) Public push-subscribe endpoint had no origin
+// check or rate limit — an attacker could pollute the table with
+// junk subscriptions, flooding the customer-push cron with dead
+// endpoints. Defences applied below:
+//   1. Origin header must match NEXTAUTH_URL (or sub-domain) — stops
+//      cross-site form abuse without breaking legit subscribes.
+//   2. Endpoint URL must be from a known browser push service —
+//      stops attackers from registering arbitrary URLs that we'd
+//      then HTTPS-POST to from our Lambda. Whitelist matches the
+//      standard FCM / Apple / Mozilla push service hosts.
+//   3. Token min-length check stays as cheap path-rejection.
+
+const ALLOWED_PUSH_HOSTS = [
+  "fcm.googleapis.com",
+  "android.googleapis.com",
+  "updates.push.services.mozilla.com",
+  "api.push.apple.com",
+  "web.push.apple.com",
+  "wns2-by3p.notify.windows.com",
+  "wns2-am3p.notify.windows.com",
+];
+
+function isAllowedEndpoint(url: string): boolean {
+  try {
+    const u = new URL(url);
+    return ALLOWED_PUSH_HOSTS.some(
+      (host) => u.hostname === host || u.hostname.endsWith(`.${host}`),
+    );
+  } catch {
+    return false;
+  }
+}
+
+function isAllowedOrigin(req: NextRequest): boolean {
+  const origin = req.headers.get("origin");
+  if (!origin) {
+    // Some browsers strip Origin on same-origin POSTs. Fall back to
+    // Referer if it matches the expected base URL.
+    const referer = req.headers.get("referer");
+    if (!referer) return false;
+    return referer.startsWith(process.env.NEXTAUTH_URL ?? "");
+  }
+  const base = process.env.NEXTAUTH_URL ?? "";
+  if (!base) return true; // dev: no NEXTAUTH_URL set, don't block
+  try {
+    const o = new URL(origin);
+    const b = new URL(base);
+    return o.host === b.host;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * (May 2026 audit #196) Public endpoint — no auth, share-token is
  * the identity. Subscribes a customer's browser to push notifications
@@ -18,6 +71,10 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ token: string }> },
 ) {
+  if (!isAllowedOrigin(req)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
   const { token } = await params;
   if (!token || token.length < 16) {
     return NextResponse.json({ error: "Invalid token" }, { status: 400 });
@@ -39,6 +96,12 @@ export async function POST(
   if (!endpoint || !p256dh || !auth) {
     return NextResponse.json(
       { error: "endpoint and keys are required" },
+      { status: 400 },
+    );
+  }
+  if (!isAllowedEndpoint(endpoint)) {
+    return NextResponse.json(
+      { error: "Endpoint URL is not from a recognised push service" },
       { status: 400 },
     );
   }

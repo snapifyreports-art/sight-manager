@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider } from "@/components/providers/SessionProvider";
@@ -20,6 +20,24 @@ export const metadata: Metadata = {
     statusBarStyle: "default",
     title: "Sight Manager",
   },
+};
+
+// (May 2026 audit O-1 / UX-1) Viewport meta tag was missing entirely
+// — every external mobile user (contractor token portal, customer
+// progress page, ICS subscribe page) got a shrunk-to-fit desktop
+// render on phones. Internal users hit it too on field-day phone use.
+// `width=device-width` + `initialScale=1` is the standard responsive
+// viewport. `maximumScale=5` keeps native pinch-to-zoom for users who
+// need to zoom in on a photo or detail; never disable user-scaling on
+// an a11y grounds.
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 5,
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
+    { media: "(prefers-color-scheme: dark)", color: "#0f172a" },
+  ],
 };
 
 export default function RootLayout({

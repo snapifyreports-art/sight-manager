@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/email";
 import { format } from "date-fns";
 import { getServerCurrentDate, getServerStartOfDay } from "@/lib/dev-date";
+import { getUserSiteIds } from "@/lib/site-access";
 
 export const dynamic = "force-dynamic";
 
@@ -106,13 +107,18 @@ export async function GET(req: NextRequest) {
     })
   );
 
-  // Get managers to email (CEO, DIRECTOR, SITE_MANAGER with email set)
+  // (May 2026 audit B-11) Get managers to email. Pre-fix
+  // `email: { not: undefined }` was a no-op Prisma filter — it didn't
+  // exclude anyone. Add SUPER_ADMIN to the role list (they bypass every
+  // permission elsewhere; same goes for daily-brief eligibility). Also
+  // exclude empty-string emails (User.email is non-null in the schema
+  // but could be "" from legacy seed data).
   const managers = await prisma.user.findMany({
     where: {
-      role: { in: ["CEO", "DIRECTOR", "SITE_MANAGER"] },
-      email: { not: undefined },
+      role: { in: ["SUPER_ADMIN", "CEO", "DIRECTOR", "SITE_MANAGER"] },
+      email: { not: "" },
     },
-    select: { id: true, name: true, email: true },
+    select: { id: true, name: true, email: true, role: true },
   });
 
   if (managers.length === 0) {
@@ -161,7 +167,12 @@ export async function GET(req: NextRequest) {
   ) =>
     `<a href="${href}" style="color:${color};font-weight:600;text-decoration:none;border-bottom:1px dashed currentColor;">${label}</a>`;
 
-  const siteRows = siteDigests
+  // (May 2026 audit D-6 / B-11) Per-manager scoping. Pre-fix every
+  // manager — including a SITE_MANAGER assigned to one site — got an
+  // email listing every active site in the system. Now build the rows
+  // function once and call it per manager with their accessible
+  // siteDigests.
+  const buildSiteRows = (digests: typeof siteDigests) => digests
     .map((d) => {
       const siteUrl = `${baseUrl}/sites/${d.site.id}`;
       const alerts = [];
@@ -249,12 +260,10 @@ export async function GET(req: NextRequest) {
     })
     .join("");
 
-  const totalAlerts = siteDigests.reduce(
-    (sum, d) => sum + d.overdueJobs + d.lateStarts + d.overdueDeliveries + d.ordersToPlace,
-    0
-  );
-
-  const emailHtml = `<!DOCTYPE html>
+  const buildEmailHtml = (
+    digests: typeof siteDigests,
+    totalAlerts: number,
+  ) => `<!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
 <body style="margin:0;padding:0;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
@@ -266,14 +275,14 @@ export async function GET(req: NextRequest) {
     <div style="padding:32px;">
       ${totalAlerts > 0
         ? `<div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;padding:12px 16px;margin:0 0 24px;">
-            <p style="margin:0;color:#dc2626;font-size:14px;font-weight:600;">${totalAlerts} item${totalAlerts !== 1 ? "s" : ""} need${totalAlerts === 1 ? "s" : ""} your attention across ${siteDigests.filter((d) => d.hasAlerts).length} site${siteDigests.filter((d) => d.hasAlerts).length !== 1 ? "s" : ""}.</p>
+            <p style="margin:0;color:#dc2626;font-size:14px;font-weight:600;">${totalAlerts} item${totalAlerts !== 1 ? "s" : ""} need${totalAlerts === 1 ? "s" : ""} your attention across ${digests.filter((d) => d.hasAlerts).length} site${digests.filter((d) => d.hasAlerts).length !== 1 ? "s" : ""}.</p>
           </div>`
         : `<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:12px 16px;margin:0 0 24px;">
             <p style="margin:0;color:#16a34a;font-size:14px;font-weight:600;">All sites are on track today.</p>
           </div>`
       }
       <h2 style="margin:0 0 16px;font-size:16px;color:#0f172a;">Site Overview</h2>
-      ${siteRows}
+      ${buildSiteRows(digests)}
       <div style="margin:24px 0 0;text-align:center;">
         <a href="${process.env.NEXTAUTH_URL || "https://sight-manager.vercel.app"}" style="background:#2563eb;color:#fff;padding:10px 24px;border-radius:8px;text-decoration:none;font-size:14px;font-weight:600;">Open Sight Manager</a>
       </div>
@@ -285,17 +294,34 @@ export async function GET(req: NextRequest) {
 </body>
 </html>`;
 
-  // Send to all managers
+  // Send a scoped email per manager — execs (SUPER_ADMIN/CEO/DIRECTOR)
+  // get every site (getUserSiteIds returns null), SITE_MANAGERs get only
+  // their UserSite-granted sites. Managers with zero accessible sites
+  // are skipped (no point in a "no sites" email).
+  let skippedNoAccess = 0;
   const results = await Promise.allSettled(
     managers
-      .filter((m) => m.email)
-      .map((m) =>
-        sendEmail({
+      .filter((m) => m.email && m.email.length > 0)
+      .map(async (m) => {
+        const accessibleSiteIds = await getUserSiteIds(m.id, m.role);
+        const myDigests =
+          accessibleSiteIds === null
+            ? siteDigests
+            : siteDigests.filter((d) => accessibleSiteIds.includes(d.site.id));
+        if (myDigests.length === 0) {
+          skippedNoAccess++;
+          return;
+        }
+        const myAlerts = myDigests.reduce(
+          (sum, d) => sum + d.overdueJobs + d.lateStarts + d.overdueDeliveries + d.ordersToPlace,
+          0,
+        );
+        return sendEmail({
           to: m.email!,
-          subject: `Daily Brief — ${dateLabel}${totalAlerts > 0 ? ` (${totalAlerts} action${totalAlerts !== 1 ? "s" : ""} needed)` : ""}`,
-          html: emailHtml,
-        })
-      )
+          subject: `Daily Brief — ${dateLabel}${myAlerts > 0 ? ` (${myAlerts} action${myAlerts !== 1 ? "s" : ""} needed)` : ""}`,
+          html: buildEmailHtml(myDigests, myAlerts),
+        });
+      }),
   );
 
   const sent = results.filter((r) => r.status === "fulfilled").length;
@@ -319,13 +345,14 @@ export async function GET(req: NextRequest) {
   await prisma.eventLog.create({
     data: {
       type: "NOTIFICATION",
-      description: `Daily brief email sent to ${sent} manager${sent !== 1 ? "s" : ""}${failed > 0 ? ` (${failed} failed${failureHint})` : ""}`,
+      description: `Daily brief email sent to ${sent} manager${sent !== 1 ? "s" : ""}${failed > 0 ? ` (${failed} failed${failureHint})` : ""}${skippedNoAccess > 0 ? ` (${skippedNoAccess} skipped — no accessible sites)` : ""}`,
     },
   });
 
   return NextResponse.json({
     sent,
     failed,
+    skippedNoAccess,
     managers: managers.length,
     sites: sites.length,
     date: todayStr,

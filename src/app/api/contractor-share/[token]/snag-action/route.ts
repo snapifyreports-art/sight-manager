@@ -44,8 +44,22 @@ export async function POST(
       return NextResponse.json({ error: "snagId required" }, { status: 400 });
     }
     const notes = formData.get("notes");
-    const notesStr = typeof notes === "string" ? notes.trim() : "";
-    const photos = formData.getAll("photos").filter((p): p is File => p instanceof File);
+    // (May 2026 audit B-14) Sanitise contractor-submitted notes before
+    // appending to snag.notes. Strip HTML tags + control chars to close
+    // an XSS path: notes get rendered admin-side and any future
+    // `dangerouslySetInnerHTML` consumer would inject. Cap length at
+    // 2000 chars so a single submission can't bloat the column.
+    const rawNotes = typeof notes === "string" ? notes : "";
+    const notesStr = rawNotes
+      .replace(/<[^>]*>/g, "") // strip any HTML-tag-looking thing
+      .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "") // strip control chars except \n \r \t
+      .trim()
+      .slice(0, 2000);
+    // Cap photos at 12 per submission to stop a runaway upload loop.
+    const photos = formData
+      .getAll("photos")
+      .filter((p): p is File => p instanceof File)
+      .slice(0, 12);
 
     const snag = await prisma.snag.findUnique({
       where: { id: snagId },
