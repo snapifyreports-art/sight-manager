@@ -70,10 +70,17 @@ interface Props {
   compact?: boolean;
 }
 
+export interface ContactOption {
+  id: string;
+  name: string;
+  company: string | null;
+}
+
 export function LatenessSummary(props: Props) {
   const { status = "open", compact = false } = props;
   const toast = useToast();
   const [events, setEvents] = useState<LatenessEventDTO[] | null>(null);
+  const [contacts, setContacts] = useState<ContactOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState(false);
 
@@ -96,6 +103,33 @@ export function LatenessSummary(props: Props) {
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  // (May 2026 audit SM-P0-3 / FC-P0) Fetch contractors once for the
+  // inline attribution picker. Pre-fix the picker rendered reason +
+  // note but NOT a contractor select — even though the API accepts it.
+  // Managers had to leave the screen, go to the contact's page, and
+  // attribute there. Now a Select renders alongside the reason
+  // dropdown so attribution happens inline.
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/contacts?type=CONTRACTOR", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : []))
+      .then((rows: Array<{ id: string; name: string; company: string | null }>) => {
+        if (cancelled) return;
+        setContacts(
+          rows
+            .map((r) => ({ id: r.id, name: r.name, company: r.company }))
+            .sort((a, b) => (a.company || a.name).localeCompare(b.company || b.name)),
+        );
+      })
+      .catch(() => {
+        /* contractor list is a nice-to-have; if it fails the picker
+           still shows the reason editor without contractor select */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   if (loading) {
     return (
@@ -188,7 +222,7 @@ export function LatenessSummary(props: Props) {
           )}
           <ul className="divide-y">
             {events.map((e) => (
-              <LatenessRow key={e.id} event={e} onChange={refresh} toast={toast} />
+              <LatenessRow key={e.id} event={e} contacts={contacts} onChange={refresh} toast={toast} />
             ))}
           </ul>
         </div>
@@ -199,16 +233,21 @@ export function LatenessSummary(props: Props) {
 
 function LatenessRow({
   event,
+  contacts,
   onChange,
   toast,
 }: {
   event: LatenessEventDTO;
+  contacts: ContactOption[];
   onChange: () => void;
   toast: ReturnType<typeof useToast>;
 }) {
   const [editing, setEditing] = useState(false);
   const [reasonCode, setReasonCode] = useState(event.reasonCode);
   const [reasonNote, setReasonNote] = useState(event.reasonNote ?? "");
+  const [attributedContactId, setAttributedContactId] = useState<string>(
+    event.attributedContactId ?? "",
+  );
   const [saving, setSaving] = useState(false);
 
   const targetLabel = event.job
@@ -228,7 +267,12 @@ function LatenessRow({
       const res = await fetch(`/api/lateness/${event.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reasonCode, reasonNote: reasonNote || null }),
+        body: JSON.stringify({
+          reasonCode,
+          reasonNote: reasonNote || null,
+          // null clears attribution; empty string passes "no choice".
+          attributedContactId: attributedContactId || null,
+        }),
       });
       if (!res.ok) {
         toast.error(await fetchErrorMessage(res, "Couldn't save attribution"));
@@ -306,6 +350,7 @@ function LatenessRow({
             value={reasonCode}
             onChange={(e) => setReasonCode(e.target.value)}
             className="w-full rounded border bg-white px-2 py-1.5 text-xs"
+            aria-label="Lateness reason"
           >
             {REASON_OPTIONS.map((r) => (
               <option key={r.value} value={r.value}>
@@ -313,6 +358,24 @@ function LatenessRow({
               </option>
             ))}
           </select>
+          {/* (May 2026 audit SM-P0-3) Contractor picker — previously
+              absent. API has always accepted attributedContactId,
+              just had no UI surface. */}
+          {contacts.length > 0 && (
+            <select
+              value={attributedContactId}
+              onChange={(e) => setAttributedContactId(e.target.value)}
+              className="w-full rounded border bg-white px-2 py-1.5 text-xs"
+              aria-label="Attribute to contractor"
+            >
+              <option value="">— No contractor attribution —</option>
+              {contacts.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.company ? `${c.company} (${c.name})` : c.name}
+                </option>
+              ))}
+            </select>
+          )}
           <input
             type="text"
             value={reasonNote}
@@ -331,6 +394,7 @@ function LatenessRow({
               onClick={() => {
                 setReasonCode(event.reasonCode);
                 setReasonNote(event.reasonNote ?? "");
+                setAttributedContactId(event.attributedContactId ?? "");
                 setEditing(false);
               }}
               disabled={saving}

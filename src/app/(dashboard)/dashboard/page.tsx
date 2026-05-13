@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { Prisma } from "@prisma/client";
 import { auth } from "@/lib/auth";
 import { getUserSiteIds } from "@/lib/site-access";
 import { DashboardClient, type DashboardData } from "@/components/dashboard/DashboardClient";
@@ -263,32 +264,59 @@ export default async function DashboardPage() {
       status: w.site.status,
       plotCount: w.site._count.plots,
     })),
-    // (May 2026 audit #168) Plots over budget — actual delivered
-    // material cost exceeds expected. Lightweight derivation from
-    // PlotMaterial so we don't HTTP-self-call the budget-report
-    // route. Skipped when siteIds = null + result set is huge —
-    // capped at first 200 plots in scope, ranked by overrun.
+    // (May 2026 audit #168 + D-P0-2) Plots over budget.
+    //
+    // Pre-fix: actual cost was `delivered_quantity * plotMaterial.unitCost`
+    // — same unitCost used for both budget AND actual, so cost overrun
+    // could only fire via over-delivery (more units than budgeted). If
+    // the supplier raised the unit price post-order but quantities
+    // matched, the panel said "on budget".
+    //
+    // Fix: separate the sources.
+    //   Budget = sum(PlotMaterial.quantity * PlotMaterial.unitCost)
+    //   Actual = sum(MaterialOrder.totalCost where DELIVERED + plot match)
+    // The actual side now reflects real invoice totals, catching both
+    // over-delivery AND unit-price overruns.
     plotsOverBudget: await (async () => {
-      const rows = await prisma.plotMaterial.findMany({
-        where: siteIds !== null
-          ? { plot: { siteId: { in: siteIds } } }
-          : { plot: { site: { status: { not: "COMPLETED" } } } },
-        select: {
-          plotId: true,
-          quantity: true,
-          delivered: true,
-          unitCost: true,
-          plot: {
-            select: { id: true, name: true, plotNumber: true, siteId: true, site: { select: { name: true } } },
+      const plotWhere: Prisma.PlotWhereInput =
+        siteIds !== null
+          ? { siteId: { in: siteIds } }
+          : { site: { status: { not: "COMPLETED" } } };
+
+      const [matRows, orderRows] = await Promise.all([
+        prisma.plotMaterial.findMany({
+          where: { plot: plotWhere },
+          select: {
+            plotId: true,
+            quantity: true,
+            unitCost: true,
+            plot: {
+              select: { id: true, name: true, plotNumber: true, siteId: true, site: { select: { name: true } } },
+            },
           },
-        },
-        take: 5000,
-      });
+          take: 5000,
+        }),
+        prisma.materialOrder.findMany({
+          where: {
+            status: "DELIVERED",
+            ...(siteIds !== null
+              ? { OR: [{ plot: { siteId: { in: siteIds } } }, { job: { plot: { siteId: { in: siteIds } } } }] }
+              : {}),
+          },
+          select: {
+            plotId: true,
+            job: { select: { plotId: true } },
+            orderItems: { select: { quantity: true, unitCost: true } },
+          },
+          take: 5000,
+        }),
+      ]);
+
       const map = new Map<
         string,
         { id: string; name: string; plotNumber: string | null; siteId: string; siteName: string; budgeted: number; actual: number }
       >();
-      for (const r of rows) {
+      for (const r of matRows) {
         const k = r.plotId;
         const cur = map.get(k) ?? {
           id: r.plot.id,
@@ -300,8 +328,18 @@ export default async function DashboardPage() {
           actual: 0,
         };
         cur.budgeted += (r.quantity ?? 0) * (r.unitCost ?? 0);
-        cur.actual += (r.delivered ?? 0) * (r.unitCost ?? 0);
         map.set(k, cur);
+      }
+      for (const o of orderRows) {
+        const plotKey = o.plotId ?? o.job?.plotId ?? null;
+        if (!plotKey) continue;
+        const cur = map.get(plotKey);
+        if (!cur) continue; // orders for plots with no PlotMaterial seeded skip
+        const lineTotal = o.orderItems.reduce(
+          (sum, it) => sum + (it.quantity ?? 0) * (it.unitCost ?? 0),
+          0,
+        );
+        cur.actual += lineTotal;
       }
       return Array.from(map.values())
         .map((p) => ({ ...p, overrun: p.actual - p.budgeted }))
