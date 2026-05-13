@@ -311,8 +311,17 @@ export async function POST(
       return NextResponse.json({ error: "You do not have access to this site" }, { status: 403 });
     }
 
+    // (May 2026 audit B-P1-26) Same-day shift is a no-op — return
+    // 200 with `noop: true` rather than 400. Pre-fix the UI surfaced
+    // "must be earlier than current start" as an error toast even
+    // though the user's intent was perfectly valid (drag-back-and-
+    // forth to the same date, or click confirm twice).
+    if (newStart.getTime() === job.startDate.getTime()) {
+      return NextResponse.json({ noop: true, reason: "Same start date — no change required" });
+    }
+
     // Must be earlier than current start — otherwise this is a push, not a pull.
-    if (newStart >= job.startDate) {
+    if (newStart > job.startDate) {
       return NextResponse.json(
         { error: "New start date must be earlier than current start" },
         { status: 400 },
@@ -321,7 +330,9 @@ export async function POST(
 
     const shift = differenceInWorkingDays(newStart, job.startDate); // negative
     if (shift === 0) {
-      return NextResponse.json({ error: "No change" }, { status: 400 });
+      // Calendar dates differ but the working-day delta is zero
+      // (e.g. Sat → Mon snap). Also a no-op.
+      return NextResponse.json({ noop: true, reason: "No working-day shift required" });
     }
 
     const newEnd = addWorkingDays(job.endDate, shift);

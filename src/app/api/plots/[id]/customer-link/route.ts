@@ -80,6 +80,7 @@ export async function POST(
 
   // Generate iff missing OR caller asked to rotate
   let token = result.plot.shareToken;
+  const isRotation = rotate && !!result.plot.shareToken;
   if (!token || rotate) {
     token = newToken();
   }
@@ -90,6 +91,20 @@ export async function POST(
       data: { shareToken: token, shareEnabled: true },
       select: { shareToken: true, shareEnabled: true },
     });
+
+    // (May 2026 audit B-P1-31) Token rotation invalidates the URL the
+    // customer bookmarked, but CustomerPushSubscription.plotId ties
+    // subscriptions to the plot, not the token. Pre-fix old
+    // subscribers continued to receive pushes for a URL that 404'd.
+    // Drop subscriptions on rotate so the customer's next visit
+    // re-subscribes against the live link.
+    if (isRotation) {
+      await prisma.customerPushSubscription
+        .deleteMany({ where: { plotId: id } })
+        .catch((err) => {
+          console.warn("[customer-link rotate] subscription cleanup failed:", err);
+        });
+    }
 
     return NextResponse.json({
       token: updated.shareToken,
