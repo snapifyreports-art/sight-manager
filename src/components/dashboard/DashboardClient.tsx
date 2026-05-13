@@ -203,7 +203,23 @@ function formatEventType(type: string): string {
 
 // ---------- Stats Cards ----------
 
-function StatsCards({ stats }: { stats: StatsData }) {
+// (May 2026 audit D-P1) Derived stats on top of the API output:
+// atRiskCount (overdue job count), totalLatenessWdLost (sum of working-
+// days late across all overdue jobs). Pre-fix the dashboard's 8 stat
+// cards covered sites/jobs/orders/contacts but had NO entry-points for
+// the director's first-of-the-day questions — "how much are we
+// running late this morning?" and "which sites need a phone call?".
+// Both numbers are visible in the At-Risk panel below the fold, but
+// the cards are the above-the-fold scanning surface.
+function StatsCards({
+  stats,
+  atRiskCount,
+  totalLatenessWdLost,
+}: {
+  stats: StatsData;
+  atRiskCount: number;
+  totalLatenessWdLost: number;
+}) {
   const cards = [
     {
       title: "Total Sites",
@@ -272,6 +288,35 @@ function StatsCards({ stats }: { stats: StatsData }) {
       gradient: "from-violet-500 to-purple-600",
       shadow: "shadow-violet-500/20",
       href: "/contacts",
+    },
+    // (May 2026 audit D-P1) Director's morning scan questions. The
+    // numbers themselves are above-the-fold; the deep-link drops the
+    // user into the At-Risk anchor of the same page, or jumps to
+    // Analytics → Lateness for the working-day total.
+    {
+      title: "At-Risk Jobs",
+      value: atRiskCount,
+      icon: AlertTriangle,
+      gradient:
+        atRiskCount > 0
+          ? "from-red-500 to-red-600"
+          : "from-slate-300 to-slate-400",
+      shadow: atRiskCount > 0 ? "shadow-red-500/20" : "shadow-slate-300/20",
+      href: "#at-risk" as string | null,
+    },
+    {
+      title: "Working Days Late",
+      value: totalLatenessWdLost,
+      icon: Clock,
+      gradient:
+        totalLatenessWdLost > 0
+          ? "from-amber-500 to-orange-500"
+          : "from-slate-300 to-slate-400",
+      shadow:
+        totalLatenessWdLost > 0
+          ? "shadow-amber-500/20"
+          : "shadow-slate-300/20",
+      href: "/analytics" as string | null,
     },
   ];
 
@@ -403,7 +448,9 @@ function AtRiskPanel({
   // in the panel — same job).
 
   return (
-    <Card className="border-amber-200 bg-amber-50/30">
+    // (May 2026 audit D-P1) Anchor id so the "At-Risk Jobs" stat card
+    // above can deep-link straight to this panel.
+    <Card id="at-risk" className="scroll-mt-24 border-amber-200 bg-amber-50/30">
       <CardHeader className="pb-3">
         <div className="flex items-center gap-2">
           <AlertTriangle className="size-4 text-amber-600" aria-hidden="true" />
@@ -771,7 +818,14 @@ export function DashboardClient({ data }: { data: DashboardData }) {
       </div>
 
       {/* Stats Row */}
-      <StatsCards stats={data.stats} />
+      <StatsCards
+        stats={data.stats}
+        atRiskCount={data.overdueJobs.length}
+        totalLatenessWdLost={data.overdueJobs.reduce(
+          (sum, j) => sum + (j.daysLate ?? 0),
+          0,
+        )}
+      />
 
       {/* (May 2026 audit follow-up to #152) Sites the user is watching
           — surfaces what's on their personal radar without trawling
