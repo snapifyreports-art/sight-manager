@@ -443,7 +443,10 @@ export function ContactsClient({
 
           <div className="space-y-4 py-2">
             <div className="space-y-2">
-              <Label htmlFor="contact-name">Name *</Label>
+              <Label htmlFor="contact-name">
+                Name <span className="text-red-600" aria-hidden>*</span>
+                <span className="sr-only">(required)</span>
+              </Label>
               <Input
                 id="contact-name"
                 placeholder="e.g. John Smith"
@@ -451,6 +454,8 @@ export function ContactsClient({
                 onChange={(e) =>
                   setForm((prev) => ({ ...prev, name: e.target.value }))
                 }
+                required
+                aria-required="true"
               />
             </div>
 

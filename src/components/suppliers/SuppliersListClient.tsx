@@ -195,11 +195,17 @@ export function SuppliersListClient({ suppliers: initial }: { suppliers: Supplie
           </DialogHeader>
           <div className="space-y-3">
             <div>
-              <label className="text-xs font-medium">Name *</label>
+              <label htmlFor="supplier-name" className="text-xs font-medium">
+                Name <span className="text-red-600" aria-hidden>*</span>
+                <span className="sr-only">(required)</span>
+              </label>
               <Input
+                id="supplier-name"
                 value={form.name}
                 onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
                 placeholder="Supplier name"
+                required
+                aria-required="true"
               />
             </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">

@@ -208,13 +208,17 @@ function AddJobDialog({
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="job-name">Name</Label>
+            <Label htmlFor="job-name">
+              Name <span className="text-red-600" aria-hidden>*</span>
+              <span className="sr-only">(required)</span>
+            </Label>
             <Input
               id="job-name"
               placeholder="e.g. First Fix Plumbing"
               value={name}
               onChange={(e) => setName(e.target.value)}
               required
+              aria-required="true"
             />
           </div>
 
