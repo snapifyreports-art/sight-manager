@@ -4,6 +4,7 @@ import { sendPushToAll, sendPushToSiteAudience } from "@/lib/push";
 import { addDays } from "date-fns";
 import { getServerCurrentDate, getServerStartOfDay } from "@/lib/dev-date";
 import { checkCronAuth } from "@/lib/cron-auth";
+import { whereJobEndOverdue, whereJobStartOverdue } from "@/lib/lateness";
 
 export const dynamic = "force-dynamic";
 
@@ -38,9 +39,15 @@ export async function GET(req: NextRequest) {
     pendingOrdersCount,
     lateStartCount,
   ] = await Promise.all([
-    // All job counts filter to LEAF jobs only (parents are derived rollups)
+    // (May 2026 audit D-P1-4) Use the Lateness SSOT so the overdue
+    // definition matches every other surface. Pre-fix this counted
+    // only IN_PROGRESS jobs as overdue — but NOT_STARTED + ON_HOLD
+    // jobs past their endDate are also overdue in every other view
+    // (Daily Brief, Delay Report, lateness cron). The push count
+    // diverged from what the user saw in-app. All job counts filter
+    // to LEAF jobs only since parents are derived rollups.
     prisma.job.count({
-      where: { status: "IN_PROGRESS", endDate: { lt: now }, children: { none: {} } },
+      where: { ...whereJobEndOverdue(now), children: { none: {} } },
     }),
     prisma.materialOrder.count({
       where: {
@@ -71,9 +78,10 @@ export async function GET(req: NextRequest) {
     prisma.materialOrder.count({
       where: { status: "PENDING", dateOfOrder: { lte: todayEnd } },
     }),
-    // Late starts: NOT_STARTED leaf jobs whose start date has already passed
+    // Late starts: NOT_STARTED leaf jobs whose start date has already
+    // passed. Use the Lateness SSOT helper.
     prisma.job.count({
-      where: { status: "NOT_STARTED", startDate: { lt: todayStart }, children: { none: {} } },
+      where: { ...whereJobStartOverdue(todayStart), children: { none: {} } },
     }),
   ]);
 

@@ -115,9 +115,17 @@ export function LatenessSummary(props: Props) {
 
   const open = events.filter((e) => !e.resolvedAt);
   const resolved = events.filter((e) => e.resolvedAt);
-  const totalDays = events.reduce((sum, e) => sum + e.daysLate, 0);
+  // (May 2026 audit D-P0-3) Split open vs resolved working-days. Pre-fix
+  // the headline conflated them when status=all so the Delay Report tab
+  // said "47 WD lost" (= open + historical resolved) while the weekly
+  // digest email said "12 WD lost" (= open only). Director couldn't
+  // reconcile. Now: always two numbers, never one blended figure.
+  const openDays = open.reduce((sum, e) => sum + e.daysLate, 0);
+  const resolvedDays = resolved.reduce((sum, e) => sum + e.daysLate, 0);
 
-  // Reason breakdown.
+  // Reason breakdown — keep summing all events so the breakdown shows
+  // every reason that ever contributed (this is a "where did the time
+  // go" lens, not a "what's open right now" lens).
   const reasonCounts = new Map<string, number>();
   for (const e of events) {
     reasonCounts.set(e.reasonCode, (reasonCounts.get(e.reasonCode) ?? 0) + e.daysLate);
@@ -125,6 +133,17 @@ export function LatenessSummary(props: Props) {
   const topReasons = Array.from(reasonCounts.entries())
     .sort((a, b) => b[1] - a[1])
     .slice(0, 3);
+
+  // Headline — always lead with the open figure when there is one; the
+  // resolved figure tags onto the right when both exist. If only resolved
+  // events exist (rare — usually means the user filtered to status=resolved
+  // explicitly), show the historical figure.
+  const headline =
+    open.length > 0
+      ? resolved.length > 0
+        ? `${open.length} open · ${openDays} WD lost (+${resolvedDays} WD historic)`
+        : `${open.length} open · ${openDays} working day${openDays === 1 ? "" : "s"} lost`
+      : `${resolved.length} resolved · ${resolvedDays} working day${resolvedDays === 1 ? "" : "s"} historically`;
 
   return (
     <div className="rounded-lg border bg-white">
@@ -136,11 +155,7 @@ export function LatenessSummary(props: Props) {
       >
         <div className="flex items-center gap-2">
           <AlertTriangle className="size-4 text-amber-600" aria-hidden />
-          <span className="text-sm font-semibold">
-            {open.length > 0
-              ? `${open.length} open · ${totalDays} working day${totalDays === 1 ? "" : "s"} lost`
-              : `${resolved.length} resolved · ${totalDays} working day${totalDays === 1 ? "" : "s"} historically`}
-          </span>
+          <span className="text-sm font-semibold">{headline}</span>
         </div>
         <ChevronDown
           className={`size-4 shrink-0 transition-transform ${expanded ? "rotate-180" : ""}`}

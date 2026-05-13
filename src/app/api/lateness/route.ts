@@ -82,6 +82,11 @@ export async function GET(req: NextRequest) {
 
   if (kindParam) where.kind = kindParam;
 
+  // (May 2026 audit D-P0-3) Pre-fix this endpoint capped at 200 events,
+  // silently. A big site with >200 lateness events made LatenessSummary's
+  // headline disagree with the Analytics widget (no cap) and Weekly
+  // Digest (also no cap). Now: pull all matching events. If we ever need
+  // pagination here it'll be in the contract, not a silent cap.
   const events = await prisma.latenessEvent.findMany({
     where,
     orderBy: [{ resolvedAt: { sort: "asc", nulls: "first" } }, { wentLateOn: "desc" }],
@@ -98,7 +103,6 @@ export async function GET(req: NextRequest) {
       attributedContact: { select: { id: true, name: true, company: true } },
       recordedBy: { select: { id: true, name: true } },
     },
-    take: 200,
   });
 
   return NextResponse.json(events);

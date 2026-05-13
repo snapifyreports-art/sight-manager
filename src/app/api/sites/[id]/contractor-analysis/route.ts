@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canAccessSite } from "@/lib/site-access";
 import { apiError } from "@/lib/api-errors";
+import { differenceInWorkingDays } from "@/lib/working-days";
 
 export const dynamic = "force-dynamic";
 
@@ -43,20 +44,17 @@ interface ContractorRow {
   }>;
 }
 
-function workingDaysBetween(a: Date, b: Date): number {
-  if (b <= a) return 0;
-  let count = 0;
-  const cursor = new Date(a);
-  cursor.setHours(0, 0, 0, 0);
-  const end = new Date(b);
-  end.setHours(0, 0, 0, 0);
-  while (cursor < end) {
-    const d = cursor.getDay();
-    if (d !== 0 && d !== 6) count++;
-    cursor.setDate(cursor.getDate() + 1);
-  }
-  return count;
-}
+// (May 2026 audit D-P1-7) Inline `workingDaysBetween` removed — was a
+// shadow of `differenceInWorkingDays` from `@/lib/working-days`. Any
+// future bank-holiday handling, working-day rule change, or weekend
+// definition change wouldn't have propagated to three shadowed copies
+// (here, supplier-analysis, site-story). All three now route through
+// the SSOT helper.
+//
+// `differenceInWorkingDays` returns a SIGNED delta (b before a → negative).
+// The old `workingDaysBetween` returned 0 for b <= a. Callers below clamp
+// with Math.max(0, ...) where needed to preserve the old non-negative
+// contract at the consumer.
 
 export async function GET(
   _req: NextRequest,
@@ -144,9 +142,12 @@ export async function GET(
           daysLate = 0;
         } else if (r.job.actualEndDate) {
           row.jobsLate++;
-          daysLate = workingDaysBetween(
-            r.job.originalEndDate,
-            r.job.actualEndDate,
+          // Working-day delta from originalEnd → actualEnd. Clamp to 0
+          // (older inline shadow returned 0 for negative deltas; preserve
+          // that semantic — "jobs late" can't be negatively-late).
+          daysLate = Math.max(
+            0,
+            differenceInWorkingDays(r.job.actualEndDate, r.job.originalEndDate),
           );
           row.totalDelayDaysAttributed += daysLate;
         }

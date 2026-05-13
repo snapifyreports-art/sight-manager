@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canAccessSite } from "@/lib/site-access";
 import { apiError } from "@/lib/api-errors";
+import { differenceInWorkingDays } from "@/lib/working-days";
 
 export const dynamic = "force-dynamic";
 
@@ -38,20 +39,9 @@ interface SupplierRow {
   }>;
 }
 
-function workingDaysBetween(a: Date, b: Date): number {
-  if (b <= a) return 0;
-  let count = 0;
-  const cursor = new Date(a);
-  cursor.setHours(0, 0, 0, 0);
-  const end = new Date(b);
-  end.setHours(0, 0, 0, 0);
-  while (cursor < end) {
-    const d = cursor.getDay();
-    if (d !== 0 && d !== 6) count++;
-    cursor.setDate(cursor.getDate() + 1);
-  }
-  return count;
-}
+// (May 2026 audit D-P1-7) Inline `workingDaysBetween` removed — was a
+// shadow of `differenceInWorkingDays` from `@/lib/working-days`. Callers
+// clamp with Math.max(0, ...) to preserve the old non-negative contract.
 
 export async function GET(
   _req: NextRequest,
@@ -134,9 +124,9 @@ export async function GET(
         if (o.deliveredDate && o.expectedDeliveryDate) {
           if (o.deliveredDate.getTime() > o.expectedDeliveryDate.getTime()) {
             row.ordersLate++;
-            daysLate = workingDaysBetween(
-              o.expectedDeliveryDate,
-              o.deliveredDate,
+            daysLate = Math.max(
+              0,
+              differenceInWorkingDays(o.deliveredDate, o.expectedDeliveryDate),
             );
             row.totalDaysLate += daysLate;
           } else {

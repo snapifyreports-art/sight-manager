@@ -10,6 +10,7 @@ import {
 } from "date-fns";
 import { getServerCurrentDate } from "@/lib/dev-date";
 import { canAccessSite } from "@/lib/site-access";
+import { isJobEndOverdue } from "@/lib/lateness";
 
 export const dynamic = "force-dynamic";
 
@@ -170,12 +171,12 @@ export async function GET(
     return NextResponse.json({ error: "Site not found" }, { status: 404 });
   }
 
-  // Calculate stats
+  // Calculate stats. (May 2026 audit D-P1-5) `overdueJobs` was inline
+  // arithmetic — logically equivalent today but drifts from the Lateness
+  // SSOT on the next semantics change. Route through `isJobEndOverdue`.
   const totalJobs = allJobs.length;
   const completedJobs = allJobs.filter((j) => j.status === "COMPLETED").length;
-  const overdueJobs = allJobs.filter(
-    (j) => j.endDate && new Date(j.endDate) < today && j.status !== "COMPLETED"
-  ).length;
+  const overdueJobs = allJobs.filter((j) => isJobEndOverdue(j, today)).length;
   const activeJobs = allJobs.filter((j) => j.status === "IN_PROGRESS").length;
 
   // Next week lookahead

@@ -4,6 +4,7 @@ import { sendEmail } from "@/lib/email";
 import { format } from "date-fns";
 import { getServerCurrentDate, getServerStartOfDay } from "@/lib/dev-date";
 import { getUserSiteIds } from "@/lib/site-access";
+import { whereJobEndOverdue, whereJobStartOverdue } from "@/lib/lateness";
 
 export const dynamic = "force-dynamic";
 
@@ -52,12 +53,17 @@ export async function GET(req: NextRequest) {
         ordersToPlace,
         openSnags,
       ] = await Promise.all([
-        // All job counts filter to LEAF jobs only (parents are derived rollups)
+        // (May 2026 audit D-P1-3) Route the overdue / late-start counts
+        // through the Lateness SSOT (`@/lib/lateness`) so future
+        // semantics changes propagate. Pre-fix: hand-rolled clauses,
+        // coincidentally equivalent today, drifted on the next "what
+        // counts as overdue" tweak. All job counts also filter to LEAF
+        // jobs only since parents are derived rollups.
         prisma.job.count({
-          where: { plot: { siteId: site.id }, endDate: { lt: todayStart }, status: { not: "COMPLETED" }, children: { none: {} } },
+          where: { plot: { siteId: site.id }, ...whereJobEndOverdue(todayStart), children: { none: {} } },
         }),
         prisma.job.count({
-          where: { plot: { siteId: site.id }, status: "NOT_STARTED", startDate: { lt: todayStart }, children: { none: {} } },
+          where: { plot: { siteId: site.id }, ...whereJobStartOverdue(todayStart), children: { none: {} } },
         }),
         prisma.job.count({
           where: { plot: { siteId: site.id }, status: "IN_PROGRESS", children: { none: {} } },

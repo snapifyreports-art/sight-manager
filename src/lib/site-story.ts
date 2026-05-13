@@ -1,4 +1,5 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
+import { differenceInWorkingDays } from "./working-days";
 
 /**
  * Site Story synthesizer — single source of truth for "what actually
@@ -146,24 +147,17 @@ interface BuildOptions {
   includeFullDetail?: boolean;
 }
 
-// Working-day helpers — local copy so this file stays standalone.
-// Mirror src/lib/working-days.ts logic but inlined to avoid the lib's
-// dev-date side effects which are server-request-scoped.
-function workingDaysBetween(a: Date, b: Date): number {
+// (May 2026 audit D-P1-7) Local `workingDaysBetween` removed. The
+// previous justification ("avoid lib side effects") is stale —
+// `src/lib/working-days.ts` is pure since the audit cleanup. Importing
+// `differenceInWorkingDays` keeps the SSOT intact: any future change
+// to working-day rules (e.g. bank-holiday handling) lands in one place.
+//
+// Callers below previously got 0 for end<=start. The SSOT helper returns
+// a signed delta, so callers clamp with Math.max(0, ...).
+function workingDaysBetween(a: Date | null, b: Date | null): number {
   if (!a || !b) return 0;
-  const start = new Date(a);
-  start.setHours(0, 0, 0, 0);
-  const end = new Date(b);
-  end.setHours(0, 0, 0, 0);
-  if (end <= start) return 0;
-  let count = 0;
-  const cursor = new Date(start);
-  while (cursor < end) {
-    const d = cursor.getDay();
-    if (d !== 0 && d !== 6) count++;
-    cursor.setDate(cursor.getDate() + 1);
-  }
-  return count;
+  return Math.max(0, differenceInWorkingDays(b, a));
 }
 
 export async function buildSiteStory(
