@@ -70,6 +70,11 @@ interface Props {
   /** Compact mode: just the header + total — no event list. Used in
    *  Plot Detail / Job Detail panels where space is tight. */
   compact?: boolean;
+  /** (May 2026 audit SM-P1) Start expanded rather than the default
+   *  collapsed header. Used on Site Story where the user has already
+   *  scrolled past significant context and shouldn't be made to click
+   *  again to read the lateness breakdown. */
+  defaultExpanded?: boolean;
 }
 
 export interface ContactOption {
@@ -84,13 +89,13 @@ export interface SupplierOption {
 }
 
 export function LatenessSummary(props: Props) {
-  const { status = "open", compact = false } = props;
+  const { status = "open", compact = false, defaultExpanded = false } = props;
   const toast = useToast();
   const [events, setEvents] = useState<LatenessEventDTO[] | null>(null);
   const [contacts, setContacts] = useState<ContactOption[]>([]);
   const [suppliers, setSuppliers] = useState<SupplierOption[]>([]);
   const [loading, setLoading] = useState(true);
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(defaultExpanded);
 
   const refresh = useCallback(async () => {
     setLoading(true);
