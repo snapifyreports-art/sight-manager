@@ -23,8 +23,14 @@
  */
 
 import { Printer, FileSpreadsheet } from "lucide-react";
-import * as XLSX from "xlsx";
 import { Button } from "@/components/ui/button";
+
+// (May 2026 audit P-* bundle-bloat) xlsx is ~190 KB gzipped — pre-fix
+// the static import shipped it on every authenticated page that
+// included a ReportExportButtons component (i.e. most of the app).
+// Lazy-import on click so it only loads when the user actually
+// downloads an Excel file. First-click latency rises by ~200ms; every
+// other page load gets faster.
 
 export interface ReportExportButtonsProps {
   /** Filename without extension. Will get `.xlsx` appended. */
@@ -57,8 +63,9 @@ export function ReportExportButtons({
     else window.print();
   };
 
-  const handleExcel = () => {
+  const handleExcel = async () => {
     if (!rows || rows.length === 0) return;
+    const XLSX = await import("xlsx");
     const ws = XLSX.utils.json_to_sheet(rows);
     const wb = XLSX.utils.book_new();
     // Sheet names are limited to 31 chars.

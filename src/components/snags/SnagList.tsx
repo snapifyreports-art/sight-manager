@@ -23,7 +23,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import * as XLSX from "xlsx";
+// (May 2026 audit P-* bundle-bloat) xlsx (~190KB gzip) lazy-loaded on
+// click — pre-fix it shipped on every snag tab.
 import { SnagStatusBadge, SnagPriorityBadge } from "@/components/shared/StatusBadge";
 import { InlinePriorityPicker } from "./InlinePriorityPicker";
 import { useSnagAction, type SnagStatus } from "@/hooks/useSnagAction";
@@ -145,7 +146,8 @@ export function SnagList({ snags, onSelect, onRefresh, showPlot, highlightId, si
     CLOSED: snags.filter((s) => s.status === "CLOSED").length,
   };
 
-  const handleExport = () => {
+  const handleExport = async () => {
+    const XLSX = await import("xlsx");
     const rows = filtered.map((s) => ({
       Description: s.description,
       Location: s.location || "",
