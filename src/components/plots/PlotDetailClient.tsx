@@ -51,6 +51,7 @@ import {
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { ClipboardCheck } from "lucide-react";
 import { PlotQualityPanel } from "@/components/plots/PlotQualityPanel";
+import { LatenessSummary } from "@/components/lateness/LatenessSummary";
 import {
   Dialog,
   DialogContent,
@@ -494,6 +495,11 @@ function PlotOverview({
 
       {/* (May 2026 audit #53) Predictive completion banner. */}
       <PredictiveCompletionBanner plotId={plot.id} />
+
+      {/* (#191) Lateness summary — opens to show every open lateness
+          event on this plot with inline reason attribution. Hides
+          completely when there's nothing late. */}
+      <LatenessSummary plotId={plot.id} status="all" />
 
       {/* Progress Stats */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">

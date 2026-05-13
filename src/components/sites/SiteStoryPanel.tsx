@@ -18,6 +18,7 @@ import {
   HardHat,
 } from "lucide-react";
 import { format } from "date-fns";
+import { LatenessSummary } from "@/components/lateness/LatenessSummary";
 
 /**
  * Site Story tab — internal retrospective view ("warts and all").
@@ -486,6 +487,17 @@ export function SiteStoryPanel({ siteId }: { siteId: string }) {
           )}
         </section>
       )}
+
+      {/* (#191) Lateness section — every open/resolved event for
+          this site with reason breakdown + attribution. The full
+          retrospective lives here. */}
+      <section className="rounded-xl border bg-white p-5">
+        <div className="mb-3 flex items-center gap-2">
+          <Clock className="size-4 text-amber-600" aria-hidden />
+          <h3 className="text-sm font-semibold text-slate-700">Lateness</h3>
+        </div>
+        <LatenessSummary siteId={siteId} status="all" />
+      </section>
 
       {/* ─── Per-plot stories ─────────────────────────────── */}
       <section>

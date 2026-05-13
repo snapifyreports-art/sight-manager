@@ -35,6 +35,7 @@ import {
 } from "lucide-react";
 import { JobSiblingNav } from "@/components/jobs/JobSiblingNav";
 import { SnagDialog } from "@/components/snags/SnagDialog";
+import { LatenessSummary } from "@/components/lateness/LatenessSummary";
 import { Button } from "@/components/ui/button";
 import { Breadcrumbs } from "@/components/ui/breadcrumbs";
 import { Badge } from "@/components/ui/badge";
@@ -836,6 +837,11 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
           </div>
         </div>
       </div>
+
+      {/* (#191) Lateness history for this job — every time it
+          slipped, why, who carried it. Hides when there's nothing
+          late + no resolved history. */}
+      <LatenessSummary jobId={job.id} status="all" />
 
       {/* Info Grid */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

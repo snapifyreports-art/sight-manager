@@ -23,6 +23,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { JobStatusBadge, SnagStatusBadge, SnagPriorityBadge } from "@/components/shared/StatusBadge";
+import { LatenessSummary } from "@/components/lateness/LatenessSummary";
 
 interface Contact {
   id: string;
@@ -238,6 +239,10 @@ export function ContactDetailClient({ contact, jobs, snags, documents, orders }:
           </CardContent>
         </Card>
       </div>
+
+      {/* (#191) Lateness attributed to this contact — every slip the
+          manager has flagged as caused by them. Empty hides itself. */}
+      <LatenessSummary contactId={contact.id} status="all" />
 
       {/* (May 2026 audit #179) Contractor scorecard. Only rendered
           for contractors, only after the API responds. */}

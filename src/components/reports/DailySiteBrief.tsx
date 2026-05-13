@@ -63,6 +63,7 @@ import {
 import { cn } from "@/lib/utils";
 import { SnagDialog } from "@/components/snags/SnagDialog";
 import { JobActionStrip } from "@/components/reports/JobActionStrip";
+import { LatenessSummary } from "@/components/lateness/LatenessSummary";
 import { useRefreshOnFocus } from "@/hooks/useRefreshOnFocus";
 import { Button } from "@/components/ui/button";
 import {
@@ -1620,6 +1621,13 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
         );
       })()}
 
+
+      {/* (#191) Lateness summary — every open lateness event on the
+          site with reason attribution UI. Auto-hides when nothing's
+          late. Keith's directive: "this cannot just try, it has to
+          literally work — everything that's late needs a reason and
+          attribution". */}
+      <LatenessSummary siteId={siteId} status="open" />
 
       {/* ═══════════════ ALERTS ═══════════════ */}
       {(() => {
