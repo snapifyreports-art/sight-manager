@@ -30,13 +30,18 @@ export function GlobalDailyBriefClient({ sites }: GlobalDailyBriefClientProps) {
   const selectedSiteId = searchParams.get("site") ?? "";
   const selectedSite = sites.find((s) => s.id === selectedSiteId);
 
+  // (May 2026 audit SM-P1) When the user picks a specific site, route
+  // to the CANONICAL per-site URL (/sites/[id]?tab=daily-brief) instead
+  // of /daily-brief?site=. Pre-fix two URL shapes returned the same
+  // view, creating stale-bookmark + back-button confusion when a link
+  // was shared. The All-Sites option still lives at /daily-brief.
   const handleSiteChange = (value: string) => {
-    const params = new URLSearchParams(searchParams.toString());
     if (value) {
-      params.set("site", value);
-    } else {
-      params.delete("site");
+      router.replace(`/sites/${value}?tab=daily-brief`);
+      return;
     }
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("site");
     router.replace(`/daily-brief?${params.toString()}`);
   };
 
