@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { calculateCascade } from "@/lib/cascade";
 import { canAccessSite } from "@/lib/site-access";
 import { apiError } from "@/lib/api-errors";
+import { enforceOrderInvariants } from "@/lib/order-invariants";
 
 export const dynamic = "force-dynamic";
 
@@ -226,12 +227,38 @@ export async function PUT(
           },
         })
       ),
-      ...overriddenOrders.map((o) =>
-        prisma.materialOrder.update({
+      // (May 2026 audit B-P1-14) For each "Start anyway" override
+      // order, also bring its expectedDeliveryDate forward to
+      // `today + leadTimeDays` via enforceOrderInvariants — pre-fix
+      // we flipped status to ORDERED with dateOfOrder=today but left
+      // expectedDeliveryDate untouched. On a pull-forward, that left
+      // the delivery date in the past relative to today and Daily
+      // Brief immediately flagged the order overdue. Manager
+      // triggered "Start anyway" expecting end-to-end fix.
+      ...overriddenOrders.map((o) => {
+        const patch = enforceOrderInvariants(
+          {
+            dateOfOrder: o.dateOfOrder,
+            expectedDeliveryDate: o.expectedDeliveryDate,
+            deliveredDate: o.deliveredDate,
+            leadTimeDays: o.leadTimeDays,
+          },
+          {
+            dateOfOrder: today,
+            status: "ORDERED",
+            leadTimeDays: o.leadTimeDays,
+          },
+          today,
+        );
+        return prisma.materialOrder.update({
           where: { id: o.id },
-          data: { status: "ORDERED", dateOfOrder: today },
-        })
-      ),
+          data: {
+            status: "ORDERED",
+            dateOfOrder: today,
+            ...patch,
+          },
+        });
+      }),
     ]);
 
     // I6: parent-stage rollup — recompute any parent whose children moved.

@@ -80,6 +80,24 @@ export async function POST(req: NextRequest) {
     });
   } catch (err) {
     console.error("[request-reset] sendEmail failed:", err);
+    // (May 2026 audit B-P1-16) Persist the failure to EventLog so a
+    // monitoring scan can alert. Pre-fix the only signal was a
+    // console.error in Lambda logs — operators had no visible trail
+    // when Resend rate-limited / domain wasn't verified / API key
+    // was missing. Same pattern as the daily-email cron's failure
+    // logging.
+    const msg = err instanceof Error ? err.message : String(err);
+    await prisma.eventLog
+      .create({
+        data: {
+          type: "NOTIFICATION",
+          description: `Password reset / invite email FAILED for ${user.email}: ${msg.slice(0, 200)}`,
+          userId: user.id,
+        },
+      })
+      .catch(() => {
+        /* don't compound the failure */
+      });
     // Still return generic — don't leak whether the send succeeded.
   }
 

@@ -80,6 +80,7 @@ export async function openOrUpdateLateness(
     // deadline back, then it crossed again).
     const data: Prisma.LatenessEventUpdateInput = {};
     if (existing.daysLate !== args.daysLate) data.daysLate = args.daysLate;
+    const isReopening = !!existing.resolvedAt;
     if (existing.resolvedAt) data.resolvedAt = null;
     // Only update reason fields if caller explicitly provided one
     // (don't overwrite a manager-set reason with OTHER).
@@ -94,6 +95,25 @@ export async function openOrUpdateLateness(
     }
     if (Object.keys(data).length > 0) {
       await db.latenessEvent.update({ where: { id: existing.id }, data });
+    }
+    // (May 2026 audit B-P1-13) Re-opening a resolved event used to be
+    // silent — no audit row. Reports aggregating `resolved` events for
+    // a period would still count this row as resolved even though it's
+    // back open. Emit a LATENESS_OPENED breadcrumb so the timeline
+    // shows the re-open moment.
+    if (isReopening) {
+      await db.eventLog
+        .create({
+          data: {
+            type: "LATENESS_OPENED",
+            description: `Lateness re-opened: ${args.kind} on ${args.targetType} ${args.targetId.slice(0, 8)}`,
+            siteId: args.siteId,
+            plotId: args.plotId ?? null,
+            jobId: args.jobId ?? null,
+            delayReasonType: args.reasonCode ?? null,
+          },
+        })
+        .catch(() => {});
     }
     return { id: existing.id, created: false };
   }
