@@ -237,6 +237,14 @@ function getActiveStageLabel(plot: ProgrammePlot): string {
   // (#23) Routes through the unified getCurrentStage helper so this
   // matches Walkthrough, Daily Brief, and Plot Detail. Pre-fix,
   // these four views could disagree on the same plot.
+  //
+  // (May 2026 audit B-P1-24) When all jobs are COMPLETED,
+  // getCurrentStage now returns null \u2014 distinguish "no jobs" from
+  // "all done" so the programme cell renders "Complete" instead of a
+  // misleading "Snagging" / last-job-name.
+  if (plot.jobs.length > 0 && plot.jobs.every((j) => j.status === "COMPLETED")) {
+    return "Complete";
+  }
   const stage = getCurrentStage(plot.jobs);
   if (!stage) return "\u2014";
   return getStageCode(stage);

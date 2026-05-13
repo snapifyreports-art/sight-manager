@@ -12,6 +12,21 @@ import { createHmac, timingSafeEqual } from "crypto";
 // `requireSecret()` is called by every signing/verifying function
 // below — DO NOT cache or hoist this; that's how the original bug
 // crept in.
+//
+// (May 2026 audit B-P1-21) ALL five token kinds (contractor share,
+// plot share, password reset, calendar feed, and the now-deprecated
+// raw share) sign with the same NEXTAUTH_SECRET. The verifiers are
+// naturally type-segregated by their required-payload-fields check
+// (e.g. a contractor token has `contactId`+`siteId`; a calendar token
+// has `userId`+`siteId` — neither can pass as the other). So a leaked
+// CONTRACTOR token can't be replayed as a calendar token. BUT if the
+// NEXTAUTH_SECRET itself leaks, an attacker can mint tokens of every
+// kind — they're all forgeable from the same key. Mitigation: rotate
+// NEXTAUTH_SECRET and every signed token expires invalidly. A future
+// hardening: prefix the signed `data` with a domain tag per kind
+// (e.g. `"contractor:"+data`) so an attacker would also need to know
+// each domain string. Tracked but out of scope for this batch — would
+// invalidate every in-flight token at deploy.
 function requireSecret(): string {
   const v = process.env.NEXTAUTH_SECRET;
   if (v && v.length > 0) return v;

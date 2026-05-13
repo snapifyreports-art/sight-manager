@@ -9,7 +9,7 @@
  *
  * Rule (Keith confirmed May 2026):
  *   - IN_PROGRESS exists → that stage's name
- *   - All COMPLETED → "Complete"
+ *   - All COMPLETED → null (caller renders "Complete")
  *   - Mix of COMPLETED + NOT_STARTED → first NOT_STARTED stage ("next up")
  *   - All NOT_STARTED → first stage
  *   - No jobs → null
@@ -18,6 +18,15 @@
  * (the stage IS in motion, just paused). Edge case: if there are
  * multiple IN_PROGRESS jobs (parallel sub-jobs), the lowest-sortOrder
  * one wins so the result is deterministic.
+ *
+ * (May 2026 audit B-P1-24) Pre-fix this function returned the
+ * last-COMPLETED job when every job was COMPLETED, but
+ * `getCurrentStageLabel` returned the string "Complete" for the same
+ * input — so a direct caller showed e.g. "Snagging" for a fully done
+ * plot while a label caller showed "Complete". They now agree:
+ * getCurrentStage returns null when all-complete (signal to the
+ * caller to render its own "Complete" affordance), and
+ * getCurrentStageLabel keeps emitting "Complete".
  */
 
 interface StageJob {
@@ -42,11 +51,11 @@ export function getCurrentStage<T extends StageJob>(jobs: T[]): T | null {
   const upcoming = sorted.find((j) => j.status === "NOT_STARTED");
   if (upcoming) return upcoming;
 
-  // Otherwise everything is complete (or some unknown status). Use the
-  // last completed job as the most representative "this is where we
-  // ended up". The caller can render "Complete" if they want a literal
-  // string label for fully-finished plots.
-  return sorted[sorted.length - 1];
+  // Everything COMPLETED (or zero jobs) — return null. Callers should
+  // render "Complete" / their own end-of-build affordance. Returning
+  // the last-completed job confused callers that needed a "this is
+  // where we are now" signal.
+  return null;
 }
 
 /** Convenience: just the label string. Returns "Complete" when every

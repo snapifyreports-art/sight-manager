@@ -419,7 +419,15 @@ function PlotOverview({
   // Brief. Returns the parent stage name when the picked job has a
   // parent (sub-job), or the job's own name when it's a top-level
   // stage. (#23)
+  //
+  // (May 2026 audit B-P1-24) When every job on the plot is COMPLETED,
+  // getCurrentStage now returns null — caller renders "Complete". Pre-
+  // fix it returned the last-COMPLETED job's name so the pill said
+  // e.g. "Snagging" on a fully-done plot, contradicting the heatmap.
   const currentStage = useMemo(() => {
+    if (plot.jobs.length === 0) return null;
+    const allComplete = plot.jobs.every((j) => j.status === "COMPLETED");
+    if (allComplete) return "Complete";
     const stage = getCurrentStage(
       plot.jobs.map((j) => ({ name: j.parentStage || j.name, status: j.status, sortOrder: j.sortOrder })),
     );
