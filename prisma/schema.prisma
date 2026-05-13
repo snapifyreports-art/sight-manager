@@ -474,9 +474,15 @@ model MaterialOrder {
   updatedAt            DateTime    @updatedAt
 
   supplier   Supplier    @relation(fields: [supplierId], references: [id])
-  job        Job?        @relation(fields: [jobId], references: [id], onDelete: Cascade)
-  site       Site?       @relation(fields: [siteId], references: [id], onDelete: Cascade)
-  plot       Plot?       @relation(fields: [plotId], references: [id], onDelete: Cascade)
+  // (May 2026 audit S-P0) Jobs / Plots / Sites are NEVER deleted in
+  // practice (Keith confirmed) — but if anyone ever does, Cascade
+  // would silently wipe DELIVERED orders + lateness events + audit
+  // trail. SetNull preserves the delivery + invoice history; the
+  // orphan order shows "(deleted job)" in the UI but the financials
+  // stay intact.
+  job        Job?        @relation(fields: [jobId], references: [id], onDelete: SetNull)
+  site       Site?       @relation(fields: [siteId], references: [id], onDelete: SetNull)
+  plot       Plot?       @relation(fields: [plotId], references: [id], onDelete: SetNull)
   contact    Contact?    @relation(fields: [contactId], references: [id], onDelete: SetNull)
   orderItems OrderItem[]
   latenessEvents LatenessEvent[]
@@ -954,10 +960,14 @@ model SiteDocument {
   uploadedById String
   createdAt    DateTime @default(now())
 
-  site            Site?                @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  // (May 2026 audit S-P0) Pre-fix `contactId` Cascade meant deleting
+  // a Contact wiped their RAMS / compliance evidence. SetNull
+  // preserves the document; the orphan record shows "(contact
+  // archived)" in the UI but the file + audit trail survive.
+  site            Site?                @relation(fields: [siteId], references: [id], onDelete: SetNull)
   plot            Plot?                @relation(fields: [plotId], references: [id], onDelete: SetNull)
   job             Job?                 @relation(fields: [jobId], references: [id], onDelete: SetNull)
-  contact         Contact?             @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  contact         Contact?             @relation(fields: [contactId], references: [id], onDelete: SetNull)
   uploadedBy      User                 @relation("UploadedDocuments", fields: [uploadedById], references: [id])
   handoverItems   HandoverChecklist[]
   complianceItems SiteComplianceItem[] @relation("ComplianceDocument")
