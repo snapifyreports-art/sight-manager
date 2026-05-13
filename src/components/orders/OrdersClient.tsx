@@ -367,6 +367,14 @@ function CreateOrderDialog({
   const [form, setForm] = useState<OrderFormData>(EMPTY_FORM);
   const [submitting, setSubmitting] = useState(false);
   const toast = useToast();
+  // (May 2026 audit SM-P0-1 / FC-P0) Auto-open when arriving via
+  // `?action=new` from Cmd-K or FAB. Pre-fix those entries deep-linked
+  // here but the create dialog never opened — the param was never read.
+  const searchParams = useSearchParams();
+  const actionParam = searchParams.get("action");
+  useEffect(() => {
+    if (actionParam === "new") setOpen(true);
+  }, [actionParam]);
 
   async function handleCreate() {
     if (!form.supplierId || !form.jobId) return;

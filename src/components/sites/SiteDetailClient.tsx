@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useRefreshOnFocus } from "@/hooks/useRefreshOnFocus";
 import { format, addWeeks, addDays } from "date-fns";
 import {
@@ -254,6 +254,23 @@ function SiteSnags({ siteId, plots, initialSnagId }: { siteId: string; plots: Ar
   const [snagCreateOpen, setSnagCreateOpen] = useState(false);
   const [selectedPlotId, setSelectedPlotId] = useState("");
   const [showAgeingReport, setShowAgeingReport] = useState(false);
+
+  // (May 2026 audit SM-P0-1 / FC-P0) Auto-open the create-snag dialog
+  // when arriving via `?action=new&plotId=…` — used by Cmd-K and FAB
+  // verb "Raise a snag". Pre-fix the deep-link landed on the snag tab
+  // but the dialog never opened — the param was never read.
+  const searchParams = useSearchParams();
+  const actionParam = searchParams.get("action");
+  const plotIdParam = searchParams.get("plotId");
+  useEffect(() => {
+    if (actionParam === "new" && !createDialogOpen) {
+      setSelectedPlotId(plotIdParam ?? plots[0]?.id ?? "");
+      setCreateDialogOpen(true);
+    }
+    // Only run when the param appears — explicitly NOT a deps list with
+    // plots so a re-render doesn't re-open after the user has dismissed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [actionParam, plotIdParam]);
 
   const loadSnags = useCallback(() => {
     fetch(`/api/sites/${siteId}/snags`)

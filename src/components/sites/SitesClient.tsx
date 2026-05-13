@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { format } from "date-fns";
 import { AlertCircle, Plus, Building2, MapPin, FolderOpen, Trash2, Loader2 } from "lucide-react";
@@ -95,6 +95,15 @@ export function SitesClient({
   const searchParams = useSearchParams();
   const [sites, setSites] = useState(initialSites);
   const [dialogOpen, setDialogOpen] = useState(false);
+
+  // (May 2026 audit SM-P0-1 / FC-P0) Auto-open the create-site wizard
+  // when arriving via `?action=new` — used by Cmd-K's "Create site"
+  // verb and the FAB. Pre-fix the link landed on /sites but never
+  // opened the wizard.
+  const actionParam = searchParams.get("action");
+  useEffect(() => {
+    if (actionParam === "new") setDialogOpen(true);
+  }, [actionParam]);
 
   // When the sidebar sent the user here without a site picked (e.g. they
   // clicked "Programme" with no site selected), `?pickFor=<tab>` tells us
