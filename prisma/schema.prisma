@@ -107,9 +107,38 @@ enum EventType {
   PLOT_UPDATED
   SNAG_CREATED
   SNAG_RESOLVED
+  LATENESS_OPENED
+  LATENESS_RESOLVED
   USER_ACTION
   NOTIFICATION
   SYSTEM
+}
+
+/// (#191) Lateness — a first-class record of every time something
+/// on this site fell behind. The cron creates rows; managers
+/// optionally tag a reason + attribution; reports aggregate.
+enum LatenessKind {
+  JOB_END_OVERDUE        // job past planned endDate, not COMPLETED
+  JOB_START_OVERDUE      // job NOT_STARTED past startDate
+  ORDER_DELIVERY_OVERDUE // order past expectedDeliveryDate, not DELIVERED
+  ORDER_SEND_OVERDUE     // order past dateOfOrder, still PENDING
+}
+
+enum LatenessReason {
+  WEATHER_RAIN
+  WEATHER_TEMPERATURE
+  WEATHER_WIND
+  MATERIAL_LATE
+  MATERIAL_WRONG
+  MATERIAL_SHORT
+  LABOUR_NO_SHOW
+  LABOUR_SHORT
+  DESIGN_CHANGE
+  SPEC_CLARIFICATION
+  PREDECESSOR_LATE
+  ACCESS_BLOCKED
+  INSPECTION_FAILED
+  OTHER
 }
 
 model User {
@@ -143,6 +172,7 @@ model User {
   checkedHandovers        HandoverChecklist[]      @relation("CheckedHandoverItems")
   plotJournalEntries      PlotJournalEntry[]       @relation("PlotJournalAuthor")
   watchedSites            WatchedSite[]
+  recordedLatenessEvents  LatenessEvent[]          @relation("LatenessEventRecorder")
 }
 
 model Site {
@@ -175,6 +205,7 @@ model Site {
   complianceItems  SiteComplianceItem[]
   toolboxTalks     ToolboxTalk[]
   nonConformances  NCR[]
+  latenessEvents   LatenessEvent[]
 }
 
 model RainedOffDay {
@@ -244,6 +275,7 @@ model Plot {
   drawSchedule          PlotDrawSchedule[]
   voiceNotes            VoiceNote[]
   photoAnnotations      PhotoAnnotation[]
+  latenessEvents        LatenessEvent[]
 
   @@unique([siteId, plotNumber])
   @@index([siteId]) // hot path: every site page loads plots
@@ -312,6 +344,7 @@ model Job {
   documents   SiteDocument[]
   snags       Snag[]
   ncrs        NCR[]
+  latenessEvents LatenessEvent[]
 
   @@index([plotId])       // hot: programme, daily-brief, reports join on plot
   @@index([status])       // hot: "NOT_STARTED where startDate < today" etc.
@@ -435,6 +468,7 @@ model MaterialOrder {
   plot       Plot?       @relation(fields: [plotId], references: [id], onDelete: Cascade)
   contact    Contact?    @relation(fields: [contactId], references: [id], onDelete: SetNull)
   orderItems OrderItem[]
+  latenessEvents LatenessEvent[]
 
   @@index([jobId])                 // hot: job → orders on every programme / daily-brief / panel
   @@index([status])                // hot: Tasks filters status=PENDING globally
@@ -474,6 +508,7 @@ model Contact {
   snags          Snag[]
   documents      SiteDocument[]
   ncrs           NCR[]
+  attributedLatenessEvents LatenessEvent[]
 }
 
 // ---------- Plot Templates ----------
@@ -1140,6 +1175,77 @@ enum PlotDrawStatus {
   DUE
   PAID
   WAIVED
+}
+
+/// (#191) Lateness — one row per (target, kind, day-it-first-went-late).
+/// The cron creates rows when something crosses its deadline; managers
+/// optionally tag a reason + attribute responsibility; the row stays
+/// open until the target resolves (job completes, order delivered, etc.).
+///
+/// Why a separate table from EventLog? EventLog is an append-only audit
+/// of "what happened" — useful for timelines. LatenessEvent is the
+/// MUTABLE state record of "what's currently late + why" — useful for
+/// reports, dashboards, the Site Story tab. The two complement each
+/// other; we cross-emit one EventLog row when a LatenessEvent opens
+/// and another when it resolves so the timeline still has the breadcrumb.
+model LatenessEvent {
+  id                  String         @id @default(cuid())
+  kind                LatenessKind
+
+  /// Discriminator. "job" or "order" — denormalised so we never join
+  /// two tables to know what kind of thing this row points at.
+  targetType          String
+  targetId            String
+
+  /// Denormalised scope for fast filtering. siteId is always set;
+  /// plotId/jobId/orderId fill in based on kind.
+  siteId              String
+  plotId              String?
+  jobId               String?
+  orderId             String?
+
+  /// Day the target first crossed its deadline (working-day-aligned to
+  /// midnight). Used by the unique constraint so the daily cron never
+  /// double-opens.
+  wentLateOn          DateTime
+
+  /// Working-day count of how far late the target currently is.
+  /// Refreshed by the daily cron until the row resolves.
+  daysLate            Int            @default(1)
+
+  /// Set when the target resolves (job completes, order delivered,
+  /// etc.). Null = still open.
+  resolvedAt          DateTime?
+
+  /// Reason + attribution. reasonCode defaults to OTHER until a manager
+  /// (or an inference rule) sets it.
+  reasonCode          LatenessReason @default(OTHER)
+  reasonNote          String?
+
+  /// Which contractor or supplier carried the slip, if attributable.
+  attributedContactId String?
+  recordedById        String?        // user who set the reason
+
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+
+  site              Site           @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  plot              Plot?          @relation(fields: [plotId], references: [id], onDelete: SetNull)
+  job               Job?           @relation(fields: [jobId], references: [id], onDelete: SetNull)
+  order             MaterialOrder? @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  attributedContact Contact?       @relation(fields: [attributedContactId], references: [id], onDelete: SetNull)
+  recordedBy        User?          @relation("LatenessEventRecorder", fields: [recordedById], references: [id], onDelete: SetNull)
+
+  /// One open event per (target, kind, day-it-went-late). The cron's
+  /// upsert relies on this so it never creates duplicates.
+  @@unique([targetType, targetId, kind, wentLateOn])
+  @@index([siteId, wentLateOn])
+  @@index([resolvedAt])
+  @@index([attributedContactId])
+  @@index([reasonCode])
+  @@index([plotId])
+  @@index([jobId])
+  @@index([orderId])
 }
 
 /// (May 2026 audit #49) Voice notes recorded on a job/plot/snag.

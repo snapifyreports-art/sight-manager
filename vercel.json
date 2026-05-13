@@ -17,6 +17,10 @@
       "schedule": "0 4 * * *"
     },
     {
+      "path": "/api/cron/lateness",
+      "schedule": "30 4 * * *"
+    },
+    {
       "path": "/api/cron/weekly-digest",
       "schedule": "0 7 * * 1"
     }

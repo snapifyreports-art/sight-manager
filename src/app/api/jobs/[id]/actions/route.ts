@@ -465,6 +465,16 @@ export async function POST(
   // so the parent stretches with its children and its status follows theirs
   await recomputeParentOf(prisma, id);
 
+  // (#191) Resolve any open lateness for this job when it reaches a
+  // non-late terminal state. Job complete → resolve end-overdue;
+  // job start → resolve start-overdue.
+  if (action === "complete" || action === "start") {
+    const { resolveLateness } = await import("@/lib/lateness-event");
+    await resolveLateness(prisma, "job", id, now).catch((err) =>
+      console.error("[actions] resolveLateness failed:", err),
+    );
+  }
+
   // (#189) Auto-cascade on LATE completion. Pre-fix: a job that
   // finished after its planned endDate would set actualEndDate=now but
   // leave downstream jobs frozen at their old planned dates — leading

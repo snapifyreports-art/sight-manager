@@ -259,6 +259,20 @@ export async function PUT(
       });
     }
 
+    // (#191) Resolve any open lateness for this order when it reaches
+    // a non-late terminal state. PENDING → anything-else resolves the
+    // SEND_OVERDUE bucket; ORDERED → DELIVERED resolves DELIVERY_OVERDUE.
+    if (body.status !== undefined && body.status !== existing.status) {
+      const movedFromPending = existing.status === "PENDING" && body.status !== "PENDING";
+      const movedToDelivered = body.status === "DELIVERED";
+      if (movedFromPending || movedToDelivered) {
+        const { resolveLateness } = await import("@/lib/lateness-event");
+        await resolveLateness(prisma, "order", id, today).catch((err) =>
+          console.error("[orders PUT] resolveLateness failed:", err),
+        );
+      }
+    }
+
     const order = await prisma.materialOrder.update({
       where: { id },
       data,
