@@ -29,11 +29,25 @@ type Tx = PrismaClient | Prisma.TransactionClient;
 /**
  * Recompute a parent Job's dates and status from its children.
  * No-op if the parent has no children (safe to call on leaf jobs).
+ *
+ * (May 2026 audit P-P0-9) Returns the new parent row so reconcile + other
+ * drift-detection callers don't have to issue a second findUnique to read
+ * what we just computed. Existing void-returning consumers can ignore.
  */
+export interface RecomputedParent {
+  startDate: Date | null;
+  endDate: Date | null;
+  status: JobStatus;
+  actualStartDate: Date | null;
+  actualEndDate: Date | null;
+  originalStartDate: Date | null;
+  originalEndDate: Date | null;
+}
+
 export async function recomputeParentFromChildren(
   tx: Tx,
   parentJobId: string
-): Promise<void> {
+): Promise<RecomputedParent | null> {
   const children = await tx.job.findMany({
     where: { parentId: parentJobId },
     select: {
@@ -49,7 +63,7 @@ export async function recomputeParentFromChildren(
       originalEndDate: true,
     },
   });
-  if (children.length === 0) return;
+  if (children.length === 0) return null;
 
   const starts = children
     .map((c) => c.startDate)
@@ -127,6 +141,18 @@ export async function recomputeParentFromChildren(
       ...(maxOrigEnd ? { originalEndDate: maxOrigEnd } : {}),
     },
   });
+
+  return {
+    startDate: minStart,
+    endDate: maxEnd,
+    status,
+    actualStartDate: minActualStart,
+    actualEndDate: maxActualEnd,
+    // For the return, keep current values when we didn't set them — the
+    // parent's existing originals are still the truth.
+    originalStartDate: minOrigStart,
+    originalEndDate: maxOrigEnd,
+  };
 }
 
 /**

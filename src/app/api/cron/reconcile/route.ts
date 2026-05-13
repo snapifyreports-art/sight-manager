@@ -63,12 +63,11 @@ export async function GET(req: NextRequest) {
     plotsScanned++;
     const before = p.buildCompletePercent;
     try {
-      await recomputePlotPercent(prisma, p.id);
-      const after = await prisma.plot.findUnique({
-        where: { id: p.id },
-        select: { buildCompletePercent: true },
-      });
-      if (after && Math.abs(after.buildCompletePercent - before) > 0.01) {
+      // (May 2026 audit P-P0-9) recomputePlotPercent now returns the
+      // new percent so we don't need a second findUnique to detect
+      // drift — halves the round-trip count on this pass.
+      const after = await recomputePlotPercent(prisma, p.id);
+      if (Math.abs(after - before) > 0.01) {
         plotsAdjusted++;
         // Cap at 50 so a catastrophically broken night doesn't write
         // a multi-megabyte event log row.
@@ -76,7 +75,7 @@ export async function GET(req: NextRequest) {
           driftedPlots.push({
             plotId: p.id,
             before: Math.round(before * 100) / 100,
-            after: Math.round(after.buildCompletePercent * 100) / 100,
+            after: Math.round(after * 100) / 100,
           });
         }
       }
@@ -110,28 +109,16 @@ export async function GET(req: NextRequest) {
   for (const p of parentJobs) {
     parentsScanned++;
     try {
-      await recomputeParentFromChildren(prisma, p.id);
-      const after = await prisma.job.findUnique({
-        where: { id: p.id },
-        select: {
-          startDate: true,
-          endDate: true,
-          status: true,
-          actualStartDate: true,
-          actualEndDate: true,
-          originalStartDate: true,
-          originalEndDate: true,
-        },
-      });
+      // (May 2026 audit P-P0-9) recomputeParentFromChildren now returns
+      // the recomputed values — drop the redundant findUnique pass.
+      const after = await recomputeParentFromChildren(prisma, p.id);
       if (
         after &&
         (after.startDate?.getTime() !== p.startDate?.getTime() ||
           after.endDate?.getTime() !== p.endDate?.getTime() ||
           after.status !== p.status ||
           after.actualStartDate?.getTime() !== p.actualStartDate?.getTime() ||
-          after.actualEndDate?.getTime() !== p.actualEndDate?.getTime() ||
-          after.originalStartDate?.getTime() !== p.originalStartDate?.getTime() ||
-          after.originalEndDate?.getTime() !== p.originalEndDate?.getTime())
+          after.actualEndDate?.getTime() !== p.actualEndDate?.getTime())
       ) {
         parentsAdjusted++;
         if (driftedParents.length < 50) driftedParents.push(p.id);

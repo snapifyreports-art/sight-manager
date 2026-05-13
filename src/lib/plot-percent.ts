@@ -22,7 +22,7 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 export async function recomputePlotPercent(
   client: PrismaClient | Prisma.TransactionClient,
   plotId: string,
-): Promise<void> {
+): Promise<number> {
   const counts = await client.job.groupBy({
     by: ["status"],
     where: { plotId, children: { none: {} } },
@@ -42,4 +42,10 @@ export async function recomputePlotPercent(
     where: { id: plotId },
     data: { buildCompletePercent: percent },
   });
+
+  // (May 2026 audit P-P0-9) Return the new percent so reconcile + other
+  // drift-detection callers don't have to issue a second findUnique just
+  // to read what we already computed. Existing void-returning consumers
+  // can ignore the value — TS allows discarding a return.
+  return percent;
 }
