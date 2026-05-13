@@ -184,20 +184,26 @@ export async function GET(
   // Split late starts into genuinely late vs blocked by predecessor
   const genuineLateStartJobs: typeof lateStartJobs = [];
   const blockedJobs: Array<
-    (typeof lateStartJobs)[number] & { blockedBy: string }
+    (typeof lateStartJobs)[number] & {
+      blockedBy: string;
+      blockedById: string;
+      blockedByStatus: string;
+    }
   > = [];
 
   if (lateStartJobs.length > 0) {
     // Get all plotIds that have late start jobs
     const plotIds = [...new Set(lateStartJobs.map((j) => j.plotId))];
 
-    // Fetch all incomplete predecessor jobs for those plots in one query
+    // Fetch all incomplete predecessor jobs for those plots in one query.
+    // (#187) Include status so the UI can show whether the blocker is
+    // IN_PROGRESS (almost done) or NOT_STARTED (won't unblock soon).
     const predecessorJobs = await prisma.job.findMany({
       where: {
         plotId: { in: plotIds },
         status: { not: "COMPLETED" },
       },
-      select: { id: true, name: true, sortOrder: true, plotId: true },
+      select: { id: true, name: true, sortOrder: true, plotId: true, status: true },
     });
 
     // Group predecessors by plotId for fast lookup
@@ -215,7 +221,15 @@ export async function GET(
         (p) => p.id !== job.id && p.sortOrder < job.sortOrder
       );
       if (blocker) {
-        blockedJobs.push({ ...job, blockedBy: blocker.name });
+        // (#187) Carry the blocker's id and status so the UI can link
+        // to the blocking job + show its state ("waiting for X — in
+        // progress" vs "waiting for X — not started").
+        blockedJobs.push({
+          ...job,
+          blockedBy: blocker.name,
+          blockedById: blocker.id,
+          blockedByStatus: (blocker as { status?: string }).status ?? "NOT_STARTED",
+        });
       } else {
         genuineLateStartJobs.push(job);
       }

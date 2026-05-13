@@ -151,7 +151,11 @@ interface BriefData {
     assignedTo: { name: string } | null;
     contractors: Array<{ contact: { id: string; name: string; company: string | null } }>;
   }>;
+  // (#187) Blocked jobs now carry the blocker's id + status so the
+  // row can link directly to the blocking job and label its state.
   blockedJobs: Array<{
+    blockedById?: string;
+    blockedByStatus?: string;
     id: string;
     name: string;
     startDate: string | null;
@@ -636,13 +640,29 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
   // Auto-refresh when tab regains focus (real-time sync across views)
   useRefreshOnFocus(fetchData);
 
-  // Open sections that have content; empty ones stay collapsed; recent-activity always closed
+  // (#187) Open every section that has at least one actionable item.
+  // Keith May 2026: "anything that can require attention shouldn't
+  // be collapsed". Pre-change only todays-jobs + in-progress were
+  // auto-expanded — Materials (which carries overdue deliveries +
+  // orders to send) stayed collapsed by default, silently hiding
+  // urgent items.
   useEffect(() => {
     if (!data) return;
     const open = new Set<string>();
-    // Today's Jobs always expanded, In Progress if it has items
+    // Today's Jobs always expanded.
     open.add("todays-jobs");
     if (data.activeJobs.length > 0) open.add("in-progress");
+    if (
+      data.ordersToPlace.length > 0 ||
+      data.deliveriesToday.length > 0 ||
+      (data.overdueDeliveries?.length ?? 0) > 0 ||
+      (data.upcomingOrders?.length ?? 0) > 0
+    ) {
+      open.add("materials");
+    }
+    if ((data.delayedJobs?.length ?? 0) > 0) open.add("delayed");
+    if ((data.needsAttention?.length ?? 0) > 0) open.add("needs-attention");
+    if ((data.inactivePlots?.length ?? 0) > 0) open.add("inactive-plots");
     setOpenSections(open);
   }, [data]);
 
@@ -1290,44 +1310,21 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
 
   return (
     <div className="space-y-4">
-      {/* Date + actions */}
+      {/* Date + print */}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm font-semibold sm:text-lg">
           {format(date, "EEEE, d MMMM yyyy")}
         </p>
-        <div className="flex items-center gap-2 print:hidden">
-          {data.isRainedOff ? (
-            <Button
-              variant="outline"
-              size="sm"
-              className="border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100"
-              onClick={handleUndoRainedOff}
-            >
-              <CloudRain className="mr-1 size-3.5" />
-              Undo Rained Off
-            </Button>
-          ) : (
-            <Button
-              variant="outline"
-              size="sm"
-              className="border-slate-200"
-              onClick={() => setRainedOffDialogOpen(true)}
-            >
-              <CloudRain className="mr-1 size-3.5" />
-              <span className="hidden sm:inline">Mark </span>Rained Off
-            </Button>
-          )}
-          <Button
-            variant="outline"
-            size="sm"
-            className="no-print"
-            onClick={() => window.print()}
-            title="Print daily brief"
-          >
-            <Printer className="size-3.5" />
-            <span className="hidden sm:inline ml-1">Print</span>
-          </Button>
-        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          className="no-print print:hidden"
+          onClick={() => window.print()}
+          title="Print daily brief"
+        >
+          <Printer className="size-3.5" />
+          <span className="hidden sm:inline ml-1">Print</span>
+        </Button>
       </div>
 
       {/* Bulk action floating bar (UX #3) */}
@@ -1372,45 +1369,144 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
         </div>
       )}
 
-      {/* Rained off banner */}
-      {data.isRainedOff && (
-        <div className="flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 p-3 text-blue-800">
-          <CloudRain className="size-5 shrink-0" />
-          <div>
-            <p className="font-medium">Rained Off</p>
-            {data.rainedOffNote && (
-              <p className="text-sm opacity-80">{data.rainedOffNote}</p>
+      {/* (#187) Weather impact strip — two prominent cards. Card 1
+          covers today (rained off / not rained off). Card 2 covers
+          tomorrow (pre-mark if forecast looks bad / view forecast).
+          Pre-fix this was a single small button up top + a tiny
+          banner; Keith called it terrible on both mobile and desktop. */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        {/* Today card */}
+        <div
+          className={cn(
+            "rounded-lg border p-3",
+            data.isRainedOff
+              ? "border-blue-200 bg-blue-50"
+              : "border-slate-200 bg-white",
+          )}
+        >
+          <div className="flex items-start gap-2">
+            <CloudRain
+              className={cn(
+                "size-5 shrink-0",
+                data.isRainedOff ? "text-blue-700" : "text-slate-400",
+              )}
+              aria-hidden
+            />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium">
+                Today —{" "}
+                {data.isRainedOff ? (
+                  <span className="text-blue-700">rained off</span>
+                ) : (
+                  <span className="text-slate-700">working day</span>
+                )}
+              </p>
+              {data.isRainedOff && data.rainedOffNote && (
+                <p className="mt-0.5 text-xs text-blue-800/80">{data.rainedOffNote}</p>
+              )}
+              {!data.isRainedOff && (
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  Mark the day as rained off to push every job and PENDING order back by one working day.
+                </p>
+              )}
+            </div>
+          </div>
+          <div className="mt-3 print:hidden">
+            {data.isRainedOff ? (
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full border-blue-200 bg-white text-blue-700 hover:bg-blue-100"
+                onClick={handleUndoRainedOff}
+              >
+                Undo rained off
+              </Button>
+            ) : (
+              <Button
+                size="sm"
+                className="w-full bg-blue-600 text-white hover:bg-blue-700"
+                onClick={() => setRainedOffDialogOpen(true)}
+              >
+                <CloudRain className="mr-1 size-3.5" aria-hidden />
+                Mark today rained off
+              </Button>
             )}
           </div>
         </div>
-      )}
 
-      {/* Summary stats — grouped by section.
-          Keith Apr 2026: "this needs to hold ALL information this is core
-          issue as the daily brief is so important". Changed semantics:
-          pills are now always rendered, 0-values show dimmed. This keeps
-          the full picture on-screen at a glance so empty counts aren't
-          invisible (they used to be hidden, leaving orphan row labels). */}
-      {(() => {
-        const pill = (label: string, value: number | string, anchor: string | null, activeColor: string) => {
-          const num = typeof value === "number" ? value : parseInt(value) || 0;
-          const isZero = num === 0 && label !== "Progress";
-          const inner = (
-            <div className={cn(
-              "flex items-center gap-1.5 rounded border px-2 py-1 text-xs shadow-sm",
-              isZero ? "border-slate-100 bg-slate-50/50" : "border-slate-200 bg-white"
-            )}>
-              <span className={cn(
-                "text-sm font-bold leading-none",
-                isZero ? "text-slate-300" : activeColor
-              )}>{value}</span>
-              <span className={cn(
-                "leading-tight",
-                isZero ? "text-muted-foreground" : "text-foreground"
-              )}>{label}</span>
+        {/* Tomorrow card — pre-mark, plus a forecast preview if we have one */}
+        {(() => {
+          const tomorrow = data.weather?.forecast?.[0];
+          const tomorrowIsBad = tomorrow && ["rain", "snow", "thunder"].includes(tomorrow.category);
+          return (
+            <div
+              className={cn(
+                "rounded-lg border p-3",
+                tomorrowIsBad ? "border-amber-200 bg-amber-50" : "border-slate-200 bg-white",
+              )}
+            >
+              <div className="flex items-start gap-2">
+                <CloudRain
+                  className={cn(
+                    "size-5 shrink-0",
+                    tomorrowIsBad ? "text-amber-700" : "text-slate-400",
+                  )}
+                  aria-hidden
+                />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium">
+                    Tomorrow{tomorrow ? ` — ${tomorrow.category}` : ""}
+                  </p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    {tomorrowIsBad
+                      ? "Forecast looks bad. Pre-mark to push the programme proactively so contractors plan around it."
+                      : "Pre-mark tomorrow rained off if you already know it's going to be a write-off."}
+                  </p>
+                </div>
+              </div>
+              <div className="mt-3 print:hidden">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className={cn(
+                    "w-full",
+                    tomorrowIsBad
+                      ? "border-amber-300 bg-white text-amber-800 hover:bg-amber-100"
+                      : "border-slate-200",
+                  )}
+                  onClick={() => {
+                    // Step the date picker forward and open the mark
+                    // dialog so the user can confirm + add a note.
+                    setDate((d) => new Date(d.getTime() + 86400000));
+                    setRainedOffDialogOpen(true);
+                  }}
+                >
+                  <CloudRain className="mr-1 size-3.5" aria-hidden />
+                  Pre-mark tomorrow rained off
+                </Button>
+              </div>
             </div>
           );
-          return anchor && !isZero ? (
+        })()}
+      </div>
+
+      {/* Summary pills — Keith May 2026: hide zero-count pills so the
+          summary row only shows what's actually relevant. Pre-change
+          the pills were rendered dimmed for zero values — meant to
+          "keep the full picture" but Keith found this noisy; if
+          there's nothing in a bucket, it shouldn't take screen real
+          estate. Same rule applies to whole sections: an empty Jobs
+          / Materials / Issues row is hidden entirely. */}
+      {(() => {
+        const pill = (label: string, value: number, anchor: string | null, activeColor: string) => {
+          if (value === 0) return null; // (#187) hide zero pills
+          const inner = (
+            <div className="flex items-center gap-1.5 rounded border border-slate-200 bg-white px-2 py-1 text-xs shadow-sm">
+              <span className={cn("text-sm font-bold leading-none", activeColor)}>{value}</span>
+              <span className="leading-tight text-foreground">{label}</span>
+            </div>
+          );
+          return anchor ? (
             <button
               key={label}
               type="button"
@@ -1423,9 +1519,36 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
             <div key={label}>{inner}</div>
           );
         };
+        // Compute each row's pills up-front so we can hide whole rows
+        // when every pill returned null.
+        const jobsPills = [
+          pill("Starting", data.jobsStartingToday.filter((j) => j.status === "NOT_STARTED").length, "section-starting-today", "text-green-600"),
+          pill("Finishing", data.jobsDueToday.length, "section-starting-today", "text-emerald-600"),
+          pill("Active", s.activeJobCount, "section-active", "text-blue-600"),
+          pill("Late", s.lateStartCount, "section-late-starts", "text-red-600"),
+          pill("Blocked", s.blockedCount, "section-blocked", "text-slate-500"),
+          pill("Overdue", s.overdueJobCount, "section-overdue", "text-red-600"),
+          pill("Delayed", data.delayedJobs?.length || 0, "section-delayed", "text-amber-600"),
+          pill("Tomorrow", data.jobsStartingTomorrow?.length || 0, "section-starting-tomorrow", "text-slate-600"),
+          pill("Sign Off", data.awaitingSignOff?.length || 0, "section-awaiting-signoff", "text-amber-600"),
+        ].filter(Boolean);
+        const materialsPills = [
+          pill("To Send", data.ordersToPlace.length, "section-orders", "text-violet-600"),
+          pill("Scheduled", data.upcomingOrders?.length || 0, "section-upcoming-orders", "text-violet-500"),
+          pill("Due Today", data.deliveriesToday.length, "section-deliveries", "text-blue-600"),
+          pill("Upcoming", data.upcomingDeliveries?.length || 0, "section-upcoming-deliveries", "text-blue-500"),
+          pill("Overdue", data.overdueDeliveries?.length || 0, "section-overdue", "text-red-600"),
+        ].filter(Boolean);
+        const issuesPills = [
+          pill("Snags", s.openSnagCount, "section-snags", "text-orange-600"),
+          pill("Attention", data.needsAttention?.length || 0, "section-needs-attention", "text-amber-600"),
+          pill("Contractors", (data.inactivePlots ?? []).filter((p) => p.inactivityType === "awaiting_contractor").length, "section-contractor-confirmations", "text-amber-600"),
+          pill("Inactive", data.inactivePlots?.length || 0, "section-inactive-plots", "text-orange-600"),
+          pill("Rained Off", data.isRainedOff ? 1 : 0, null, "text-blue-600"),
+        ].filter(Boolean);
         return (
           <div className="space-y-2">
-            {/* Progress */}
+            {/* Progress — always shown (it's the headline metric). */}
             <div className="flex items-center gap-2">
               <div className="flex items-center gap-2 rounded border border-slate-200 bg-white px-3 py-1.5 shadow-sm">
                 <span className="text-lg font-bold leading-none text-foreground">{s.progressPercent}%</span>
@@ -1436,42 +1559,26 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
               </div>
             </div>
 
-            {/* Jobs — Active + Delayed + Tomorrow added so every job
-                state with data loaded has a pill. */}
-            <div className="flex flex-wrap items-center gap-1.5">
-              <span className="mr-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Jobs</span>
-              {pill("Starting", data.jobsStartingToday.filter((j) => j.status === "NOT_STARTED").length, "section-starting-today", "text-green-600")}
-              {pill("Finishing", data.jobsDueToday.length, "section-starting-today", "text-emerald-600")}
-              {pill("Active", s.activeJobCount, "section-active", "text-blue-600")}
-              {pill("Late", s.lateStartCount, "section-late-starts", "text-red-600")}
-              {pill("Blocked", s.blockedCount, "section-blocked", "text-slate-500")}
-              {pill("Overdue", s.overdueJobCount, "section-overdue", "text-red-600")}
-              {pill("Delayed", data.delayedJobs?.length || 0, "section-delayed", "text-amber-600")}
-              {pill("Tomorrow", data.jobsStartingTomorrow?.length || 0, "section-starting-tomorrow", "text-slate-600")}
-              {pill("Sign Off", data.awaitingSignOff?.length || 0, "section-awaiting-signoff", "text-amber-600")}
-            </div>
+            {jobsPills.length > 0 && (
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="mr-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Jobs</span>
+                {jobsPills}
+              </div>
+            )}
 
-            {/* Materials — full pipeline: send-now, scheduled-to-send,
-                arriving-today, awaiting, overdue. Was missing Overdue
-                entirely + Scheduled (future orders waiting to go out). */}
-            <div className="flex flex-wrap items-center gap-1.5">
-              <span className="mr-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Materials</span>
-              {pill("To Send", data.ordersToPlace.length, "section-orders", "text-violet-600")}
-              {pill("Scheduled", data.upcomingOrders?.length || 0, "section-upcoming-orders", "text-violet-500")}
-              {pill("Due Today", data.deliveriesToday.length, "section-deliveries", "text-blue-600")}
-              {pill("Upcoming", data.upcomingDeliveries?.length || 0, "section-upcoming-deliveries", "text-blue-500")}
-              {pill("Overdue", data.overdueDeliveries?.length || 0, "section-overdue", "text-red-600")}
-            </div>
+            {materialsPills.length > 0 && (
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="mr-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Materials</span>
+                {materialsPills}
+              </div>
+            )}
 
-            {/* Issues — Rained Off added when weather impact today. */}
-            <div className="flex flex-wrap items-center gap-1.5">
-              <span className="mr-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Issues</span>
-              {pill("Snags", s.openSnagCount, "section-snags", "text-orange-600")}
-              {pill("Attention", data.needsAttention?.length || 0, "section-needs-attention", "text-amber-600")}
-              {pill("Contractors", (data.inactivePlots ?? []).filter((p) => p.inactivityType === "awaiting_contractor").length, "section-contractor-confirmations", "text-amber-600")}
-              {pill("Inactive", data.inactivePlots?.length || 0, "section-inactive-plots", "text-orange-600")}
-              {pill("Rained Off", data.isRainedOff ? 1 : 0, null, "text-blue-600")}
-            </div>
+            {issuesPills.length > 0 && (
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="mr-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Issues</span>
+                {issuesPills}
+              </div>
+            )}
           </div>
         );
       })()}
@@ -1982,26 +2089,65 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                       <p id="section-blocked" className="mt-3 flex items-center gap-1.5 border-t pt-3 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                         <Lock className="size-3" /> Blocked ({data.blockedJobs.length})
                       </p>
-                      {data.blockedJobs.map((j) => (
-                        <div key={`blocked-${j.id}`} className="rounded border border-slate-200 bg-slate-50/50 p-2 text-sm opacity-70">
+                      {data.blockedJobs.map((j) => {
+                        // (#187) Spell out the blocker explicitly —
+                        // link to the blocking job and label its
+                        // state so the manager knows whether it's
+                        // almost done (IN_PROGRESS) or hasn't been
+                        // touched yet (NOT_STARTED).
+                        const blockerStatusLabel =
+                          j.blockedByStatus === "IN_PROGRESS"
+                            ? "in progress"
+                            : j.blockedByStatus === "ON_HOLD"
+                              ? "on hold"
+                              : "not started";
+                        return (
+                          <div key={`blocked-${j.id}`} className="rounded border border-slate-200 bg-slate-50/50 p-2 text-sm">
                             <div className="flex items-center gap-2">
-                              <Link href={`/jobs/${j.id}`} className="truncate font-medium text-slate-600 hover:underline">{j.name}</Link>
+                              <Link href={`/jobs/${j.id}`} className="truncate font-medium text-slate-700 hover:underline">{j.name}</Link>
                               <Badge variant="outline" className="shrink-0 border-slate-300 text-[10px] text-slate-500">Blocked</Badge>
                             </div>
                             <p className="text-xs text-muted-foreground">
                               {j.plot.plotNumber ? `Plot ${j.plot.plotNumber}` : j.plot.name}
                               {j.assignedTo && <span> · {j.assignedTo.name}</span>}
                             </p>
-                            <p className="mt-0.5 flex items-center gap-1 text-xs text-slate-500">
-                              <Lock className="size-3" /> Blocked by: {j.blockedBy}
-                            </p>
+                            <div className="mt-1 flex items-start gap-2 rounded border border-slate-200 bg-white px-2 py-1.5 text-xs">
+                              <Lock className="mt-0.5 size-3 shrink-0 text-slate-500" aria-hidden />
+                              <div className="min-w-0 flex-1">
+                                <p className="text-slate-700">
+                                  Waiting for{" "}
+                                  {j.blockedById ? (
+                                    <Link
+                                      href={`/jobs/${j.blockedById}`}
+                                      className="font-medium text-blue-600 hover:underline"
+                                    >
+                                      {j.blockedBy}
+                                    </Link>
+                                  ) : (
+                                    <span className="font-medium">{j.blockedBy}</span>
+                                  )}
+                                </p>
+                                <p className="text-[11px] text-muted-foreground">
+                                  Currently {blockerStatusLabel}. This job will unblock when {j.blockedBy} completes.
+                                </p>
+                              </div>
+                            </div>
                             <JobActionStrip>
-                              <Link href={`/jobs/${j.id}`} className="inline-flex h-6 items-center gap-1 rounded-md border px-2 text-xs sm:text-[10px] text-slate-600 hover:bg-slate-100">
-                                <Briefcase className="size-2.5" /> View Job
+                              {j.blockedById ? (
+                                <Link
+                                  href={`/jobs/${j.blockedById}`}
+                                  className="inline-flex h-9 items-center gap-1 rounded-md border border-blue-200 bg-blue-50 px-2 text-xs text-blue-700 hover:bg-blue-100 sm:h-6 sm:text-[10px]"
+                                >
+                                  <Briefcase className="size-2.5" /> Open {j.blockedBy}
+                                </Link>
+                              ) : null}
+                              <Link href={`/jobs/${j.id}`} className="inline-flex h-9 items-center gap-1 rounded-md border px-2 text-xs text-slate-600 hover:bg-slate-100 sm:h-6 sm:text-[10px]">
+                                <Briefcase className="size-2.5" /> View this job
                               </Link>
                             </JobActionStrip>
-                        </div>
-                      ))}
+                          </div>
+                        );
+                      })}
                     </>
                   )}
 

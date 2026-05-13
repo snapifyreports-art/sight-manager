@@ -1,65 +1,84 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, MoreHorizontal } from "lucide-react";
 
 /**
- * (#186) Action-button strip wrapper for Daily Brief job rows.
+ * (#186/188) Action-button strip for Daily Brief job rows.
  *
- * On mobile a Daily Brief job card can carry up to six action buttons
- * (Extend, Complete, Sign Off, Snag, Note, Photos…). They wrap across
- * two rows of awkward right-aligned chips — visually overwhelming and
- * the user isn't always there to take an action. Keith asked for a
- * dropdown/collapsable.
+ * Three-way split, so attention-needing primary actions are NEVER
+ * hidden but the long tail of secondary actions doesn't drown the
+ * mobile UI:
  *
- * Behaviour:
- *   - md+:  always expanded, inline row (current desktop look).
- *   - mobile: collapsed by default. A single "Actions ▾" tap-target
- *     expands the buttons in a wrap-friendly grid below the header.
+ *   - primary  → always visible (Complete, Sign Off, Mark Delivered…
+ *                anything that takes a job FORWARD in its lifecycle).
+ *   - secondary → on md+ inline alongside primary; on mobile collapsed
+ *                 behind a "More ▾" disclosure button.
  *
- * Caller passes the action buttons as children; the strip handles the
- * collapsed vs expanded chrome.
+ * Keith's rule, May 2026: "anything that can require attention
+ * shouldn't be collapsed". Primary actions resolve a state — they
+ * must be one tap away.
+ *
+ * For full-strip cases that don't have a primary action (e.g. a job
+ * card showing only Note / Photos / Snag) pass `primary={null}` and
+ * the secondary collapse takes the whole strip.
  */
 export function JobActionStrip({
+  primary,
+  secondary,
   children,
   className,
 }: {
-  children: ReactNode;
+  /** Primary buttons — always visible. Pass null for none. */
+  primary?: ReactNode;
+  /** Secondary buttons — collapses on mobile under "More". */
+  secondary?: ReactNode;
+  /** Backwards-compat: if no primary/secondary split is provided,
+   *  children render as primary (always visible). Newer callers should
+   *  pass primary + secondary explicitly. */
+  children?: ReactNode;
   className?: string;
 }) {
   const [open, setOpen] = useState(false);
+  // If caller didn't split, treat children as primary so existing
+  // usages still render their full action set inline.
+  const effectivePrimary = primary !== undefined ? primary : children;
 
   return (
     <div className={`mt-1.5 border-t pt-1.5 print:hidden ${className ?? ""}`}>
-      {/* Mobile header — toggles open/closed. */}
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center justify-between gap-2 rounded-md text-left text-[12px] font-medium text-muted-foreground hover:text-foreground md:hidden"
-        aria-expanded={open}
-      >
-        <span>Actions</span>
-        <ChevronDown
-          className={`size-3.5 shrink-0 transition-transform ${open ? "rotate-180" : ""}`}
-          aria-hidden
-        />
-      </button>
-
-      {/* Desktop label — unchanged. */}
-      <div className="hidden md:flex md:flex-wrap md:items-center md:gap-1">
+      {/* Label + primary row (mobile + desktop) */}
+      <div className="flex flex-wrap items-center gap-1.5">
         <span className="mr-auto text-[10px] font-medium text-muted-foreground">
           Actions
         </span>
-        {children}
+        {effectivePrimary}
+        {/* Secondary inline on desktop only */}
+        {secondary && (
+          <div className="hidden md:contents">{secondary}</div>
+        )}
+        {/* Mobile "More" toggle — only renders if there's something to
+            hide behind it. */}
+        {secondary && (
+          <button
+            type="button"
+            onClick={() => setOpen((o) => !o)}
+            aria-expanded={open}
+            className="inline-flex h-9 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-600 hover:bg-slate-50 md:hidden"
+          >
+            <MoreHorizontal className="size-3.5" aria-hidden />
+            More
+            <ChevronDown
+              className={`size-3 transition-transform ${open ? "rotate-180" : ""}`}
+              aria-hidden
+            />
+          </button>
+        )}
       </div>
 
-      {/* Mobile expanded buttons — 2-col grid; each button stretches
-          to fill its cell via `[&>*]:w-full` so they're consistently
-          sized and tap-friendly, instead of awkward auto-width chips
-          right-aligned with whitespace gaps. */}
-      {open && (
+      {/* Mobile expanded secondary buttons — 2-col full-width grid. */}
+      {secondary && open && (
         <div className="mt-2 grid grid-cols-2 gap-1.5 md:hidden [&>*]:w-full">
-          {children}
+          {secondary}
         </div>
       )}
     </div>
