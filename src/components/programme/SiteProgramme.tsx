@@ -1249,24 +1249,28 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
           </button>
         </div>
 
-        {/* Zoom controls */}
+        {/* Zoom controls — (May 2026 audit UX-P2) aria-labels on
+            icon-only buttons; `title` alone isn't reliably announced
+            by screen readers across browsers. */}
         <div className="flex items-center overflow-hidden rounded-md border">
           <button
             onClick={() => setZoomLevel((z) => Math.max(0.5, parseFloat((z - 0.25).toFixed(2))))}
             disabled={zoomLevel <= 0.5}
             className="flex items-center px-2 py-1.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-slate-50 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
             title="Zoom out"
+            aria-label="Zoom out"
           >
-            <ZoomOut className="size-3" />
+            <ZoomOut className="size-3" aria-hidden />
           </button>
-          <span className="border-x px-1.5 text-[11px] text-muted-foreground">{Math.round(zoomLevel * 100)}%</span>
+          <span className="border-x px-1.5 text-[11px] text-muted-foreground" aria-live="polite">{Math.round(zoomLevel * 100)}%</span>
           <button
             onClick={() => setZoomLevel((z) => Math.min(3, parseFloat((z + 0.25).toFixed(2))))}
             disabled={zoomLevel >= 3}
             className="flex items-center px-2 py-1.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-slate-50 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
             title="Zoom in"
+            aria-label="Zoom in"
           >
-            <ZoomIn className="size-3" />
+            <ZoomIn className="size-3" aria-hidden />
           </button>
         </div>
 

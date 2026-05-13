@@ -137,25 +137,29 @@ export function ContactsClient({
     setDialogOpen(true);
   }
 
-  // Open delete confirmation via the shared hook.
+  // (May 2026 audit S-P0) "Delete" is now soft-archive — the route
+  // stamps archivedAt instead of dropping the row, so all historical
+  // jobs / snags / RAMS stay attributed.
   function handleOpenDelete(contact: Contact) {
     confirmAction({
-      title: "Delete Contractor",
+      title: "Archive Contractor",
       description: (
         <>
-          Are you sure you want to delete{" "}
+          Archive{" "}
           <span className="font-medium text-foreground">{contact.name}</span>?
-          This action cannot be undone.
+          They&apos;ll disappear from pickers but every job they did,
+          snag they raised, and document they uploaded stays attached
+          to them. You can restore later.
         </>
       ),
-      confirmLabel: "Delete",
+      confirmLabel: "Archive",
       onConfirm: async () => {
         const res = await fetch(`/api/contacts/${contact.id}`, { method: "DELETE" });
         if (!res.ok) {
-          throw new Error(await fetchErrorMessage(res, "Failed to delete contractor"));
+          throw new Error(await fetchErrorMessage(res, "Failed to archive contractor"));
         }
         setContacts((prev) => prev.filter((c) => c.id !== contact.id));
-        toast.success(`${contact.name} deleted`);
+        toast.success(`${contact.name} archived`);
         router.refresh();
       },
     });
@@ -389,9 +393,10 @@ export function ContactsClient({
                       e.stopPropagation();
                       handleOpenDelete(contact);
                     }}
+                    title="Archive contractor (soft-delete — restorable)"
                   >
                     <Trash2 className="size-3" />
-                    <span className="hidden sm:inline">Delete</span>
+                    <span className="hidden sm:inline">Archive</span>
                   </Button>
                 </div>
               </CardContent>
