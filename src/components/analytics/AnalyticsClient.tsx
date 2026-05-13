@@ -68,6 +68,11 @@ interface ContractorPerf {
   totalJobs: number;
   completedJobs: number;
   onTimeJobs: number;
+  // (May 2026 audit D-P1) Jobs marked COMPLETED without actualEndDate
+  // are not measurable for on-time-ness. Tracked separately by the
+  // API so the on-time-rate denominator excludes them.
+  unknownOutcomeJobs: number;
+  measurableJobs: number;
   onTimeRate: number | null;
   avgDelayDays: number;
 }
@@ -634,9 +639,23 @@ export function AnalyticsClient() {
                         <Link href={`/contacts/${c.id}`} className="hover:text-blue-600 hover:underline">{c.name}</Link>
                       </td>
                       <td className="py-2 text-center">{c.totalJobs}</td>
-                      <td className="py-2 text-center">{c.completedJobs}</td>
                       <td className="py-2 text-center">
-                        <RAGBadge value={c.onTimeRate} />
+                        {c.completedJobs}
+                        {c.unknownOutcomeJobs > 0 && (
+                          <span
+                            className="ml-1 text-[10px] text-amber-600"
+                            title={`${c.unknownOutcomeJobs} completed without a recorded end date — excluded from on-time rate (May 2026 audit D-P1)`}
+                          >
+                            (-{c.unknownOutcomeJobs})
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-2 text-center">
+                        {c.measurableJobs > 0 ? (
+                          <RAGBadge value={c.onTimeRate} />
+                        ) : (
+                          <span className="text-muted-foreground" title="No completed jobs with recorded end dates">n/a</span>
+                        )}
                       </td>
                       <td className="py-2 text-center">
                         {c.avgDelayDays > 0 ? (

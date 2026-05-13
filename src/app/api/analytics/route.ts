@@ -275,6 +275,12 @@ export async function GET(req: NextRequest) {
       totalJobs: number;
       completedJobs: number;
       onTimeJobs: number;
+      // (May 2026 audit D-P1) Jobs marked COMPLETED but with no
+      // actualEndDate stamped (legacy back-fill, half-failed write,
+      // historical import). Pre-fix these flattered the contractor by
+      // being counted as on-time. Now tracked separately so the rate
+      // denominator excludes them, surfaced via `measurableJobs`.
+      unknownOutcomeJobs: number;
       totalDelayDays: number;
     }
   >();
@@ -288,6 +294,7 @@ export async function GET(req: NextRequest) {
       totalJobs: 0,
       completedJobs: 0,
       onTimeJobs: 0,
+      unknownOutcomeJobs: 0,
       totalDelayDays: 0,
     };
 
@@ -306,8 +313,11 @@ export async function GET(req: NextRequest) {
           entry.totalDelayDays += delay;
         }
       } else {
-        // No actual end date tracked, assume on time
-        entry.onTimeJobs++;
+        // (May 2026 audit D-P1) Jobs without actualEndDate are not
+        // measurable for on-time-ness. Pre-fix this branch assumed
+        // on-time and inflated the rate. Now we count them separately
+        // and exclude from the denominator below.
+        entry.unknownOutcomeJobs++;
       }
     }
 
@@ -315,19 +325,23 @@ export async function GET(req: NextRequest) {
   }
 
   const contractorPerformance = Array.from(contractorMap.values())
-    .map((c) => ({
+    .map((c) => {
+      const measurableJobs = c.completedJobs - c.unknownOutcomeJobs;
+      return {
       ...c,
+      measurableJobs,
       onTimeRate:
-        c.completedJobs > 0
-          ? Math.round((c.onTimeJobs / c.completedJobs) * 100)
+        measurableJobs > 0
+          ? Math.round((c.onTimeJobs / measurableJobs) * 100)
           : null,
       avgDelayDays:
-        c.completedJobs - c.onTimeJobs > 0
+        measurableJobs - c.onTimeJobs > 0
           ? Math.round(
-              c.totalDelayDays / (c.completedJobs - c.onTimeJobs)
+              c.totalDelayDays / (measurableJobs - c.onTimeJobs)
             )
           : 0,
-    }))
+      };
+    })
     .sort((a, b) => b.totalJobs - a.totalJobs);
 
   // ── Order Metrics ──
