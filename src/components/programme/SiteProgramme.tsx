@@ -1114,9 +1114,17 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
           </button>
         </div>
 
-        {/* Gantt mode toggle: Original / Current / Overlay */}
+        {/* Gantt mode toggle: Current / Overlay.
+            (May 2026 Keith bug report) Dropped "Original" — on a
+            fresh site originalStartDate === startDate, so the
+            Original mode rendered identically to Current and looked
+            broken. Overlay shows BOTH bars (current above, original
+            below) so a manager can SEE the shift visually whenever
+            one exists. Original-as-its-own-view is implicit in
+            Overlay: if a job hasn't shifted, the overlay rows align;
+            if it has, the offset reveals the original underneath. */}
         <div className="flex items-center rounded-md border overflow-hidden">
-          {(["original", "current", "overlay"] as const).map((mode) => (
+          {(["current", "overlay"] as const).map((mode, i) => (
             <button
               key={mode}
               onClick={() => setGanttMode(mode)}
@@ -1124,14 +1132,14 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                 ganttMode === mode
                   ? "bg-slate-700 text-white"
                   : "text-muted-foreground hover:bg-slate-50 hover:text-foreground"
-              } ${mode !== "original" ? "border-l" : ""}`}
+              } ${i > 0 ? "border-l" : ""}`}
               title={
-                mode === "original" ? "Original planned schedule" :
-                mode === "current" ? "Current/actual schedule" :
-                "Overlay: original + current"
+                mode === "current"
+                  ? "Current schedule with actual dates for completed work"
+                  : "Overlay: current schedule on top, original planned schedule below"
               }
             >
-              {mode === "original" ? "Original" : mode === "current" ? "Current" : "Overlay"}
+              {mode === "current" ? "Current" : "Overlay"}
             </button>
           ))}
         </div>
@@ -1686,6 +1694,15 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                       const currentCells = columns.map((col, colIdx) => {
                         const overlaps = jobStart < col.endDate && jobEnd >= col.date;
                         if (!overlaps) return null;
+                        // (May 2026 Keith bug report) Day-view weekend
+                        // cells render nothing — construction work is
+                        // working-day. A job from Thu→Tue (4 working
+                        // days) used to paint its colour on Sat + Sun
+                        // too because the calendar-overlap check sees
+                        // them as "inside" the bar. Now we skip weekend
+                        // day columns entirely. Week-view columns span
+                        // Mon-Sun so this check is no-op there.
+                        if (viewMode === "day" && col.isWeekendDay) return null;
 
                         const isFirstJobCell = colIdx === jobFirstColIdx;
 
@@ -1852,6 +1869,10 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                         ? columns.map((col, colIdx) => {
                             const overlaps = origJobStart < col.endDate && origJobEnd >= col.date;
                             if (!overlaps) return null;
+                            // (May 2026 Keith bug report) Skip weekend
+                            // day cells — same fix as the current bar
+                            // loop above.
+                            if (viewMode === "day" && col.isWeekendDay) return null;
                             return (
                               <div
                                 key={`${job.id}-orig-${col.key}`}

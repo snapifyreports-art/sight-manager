@@ -68,6 +68,24 @@ interface TemplateJob {
   startWeek: number;
   endWeek: number;
   orders: TemplateOrder[];
+  // (May 2026 Keith bug report) Sub-jobs carry their own orders.
+  // Pre-fix the wizard only walked top-level jobs when checking
+  // whether the supplier-mapping step was needed, so templates whose
+  // orders live on sub-jobs silently bypassed mapping → all orders
+  // got skipped with no UI feedback.
+  children?: TemplateJob[];
+}
+
+/** Walk a template's job tree and yield every job (parents + children). */
+function flattenTemplateJobs(jobs: TemplateJob[]): TemplateJob[] {
+  const out: TemplateJob[] = [];
+  for (const j of jobs) {
+    out.push(j);
+    if (j.children && j.children.length > 0) {
+      out.push(...flattenTemplateJobs(j.children));
+    }
+  }
+  return out;
 }
 
 interface Template {
@@ -570,23 +588,32 @@ export function CreateSiteWizard({
   // Compute total plots
   const totalPlots = plotBatches.reduce((sum, b) => sum + b.plots.length, 0);
 
-  // Check if any template batch has orders (needs supplier mapping)
+  // (May 2026 Keith bug report) Check if any template batch has orders
+  // (needs supplier mapping). Walk children too — sub-jobs carry orders.
   const templateBatchesWithOrders = plotBatches.filter((b) => {
     if (b.mode !== "template") return false;
     const tpl = templates.find((t) => t.id === b.templateId);
-    return tpl?.jobs.some((j) => j.orders.length > 0);
+    if (!tpl) return false;
+    return flattenTemplateJobs(tpl.jobs).some((j) => j.orders.length > 0);
   });
 
   const hasTemplateOrders = templateBatchesWithOrders.length > 0;
 
-  // Get unique templates with orders for supplier mapping step
+  // Get unique templates with orders for supplier mapping step.
+  // (May 2026 Keith bug report) Use flattenTemplateJobs so sub-job
+  // orders also gate inclusion.
   const uniqueTemplatesWithOrders = (() => {
     const seen = new Set<string>();
     const result: { template: Template; batchLabels: string[] }[] = [];
     for (const batch of plotBatches) {
       if (batch.mode !== "template" || seen.has(batch.templateId)) continue;
       const tpl = templates.find((t) => t.id === batch.templateId);
-      if (!tpl || !tpl.jobs.some((j) => j.orders.length > 0)) continue;
+      if (
+        !tpl ||
+        !flattenTemplateJobs(tpl.jobs).some((j) => j.orders.length > 0)
+      ) {
+        continue;
+      }
       seen.add(batch.templateId);
       const labels = plotBatches
         .filter((b) => b.templateId === batch.templateId)
@@ -647,10 +674,14 @@ export function CreateSiteWizard({
       resetBatchForm();
       setShowAddForm(false);
       // Check if any template batch has orders needing supplier mapping
+      // (May 2026 Keith bug report) Walk top-level jobs AND their
+      // children. Pre-fix templates with orders on sub-jobs skipped
+      // mapping entirely and every order was silently dropped.
       const needsSupplierMapping = allBatches.some((b) => {
         if (b.mode !== "template") return false;
         const tpl = templates.find((t) => t.id === b.templateId);
-        return tpl?.jobs.some((j) => j.orders.length > 0);
+        if (!tpl) return false;
+        return flattenTemplateJobs(tpl.jobs).some((j) => j.orders.length > 0);
       });
       if (needsSupplierMapping) {
         setStep("supplier-mapping");
@@ -707,6 +738,15 @@ export function CreateSiteWizard({
 
       // Phase 2: Create plot batches
       const batchErrors: string[] = [];
+      // (May 2026 Keith bug report) Collect supplier-mapping warnings
+      // across every batch so we can surface them in a single summary
+      // toast after the site is created. Pre-fix orders without a
+      // supplier mapping were silently skipped with no UI feedback.
+      const skippedOrderWarnings: Array<{
+        plotKey: string;
+        templateJobName: string;
+        itemsDescription: string | null;
+      }> = [];
 
       for (let i = 0; i < batches.length; i++) {
         const batch = batches[i];
@@ -743,6 +783,15 @@ export function CreateSiteWizard({
               plots,
             }, { silent: true });
             if (!res.ok) throw new Error(res.error ?? "Failed to create plots");
+            // (May 2026 Keith bug report) Collect supplier-skip
+            // warnings for the summary toast below.
+            if (res.warnings) {
+              for (const [plotKey, list] of Object.entries(res.warnings)) {
+                for (const w of list) {
+                  skippedOrderWarnings.push({ plotKey, ...w });
+                }
+              }
+            }
           }
         } catch (batchErr: unknown) {
           const msg =
@@ -768,6 +817,26 @@ export function CreateSiteWizard({
         onCreated(finalSite);
       } else {
         onCreated(finalSite);
+        // (May 2026 Keith bug report) Surface supplier-skip warnings
+        // BEFORE closing the wizard. Pre-fix the wizard closed
+        // silently and the user had no idea orders had been dropped.
+        if (skippedOrderWarnings.length > 0) {
+          const lines = skippedOrderWarnings
+            .slice(0, 5)
+            .map(
+              (w) =>
+                `• ${w.templateJobName}: ${w.itemsDescription || "(unnamed order)"}`,
+            )
+            .join("\n");
+          const extra =
+            skippedOrderWarnings.length > 5
+              ? `\n…and ${skippedOrderWarnings.length - 5} more`
+              : "";
+          toast.error(
+            `Site created but ${skippedOrderWarnings.length} order${skippedOrderWarnings.length === 1 ? "" : "s"} were skipped — no supplier mapped.\n${lines}${extra}\n\nAssign suppliers in Settings → Templates → Orders, or pick them when creating a site.`,
+            { ttlMs: 15000 },
+          );
+        }
         onOpenChange(false);
       }
     } catch (err: unknown) {
@@ -1446,7 +1515,10 @@ export function CreateSiteWizard({
                       Used by {batchLabels.join(", ")}
                     </p>
                   </div>
-                  {template.jobs
+                  {/* (May 2026 Keith bug report) Walk the full tree.
+                      Pre-fix this was `template.jobs.filter(...)` which
+                      missed every sub-job order. */}
+                  {flattenTemplateJobs(template.jobs)
                     .filter((j) => j.orders.length > 0)
                     .flatMap((job) =>
                       job.orders.map((order) => (

@@ -7,7 +7,7 @@
  * stay inside the main component.
  */
 
-import { format, startOfWeek } from "date-fns";
+import { format, isWeekend, startOfWeek } from "date-fns";
 import { getCurrentStage } from "@/lib/plot-stage";
 import { getStageCode } from "@/lib/stage-codes";
 import {
@@ -69,6 +69,16 @@ export function getJobStageForCell(
   cellDate: Date,
   cellEnd: Date,
 ): { code: string; status: string } | null {
+  // (May 2026 Keith bug report) Skip weekend cells entirely.
+  // Construction work is working-day. A job that runs Thu→Tue
+  // (4 working days = Thu, Fri, Mon, Tue) shouldn't paint Sat/Sun
+  // bars. Pre-fix the calendar-day overlap check painted them.
+  // Day-view cells span 1 day, so isWeekend on cellDate is the
+  // signal. Week-view cells span 7 days starting Monday so they're
+  // never wholly weekend.
+  if (isWeekend(cellDate) && cellEnd.getTime() - cellDate.getTime() <= 86_400_000 + 1) {
+    return null;
+  }
   const overlaps: ProgrammeJob[] = [];
   for (const job of jobs) {
     if (!job.startDate || !job.endDate) continue;

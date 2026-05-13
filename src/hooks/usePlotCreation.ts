@@ -76,6 +76,18 @@ interface Result {
   error?: string;
   /** Per-plot error list (only set when batch APIs partially fail). */
   plotErrors?: Array<{ plotNumber: string; error: string }>;
+  /**
+   * (May 2026 Keith bug report) Per-plot warnings returned by the
+   * apply-template-batch route. Currently used for
+   * "order_skipped_no_supplier" warnings — populated when a template
+   * order has no supplier in the template AND the wizard didn't map
+   * one. Pre-fix the caller had no way to see these; orders just
+   * silently disappeared.
+   */
+  warnings?: Record<
+    string,
+    Array<{ templateJobName: string; itemsDescription: string | null }>
+  >;
 }
 
 interface Options {
@@ -181,7 +193,12 @@ export function usePlotCreation() {
         }
         return err;
       }
-      return { ok: true };
+      // (May 2026 Keith bug report) Surface order_skipped warnings to
+      // the caller. Pre-fix the route returned them but the hook
+      // dropped them on the floor, so the user never knew that orders
+      // had been silently skipped due to missing supplier.
+      const body = await res.json().catch(() => ({}));
+      return { ok: true, warnings: body?.warnings };
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Failed to create plots";
       if (!opts?.silent) toast.error(msg);
