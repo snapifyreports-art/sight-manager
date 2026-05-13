@@ -34,6 +34,14 @@ function bufToB64(buffer: ArrayBuffer): string {
   return window.btoa(bin);
 }
 
+// (May 2026 audit O-P0) VAPID key is a build-time env var — read once
+// at module load. If it's missing, the toggle can't possibly work
+// (the /api/.../push-subscribe round-trip would silently no-op
+// because the server can't sign anything). Hide the button entirely
+// rather than rendering a "Get progress notifications" prompt that
+// looks broken when the buyer taps it.
+const VAPID_PUBLIC_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+
 export function CustomerNotifyToggle({ token }: { token: string }) {
   const [state, setState] = useState<State>("loading");
   const [busy, setBusy] = useState(false);
@@ -44,6 +52,12 @@ export function CustomerNotifyToggle({ token }: { token: string }) {
       !("serviceWorker" in navigator) ||
       !("PushManager" in window)
     ) {
+      setState("unsupported");
+      return;
+    }
+    // (May 2026 audit O-P0) Without the public VAPID key the button
+    // can't trigger a real subscription — treat as unsupported.
+    if (!VAPID_PUBLIC_KEY) {
       setState("unsupported");
       return;
     }
@@ -74,10 +88,10 @@ export function CustomerNotifyToggle({ token }: { token: string }) {
         setState(perm === "denied" ? "denied" : "prompt");
         return;
       }
-      const vapidKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
-      if (!vapidKey) {
-        // Server config missing — fail silently rather than show an
-        // error to a customer who doesn't know what VAPID means.
+      if (!VAPID_PUBLIC_KEY) {
+        // Belt-and-braces — by this point the useEffect should have
+        // already short-circuited to "unsupported", so this branch
+        // is unreachable. Kept for defensive symmetry.
         return;
       }
       const reg = await navigator.serviceWorker.ready;
@@ -86,7 +100,7 @@ export function CustomerNotifyToggle({ token }: { token: string }) {
         // TS's modern Uint8Array typing is stricter than the
         // PushSubscriptionOptionsInit signature; the runtime accepts
         // the Uint8Array fine.
-        applicationServerKey: b64ToUint8(vapidKey) as unknown as BufferSource,
+        applicationServerKey: b64ToUint8(VAPID_PUBLIC_KEY) as unknown as BufferSource,
       });
       const sj = sub.toJSON();
       await fetch(`/api/progress/${token}/push-subscribe`, {
