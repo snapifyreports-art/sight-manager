@@ -88,7 +88,9 @@ export function FloatingActions() {
   return (
     // Mobile-only by default. md+ users have the header search button
     // + Cmd-K, which is more efficient than a FAB on those viewports.
-    <div className="md:hidden">
+    // (May 2026 audit UX-P2) Hide on print so the Daily Brief / Site
+    // Story PDF preview doesn't ship a giant blue Plus on every page.
+    <div className="md:hidden print:hidden">
       {/* Sub-action buttons — slide up when open */}
       {open && (
         <div className="fixed bottom-20 right-4 z-40 flex flex-col items-end gap-2">

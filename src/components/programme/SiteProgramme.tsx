@@ -19,7 +19,7 @@ import {
 import { getCurrentDate, getCurrentDateAtMidnight } from "@/lib/dev-date";
 import { useDevDate } from "@/lib/dev-date-context";
 import { differenceInWorkingDays } from "@/lib/working-days";
-import { Loader2, Columns3, ChevronRight, Download, FileText, Search, X, Camera, StickyNote, CalendarDays, Calendar, Layers, List, CheckSquare, Clock, ZoomIn, ZoomOut, Maximize2, Minimize2, Play } from "lucide-react";
+import { Loader2, Columns3, ChevronRight, Download, FileText, Search, X, Camera, StickyNote, CalendarDays, Calendar, Layers, List, CheckSquare, Check, Clock, ZoomIn, ZoomOut, Maximize2, Minimize2, Play } from "lucide-react";
 import Link from "next/link";
 import { getStageCode, getStageColor } from "@/lib/stage-codes";
 import { getCurrentStage } from "@/lib/plot-stage";
@@ -157,13 +157,18 @@ function ApprovalDot({
     <div
       role="img"
       aria-label={`${label ?? "Approval"}: ${approved ? "approved" : "pending"}`}
-      className={`size-3.5 rounded-sm text-center text-[8px] font-bold leading-[14px] ${
+      className={`flex size-3.5 items-center justify-center rounded-sm ${
         approved
           ? "bg-green-500 text-white"
-          : "border border-slate-300 bg-white text-transparent"
+          : "border border-slate-300 bg-white"
       }`}
     >
-      {approved ? "\u2713" : ""}
+      {/* (May 2026 audit UX-P2) Vector check at 10px renders crisply
+          at any zoom. Pre-fix this used a literal "\u2713" character at
+          text-[8px] \u2014 below the 9px font-hinting floor, easy to mis-
+          render on retina + Windows systems where 8px characters
+          collapse to a single pixel. */}
+      {approved && <Check className="size-2.5" aria-hidden />}
     </div>
   );
 }

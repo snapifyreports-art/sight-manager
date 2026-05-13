@@ -965,10 +965,13 @@ export function SnagDialog({
 
               {/* Actions */}
               <div className="flex justify-between gap-2 pt-2">
+                {/* (May 2026 audit UX-P2) Use the destructive variant so
+                    the Delete affordance is clearly distinguished from
+                    the Close button (which was also red on hover pre-
+                    fix — confusing). */}
                 <Button
-                  variant="ghost"
+                  variant="destructive"
                   size="sm"
-                  className="text-red-500 hover:text-red-600"
                   onClick={handleDelete}
                 >
                   Delete
