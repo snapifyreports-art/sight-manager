@@ -249,7 +249,8 @@ export function SnagList({ snags, onSelect, onRefresh, showPlot, highlightId, si
             <button
               key={chip.value}
               onClick={() => setFilterStatus(chip.value)}
-              className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium transition-colors ${
+              aria-pressed={filterStatus === chip.value}
+              className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring ${
                 filterStatus === chip.value
                   ? "bg-blue-600 text-white"
                   : "bg-slate-100 text-slate-600 hover:bg-slate-200"
@@ -265,7 +266,8 @@ export function SnagList({ snags, onSelect, onRefresh, showPlot, highlightId, si
             <button
               key={p}
               onClick={() => setFilterPriority(p)}
-              className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium transition-colors ${
+              aria-pressed={filterPriority === p}
+              className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring ${
                 filterPriority === p
                   ? "bg-blue-600 text-white"
                   : "bg-slate-100 text-slate-600 hover:bg-slate-200"

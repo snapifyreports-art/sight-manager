@@ -517,7 +517,17 @@ function PlotOverview({
                 <p className="text-xs text-muted-foreground">Complete</p>
               </div>
             </div>
-            <div className="mt-2 h-1.5 w-full rounded-full bg-muted">
+            {/* (May 2026 audit UX-P2) role=progressbar + aria values so
+                screen readers announce "X% complete" — pre-fix this
+                was a pair of decorative divs with no semantic role. */}
+            <div
+              role="progressbar"
+              aria-valuenow={stats.progressPercent}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-label="Plot build completion"
+              className="mt-2 h-1.5 w-full rounded-full bg-muted"
+            >
               <div
                 className="h-1.5 rounded-full bg-green-500 transition-all"
                 style={{ width: `${stats.progressPercent}%` }}
