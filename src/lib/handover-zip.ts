@@ -196,30 +196,45 @@ export async function buildHandoverArchive({
         category: true,
       },
     });
-    for (const doc of docs) {
-      const cat = (doc.category || "OTHER").toUpperCase();
-      const folderForCat =
-        cat === "CERT"
-          ? "certificates"
-          : cat === "DRAWING"
-            ? "drawings"
-            : cat === "SPEC"
-              ? "specs"
-              : cat === "RAMS"
-                ? "rams"
-                : cat === "HANDOVER"
-                  ? "handover-checklist"
-                  : "other";
-      const stream = await fetchAsStream(doc.url);
-      if (!stream) continue;
-      const ext = extractExtension(doc.url, null);
-      const name = safeName(doc.name);
-      archive.append(stream, {
-        name: `${folder}/${folderForCat}/${name}.${ext}`,
+    // (May 2026 audit P-*) Same parallel-batch pattern as the photos
+    // loop below — pre-fix this was N sequential fetches per plot.
+    const DOC_BATCH = 10;
+    for (let i = 0; i < docs.length; i += DOC_BATCH) {
+      const batch = docs.slice(i, i + DOC_BATCH);
+      const streams = await Promise.all(batch.map((d) => fetchAsStream(d.url)));
+      batch.forEach((doc, idx) => {
+        const stream = streams[idx];
+        if (!stream) return;
+        const cat = (doc.category || "OTHER").toUpperCase();
+        const folderForCat =
+          cat === "CERT"
+            ? "certificates"
+            : cat === "DRAWING"
+              ? "drawings"
+              : cat === "SPEC"
+                ? "specs"
+                : cat === "RAMS"
+                  ? "rams"
+                  : cat === "HANDOVER"
+                    ? "handover-checklist"
+                    : "other";
+        const ext = extractExtension(doc.url, null);
+        const name = safeName(doc.name);
+        archive.append(stream, {
+          name: `${folder}/${folderForCat}/${name}.${ext}`,
+        });
       });
     }
 
-    // photos/ — every JobPhoto on the plot, organised by stage
+    // photos/ — every JobPhoto on the plot, organised by stage.
+    // (May 2026 audit P-* handover-zip) Pre-fix this awaited each photo
+    // fetch in series — a 500-photo site = 500 sequential HTTPS round
+    // trips before the ZIP could finalise, easily exceeding the Lambda
+    // budget. Now fetch in parallel batches of 10 (avoids saturating
+    // Supabase's CDN + keeps Node's event loop responsive), but append
+    // in chronological order so the ZIP's file ordering matches the
+    // findMany orderBy. The stream itself is still chunked; only the
+    // HTTPS request kick-off is concurrent.
     const photos = await prisma.jobPhoto.findMany({
       where: { job: { plotId: plot.id } },
       select: {
@@ -232,15 +247,20 @@ export async function buildHandoverArchive({
       },
       orderBy: { createdAt: "asc" },
     });
-    for (const p of photos) {
-      const stream = await fetchAsStream(p.url);
-      if (!stream) continue;
-      const ext = extractExtension(p.url, null);
-      const stageFolder = safeName(p.job.stageCode || p.job.name);
-      const ts = p.createdAt.toISOString().slice(0, 10);
-      const filename = `${ts}_${safeName(p.caption || p.tag || p.id)}.${ext}`;
-      archive.append(stream, {
-        name: `${folder}/photos/${stageFolder}/${filename}`,
+    const PHOTO_BATCH = 10;
+    for (let i = 0; i < photos.length; i += PHOTO_BATCH) {
+      const batch = photos.slice(i, i + PHOTO_BATCH);
+      const streams = await Promise.all(batch.map((p) => fetchAsStream(p.url)));
+      batch.forEach((p, idx) => {
+        const stream = streams[idx];
+        if (!stream) return;
+        const ext = extractExtension(p.url, null);
+        const stageFolder = safeName(p.job.stageCode || p.job.name);
+        const ts = p.createdAt.toISOString().slice(0, 10);
+        const filename = `${ts}_${safeName(p.caption || p.tag || p.id)}.${ext}`;
+        archive.append(stream, {
+          name: `${folder}/photos/${stageFolder}/${filename}`,
+        });
       });
     }
   }
