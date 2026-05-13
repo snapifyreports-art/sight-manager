@@ -107,6 +107,9 @@ import type { BriefData, DailySiteBriefProps } from "./daily-brief/types";
 // reuse the same components.
 import { WeatherIcon, WEATHER_CATEGORY_LABELS as CATEGORY_LABELS } from "./daily-brief/WeatherIcon";
 import { JobActionButton } from "./daily-brief/JobActionButton";
+import { SnagsSection } from "./daily-brief/SnagsSection";
+import { RecentActivitySection } from "./daily-brief/RecentActivitySection";
+import { UpcomingDeliveriesSection } from "./daily-brief/UpcomingDeliveriesSection";
 
 export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
   const { devDate } = useDevDate();
@@ -2345,93 +2348,16 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
         </Card>
       )}
 
-      {/* Open Snags — collapsible (moved from Pipeline) */}
-      {data.openSnagsList.length > 0 && (
-        <Card id="section-snags">
-          <CardHeader className="cursor-pointer select-none pb-2" onClick={() => toggleSection("snags")}>
-            <CardTitle className="flex items-center gap-2 text-sm">
-              <Bug className="size-4 text-orange-600" />
-              Open Snags ({data.summary.openSnagCount})
-              {data.openSnagsTruncated && (
-                <span className="text-[10px] font-normal text-muted-foreground">Showing top 20 of {data.summary.openSnagCount}</span>
-              )}
-              <ChevronDown className={cn("ml-auto size-3.5 shrink-0 transition-transform duration-200", openSections.has("snags") && "rotate-180")} />
-            </CardTitle>
-          </CardHeader>
-          {openSections.has("snags") && (
-            <CardContent>
-            <div className="max-h-[400px] overflow-y-auto space-y-2">
-              {data.openSnagsTruncated && (
-                <p className="mb-2 text-xs text-muted-foreground">
-                  Showing 20 of {data.summary.openSnagCount} open snags.{" "}
-                  <Link href={`/sites/${siteId}?tab=snags`} className="text-blue-600 hover:underline">View all in Snags tab →</Link>
-                </p>
-              )}
-              {data.openSnagsList.map((snag) => {
-                const isPendingSnag = isSnagPending(snag.id);
-                return (
-                  <div
-                    key={snag.id}
-                    className={`rounded border p-2 text-sm ${
-                      snag.priority === "CRITICAL" ? "border-red-200 bg-red-50" :
-                      snag.priority === "HIGH" ? "border-orange-200 bg-orange-50/60" :
-                      ""
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0 flex-1">
-                        <Link
-                          href={`/sites/${siteId}?tab=snags&snagId=${snag.id}`}
-                          className="font-medium leading-snug text-blue-600 hover:underline"
-                        >
-                          {snag.description}
-                        </Link>
-                        <p className="mt-0.5 text-xs text-muted-foreground">
-                          <Link href={`/sites/${siteId}?tab=snags&snagId=${snag.id}`} className="hover:underline hover:text-blue-600">
-                            {snag.plot.plotNumber ? `Plot ${snag.plot.plotNumber}` : snag.plot.name}
-                          </Link>
-                          {snag.location && (
-                            <span> · <MapPin className="inline size-3" /> {snag.location}</span>
-                          )}
-                          {snag.assignedTo && <span> · {snag.assignedTo.name}</span>}
-                          {snag.contact && <span> · {snag.contact.company || snag.contact.name}</span>}
-                        </p>
-                      </div>
-                      <div className="flex shrink-0 flex-col items-end gap-1">
-                        <Badge
-                          variant="outline"
-                          className={`text-[10px] ${
-                            snag.priority === "CRITICAL" ? "border-red-300 text-red-700" :
-                            snag.priority === "HIGH" ? "border-orange-300 text-orange-700" :
-                            snag.priority === "MEDIUM" ? "border-yellow-300 text-yellow-700" :
-                            "border-slate-200 text-slate-600"
-                          }`}
-                        >
-                          {snag.priority}
-                        </Badge>
-                        {isPendingSnag ? (
-                          <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
-                        ) : snag.status === "OPEN" ? (
-                          <Button variant="outline" size="sm" className="h-9 border-blue-200 px-2 text-xs text-blue-700 hover:bg-blue-50"
-                            onClick={() => handleSnagAction(snag.id, "IN_PROGRESS")}>
-                            <Play className="mr-1 size-2.5" />Start
-                          </Button>
-                        ) : (
-                          <Button variant="outline" size="sm" className="h-9 border-green-200 px-2 text-xs text-green-700 hover:bg-green-50"
-                            onClick={() => handleSnagResolveOpen(snag)}>
-                            <CheckCircle2 className="mr-1 size-2.5" />Resolve
-                          </Button>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </CardContent>
-          )}
-        </Card>
-      )}
+      {/* Open Snags — collapsible. Extracted to SnagsSection. */}
+      <SnagsSection
+        data={data}
+        siteId={siteId}
+        openSections={openSections}
+        toggleSection={toggleSection}
+        isSnagPending={isSnagPending}
+        onSnagAction={handleSnagAction}
+        onSnagResolveOpen={handleSnagResolveOpen}
+      />
 
       {/* Pending Sign-offs — collapsible */}
       {data.pendingSignOffs && data.pendingSignOffs.length > 0 && (
@@ -2643,120 +2569,15 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
           )}
         </Card>
 
-        {/* Upcoming Deliveries — grouped by supplier + job name */}
-        <Card id="section-upcoming-deliveries">
-          <CardHeader className="cursor-pointer select-none pb-2" onClick={() => toggleSection("upcoming-deliveries")}>
-            <CardTitle className="flex items-center gap-2 text-sm">
-              <Truck className="size-4 text-blue-600" />
-              Upcoming Deliveries ({data.upcomingDeliveries?.length || 0})
-              <ChevronDown className={cn("ml-auto size-3.5 shrink-0 transition-transform duration-200", openSections.has("upcoming-deliveries") && "rotate-180")} />
-            </CardTitle>
-            <CardDescription className="text-xs">Orders sent to suppliers — awaiting delivery</CardDescription>
-          </CardHeader>
-          {openSections.has("upcoming-deliveries") && (
-            <CardContent>
-              {(!data.upcomingDeliveries || data.upcomingDeliveries.length === 0) ? (
-                <p className="text-sm text-muted-foreground">No upcoming deliveries</p>
-              ) : (
-                <div className="space-y-3">
-                  {(() => {
-                    // Keith Apr 2026: "all orders for the same day are
-                    // stacked into one". Outer grouping by expected delivery
-                    // date, then inner grouping by supplier + job (same
-                    // supplier for same stage across plots = one email).
-                    type DeliveryRow = NonNullable<typeof data.upcomingDeliveries>[number];
-                    const byDate = new Map<string, DeliveryRow[]>();
-                    for (const d of data.upcomingDeliveries!) {
-                      const key = d.expectedDeliveryDate
-                        ? format(new Date(d.expectedDeliveryDate), "yyyy-MM-dd")
-                        : "unscheduled";
-                      const existing = byDate.get(key) ?? [];
-                      existing.push(d);
-                      byDate.set(key, existing);
-                    }
-                    const sortedDates = Array.from(byDate.keys()).sort();
-                    return sortedDates.map((dateKey) => {
-                      const deliveries = byDate.get(dateKey)!;
-                      // Label for the day header
-                      const dayLabel = dateKey === "unscheduled"
-                        ? "No date set"
-                        : format(new Date(dateKey), "EEE d MMM");
-                      // Inner: group by supplier + job
-                      const subGrouped = new Map<string, DeliveryRow[]>();
-                      for (const d of deliveries) {
-                        const key = `${d.supplier.id}__${d.job.name}`;
-                        const existing = subGrouped.get(key) ?? [];
-                        existing.push(d);
-                        subGrouped.set(key, existing);
-                      }
-                      const subGroups = Array.from(subGrouped.values());
-                      return (
-                        <details key={dateKey} className="group rounded-lg border bg-slate-50/50" open>
-                          <summary className="flex cursor-pointer items-center justify-between gap-2 px-3 py-2 text-sm font-semibold text-blue-700 [&::-webkit-details-marker]:hidden">
-                            <span className="flex items-center gap-2">
-                              <Truck className="size-4" />
-                              {dayLabel}
-                            </span>
-                            <span className="text-xs font-normal text-muted-foreground">
-                              {deliveries.length} deliver{deliveries.length === 1 ? "y" : "ies"} · {subGroups.length} supplier{subGroups.length === 1 ? "" : "s"}
-                            </span>
-                          </summary>
-                          <div className="space-y-1.5 border-t bg-white px-2 py-2">
-                          {subGroups.map((group) => {
-                    const first = group[0];
-                    const plotLabels = group.map((d) => d.job.plot.plotNumber ? `P${d.job.plot.plotNumber}` : d.job.plot.name);
-                    const allIds = group.map((d) => d.id);
-                    const anyPending = allIds.some((id) => isOrderPending(id));
-                      return (
-                        <div key={`${first.supplier.id}__${first.job.name}`} className="rounded border p-2 text-sm">
-                          <div className="flex items-center gap-2">
-                            <Link href={`/suppliers/${first.supplier.id}`} className="font-medium text-blue-600 hover:underline">{first.supplier.name}</Link>
-                            <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-medium text-blue-700">Ordered</span>
-                            {first.expectedDeliveryDate && (
-                              <span className="ml-auto text-xs font-medium">{format(new Date(first.expectedDeliveryDate), "d MMM")}</span>
-                            )}
-                          </div>
-                          <p className="text-xs text-muted-foreground">{first.itemsDescription || first.job.name}</p>
-                          <p className="text-[11px] text-muted-foreground">
-                            {first.job.name} · {plotLabels.join(", ")}{group.length > 1 ? ` (${group.length} plots)` : ""}
-                          </p>
-                          <JobActionStrip>
-                            <input
-                              type="date"
-                              className="h-6 rounded border px-1 text-[10px] w-[110px]"
-                              defaultValue={first.expectedDeliveryDate ? format(new Date(first.expectedDeliveryDate), "yyyy-MM-dd") : ""}
-                              onChange={async (e) => {
-                                if (!e.target.value) return;
-                                for (const id of allIds) {
-                                  await fetch(`/api/orders/${id}`, {
-                                    method: "PUT",
-                                    headers: { "Content-Type": "application/json" },
-                                    body: JSON.stringify({ expectedDeliveryDate: e.target.value }),
-                                  });
-                                }
-                                setRefreshKey((k) => k + 1);
-                              }}
-                            />
-                            <Button size="sm" variant="outline" className="h-9gap-1 text-xs"
-                              disabled={anyPending}
-                              onClick={() => allIds.forEach((id) => handleOrderAction(id, "DELIVERED"))}>
-                              {anyPending ? <Loader2 className="size-3 animate-spin" /> : <CheckCircle2 className="size-3" />}
-                              <span className="ml-1">Mark Received</span>
-                            </Button>
-                          </JobActionStrip>
-                        </div>
-                      );
-                          })}
-                          </div>
-                        </details>
-                      );
-                    });
-                  })()}
-                </div>
-              )}
-            </CardContent>
-          )}
-        </Card>
+        {/* Upcoming Deliveries — extracted to UpcomingDeliveriesSection. */}
+        <UpcomingDeliveriesSection
+          data={data}
+          openSections={openSections}
+          toggleSection={toggleSection}
+          isOrderPending={isOrderPending}
+          onOrderAction={handleOrderAction}
+          onRefresh={() => setRefreshKey((k) => k + 1)}
+        />
 
       {/* Upcoming Orders (future, scheduled) — collapsible */}
       {data.upcomingOrders.length > 0 && (
@@ -2866,39 +2687,12 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
         </Card>
       )}
 
-      {/* Recent activity — always collapsed by default */}
-      {data.recentEvents.length > 0 && (
-        <Card>
-          <CardHeader className="cursor-pointer select-none pb-2" onClick={() => toggleSection("recent-activity")}>
-            <CardTitle className="flex items-center gap-2 text-sm">
-              <Activity className="size-4 text-slate-600" />
-              Recent Activity ({data.recentEvents.length})
-              <ChevronDown className={cn("ml-auto size-3.5 shrink-0 transition-transform duration-200", openSections.has("recent-activity") && "rotate-180")} />
-            </CardTitle>
-          </CardHeader>
-          {openSections.has("recent-activity") && (
-            <CardContent>
-              <div className="space-y-1.5">
-                {data.recentEvents.map((e) => (
-                  <div key={e.id} className="flex items-start gap-2 text-sm">
-                    <span className="shrink-0 text-xs text-muted-foreground">
-                      {format(new Date(e.createdAt), "HH:mm")}
-                    </span>
-                    <span className="flex-1 text-muted-foreground">
-                      {e.description}
-                    </span>
-                    {e.user && (
-                      <span className="shrink-0 text-xs text-muted-foreground">
-                        {e.user.name}
-                      </span>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          )}
-        </Card>
-      )}
+      {/* Recent activity — extracted to RecentActivitySection. */}
+      <RecentActivitySection
+        data={data}
+        openSections={openSections}
+        toggleSection={toggleSection}
+      />
 
       {/* Delay dialog — delegated to useDelayJob hook (rendered via {delayDialogs} below). */}
       {delayDialogs}
