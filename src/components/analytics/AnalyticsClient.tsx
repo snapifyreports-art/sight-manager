@@ -959,6 +959,16 @@ interface WeatherLoss {
   totalDays: number;
   byType: Record<string, number>;
   bySite: Array<{ id: string; name: string; days: number }>;
+  // (May 2026 audit D-P1) The API already computes byMonth — the
+  // widget never rendered it. Sparkline below the type/site
+  // summaries makes seasonality visible.
+  byMonth?: Array<{
+    month: string;
+    rain: number;
+    temp: number;
+    other: number;
+    total: number;
+  }>;
 }
 
 function WeatherLossWidget() {
@@ -969,6 +979,12 @@ function WeatherLossWidget() {
       .then(setData);
   }, []);
   if (!data || data.totalDays === 0) return null;
+  // (May 2026 audit D-P1) Compute sparkline scale once for the byMonth
+  // chart. Tallest bar = 100% height; everything else proportional.
+  const maxMonth =
+    data.byMonth && data.byMonth.length > 0
+      ? Math.max(...data.byMonth.map((m) => m.total))
+      : 0;
   return (
     <div className="rounded-xl border bg-white p-4">
       <h3 className="font-semibold">Weather loss</h3>
@@ -997,6 +1013,39 @@ function WeatherLossWidget() {
           </ul>
         </div>
       </div>
+      {data.byMonth && data.byMonth.length > 0 && maxMonth > 0 && (
+        <div className="mt-4">
+          <p className="text-xs font-medium text-slate-700">
+            Seasonality (last {data.byMonth.length} months)
+          </p>
+          <div
+            className="mt-2 flex items-end gap-1"
+            style={{ height: "56px" }}
+            role="img"
+            aria-label={`Weather loss by month sparkline; tallest bar ${maxMonth} days`}
+          >
+            {data.byMonth.map((m) => {
+              const pct = Math.max(2, (m.total / maxMonth) * 100);
+              const monthLabel = m.month.slice(5); // "YYYY-MM" → "MM"
+              return (
+                <div
+                  key={m.month}
+                  className="group relative flex flex-1 flex-col items-stretch"
+                  title={`${m.month}: ${m.total} days (rain ${m.rain}, temp ${m.temp}, other ${m.other})`}
+                >
+                  <div className="flex flex-1 items-end">
+                    <div
+                      className="w-full rounded-sm bg-blue-400 transition-colors group-hover:bg-blue-500"
+                      style={{ height: `${pct}%` }}
+                    />
+                  </div>
+                  <p className="mt-1 text-[9px] text-center text-muted-foreground">{monthLabel}</p>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
