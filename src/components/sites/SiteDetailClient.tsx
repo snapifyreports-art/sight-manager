@@ -156,12 +156,24 @@ interface TemplateJob {
   orders: TemplateOrder[];
 }
 
+interface TemplateVariantOption {
+  id: string;
+  name: string;
+  description: string | null;
+  sortOrder: number;
+}
+
 interface Template {
   id: string;
   name: string;
   description: string | null;
   typeLabel: string | null;
   jobs: TemplateJob[];
+  /** (May 2026 Keith bug report) Variants come back with the
+   *  template via prisma.include in GET /api/plot-templates — read
+   *  them directly instead of doing a separate lazy fetch that
+   *  could race or silently fail. */
+  variants?: TemplateVariantOption[];
 }
 
 interface Supplier {
@@ -1158,18 +1170,13 @@ export function SiteDetailClient({
                                 if (v === null) return;
                                 setSelectedTemplateId(v);
                                 setSelectedVariantId("");
-                                setTemplateVariants([]);
-                                // Lazy-fetch variants for this template
-                                void fetch(
-                                  `/api/plot-templates/${v}/variants`,
-                                  { cache: "no-store" },
-                                ).then(async (r) => {
-                                  if (!r.ok) return;
-                                  const data = await r.json();
-                                  setTemplateVariants(
-                                    Array.isArray(data) ? data : [],
-                                  );
-                                });
+                                // (May 2026 Keith bug report) Read
+                                // variants from the loaded template
+                                // object instead of a redundant lazy
+                                // fetch that could race / silently
+                                // fail.
+                                const picked = templates.find((t) => t.id === v);
+                                setTemplateVariants(picked?.variants ?? []);
                               }}
                             >
                               <SelectTrigger className="w-full">
@@ -1479,18 +1486,13 @@ export function SiteDetailClient({
                                 if (v === null) return;
                                 setSelectedTemplateId(v);
                                 setSelectedVariantId("");
-                                setTemplateVariants([]);
-                                // Lazy-fetch variants for this template
-                                void fetch(
-                                  `/api/plot-templates/${v}/variants`,
-                                  { cache: "no-store" },
-                                ).then(async (r) => {
-                                  if (!r.ok) return;
-                                  const data = await r.json();
-                                  setTemplateVariants(
-                                    Array.isArray(data) ? data : [],
-                                  );
-                                });
+                                // (May 2026 Keith bug report) Read
+                                // variants from the loaded template
+                                // object instead of a redundant lazy
+                                // fetch that could race / silently
+                                // fail.
+                                const picked = templates.find((t) => t.id === v);
+                                setTemplateVariants(picked?.variants ?? []);
                               }}
                             >
                               <SelectTrigger className="w-full">

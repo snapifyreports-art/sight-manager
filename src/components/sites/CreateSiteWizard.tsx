@@ -88,12 +88,28 @@ function flattenTemplateJobs(jobs: TemplateJob[]): TemplateJob[] {
   return out;
 }
 
+interface TemplateVariant {
+  id: string;
+  name: string;
+  description: string | null;
+  sortOrder: number;
+}
+
 interface Template {
   id: string;
   name: string;
   description: string | null;
   typeLabel: string | null;
   jobs: TemplateJob[];
+  /**
+   * (May 2026 Keith bug report) The /api/plot-templates GET response
+   * already includes variants via the route's prisma `include`. The
+   * wizard was IGNORING this field and doing a redundant lazy fetch
+   * on template-pick. If that fetch raced or failed silently, the
+   * variant picker never appeared. Now we read variants straight
+   * from the initial fetch — they're already there.
+   */
+  variants?: TemplateVariant[];
 }
 
 interface Supplier {
@@ -1204,18 +1220,13 @@ export function CreateSiteWizard({
                                 if (v === null) return;
                                 setBatchTemplateId(v);
                                 setBatchVariantId("");
-                                setBatchVariants([]);
-                                // Lazy-fetch variants for this template
-                                void fetch(
-                                  `/api/plot-templates/${v}/variants`,
-                                  { cache: "no-store" },
-                                ).then(async (r) => {
-                                  if (!r.ok) return;
-                                  const data = await r.json();
-                                  setBatchVariants(
-                                    Array.isArray(data) ? data : [],
-                                  );
-                                });
+                                // (May 2026 Keith bug report) Read
+                                // variants straight from the already-
+                                // loaded template object. Pre-fix the
+                                // wizard did a redundant lazy fetch
+                                // that could race or silently fail.
+                                const picked = templates.find((t) => t.id === v);
+                                setBatchVariants(picked?.variants ?? []);
                               }}
                             >
                               <SelectTrigger className="h-8 w-full text-sm">

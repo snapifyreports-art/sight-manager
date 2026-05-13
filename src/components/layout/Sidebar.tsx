@@ -260,23 +260,30 @@ function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: boolean; on
               const id = e.target.value;
               setFallbackSiteId(id);
               if (isOnSitePage) {
-                // On a site page, navigate to the same tab on the new site
                 if (id) {
+                  // Picked a specific site — navigate to the same tab
+                  // on the new site so the user stays in their flow.
                   window.location.href = `/sites/${id}?tab=${currentTab}`;
                 } else {
-                  // (#170) Switching to "All sites" while inside a
-                  // per-site tab — preserve which tab the user was on
-                  // by routing to /sites?pickFor=<tab>. The sites page
-                  // shows a "Pick a site to view its <Tab>" banner and
-                  // forwards them straight to that tab once they pick.
-                  // Without this they landed on a generic sites list
-                  // with no context (Keith called this a 404).
-                  window.location.href = `/sites?pickFor=${currentTab}`;
+                  // (May 2026 Keith bug report) "All sites" goes
+                  // straight to the sites list. Pre-fix this routed
+                  // to /sites?pickFor=<tab> which showed a confusing
+                  // "pick a site" banner — Keith expected (and asked
+                  // for) the plain sites page.
+                  window.location.href = `/sites`;
                 }
+              } else if (!id) {
+                // (May 2026 Keith bug report) Off-site contexts:
+                // "All sites" also navigates to /sites rather than
+                // just clearing the ?site= filter. Aligns with the
+                // on-site behaviour and matches Keith's request.
+                window.location.href = `/sites`;
               } else {
-                // Everywhere else, update ?site= in-place (never navigate away)
+                // Off-site context, specific site picked — update
+                // ?site= in-place so the current page's view re-
+                // scopes (dashboard, daily-brief, etc.).
                 const params = new URLSearchParams(searchParams.toString());
-                if (id) { params.set("site", id); } else { params.delete("site"); }
+                params.set("site", id);
                 router.push(`${pathname}?${params.toString()}`);
               }
             }}
@@ -665,12 +672,19 @@ export function MobileSiteBar() {
   const currentTab = searchParams.get("tab") || "daily-brief";
 
   const handleChange = (id: string) => {
+    // (May 2026 Keith bug report) "All sites" always navigates to
+    // /sites, on every surface (mobile + desktop). Pre-fix the
+    // off-site mobile path cleared ?site= in place which felt like
+    // nothing happened.
+    if (!id) {
+      window.location.href = "/sites";
+      return;
+    }
     if (isOnSitePage) {
-      if (id) { window.location.href = `/sites/${id}?tab=${currentTab}`; }
-      else { window.location.href = "/sites"; }
+      window.location.href = `/sites/${id}?tab=${currentTab}`;
     } else {
       const params = new URLSearchParams(searchParams.toString());
-      if (id) { params.set("site", id); } else { params.delete("site"); }
+      params.set("site", id);
       router.push(`${pathname}?${params.toString()}`);
     }
   };
