@@ -34,7 +34,35 @@ export async function PATCH(
 
     const body = await req.json();
     const data: Record<string, unknown> = {};
-    if (body.reasonCode !== undefined) data.reasonCode = body.reasonCode;
+    if (body.reasonCode !== undefined) {
+      // (May 2026 audit B-P1-33) Validate against the canonical enum
+      // before passing to Prisma. Pre-fix any string was accepted and
+      // surfaced as a generic 500 from the DB enum check — now we
+      // return a clear 400 with the reason.
+      const VALID_REASONS = [
+        "OTHER",
+        "WEATHER_RAIN",
+        "WEATHER_TEMPERATURE",
+        "WEATHER_WIND",
+        "MATERIAL_LATE",
+        "MATERIAL_WRONG",
+        "MATERIAL_SHORT",
+        "LABOUR_NO_SHOW",
+        "LABOUR_SHORT",
+        "DESIGN_CHANGE",
+        "SPEC_CLARIFICATION",
+        "PREDECESSOR_LATE",
+        "ACCESS_BLOCKED",
+        "INSPECTION_FAILED",
+      ] as const;
+      if (!VALID_REASONS.includes(body.reasonCode)) {
+        return NextResponse.json(
+          { error: `Invalid reasonCode. Must be one of: ${VALID_REASONS.join(", ")}` },
+          { status: 400 },
+        );
+      }
+      data.reasonCode = body.reasonCode;
+    }
     if (body.reasonNote !== undefined) data.reasonNote = body.reasonNote;
     if (body.attributedContactId !== undefined) {
       data.attributedContactId = body.attributedContactId || null;

@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getSupabase, PHOTOS_BUCKET } from "@/lib/supabase";
 import { canAccessSite } from "@/lib/site-access";
+import { apiError } from "@/lib/api-errors";
 
 export const dynamic = "force-dynamic";
 
@@ -153,11 +154,10 @@ export async function POST(
 
     return NextResponse.json(createdPhotos, { status: 201 });
   } catch (error) {
-    console.error("Photo upload POST error:", error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Upload failed" },
-      { status: 500 }
-    );
+    // (May 2026 audit B-P1-39) Sanitise via apiError. Pre-fix we
+    // surfaced the raw `error.message`, which can leak Supabase /
+    // Prisma internals (storage paths, bucket names) in production.
+    return apiError(error, "Photo upload failed");
   }
 }
 

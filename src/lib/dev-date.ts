@@ -55,8 +55,30 @@ export function getCurrentDateAtMidnight(): Date {
 /**
  * Server-side: get current date from a NextRequest's cookies.
  * Use in API route handlers: getServerCurrentDate(req)
+ *
+ * (May 2026 audit B-P1-35) Cron-secret-authenticated requests ignore
+ * the dev-date cookie. Pre-fix anyone in possession of CRON_SECRET
+ * could send a dev-date cookie alongside the cron auth header and
+ * shift the cron's "today" to an arbitrary date — weaponising the
+ * override to mark every overdue job not-overdue by setting
+ * dev-date in 1900, for example.
+ *
+ * Session-authenticated requests keep dev-date working so Vercel
+ * preview deployments and local dev are unaffected. The signal we
+ * use is the Authorization header — cron routes always pass
+ * `Bearer <CRON_SECRET>`; session routes never do (they use cookie
+ * auth via NextAuth). If the caller doesn't expose `headers` (some
+ * internal callers don't), we keep the legacy behaviour.
  */
-export function getServerCurrentDate(req: { cookies: { get: (name: string) => { value: string } | undefined } }): Date {
+export function getServerCurrentDate(req: {
+  cookies: { get: (name: string) => { value: string } | undefined };
+  headers?: { get?: (name: string) => string | null };
+}): Date {
+  const authHeader = req.headers?.get?.("authorization") ?? null;
+  if (authHeader?.toLowerCase().startsWith("bearer ")) {
+    // Cron / API-token caller — never honour dev-date.
+    return new Date();
+  }
   const cookie = req.cookies.get(COOKIE_NAME);
   if (!cookie?.value) return new Date();
 

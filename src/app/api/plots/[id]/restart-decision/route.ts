@@ -6,6 +6,8 @@ import { addWeeks } from "date-fns";
 import { addWorkingDays, differenceInWorkingDays, snapToWorkingDay } from "@/lib/working-days";
 import { getNextMonday } from "@/lib/schedule";
 import { apiError } from "@/lib/api-errors";
+import { canAccessSite } from "@/lib/site-access";
+import { sessionHasPermission } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -28,6 +30,39 @@ export async function POST(
   }
 
   const { id: plotId } = await params;
+
+  // (May 2026 audit B-P1-29) Pre-fix the route had ZERO permission
+  // checking — a contractor session could POST and either defer or
+  // pull-forward someone else's plot. Add canAccessSite + require
+  // EDIT_PROGRAMME (same gate as other plot/job mutations).
+  const accessPlot = await prisma.plot.findUnique({
+    where: { id: plotId },
+    select: { siteId: true },
+  });
+  if (!accessPlot) {
+    return NextResponse.json({ error: "Plot not found" }, { status: 404 });
+  }
+  if (
+    !(await canAccessSite(
+      session.user.id,
+      (session.user as { role: string }).role,
+      accessPlot.siteId,
+    ))
+  ) {
+    return NextResponse.json({ error: "Plot not found" }, { status: 404 });
+  }
+  if (
+    !sessionHasPermission(
+      session.user as { role?: string; permissions?: string[] },
+      "EDIT_PROGRAMME",
+    )
+  ) {
+    return NextResponse.json(
+      { error: "You do not have permission to edit this plot" },
+      { status: 403 },
+    );
+  }
+
   const body = await req.json();
   const { decision, nextJobId, pushWeeks, awaitingContractor } = body as {
     decision: "start_today" | "start_next_monday" | "push_weeks" | "leave_for_now";

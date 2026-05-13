@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { templateJobsInclude } from "@/lib/template-includes";
 import { createJobsFromTemplate } from "@/lib/apply-template-helpers";
 import { canAccessSite } from "@/lib/site-access";
+import { sessionHasPermission } from "@/lib/permissions";
 import { apiError } from "@/lib/api-errors";
 
 export const dynamic = "force-dynamic";
@@ -50,6 +51,23 @@ export async function POST(request: NextRequest) {
   ) {
     return NextResponse.json(
       { error: "You do not have access to this site" },
+      { status: 403 },
+    );
+  }
+
+  // (May 2026 audit B-P1-40) Apply-template creates plots + jobs +
+  // orders + materials + documents — a heavy mutation. Pre-fix it
+  // was only gated by canAccessSite, so any contractor with a
+  // UserSite row could spawn plots. Match the rest of the
+  // plot/programme mutation routes by requiring EDIT_PROGRAMME.
+  if (
+    !sessionHasPermission(
+      session.user as { role?: string; permissions?: string[] },
+      "EDIT_PROGRAMME",
+    )
+  ) {
+    return NextResponse.json(
+      { error: "You do not have permission to create plots" },
       { status: 403 },
     );
   }
