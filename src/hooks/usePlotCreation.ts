@@ -155,6 +155,23 @@ export function usePlotCreation() {
         }),
       });
       if (!res.ok) return await handleError(res, "Failed to create plot from template", opts?.silent ?? false);
+      // (May 2026 user-journey audit Bug 3) Surface _warnings the
+      // route emits. Pre-fix the hook discarded the body so any
+      // supplier-skip warnings on a single-plot apply silently
+      // disappeared — same class of bug as the batch path.
+      const body = await res.json().catch(() => ({}));
+      const warnings = body?._warnings;
+      if (Array.isArray(warnings) && warnings.length > 0 && !opts?.silent) {
+        const preview = (warnings as Array<{ templateJobName: string; itemsDescription: string | null }>)
+          .slice(0, 5)
+          .map((w) => `• ${w.templateJobName}: ${w.itemsDescription || "(unnamed order)"}`)
+          .join("\n");
+        const extra = warnings.length > 5 ? `\n…and ${warnings.length - 5} more` : "";
+        toast.error(
+          `Plot created but ${warnings.length} order${warnings.length === 1 ? "" : "s"} were skipped — no supplier mapped.\n${preview}${extra}\nAssign suppliers in Settings → Templates.`,
+          { ttlMs: 15000 },
+        );
+      }
       return { ok: true };
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Failed to create plot from template";
@@ -198,6 +215,23 @@ export function usePlotCreation() {
       // dropped them on the floor, so the user never knew that orders
       // had been silently skipped due to missing supplier.
       const body = await res.json().catch(() => ({}));
+      // (May 2026 user-journey audit Bug 2) Surface PER-PLOT errors
+      // too. The route returns 201 if at least one plot succeeded
+      // even when `errors[]` lists failed plots. Pre-fix the hook
+      // ignored the array entirely so the wizard showed "Site
+      // created!" even though half the batch failed.
+      if (Array.isArray(body?.errors) && body.errors.length > 0) {
+        if (!opts?.silent) {
+          const preview = (body.errors as Array<{ plotNumber: string; error: string }>)
+            .slice(0, 3)
+            .map((e) => `Plot ${e.plotNumber}: ${e.error}`)
+            .join("; ");
+          toast.error(
+            `${body.errors.length} plot${body.errors.length !== 1 ? "s" : ""} failed — ${preview}`,
+          );
+        }
+        return { ok: true, warnings: body?.warnings, plotErrors: body.errors };
+      }
       return { ok: true, warnings: body?.warnings };
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Failed to create plots";

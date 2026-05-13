@@ -154,6 +154,23 @@ interface TemplateJob {
   startWeek: number;
   endWeek: number;
   orders: TemplateOrder[];
+  // (May 2026 user-journey audit Bug 4) Sub-jobs carry orders. Pre-
+  // fix `selectedTemplate.jobs.flatMap` ignored these, so templates
+  // with orders on children silently dropped every one of them
+  // through the apply flow.
+  children?: TemplateJob[];
+}
+
+/** Walk a template's job tree and yield every job (parents + children). */
+function flattenTemplateJobs(jobs: TemplateJob[]): TemplateJob[] {
+  const out: TemplateJob[] = [];
+  for (const j of jobs) {
+    out.push(j);
+    if (j.children && j.children.length > 0) {
+      out.push(...flattenTemplateJobs(j.children));
+    }
+  }
+  return out;
 }
 
 interface TemplateVariantOption {
@@ -873,13 +890,16 @@ export function SiteDetailClient({
     }
   }
 
-  // Get all orders from selected template (for supplier mapping step)
+  // Get all orders from selected template (for supplier mapping step).
+  // (May 2026 user-journey audit Bug 4) Walk the FULL tree — sub-job
+  // orders were silently dropped pre-fix because the flatMap only
+  // walked top-level jobs.
   const allTemplateOrders: Array<{
     order: TemplateOrder;
     jobName: string;
   }> = selectedTemplate
-    ? selectedTemplate.jobs.flatMap((job) =>
-        job.orders.map((order) => ({ order, jobName: job.name }))
+    ? flattenTemplateJobs(selectedTemplate.jobs).flatMap((job) =>
+        job.orders.map((order) => ({ order, jobName: job.name })),
       )
     : [];
 

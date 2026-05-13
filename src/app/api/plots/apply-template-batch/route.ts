@@ -69,6 +69,15 @@ export async function POST(request: NextRequest) {
       { status: 404 }
     );
   }
+  // (May 2026 user-journey audit Bug 8) Refuse archived templates.
+  // Defence-in-depth — picker filters but stale tabs / deep-links
+  // can still hit this route.
+  if (template.archivedAt) {
+    return NextResponse.json(
+      { error: "Template is archived — restore it before applying" },
+      { status: 400 },
+    );
+  }
 
   // Variant resolution (May 2026 full-fat variants rework). Same flow
   // as apply-template (single): variants own full data; null = base.

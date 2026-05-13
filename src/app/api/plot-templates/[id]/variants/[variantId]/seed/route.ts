@@ -60,165 +60,177 @@ export async function POST(
     : { templateId, variantId: null };
 
   try {
-    const jobs = await prisma.templateJob.findMany({
-      where: sourceWhere,
-      orderBy: { sortOrder: "asc" },
-      include: { orders: { include: { items: true } } },
-    });
+    // (May 2026 user-journey audit Bug 6) The seed runs in a single
+    // transaction. Pre-fix the route created rows with bare
+    // `prisma.X.create(...)` calls, no transaction. A mid-seed
+    // failure left the variant half-built — and the refusal check
+    // above ("Variant already has stages — clear it first") then
+    // blocked every retry until manual DB cleanup. Now: all-or-
+    // nothing, retry just works.
+    const result = await prisma.$transaction(
+      async (tx) => {
+        const jobs = await tx.templateJob.findMany({
+          where: sourceWhere,
+          orderBy: { sortOrder: "asc" },
+          include: { orders: { include: { items: true } } },
+        });
 
-    if (jobs.length === 0) {
-      return NextResponse.json({
-        success: true,
-        seeded: { jobs: 0, orders: 0, materials: 0, documents: 0 },
-      });
-    }
+        if (jobs.length === 0) {
+          return { jobs: 0, orders: 0, materials: 0, documents: 0 };
+        }
 
-    const oldToNew = new Map<string, string>();
+        const oldToNew = new Map<string, string>();
 
-    // Parents first
-    for (const job of jobs.filter((j) => j.parentId === null)) {
-      const created = await prisma.templateJob.create({
-        data: {
-          templateId,
-          variantId,
-          name: job.name,
-          description: job.description,
-          stageCode: job.stageCode,
-          sortOrder: job.sortOrder,
-          startWeek: job.startWeek,
-          endWeek: job.endWeek,
-          durationWeeks: job.durationWeeks,
-          durationDays: job.durationDays,
-          weatherAffected: job.weatherAffected,
-          weatherAffectedType: job.weatherAffectedType,
-          contactId: job.contactId,
-          parentId: null,
-        },
-      });
-      oldToNew.set(job.id, created.id);
-    }
-    // Children
-    for (const job of jobs.filter((j) => j.parentId !== null)) {
-      const newParentId = job.parentId ? oldToNew.get(job.parentId) : null;
-      const created = await prisma.templateJob.create({
-        data: {
-          templateId,
-          variantId,
-          name: job.name,
-          description: job.description,
-          stageCode: job.stageCode,
-          sortOrder: job.sortOrder,
-          startWeek: job.startWeek,
-          endWeek: job.endWeek,
-          durationWeeks: job.durationWeeks,
-          durationDays: job.durationDays,
-          weatherAffected: job.weatherAffected,
-          weatherAffectedType: job.weatherAffectedType,
-          contactId: job.contactId,
-          parentId: newParentId ?? null,
-        },
-      });
-      oldToNew.set(job.id, created.id);
-    }
-
-    // Orders
-    let orderCount = 0;
-    for (const job of jobs) {
-      for (const order of job.orders) {
-        const newJobId = oldToNew.get(order.templateJobId);
-        if (!newJobId) continue;
-        const newAnchorJobId = order.anchorJobId
-          ? oldToNew.get(order.anchorJobId) ?? null
-          : null;
-        await prisma.templateOrder.create({
-          data: {
-            templateJobId: newJobId,
-            supplierId: order.supplierId,
-            orderWeekOffset: order.orderWeekOffset,
-            deliveryWeekOffset: order.deliveryWeekOffset,
-            itemsDescription: order.itemsDescription,
-            anchorType: order.anchorType,
-            anchorAmount: order.anchorAmount,
-            anchorUnit: order.anchorUnit,
-            anchorDirection: order.anchorDirection,
-            anchorJobId: newAnchorJobId,
-            leadTimeAmount: order.leadTimeAmount,
-            leadTimeUnit: order.leadTimeUnit,
-            items: {
-              create: order.items.map((it) => ({
-                name: it.name,
-                quantity: it.quantity,
-                unit: it.unit,
-                unitCost: it.unitCost,
-              })),
+        // Parents first
+        for (const job of jobs.filter((j) => j.parentId === null)) {
+          const created = await tx.templateJob.create({
+            data: {
+              templateId,
+              variantId,
+              name: job.name,
+              description: job.description,
+              stageCode: job.stageCode,
+              sortOrder: job.sortOrder,
+              startWeek: job.startWeek,
+              endWeek: job.endWeek,
+              durationWeeks: job.durationWeeks,
+              durationDays: job.durationDays,
+              weatherAffected: job.weatherAffected,
+              weatherAffectedType: job.weatherAffectedType,
+              contactId: job.contactId,
+              parentId: null,
             },
+          });
+          oldToNew.set(job.id, created.id);
+        }
+        // Children
+        for (const job of jobs.filter((j) => j.parentId !== null)) {
+          const newParentId = job.parentId
+            ? oldToNew.get(job.parentId)
+            : null;
+          const created = await tx.templateJob.create({
+            data: {
+              templateId,
+              variantId,
+              name: job.name,
+              description: job.description,
+              stageCode: job.stageCode,
+              sortOrder: job.sortOrder,
+              startWeek: job.startWeek,
+              endWeek: job.endWeek,
+              durationWeeks: job.durationWeeks,
+              durationDays: job.durationDays,
+              weatherAffected: job.weatherAffected,
+              weatherAffectedType: job.weatherAffectedType,
+              contactId: job.contactId,
+              parentId: newParentId ?? null,
+            },
+          });
+          oldToNew.set(job.id, created.id);
+        }
+
+        // Orders
+        let orderCount = 0;
+        for (const job of jobs) {
+          for (const order of job.orders) {
+            const newJobId = oldToNew.get(order.templateJobId);
+            if (!newJobId) continue;
+            const newAnchorJobId = order.anchorJobId
+              ? oldToNew.get(order.anchorJobId) ?? null
+              : null;
+            await tx.templateOrder.create({
+              data: {
+                templateJobId: newJobId,
+                supplierId: order.supplierId,
+                orderWeekOffset: order.orderWeekOffset,
+                deliveryWeekOffset: order.deliveryWeekOffset,
+                itemsDescription: order.itemsDescription,
+                anchorType: order.anchorType,
+                anchorAmount: order.anchorAmount,
+                anchorUnit: order.anchorUnit,
+                anchorDirection: order.anchorDirection,
+                anchorJobId: newAnchorJobId,
+                leadTimeAmount: order.leadTimeAmount,
+                leadTimeUnit: order.leadTimeUnit,
+                items: {
+                  create: order.items.map((it) => ({
+                    name: it.name,
+                    quantity: it.quantity,
+                    unit: it.unit,
+                    unitCost: it.unitCost,
+                  })),
+                },
+              },
+            });
+            orderCount += 1;
+          }
+        }
+
+        // Materials
+        const materials = await tx.templateMaterial.findMany({
+          where: sourceWhere,
+        });
+        for (const m of materials) {
+          await tx.templateMaterial.create({
+            data: {
+              templateId,
+              variantId,
+              name: m.name,
+              quantity: m.quantity,
+              unit: m.unit,
+              unitCost: m.unitCost,
+              category: m.category,
+              notes: m.notes,
+              linkedStageCode: m.linkedStageCode,
+            },
+          });
+        }
+
+        // Documents
+        const docs = await tx.templateDocument.findMany({
+          where: sourceWhere,
+        });
+        for (const d of docs) {
+          await tx.templateDocument.create({
+            data: {
+              templateId,
+              variantId,
+              name: d.name,
+              url: d.url,
+              fileName: d.fileName,
+              fileSize: d.fileSize,
+              mimeType: d.mimeType,
+              category: d.category,
+              isPlaceholder: d.isPlaceholder,
+            },
+          });
+        }
+
+        await tx.templateAuditEvent.create({
+          data: {
+            templateId,
+            userId: session.user?.id ?? null,
+            userName: session.user?.name ?? session.user?.email ?? null,
+            action: "variant_seeded",
+            detail: fromVariantId
+              ? `Seeded variant "${variant.name}" from another variant`
+              : `Seeded variant "${variant.name}" from base template`,
           },
         });
-        orderCount += 1;
-      }
-    }
 
-    // Materials
-    const materials = await prisma.templateMaterial.findMany({
-      where: sourceWhere,
-    });
-    for (const m of materials) {
-      await prisma.templateMaterial.create({
-        data: {
-          templateId,
-          variantId,
-          name: m.name,
-          quantity: m.quantity,
-          unit: m.unit,
-          unitCost: m.unitCost,
-          category: m.category,
-          notes: m.notes,
-          linkedStageCode: m.linkedStageCode,
-        },
-      });
-    }
-
-    // Documents
-    const docs = await prisma.templateDocument.findMany({
-      where: sourceWhere,
-    });
-    for (const d of docs) {
-      await prisma.templateDocument.create({
-        data: {
-          templateId,
-          variantId,
-          name: d.name,
-          url: d.url,
-          fileName: d.fileName,
-          fileSize: d.fileSize,
-          mimeType: d.mimeType,
-          category: d.category,
-          isPlaceholder: d.isPlaceholder,
-        },
-      });
-    }
-
-    await prisma.templateAuditEvent.create({
-      data: {
-        templateId,
-        userId: session.user?.id ?? null,
-        userName: session.user?.name ?? session.user?.email ?? null,
-        action: "variant_seeded",
-        detail: fromVariantId
-          ? `Seeded variant "${variant.name}" from another variant`
-          : `Seeded variant "${variant.name}" from base template`,
+        return {
+          jobs: oldToNew.size,
+          orders: orderCount,
+          materials: materials.length,
+          documents: docs.length,
+        };
       },
-    });
+      // Complex templates can have 20+ stages each with 5+ orders and
+      // 10+ items — the default 5s timeout doesn't cover that.
+      { timeout: 60_000, maxWait: 10_000 },
+    );
 
-    return NextResponse.json({
-      success: true,
-      seeded: {
-        jobs: oldToNew.size,
-        orders: orderCount,
-        materials: materials.length,
-        documents: docs.length,
-      },
-    });
+    return NextResponse.json({ success: true, seeded: result });
   } catch (err) {
     return apiError(err, "Failed to seed variant");
   }

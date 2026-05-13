@@ -45,21 +45,33 @@ export async function DELETE(
 
   const { id: templateId, variantId } = await params;
   try {
-    const variant = await prisma.templateVariant.findUnique({
-      where: { id: variantId },
+    // (May 2026 user-journey audit Bug 7) Verify the variant belongs
+    // to the templateId in the URL path. Pre-fix the lookup was
+    // `findUnique({ where: { id: variantId } })` with no templateId
+    // guard — a user with access to template B could
+    // `DELETE /api/plot-templates/{B}/variants/{A.variantId}` and
+    // wipe a variant of template A, with the audit event mis-
+    // attributed to template B. PATCH already has this guard; DELETE
+    // didn't.
+    const variant = await prisma.templateVariant.findFirst({
+      where: { id: variantId, templateId },
     });
-    await prisma.templateVariant.delete({ where: { id: variantId } });
-    if (variant) {
-      await prisma.templateAuditEvent.create({
-        data: {
-          templateId,
-          userId: session.user?.id ?? null,
-          userName: session.user?.name ?? session.user?.email ?? null,
-          action: "variant_removed",
-          detail: `Removed variant "${variant.name}"`,
-        },
-      });
+    if (!variant) {
+      return NextResponse.json(
+        { error: "Variant not found" },
+        { status: 404 },
+      );
     }
+    await prisma.templateVariant.delete({ where: { id: variantId } });
+    await prisma.templateAuditEvent.create({
+      data: {
+        templateId,
+        userId: session.user?.id ?? null,
+        userName: session.user?.name ?? session.user?.email ?? null,
+        action: "variant_removed",
+        detail: `Removed variant "${variant.name}"`,
+      },
+    });
     return NextResponse.json({ success: true });
   } catch (err) {
     return apiError(err, "Failed to delete variant");

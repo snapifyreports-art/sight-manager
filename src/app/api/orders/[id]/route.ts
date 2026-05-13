@@ -104,6 +104,22 @@ export async function PUT(
   ) {
     return NextResponse.json({ error: "Order not found" }, { status: 404 });
   }
+  // (May 2026 user-journey audit Bug 7) MANAGE_ORDERS permission
+  // gate. DELETE on this route has had this check for months; PUT
+  // didn't, which meant a CONTRACTOR-role user with site access
+  // could flip orders to DELIVERED, reassign supplier, change
+  // expectedDeliveryDate, etc. Now matched to DELETE.
+  if (
+    !sessionHasPermission(
+      session.user as { role?: string; permissions?: string[] },
+      "MANAGE_ORDERS",
+    )
+  ) {
+    return NextResponse.json(
+      { error: "You do not have permission to manage orders" },
+      { status: 403 },
+    );
+  }
 
   // Guard cross-site job reassignment — separate concern, must also be
   // able to reach the TARGET site.

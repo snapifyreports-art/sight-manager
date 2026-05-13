@@ -85,6 +85,18 @@ export async function POST(request: NextRequest) {
       { status: 404 }
     );
   }
+  // (May 2026 user-journey audit Bug 8) Defence-in-depth: refuse to
+  // apply an archived template. The wizard's picker filters
+  // archivedAt=null already, but a stale tab with an in-memory
+  // template list, a browser back-nav, or a deep-link could still
+  // POST an archived template id. Pre-fix the plot would be created
+  // with sourceTemplateId pointing at an archived row.
+  if (template.archivedAt) {
+    return NextResponse.json(
+      { error: "Template is archived — restore it before applying" },
+      { status: 400 },
+    );
+  }
 
   let resolvedVariantId: string | null = null;
   if (variantId) {

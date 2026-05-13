@@ -6,7 +6,7 @@ import { useSearchParams } from "next/navigation";
 import { format, addDays, differenceInCalendarDays } from "date-fns";
 import { differenceInWorkingDays } from "@/lib/working-days";
 import { PostCompletionDialog } from "@/components/PostCompletionDialog";
-import { useToast } from "@/components/ui/toast";
+import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 import { getCurrentDate } from "@/lib/dev-date";
 import { useDevDate } from "@/lib/dev-date-context";
 import { useOrderEmail } from "@/hooks/useOrderEmail";
@@ -330,14 +330,28 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
   const [selectedContractorId, setSelectedContractorId] = useState("");
   const [assigningContractor, setAssigningContractor] = useState(false);
 
-  const fetchData = useCallback(() => {
+  // (May 2026 user-journey audit Bug 1) Proper error handling on
+  // the daily-brief fetch. Pre-fix: no .ok check meant a 401/403/500
+  // response body (typically `{ error: "..." }`) was passed to
+  // setData, causing runtime crashes downstream when the render
+  // tried to access `data.activeJobs.length`, `data.summary`, etc.
+  // On network errors the unhandled rejection was swallowed by
+  // .finally and the user got a permanent loading state.
+  const fetchData = useCallback(async () => {
     setLoading(true);
-    const dateStr = format(date, "yyyy-MM-dd");
-    fetch(`/api/sites/${siteId}/daily-brief?date=${dateStr}`)
-      .then((r) => r.json())
-      .then(setData)
-      .finally(() => setLoading(false));
-  }, [siteId, date]);
+    try {
+      const dateStr = format(date, "yyyy-MM-dd");
+      const r = await fetch(`/api/sites/${siteId}/daily-brief?date=${dateStr}`);
+      if (!r.ok) {
+        throw new Error(await fetchErrorMessage(r, "Failed to load daily brief"));
+      }
+      setData(await r.json());
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to load daily brief");
+    } finally {
+      setLoading(false);
+    }
+  }, [siteId, date, toast]);
 
   useEffect(() => {
     fetchData();
@@ -864,20 +878,43 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
   };
 
   // One-click bulk action (no bulk mode required)
+  // (May 2026 user-journey audit Bug 8) Shared bulk-status caller —
+  // surface per-job failures returned by the route. Pre-fix both
+  // handlers checked only `res.ok` and silently dropped the route's
+  // `failed[]` array, so partial failures (3 of 5 jobs erroring out
+  // server-side) were invisible to the user.
+  const callBulkStatus = async (jobIds: string[], action: "start" | "complete"): Promise<boolean> => {
+    const res = await fetch(`/api/sites/${siteId}/bulk-status`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jobIds, action }),
+    });
+    if (!res.ok) {
+      showToast("Bulk action failed — please try again");
+      return false;
+    }
+    const body = (await res.json().catch(() => null)) as
+      | { updated?: number; failed?: Array<{ jobId: string; jobName: string; error: string }> }
+      | null;
+    if (body?.failed && body.failed.length > 0) {
+      const preview = body.failed
+        .slice(0, 3)
+        .map((f) => `${f.jobName}: ${f.error}`)
+        .join("; ");
+      showToast(
+        `${body.failed.length} of ${jobIds.length} jobs failed — ${preview}`,
+        "error",
+      );
+    }
+    return true;
+  };
+
   const handleQuickBulk = async (jobIds: string[], action: "start" | "complete") => {
     if (jobIds.length === 0) return;
     setBulkProcessing(true);
     try {
-      const res = await fetch(`/api/sites/${siteId}/bulk-status`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ jobIds, action }),
-      });
-      if (res.ok) {
-        setRefreshKey((k) => k + 1);
-      } else {
-        showToast("Bulk action failed — please try again");
-      }
+      const ok = await callBulkStatus(jobIds, action);
+      if (ok) setRefreshKey((k) => k + 1);
     } catch {
       showToast("Network error — please try again");
     } finally {
@@ -890,20 +927,11 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
     if (selectedJobIds.size === 0) return;
     setBulkProcessing(true);
     try {
-      const res = await fetch(`/api/sites/${siteId}/bulk-status`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          jobIds: Array.from(selectedJobIds),
-          action,
-        }),
-      });
-      if (res.ok) {
+      const ok = await callBulkStatus(Array.from(selectedJobIds), action);
+      if (ok) {
         setBulkMode(false);
         setSelectedJobIds(new Set());
         setRefreshKey((k) => k + 1);
-      } else {
-        showToast("Bulk action failed — please try again");
       }
     } catch {
       showToast("Network error — please try again");

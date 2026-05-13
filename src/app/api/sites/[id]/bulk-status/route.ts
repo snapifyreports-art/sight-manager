@@ -56,6 +56,12 @@ export async function POST(
   const newStatus = ACTION_STATUS_MAP[action];
   const now = getServerCurrentDate(req);
   const results: Array<{ jobId: string; jobName: string; newStatus: string }> = [];
+  // (May 2026 user-journey audit Bug 8) Track per-job failures so the
+  // client can surface them. Pre-fix `catch (e) { console.error(...) }`
+  // swallowed individual job failures and the response shape didn't
+  // carry them — the user saw "Bulk Start" succeed even when 1 of 5
+  // jobs silently failed.
+  const failed: Array<{ jobId: string; jobName: string; error: string }> = [];
 
   // (May 2026 audit B-P1-25) Sort the jobIds by (plotId, sortOrder) so
   // an earlier job's auto-cascade lands BEFORE we evaluate a later
@@ -473,8 +479,15 @@ export async function POST(
       results.push({ jobId, jobName: job.name, newStatus: newStatus });
     } catch (e) {
       console.error(`Bulk action error for job ${jobId}:`, e);
+      // (May 2026 user-journey audit Bug 8) Surface per-job failures
+      // so the client can toast them. Pre-fix this was a silent
+      // console.error with no response signal.
+      const jobName =
+        orderedJobMap.get(jobId)?.plotId ? `Job ${jobId.slice(0, 8)}` : jobId;
+      const msg = e instanceof Error ? e.message : "Unknown error";
+      failed.push({ jobId, jobName, error: msg });
     }
   }
 
-  return NextResponse.json({ updated: results.length, results });
+  return NextResponse.json({ updated: results.length, results, failed });
 }
