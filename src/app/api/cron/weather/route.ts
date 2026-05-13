@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { fetchWeatherForPostcode } from "@/lib/weather";
 import { sendPushToSiteAudience } from "@/lib/push";
-import { startOfDay, endOfDay, addDays } from "date-fns";
+import { endOfDay, addDays } from "date-fns";
+import { getServerCurrentDate, getServerStartOfDay } from "@/lib/dev-date";
 import type { NotificationType } from "@prisma/client";
 
 // (May 2026 audit B-P1-22) Weather pushes switched from sendPushToAll
@@ -23,6 +24,15 @@ const CATEGORY_LABELS: Record<string, string> = {
   thunder: "Thunderstorms",
 };
 
+// (May 2026 audit B-P1-20) Shared prefix for both the idempotency
+// lookup and the row creation — the previous code duplicated the
+// string literal in two places, so a typo or refactor in one would
+// silently start double-logging weather rows. Single source = no
+// drift. Still a string match (rather than a typed EventType field)
+// because adding a new EventType enum requires a Prisma migration —
+// will fold this into the next schema sprint.
+const WEATHER_DESC_PREFIX = "🌤 Weather:";
+
 // GET /api/cron/weather — called by Vercel Cron at 08:00 UTC daily
 export async function GET(req: NextRequest) {
   const { checkCronAuth } = await import("@/lib/cron-auth");
@@ -34,8 +44,12 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  const now = new Date();
-  const dayStart = startOfDay(now);
+  // (May 2026 audit B-P0-7 / B-P1-20) Route through getServerCurrentDate
+  // + getServerStartOfDay so Dev Mode replays match real-cron behaviour
+  // (the rest of the crons already do this). Pre-fix the weather cron
+  // used raw `new Date()` so simulated-time tests caught nothing.
+  const now = getServerCurrentDate(req);
+  const dayStart = getServerStartOfDay(req);
   const dayEnd = endOfDay(now);
 
   // Get all active sites with a postcode
@@ -52,12 +66,14 @@ export async function GET(req: NextRequest) {
     if (!site.postcode) continue;
 
     try {
-      // Check if today's weather is already logged for this site
+      // Check if today's weather is already logged for this site.
+      // Uses the shared WEATHER_DESC_PREFIX constant so the lookup
+      // can never drift from the row format.
       const existing = await prisma.eventLog.findFirst({
         where: {
           siteId: site.id,
           type: "SYSTEM",
-          description: { startsWith: "🌤 Weather:" },
+          description: { startsWith: WEATHER_DESC_PREFIX },
           createdAt: { gte: dayStart, lte: dayEnd },
         },
       });
@@ -74,7 +90,7 @@ export async function GET(req: NextRequest) {
       }
 
       const today = forecast[0];
-      const desc = `🌤 Weather: ${CATEGORY_LABELS[today.category] ?? today.category}, ${today.tempMin}°C–${today.tempMax}°C`;
+      const desc = `${WEATHER_DESC_PREFIX} ${CATEGORY_LABELS[today.category] ?? today.category}, ${today.tempMin}°C–${today.tempMax}°C`;
 
       await prisma.eventLog.create({
         data: { type: "SYSTEM", description: desc, siteId: site.id },

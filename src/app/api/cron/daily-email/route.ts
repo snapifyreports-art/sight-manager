@@ -153,8 +153,23 @@ export async function GET(req: NextRequest) {
 
   // Build email HTML
   const dateLabel = format(now, "EEEE d MMMM yyyy");
+  // (May 2026 audit B-P1-15) Prefer the request origin when present
+  // (covers local cron runs under Dev Mode — header reflects
+  // http://localhost:3002), fall back to NEXTAUTH_URL for Vercel
+  // cron runs (header is set by Vercel infra), and only fall back
+  // to the hard-coded prod URL as a last resort. Pre-fix every
+  // deep-link in a locally-fired test email pointed at prod.
+  const origin = req.headers.get("origin") ?? req.headers.get("x-forwarded-host");
+  const inferredFromOrigin =
+    origin && origin.length > 0
+      ? origin.startsWith("http")
+        ? origin
+        : `https://${origin}`
+      : null;
   const baseUrl =
-    process.env.NEXTAUTH_URL ?? "https://sight-manager.vercel.app";
+    inferredFromOrigin ??
+    process.env.NEXTAUTH_URL ??
+    "https://sight-manager.vercel.app";
 
   // (May 2026 audit #140) Each alert / status chip in the email links
   // straight to the relevant in-app tab. Pre-fix the email was a dead
