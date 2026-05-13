@@ -119,33 +119,36 @@ export async function sendPushToSiteAudience(
   // silently never reached anyone who hadn't toggled Watch on. Now
   // the WatchedSite row means MUTED instead of subscribed: presence
   // of a row excludes that user; absence means subscribed.
-
-  // 1. Site assignee
-  const site = await prisma.site.findUnique({
-    where: { id: siteId },
-    select: { assignedToId: true },
-  });
-
-  // 2. Every user with access to this site (UserSite join). This is
-  //    the new default audience — everyone with access gets pushed.
-  const accessRows = await prisma.userSite.findMany({
-    where: { siteId },
-    select: { userId: true },
-  });
-
-  // 3. CEO + DIRECTOR — always included regardless of access table
-  //    membership, matching the legacy behaviour.
-  const execs = await prisma.user.findMany({
-    where: { role: { in: ["CEO", "DIRECTOR"] } },
-    select: { id: true },
-  });
-
-  // 4. Mutes — users who have explicitly opted OUT of this site's
-  //    notifications. Excluded below.
-  const muted = await prisma.watchedSite.findMany({
-    where: { siteId },
-    select: { userId: true },
-  });
+  //
+  // (May 2026 audit P-P1) Parallelise the four lookups — they're
+  // independent, so awaiting them sequentially wasted ~3× round-trip
+  // latency on every push. Notable when the notifications cron loops
+  // over every active site and the latency compounds.
+  const [site, accessRows, execs, muted] = await Promise.all([
+    // 1. Site assignee
+    prisma.site.findUnique({
+      where: { id: siteId },
+      select: { assignedToId: true },
+    }),
+    // 2. Every user with access to this site (UserSite join). This is
+    //    the new default audience — everyone with access gets pushed.
+    prisma.userSite.findMany({
+      where: { siteId },
+      select: { userId: true },
+    }),
+    // 3. CEO + DIRECTOR — always included regardless of access table
+    //    membership, matching the legacy behaviour.
+    prisma.user.findMany({
+      where: { role: { in: ["CEO", "DIRECTOR"] }, archivedAt: null },
+      select: { id: true },
+    }),
+    // 4. Mutes — users who have explicitly opted OUT of this site's
+    //    notifications. Excluded below.
+    prisma.watchedSite.findMany({
+      where: { siteId },
+      select: { userId: true },
+    }),
+  ]);
   const mutedIds = new Set(muted.map((m) => m.userId));
 
   const audience = Array.from(
@@ -174,7 +177,13 @@ export async function sendPushToSiteAudience(
   if (subscriptions.length === 0) return;
 
   const pushPayload = JSON.stringify(payload);
-  return Promise.allSettled(
+  // (May 2026 audit P-P1) Collect stale subscription IDs and delete
+  // them in one bulk query at the end rather than firing a serial
+  // DELETE per bounced endpoint. Matters when a chunk of devices have
+  // rotated keys / been wiped — we'd otherwise hammer the DB inside
+  // every push round.
+  const staleIds: string[] = [];
+  await Promise.allSettled(
     subscriptions.map(async (sub) => {
       try {
         await webpush.sendNotification(
@@ -187,11 +196,14 @@ export async function sendPushToSiteAudience(
       } catch (err: unknown) {
         const statusCode = (err as { statusCode?: number }).statusCode;
         if (statusCode === 410 || statusCode === 404) {
-          await prisma.pushSubscription.delete({ where: { id: sub.id } });
+          staleIds.push(sub.id);
         }
       }
     }),
   );
+  if (staleIds.length > 0) {
+    await prisma.pushSubscription.deleteMany({ where: { id: { in: staleIds } } });
+  }
 }
 
 /**
@@ -214,7 +226,10 @@ export async function sendPushToPlotCustomers(
   });
   if (subs.length === 0) return;
   const pushPayload = JSON.stringify(payload);
-  return Promise.allSettled(
+  // (May 2026 audit P-P1) Bulk-delete stale subs at the end (see
+  // sendPushToSiteAudience for rationale).
+  const staleIds: string[] = [];
+  await Promise.allSettled(
     subs.map(async (sub) => {
       try {
         await webpush.sendNotification(
@@ -227,11 +242,14 @@ export async function sendPushToPlotCustomers(
       } catch (err: unknown) {
         const statusCode = (err as { statusCode?: number }).statusCode;
         if (statusCode === 410 || statusCode === 404) {
-          await prisma.customerPushSubscription.delete({ where: { id: sub.id } });
+          staleIds.push(sub.id);
         }
       }
     }),
   );
+  if (staleIds.length > 0) {
+    await prisma.customerPushSubscription.deleteMany({ where: { id: { in: staleIds } } });
+  }
 }
 
 /**
@@ -263,6 +281,9 @@ export async function sendPushToAll(
 
   const pushPayload = JSON.stringify(payload);
 
+  // (May 2026 audit P-P1) Bulk-delete stale subs at the end (see
+  // sendPushToSiteAudience for rationale).
+  const staleIds: string[] = [];
   const results = await Promise.allSettled(
     subscriptions.map(async (sub) => {
       try {
@@ -276,13 +297,14 @@ export async function sendPushToAll(
       } catch (err: unknown) {
         const statusCode = (err as { statusCode?: number }).statusCode;
         if (statusCode === 410 || statusCode === 404) {
-          await prisma.pushSubscription.delete({
-            where: { id: sub.id },
-          });
+          staleIds.push(sub.id);
         }
       }
     })
   );
+  if (staleIds.length > 0) {
+    await prisma.pushSubscription.deleteMany({ where: { id: { in: staleIds } } });
+  }
 
   return results;
 }
