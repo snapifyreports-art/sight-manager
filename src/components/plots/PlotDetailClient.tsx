@@ -497,9 +497,12 @@ function PlotOverview({
       <PredictiveCompletionBanner plotId={plot.id} />
 
       {/* (#191) Lateness summary — opens to show every open lateness
-          event on this plot with inline reason attribution. Hides
-          completely when there's nothing late. */}
-      <LatenessSummary plotId={plot.id} status="all" />
+          event on this plot with inline reason attribution.
+          (May 2026 audit UX-P1) `compact` so the dashed-border
+          "Nothing late here." placeholder doesn't flash on plots
+          that have no lateness — in compact mode the component
+          renders null when there are zero events. */}
+      <LatenessSummary plotId={plot.id} status="all" compact />
 
       {/* Progress Stats */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">

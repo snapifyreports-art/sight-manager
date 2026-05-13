@@ -1287,13 +1287,16 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
           ))}
         </div>
 
-        {/* Fullscreen toggle */}
+        {/* Fullscreen toggle. (May 2026 audit UX-P1) aria-pressed so
+            screen readers convey the toggle state. */}
         <button
           onClick={() => setIsFullscreen((f) => !f)}
+          aria-pressed={isFullscreen}
+          aria-label={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
           className="flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-slate-50 hover:text-foreground"
           title={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
         >
-          {isFullscreen ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
+          {isFullscreen ? <Minimize2 className="size-3.5" aria-hidden /> : <Maximize2 className="size-3.5" aria-hidden />}
         </button>
 
         {/* Select mode toggle */}
@@ -1301,6 +1304,7 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
           onClick={() => {
             if (selectMode) { clearSelection(); } else { setSelectMode(true); }
           }}
+          aria-pressed={selectMode}
           className={`flex items-center gap-1 rounded-md border px-2.5 py-1.5 text-[11px] font-medium transition-colors ${
             selectMode
               ? "border-blue-300 bg-blue-50 text-blue-700"
@@ -1308,7 +1312,7 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
           }`}
           title="Select plots for bulk actions"
         >
-          <CheckSquare className="size-3.5" />
+          <CheckSquare className="size-3.5" aria-hidden />
           Select
         </button>
 
@@ -1720,11 +1724,14 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                     {/* Semi-transparent highlight column behind today.
                         (May 2026 audit UX-P0-6) role+aria so screen
                         readers announce "today" alongside the visual
-                        red highlight; previously colour-only. */}
+                        red highlight; previously colour-only.
+                        (Audit UX-P1) 6% opacity barely registered
+                        against white — bumped to 12% so the column
+                        actually highlights the day visually. */}
                     <div
                       role="img"
                       aria-label="Today's column on the programme"
-                      className="pointer-events-none absolute top-0 z-[5] bg-red-500/[0.06]"
+                      className="pointer-events-none absolute top-0 z-[5] bg-red-500/[0.12]"
                       style={{
                         left: todayIndex * cellWidth,
                         width: cellWidth,
