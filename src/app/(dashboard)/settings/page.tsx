@@ -17,7 +17,11 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
       include: { jobs: templateJobsInclude },
     }),
     prisma.user.findMany({
-      select: { id: true, name: true, email: true, role: true, jobTitle: true, company: true, phone: true, createdAt: true },
+      // (May 2026 audit S-P0) Active users only by default; the
+      // "Show archived" toggle in UsersClient re-fetches with
+      // ?include=archived for the restore flow.
+      where: { archivedAt: null },
+      select: { id: true, name: true, email: true, role: true, jobTitle: true, company: true, phone: true, archivedAt: true, createdAt: true },
       orderBy: { name: "asc" },
     }),
     prisma.site.findMany({
@@ -26,7 +30,11 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
     }),
   ]);
 
-  const serializedUsers = users.map((u) => ({ ...u, createdAt: u.createdAt.toISOString() }));
+  const serializedUsers = users.map((u) => ({
+    ...u,
+    archivedAt: u.archivedAt?.toISOString() ?? null,
+    createdAt: u.createdAt.toISOString(),
+  }));
 
   return (
     <SettingsClient

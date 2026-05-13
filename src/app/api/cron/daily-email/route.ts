@@ -123,6 +123,8 @@ export async function GET(req: NextRequest) {
     where: {
       role: { in: ["SUPER_ADMIN", "CEO", "DIRECTOR", "SITE_MANAGER"] },
       email: { not: "" },
+      // (May 2026 audit S-P0) Exclude archived (offboarded) users.
+      archivedAt: null,
     },
     select: { id: true, name: true, email: true, role: true },
   });

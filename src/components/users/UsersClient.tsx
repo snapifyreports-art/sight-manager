@@ -56,6 +56,8 @@ interface UserData {
   jobTitle: string | null;
   company: string | null;
   phone: string | null;
+  /** (May 2026 audit S-P0) Soft-delete timestamp. Non-null = archived. */
+  archivedAt: string | null;
   createdAt: string;
 }
 
@@ -341,6 +343,8 @@ export function UsersClient({
   const toast = useToast();
   const [users, setUsers] = useState(initialUsers);
   const [search, setSearch] = useState("");
+  // (May 2026 audit S-P0) Toggle for showing archived (ex-)staff.
+  const [showArchived, setShowArchived] = useState(false);
 
   // Dialog state
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -349,6 +353,17 @@ export function UsersClient({
   const [permissionsUser, setPermissionsUser] = useState<UserData | null>(null);
   const [form, setForm] = useState<UserFormData>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
+
+  // (May 2026 audit S-P0) Re-fetch when the archive toggle changes
+  // so the list reflects active vs all users from the server.
+  useEffect(() => {
+    fetch(`/api/users${showArchived ? "?include=archived" : ""}`, { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data) setUsers(data);
+      })
+      .catch(() => {});
+  }, [showArchived]);
 
   // Confirm-delete flow shared via useConfirmAction.
   const { confirmAction, dialogs: confirmDialogs } = useConfirmAction();
@@ -411,25 +426,51 @@ export function UsersClient({
   }
 
   // Open delete confirmation via the shared hook.
+  // (May 2026 audit S-P0) Restore an archived user.
+  async function handleRestoreUser(user: UserData) {
+    try {
+      const res = await fetch(`/api/users/${user.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ archivedAt: null }),
+      });
+      if (!res.ok) {
+        throw new Error(await fetchErrorMessage(res, "Failed to restore user"));
+      }
+      const updated = await res.json();
+      setUsers((prev) => prev.map((u) => (u.id === user.id ? updated : u)));
+      toast.success(`${user.name} restored`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to restore user");
+    }
+  }
+
   function handleOpenDelete(user: UserData) {
     confirmAction({
-      title: "Delete User",
+      title: "Archive User",
       description: (
         <>
-          Are you sure you want to delete{" "}
+          Archive{" "}
           <span className="font-medium text-foreground">{user.name}</span>?
-          This will remove their account and all associated data. This action
-          cannot be undone.
+          They&apos;ll no longer be able to log in or appear in pickers, but
+          every job they signed off, every snag they raised, and every record
+          of their work stays intact. You can restore them later.
         </>
       ),
-      confirmLabel: "Delete User",
+      confirmLabel: "Archive User",
       onConfirm: async () => {
         const res = await fetch(`/api/users/${user.id}`, { method: "DELETE" });
         if (!res.ok) {
-          throw new Error(await fetchErrorMessage(res, "Failed to delete user"));
+          throw new Error(await fetchErrorMessage(res, "Failed to archive user"));
         }
-        setUsers((prev) => prev.filter((u) => u.id !== user.id));
-        toast.success(`${user.name} deleted`);
+        // The DELETE endpoint soft-archives now, so update state
+        // rather than remove. Re-fetch to get the archivedAt stamp.
+        const refreshRes = await fetch(`/api/users?include=archived`, { cache: "no-store" });
+        if (refreshRes.ok) {
+          const fresh = await refreshRes.json();
+          setUsers(fresh);
+        }
+        toast.success(`${user.name} archived`);
         router.refresh();
       },
     });
@@ -526,8 +567,8 @@ export function UsersClient({
         </Button>
       </div>
 
-      {/* Search */}
-      <div className="flex items-center">
+      {/* Search + archive toggle */}
+      <div className="flex flex-wrap items-center gap-3">
         <div className="relative w-full sm:max-w-xs">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
@@ -537,6 +578,17 @@ export function UsersClient({
             className="pl-9"
           />
         </div>
+        {/* (May 2026 audit S-P0) Toggle archived users into the list so
+            admins can restore an offboarded account if HR brings
+            someone back. */}
+        <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+          <Switch
+            checked={showArchived}
+            onCheckedChange={setShowArchived}
+            aria-label="Show archived users"
+          />
+          <span>Show archived</span>
+        </label>
       </div>
 
       {/* User Grid */}
@@ -585,6 +637,14 @@ export function UsersClient({
                           (You)
                         </span>
                       )}
+                      {/* (May 2026 audit S-P0) Archived users keep their
+                          card visible (when "Show archived" is on) but
+                          carry a clear badge. */}
+                      {user.archivedAt && (
+                        <span className="ml-1.5 rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600">
+                          Archived
+                        </span>
+                      )}
                     </p>
                     {user.jobTitle && (
                       <p className="mt-0.5 truncate text-xs text-muted-foreground">
@@ -617,44 +677,63 @@ export function UsersClient({
                   )}
                 </div>
 
-                {/* Actions */}
+                {/* Actions — archived users get a simpler "Restore" row
+                    only; active users get the full set. */}
                 <div className="mt-3 flex flex-wrap items-center gap-1 border-t pt-3">
-                  <Button
-                    variant="ghost"
-                    size="xs"
-                    onClick={() => handleOpenEdit(user)}
-                  >
-                    <Pencil className="size-3" />
-                    <span className="hidden sm:inline">Edit</span>
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="xs"
-                    onClick={() => handleOpenPermissions(user)}
-                  >
-                    <Shield className="size-3" />
-                    <span className="hidden sm:inline">Permissions</span>
-                  </Button>
-                  {user.id !== currentUserId && (
-                    <Button
-                      variant="ghost"
-                      size="xs"
-                      onClick={() => handleResendInvite(user)}
-                      title="Resend invite / password-reset email"
-                    >
-                      <MailPlus className="size-3" />
-                      <span className="hidden sm:inline">Resend invite</span>
-                    </Button>
-                  )}
-                  {user.id !== currentUserId && (
-                    <Button
-                      variant="ghost"
-                      size="xs"
-                      className="text-destructive hover:text-destructive"
-                      onClick={() => handleOpenDelete(user)}
-                    >
-                      <Trash2 className="size-3" />
-                    </Button>
+                  {user.archivedAt ? (
+                    <>
+                      <span className="mr-auto text-[10px] text-muted-foreground">
+                        Archived {new Date(user.archivedAt).toLocaleDateString()}
+                      </span>
+                      <Button
+                        variant="outline"
+                        size="xs"
+                        onClick={() => handleRestoreUser(user)}
+                      >
+                        Restore
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <Button
+                        variant="ghost"
+                        size="xs"
+                        onClick={() => handleOpenEdit(user)}
+                      >
+                        <Pencil className="size-3" />
+                        <span className="hidden sm:inline">Edit</span>
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="xs"
+                        onClick={() => handleOpenPermissions(user)}
+                      >
+                        <Shield className="size-3" />
+                        <span className="hidden sm:inline">Permissions</span>
+                      </Button>
+                      {user.id !== currentUserId && (
+                        <Button
+                          variant="ghost"
+                          size="xs"
+                          onClick={() => handleResendInvite(user)}
+                          title="Resend invite / password-reset email"
+                        >
+                          <MailPlus className="size-3" />
+                          <span className="hidden sm:inline">Resend invite</span>
+                        </Button>
+                      )}
+                      {user.id !== currentUserId && (
+                        <Button
+                          variant="ghost"
+                          size="xs"
+                          className="text-destructive hover:text-destructive"
+                          onClick={() => handleOpenDelete(user)}
+                          title="Archive user (soft-delete)"
+                        >
+                          <Trash2 className="size-3" />
+                        </Button>
+                      )}
+                    </>
                   )}
                 </div>
               </CardContent>

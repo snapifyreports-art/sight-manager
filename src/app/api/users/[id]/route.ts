@@ -74,7 +74,7 @@ export async function PUT(
 
   const { id } = await params;
   const body = await req.json();
-  const { name, email, password, role, jobTitle, company, phone } = body;
+  const { name, email, password, role, jobTitle, company, phone, archivedAt } = body;
 
   const existing = await prisma.user.findUnique({ where: { id } });
   if (!existing) {
@@ -99,6 +99,11 @@ export async function PUT(
   if (jobTitle !== undefined) updateData.jobTitle = jobTitle || null;
   if (company !== undefined) updateData.company = company || null;
   if (phone !== undefined) updateData.phone = phone || null;
+  // (May 2026 audit S-P0) PATCH `archivedAt: null` restores an
+  // archived user. PATCH `archivedAt: <ISO>` archives (same as the
+  // DELETE route does). Allow either via PUT for symmetry.
+  if (archivedAt === null) updateData.archivedAt = null;
+  if (typeof archivedAt === "string") updateData.archivedAt = new Date(archivedAt);
 
   // Hash password if provided
   if (password) {
@@ -162,10 +167,21 @@ export async function DELETE(
   }
 
   try {
-    await prisma.user.delete({ where: { id } });
+    // (May 2026 audit S-P0) Soft-delete via archivedAt rather than
+    // hard-delete. Pre-fix hard-delete failed for any user with
+    // history (FK Restrict), so admins had no working flow at all.
+    // Now: stamp archivedAt = now → auth rejects login → user
+    // disappears from pickers (callers query `archivedAt: null`).
+    // All EventLog / JobAction / SignedOffBy attribution preserved
+    // with the user's actual name. To re-activate, PATCH the user
+    // with `archivedAt: null`.
+    await prisma.user.update({
+      where: { id },
+      data: { archivedAt: new Date() },
+    });
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, archived: true });
   } catch (err) {
-    return apiError(err, "Failed to delete user");
+    return apiError(err, "Failed to archive user");
   }
 }

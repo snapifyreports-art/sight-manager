@@ -151,6 +151,14 @@ model User {
   company   String?
   phone     String?
   avatar    String?
+  /// (May 2026 audit S-P0) Soft-delete pattern. Pre-fix User FKs
+  /// defaulted to Restrict — once a user had any historical activity
+  /// (signed off a job, raised a snag, etc.) HR could never offboard
+  /// them. Now: admin clicks "Archive user" → `archivedAt` stamped →
+  /// user can't log in (auth check), filtered out of every picker,
+  /// but all historical attribution survives. Restoring just clears
+  /// the field.
+  archivedAt DateTime?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

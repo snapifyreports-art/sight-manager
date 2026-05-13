@@ -53,6 +53,8 @@ export async function GET(req: NextRequest) {
   const users = await prisma.user.findMany({
     where: {
       email: { not: "" },
+      // (May 2026 audit S-P0) Don't email archived (offboarded) users.
+      archivedAt: null,
       OR: [
         { siteAccess: { some: { site: { status: { not: "COMPLETED" } } } } },
         { assignedSites: { some: { status: { not: "COMPLETED" } } } },

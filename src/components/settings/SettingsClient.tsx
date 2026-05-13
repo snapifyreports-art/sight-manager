@@ -28,6 +28,8 @@ interface UserData {
   jobTitle: string | null;
   company: string | null;
   phone: string | null;
+  /** (May 2026 audit S-P0) Soft-delete timestamp. */
+  archivedAt: string | null;
   createdAt: string;
 }
 

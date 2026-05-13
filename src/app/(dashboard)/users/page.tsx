@@ -25,8 +25,12 @@ export default async function UsersPage() {
     redirect("/dashboard");
   }
 
+  // (May 2026 audit S-P0) Default page load shows ACTIVE users only.
+  // The "Show archived" toggle in UsersClient re-fetches via
+  // /api/users?include=archived when the admin wants to see ex-staff.
   const [users, sites] = await Promise.all([
     prisma.user.findMany({
+      where: { archivedAt: null },
       select: {
         id: true,
         name: true,
@@ -35,6 +39,7 @@ export default async function UsersPage() {
         jobTitle: true,
         company: true,
         phone: true,
+        archivedAt: true,
         createdAt: true,
       },
       orderBy: { name: "asc" },
@@ -47,6 +52,7 @@ export default async function UsersPage() {
 
   const serialized = users.map((u) => ({
     ...u,
+    archivedAt: u.archivedAt?.toISOString() ?? null,
     createdAt: u.createdAt.toISOString(),
   }));
 

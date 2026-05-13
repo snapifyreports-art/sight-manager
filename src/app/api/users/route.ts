@@ -9,7 +9,7 @@ import { apiError } from "@/lib/api-errors";
 export const dynamic = "force-dynamic";
 
 // GET — list all users
-export async function GET() {
+export async function GET(req: NextRequest) {
   const session = await auth();
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -28,7 +28,13 @@ export async function GET() {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
+  // (May 2026 audit S-P0) Filter archived users out by default. Pass
+  // `?include=archived` to see ex-staff (used by the Users UI's
+  // "Show archived" toggle so admins can restore an account).
+  const includeArchived = new URL(req.url).searchParams.get("include") === "archived";
+
   const users = await prisma.user.findMany({
+    where: includeArchived ? {} : { archivedAt: null },
     select: {
       id: true,
       name: true,
@@ -37,9 +43,10 @@ export async function GET() {
       jobTitle: true,
       company: true,
       phone: true,
+      archivedAt: true,
       createdAt: true,
     },
-    orderBy: { name: "asc" },
+    orderBy: [{ archivedAt: { sort: "asc", nulls: "first" } }, { name: "asc" }],
   });
 
   return NextResponse.json(users);

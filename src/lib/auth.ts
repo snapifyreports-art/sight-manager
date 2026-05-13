@@ -24,6 +24,11 @@ const nextAuthResult = NextAuth({
 
         if (!user) return null;
 
+        // (May 2026 audit S-P0) Soft-deleted users can't log in.
+        // Archived attribution still appears on historical records;
+        // the account itself is dormant.
+        if (user.archivedAt) return null;
+
         const isValid = await compare(
           credentials.password as string,
           user.password
@@ -63,9 +68,16 @@ const nextAuthResult = NextAuth({
         try {
           const freshUser = await prisma.user.findUnique({
             where: { id: token.id as string },
-            select: { id: true, role: true },
+            select: { id: true, role: true, archivedAt: true },
           });
           if (!freshUser) {
+            token.invalidated = true;
+            return token;
+          }
+          // (May 2026 audit S-P0) If the user was archived since the
+          // session was issued, invalidate the JWT so the next request
+          // bounces them to login.
+          if (freshUser.archivedAt) {
             token.invalidated = true;
             return token;
           }
