@@ -62,6 +62,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SnagDialog } from "@/components/snags/SnagDialog";
+import { JobActionStrip } from "@/components/reports/JobActionStrip";
 import { useRefreshOnFocus } from "@/hooks/useRefreshOnFocus";
 import { Button } from "@/components/ui/button";
 import {
@@ -1256,8 +1257,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
         {j.endDate && <span> · Due {format(new Date(j.endDate), "dd MMM")}</span>}
       </p>
       {showAction && !bulkMode && (
-        <div className="mt-1.5 flex flex-wrap items-center gap-1 border-t pt-1.5 print:hidden">
-          <span className="mr-auto text-[10px] font-medium text-muted-foreground">Actions</span>
+        <JobActionStrip>
           {pendingActions.has(j.id) ? (
             <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
           ) : j.status === "COMPLETED" ? (
@@ -1283,7 +1283,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
               </Button>
             </>
           ) : null}
-        </div>
+        </JobActionStrip>
       )}
     </div>
   );
@@ -1841,8 +1841,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                             )}
                           </div>
                         )}
-                        <div className="mt-1.5 flex flex-wrap items-center gap-1 border-t pt-1.5 print:hidden">
-                          <span className="mr-auto text-[10px] font-medium text-muted-foreground">Actions</span>
+                        <JobActionStrip>
                           {pendingActions.has(j.id) ? (
                             <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
                           ) : j.status === "NOT_STARTED" ? (
@@ -1879,7 +1878,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                               onExtend={() => handleExtendOpen(j.id)}
                             />
                           )}
-                        </div>
+                        </JobActionStrip>
                       </div>
                     );
                   })}
@@ -1903,8 +1902,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                         <Link href={`/sites/${siteId}/plots/${j.plotId}`} className="hover:underline hover:text-blue-600">{j.plot.plotNumber ? `Plot ${j.plot.plotNumber}` : j.plot.name}</Link>
                         {j.assignedTo && <span> · {j.assignedTo.name}</span>}
                       </p>
-                      <div className="mt-1.5 flex flex-wrap items-center gap-1 border-t pt-1.5 print:hidden">
-                        <span className="mr-auto text-[10px] font-medium text-muted-foreground">Actions</span>
+                      <JobActionStrip>
                         {j.status === "COMPLETED" ? (
                           <span className="flex items-center gap-0.5 text-[10px] text-emerald-600">
                             <Check className="size-3" /> Signed Off
@@ -1933,7 +1931,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                             </Button>
                           </>
                         )}
-                      </div>
+                      </JobActionStrip>
                     </div>
                   ))}
                   {/* ── Late Starts ── */}
@@ -1953,8 +1951,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                         {j.assignedTo && <span> · {j.assignedTo.name}</span>}
                         {j.startDate && <span className="text-amber-700"> · Due {format(new Date(j.startDate), "dd MMM")}</span>}
                       </p>
-                      <div className="mt-1.5 flex items-center gap-1 border-t border-amber-200 pt-1.5">
-                        <span className="mr-auto text-[10px] font-medium text-muted-foreground">Actions</span>
+                      <JobActionStrip>
                         <Button variant="outline" size="sm" className="h-9 sm:h-6 gap-1 border-green-200 px-2 text-xs sm:text-[10px] text-green-700 hover:bg-green-50" disabled={pendingActions.has(j.id)} onClick={() => triggerJobAction({ id: j.id, name: j.name, status: "NOT_STARTED", startDate: j.startDate, endDate: j.endDate ?? null }, "start")}>
                           <Play className="size-2.5" /> Start
                         </Button>
@@ -1975,7 +1972,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                         }}>
                           <CalendarClock className="size-2.5" /> Pull
                         </Button>
-                      </div>
+                      </JobActionStrip>
                     </div>
                   ))}
 
@@ -1998,12 +1995,11 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                             <p className="mt-0.5 flex items-center gap-1 text-xs text-slate-500">
                               <Lock className="size-3" /> Blocked by: {j.blockedBy}
                             </p>
-                            <div className="mt-1.5 flex flex-wrap items-center gap-1 border-t pt-1.5 print:hidden">
-                              <span className="mr-auto text-[10px] font-medium text-muted-foreground">Actions</span>
+                            <JobActionStrip>
                               <Link href={`/jobs/${j.id}`} className="inline-flex h-6 items-center gap-1 rounded-md border px-2 text-xs sm:text-[10px] text-slate-600 hover:bg-slate-100">
                                 <Briefcase className="size-2.5" /> View Job
                               </Link>
-                            </div>
+                            </JobActionStrip>
                         </div>
                       ))}
                     </>
@@ -2090,8 +2086,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                               {contractor && ` · ${contractor.company || contractor.name}`}
                               {daysSince > 0 && ` · Completed ${daysSince} day${daysSince !== 1 ? "s" : ""} ago`}
                             </p>
-                            <div className="mt-1.5 flex flex-wrap items-center gap-1 border-t border-amber-200 pt-1.5">
-                              <span className="w-full text-[10px] font-medium text-muted-foreground sm:mr-auto sm:w-auto">Actions</span>
+                            <JobActionStrip>
                               <Button size="sm" variant="outline" className="h-9 sm:h-6 gap-1 border-amber-300 px-2 text-xs sm:text-[10px] text-amber-700 hover:bg-amber-100"
                                 onClick={() => setSignOffTarget({ id: j.id, name: j.name, status: "COMPLETED", plot: j.plot })}>
                                 <FileCheck className="size-2.5" /> Sign Off
@@ -2112,7 +2107,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                                   <RotateCcw className="size-2.5" /> Reopen
                                 </Button>
                               )}
-                            </div>
+                            </JobActionStrip>
                           </div>
                         );
                       })}
@@ -2151,8 +2146,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                         <Link href={`/jobs/${d.job.id}`} className="hover:underline hover:text-blue-600">{d.job.name}</Link>
                         {" · "}{d.job.plot.plotNumber ? `Plot ${d.job.plot.plotNumber}` : d.job.plot.name}
                       </p>
-                      <div className="mt-1.5 flex items-center gap-1 border-t pt-1.5 print:hidden">
-                        <span className="mr-auto text-[10px] font-medium text-muted-foreground">Actions</span>
+                      <JobActionStrip>
                         <Button
                           variant="outline"
                           size="sm"
@@ -2163,7 +2157,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                           {isOrderPending(d.id) ? <Loader2 className="size-3 animate-spin" /> : <CheckCircle2 className="size-3" />}
                           <span className="ml-1">Mark Received</span>
                         </Button>
-                      </div>
+                      </JobActionStrip>
                     </div>
                   ))
                 )}
@@ -2242,8 +2236,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                             <span className="text-[10px] text-muted-foreground">+{group.length - 5} more</span>
                           )}
                         </div>
-                        <div className="mt-1.5 flex flex-wrap items-center gap-1 border-t pt-1.5 print:hidden">
-                          <span className="mr-auto text-[10px] font-medium text-muted-foreground">Actions</span>
+                        <JobActionStrip>
                           {anyPending ? (
                             <Loader2 className="size-4 animate-spin text-muted-foreground" />
                           ) : (
@@ -2260,7 +2253,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                               </Button>
                             </>
                           )}
-                        </div>
+                        </JobActionStrip>
                       </div>
                     );
                   })
@@ -2315,8 +2308,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                       })()}
                       {j.endDate && <span> · Due {format(new Date(j.endDate), "dd MMM")}</span>}
                     </p>
-                    <div className="mt-1.5 flex flex-wrap items-center gap-1 border-t pt-1.5 print:hidden">
-                      <span className="mr-auto text-[10px] font-medium text-muted-foreground">Actions</span>
+                    <JobActionStrip>
                       {pendingActions.has(j.id) ? (
                         <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
                       ) : (
@@ -2335,7 +2327,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                           </Button>
                         </>
                       )}
-                    </div>
+                    </JobActionStrip>
                   </div>
                 ))}
               </div>
@@ -2908,8 +2900,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                           <p className="text-[11px] text-muted-foreground">
                             {first.job.name} · {plotLabels.join(", ")}{group.length > 1 ? ` (${group.length} plots)` : ""}
                           </p>
-                          <div className="mt-1.5 flex flex-wrap items-center gap-1 border-t pt-1.5 print:hidden">
-                            <span className="mr-auto text-[10px] font-medium text-muted-foreground">Actions</span>
+                          <JobActionStrip>
                             <input
                               type="date"
                               className="h-6 rounded border px-1 text-[10px] w-[110px]"
@@ -2932,7 +2923,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                               {anyPending ? <Loader2 className="size-3 animate-spin" /> : <CheckCircle2 className="size-3" />}
                               <span className="ml-1">Mark Received</span>
                             </Button>
-                          </div>
+                          </JobActionStrip>
                         </div>
                       );
                           })}
@@ -3028,8 +3019,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                         <span className="text-[10px] text-muted-foreground">+{group.length - 5} more</span>
                       )}
                     </div>
-                    <div className="mt-1.5 flex flex-wrap items-center gap-1 border-t pt-1.5 print:hidden">
-                      <span className="mr-auto text-[10px] font-medium text-muted-foreground">Actions</span>
+                    <JobActionStrip>
                       {anyPending ? (
                         <Loader2 className="size-4 animate-spin text-muted-foreground" />
                       ) : (
@@ -3046,7 +3036,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                           </Button>
                         </>
                       )}
-                    </div>
+                    </JobActionStrip>
                   </div>
                 );
               })}
