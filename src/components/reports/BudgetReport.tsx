@@ -55,6 +55,13 @@ interface BudgetData {
     templateMatched: string | null;
     budgeted: number;
     actual: number;
+    // (May 2026 audit D-P1) 4-bucket detail surfaced from the API.
+    // Pre-fix the client typed only actual + budgeted so the variance
+    // table couldn't show "did we overspend on delivered or just
+    // committed?". Now the per-plot row shows all three buckets.
+    delivered: number;
+    committed: number;
+    pending: number;
     variance: number;
     variancePercent: number;
     jobs: Array<{
@@ -63,6 +70,9 @@ interface BudgetData {
       status: string;
       budgeted: number;
       actual: number;
+      delivered: number;
+      committed: number;
+      pending: number;
       variance: number;
       variancePercent: number;
       orderCount: number;
@@ -355,7 +365,30 @@ export function BudgetReport({ siteId }: BudgetReportProps) {
               {/* Details always in DOM with `print:!block` so print output
                   includes every plot's breakdown even when collapsed on screen. */}
               <div className={isExpanded ? "" : "hidden print:block"}>
-                <CardContent className="border-t pt-3">
+                <CardContent className="space-y-3 border-t pt-3">
+                  {/* (May 2026 audit D-P1) 4-bucket detail row — surfaces
+                      delivered / committed / pending so the director can
+                      defend a variance number: "are we over because we
+                      delivered too much, or because of committed but
+                      not-yet-arrived orders?". Hidden when the plot has
+                      no spend data. */}
+                  {hasData && (
+                    <div className="grid grid-cols-3 gap-2 rounded-lg border bg-slate-50/60 p-2 text-[11px] sm:grid-cols-3">
+                      <div>
+                        <p className="text-muted-foreground">Delivered</p>
+                        <p className="font-medium text-emerald-700">{formatCurrency(plot.delivered)}</p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground">Committed</p>
+                        <p className="font-medium text-blue-700">{formatCurrency(plot.committed)}</p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground">Pending</p>
+                        <p className="font-medium text-amber-700">{formatCurrency(plot.pending)}</p>
+                      </div>
+                    </div>
+                  )}
+
                   {plot.jobs.length === 0 ? (
                     <p className="text-sm text-muted-foreground">No jobs</p>
                   ) : (
@@ -370,6 +403,11 @@ export function BudgetReport({ siteId }: BudgetReportProps) {
                             <p className="font-medium hover:text-blue-700">{job.jobName}</p>
                             <p className="text-[10px] text-muted-foreground">
                               {job.orderCount} order{job.orderCount !== 1 ? "s" : ""} · {job.status.replace("_", " ")}
+                              {job.pending > 0 && (
+                                <span className="ml-2 text-amber-700">
+                                  · {formatCurrency(job.pending)} pending
+                                </span>
+                              )}
                             </p>
                           </div>
                           <span className="text-right text-xs text-muted-foreground">
