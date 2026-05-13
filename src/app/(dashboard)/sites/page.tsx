@@ -10,13 +10,35 @@ export const metadata = {
   title: "Sites | Sight Manager",
 };
 
-export default async function SitesPage() {
+export default async function SitesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ pickFor?: string }>;
+}) {
   const session = await auth();
   if (!session) redirect("/login");
 
   // Scope to sites the user can access — CEOs/DIRECTORs see all, others filtered
   const siteIds = await getUserSiteIds(session.user.id, session.user.role);
   const siteWhere = siteIds !== null ? { id: { in: siteIds } } : {};
+
+  // (May 2026 audit SM-P1) If Cmd-K / FAB sends the user here to pick
+  // a destination but they only have access to ONE site, fast-forward
+  // straight to that site's destination — pre-fix solo-site users
+  // had to click through a one-option picker every time.
+  const { pickFor } = await searchParams;
+  if (pickFor && siteIds !== null && siteIds.length === 1) {
+    const target = siteIds[0];
+    if (pickFor === "walkthrough") {
+      redirect(`/sites/${target}/walkthrough`);
+    } else if (pickFor === "daily-brief") {
+      redirect(`/sites/${target}?tab=daily-brief`);
+    } else if (pickFor === "programme") {
+      redirect(`/sites/${target}?tab=programme`);
+    } else if (pickFor === "snags") {
+      redirect(`/sites/${target}?tab=snags`);
+    }
+  }
 
   const sites = await prisma.site.findMany({
     where: siteWhere,
