@@ -112,6 +112,7 @@ import { RecentActivitySection } from "./daily-brief/RecentActivitySection";
 import { UpcomingDeliveriesSection } from "./daily-brief/UpcomingDeliveriesSection";
 import { PendingSignoffsSection } from "./daily-brief/PendingSignoffsSection";
 import { InactivePlotsSections } from "./daily-brief/InactivePlotsSections";
+import { UpcomingOrdersSection } from "./daily-brief/UpcomingOrdersSection";
 
 export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
   const { devDate } = useDevDate();
@@ -2417,113 +2418,53 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
           onRefresh={() => setRefreshKey((k) => k + 1)}
         />
 
-      {/* Upcoming Orders (future, scheduled) — collapsible */}
-      {data.upcomingOrders.length > 0 && (
-        <Card id="section-upcoming-orders">
-          <CardHeader className="cursor-pointer select-none pb-2" onClick={() => setUpcomingOrdersOpen((o) => !o)}>
-            <CardTitle className="flex items-center gap-2 text-sm">
-              <ShoppingCart className="size-4 text-slate-500" />
-              Upcoming Orders ({groupedUpcomingOrders.length})
-              <ChevronDown className={cn("ml-auto size-4 text-muted-foreground transition-transform duration-200", upcomingOrdersOpen && "rotate-180")} />
-            </CardTitle>
-            <CardDescription className="text-xs">Orders scheduled for future placement — click to expand</CardDescription>
-          </CardHeader>
-          {upcomingOrdersOpen && (
-          <CardContent>
-            <div className="space-y-2">
-              {groupedUpcomingOrders.map((group) => {
-                const o = group[0];
-                const groupIds = group.map((g) => g.id);
-                const anyPending = groupIds.some((id) => isOrderPending(id));
-                const hasEmail = !!o.supplier.contactEmail;
-                const sendGroup = () => openSendOrderEmail({
-                  supplierId: o.supplier.id,
-                  supplierName: o.supplier.name,
-                  contactName: o.supplier.contactName,
-                  contactEmail: o.supplier.contactEmail,
-                  accountNumber: o.supplier.accountNumber,
-                  siteNames: [data.site.name],
-                  orders: group.map((g) => ({
-                    id: g.id,
-                    job: {
-                      id: g.job.id,
-                      name: g.job.name,
-                      plot: {
-                        name: g.job.plot.name,
-                        plotNumber: g.job.plot.plotNumber,
-                        site: {
-                          id: siteId,
-                          name: data.site.name,
-                          address: data.site.address,
-                          postcode: data.site.postcode,
-                        },
-                      },
-                    },
-                    expectedDeliveryDate: g.expectedDeliveryDate,
-                    dateOfOrder: g.dateOfOrder,
-                    itemsDescription: g.itemsDescription,
-                    items: (g.orderItems || []).map((i) => ({
-                      name: i.name,
-                      quantity: i.quantity,
-                      unit: i.unit,
-                      unitCost: i.unitCost,
-                    })),
-                  })),
-                });
-                return (
-                  <div key={`${o.supplier.id}__${o.job.name}`} className="rounded border p-2 text-sm">
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      <Link href={`/suppliers/${o.supplier.id}`} className="truncate font-medium text-blue-600 hover:underline">
-                        {o.supplier.name}
-                      </Link>
-                    </div>
-                    <p className="text-xs text-muted-foreground">{o.itemsDescription || "—"}</p>
-                    <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-muted-foreground">
-                      {o.dateOfOrder && (
-                        <span>Order by <span className="font-medium text-purple-600">{format(new Date(o.dateOfOrder), "dd MMM")}</span></span>
-                      )}
-                      {o.expectedDeliveryDate && (
-                        <span>Delivery by <span className="font-medium text-teal-600">{format(new Date(o.expectedDeliveryDate), "dd MMM")}</span></span>
-                      )}
-                    </div>
-                    <div className="flex flex-wrap items-center gap-1 pt-0.5">
-                      <Link href={`/jobs/${o.job.id}`} className="text-xs hover:underline hover:text-blue-600">{o.job.name}</Link>
-                      <span className="text-xs text-muted-foreground">·</span>
-                      {group.slice(0, 5).map((g) => (
-                        <span key={g.id} className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600">
-                          {g.job.plot.plotNumber ? `Plot ${g.job.plot.plotNumber}` : g.job.plot.name}
-                        </span>
-                      ))}
-                      {group.length > 5 && (
-                        <span className="text-[10px] text-muted-foreground">+{group.length - 5} more</span>
-                      )}
-                    </div>
-                    <JobActionStrip>
-                      {anyPending ? (
-                        <Loader2 className="size-4 animate-spin text-muted-foreground" />
-                      ) : (
-                        <>
-                          {hasEmail && (
-                            <Button variant="outline" size="sm" className="h-9 border-violet-200 px-2 text-xs text-violet-700 hover:bg-violet-50"
-                              onClick={sendGroup}>
-                              <Mail className="mr-1 size-2.5" />{group.length > 1 ? `Send (${group.length})` : "Send Order"}
-                            </Button>
-                          )}
-                          <Button variant="outline" size="sm" className="h-9 border-blue-200 px-2 text-xs text-blue-700 hover:bg-blue-50"
-                            onClick={() => handleGroupOrderAction(groupIds, "ORDERED")}>
-                            <Package className="mr-1 size-2.5" />{hasEmail ? "Mark Sent" : "Place Order"}
-                          </Button>
-                        </>
-                      )}
-                    </JobActionStrip>
-                  </div>
-                );
-              })}
-            </div>
-          </CardContent>
-          )}
-        </Card>
-      )}
+      {/* Upcoming Orders — extracted to UpcomingOrdersSection. */}
+      <UpcomingOrdersSection
+        data={data}
+        siteId={siteId}
+        open={upcomingOrdersOpen}
+        onToggle={() => setUpcomingOrdersOpen((o) => !o)}
+        groupedUpcomingOrders={groupedUpcomingOrders}
+        isOrderPending={isOrderPending}
+        onGroupOrderAction={handleGroupOrderAction}
+        onSendGroup={(group) => {
+          const o = group[0];
+          openSendOrderEmail({
+            supplierId: o.supplier.id,
+            supplierName: o.supplier.name,
+            contactName: o.supplier.contactName,
+            contactEmail: o.supplier.contactEmail,
+            accountNumber: o.supplier.accountNumber,
+            siteNames: [data.site.name],
+            orders: group.map((g) => ({
+              id: g.id,
+              job: {
+                id: g.job.id,
+                name: g.job.name,
+                plot: {
+                  name: g.job.plot.name,
+                  plotNumber: g.job.plot.plotNumber,
+                  site: {
+                    id: siteId,
+                    name: data.site.name,
+                    address: data.site.address,
+                    postcode: data.site.postcode,
+                  },
+                },
+              },
+              expectedDeliveryDate: g.expectedDeliveryDate,
+              dateOfOrder: g.dateOfOrder,
+              itemsDescription: g.itemsDescription,
+              items: (g.orderItems || []).map((i) => ({
+                name: i.name,
+                quantity: i.quantity,
+                unit: i.unit,
+                unitCost: i.unitCost,
+              })),
+            })),
+          });
+        }}
+      />
 
       {/* Recent activity — extracted to RecentActivitySection. */}
       <RecentActivitySection
