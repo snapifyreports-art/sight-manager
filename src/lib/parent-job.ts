@@ -63,6 +63,15 @@ export async function recomputeParentFromChildren(
       originalEndDate: true,
     },
   });
+  // (May 2026 audit B-P1-30) Empty-children case: parent has no
+  // children left (last child was deleted in this tx). Return null so
+  // the caller knows to skip the update — the parent row remains
+  // intact with its previously-derived dates so reports show the
+  // historical envelope rather than going blank. Callers that want
+  // to delete the orphan parent should do so explicitly (currently
+  // none — child-delete in /api/jobs/[id]/route.ts leaves orphan
+  // parents alone, since SetNull on the self-relation means children
+  // would normally outlive the parent, not the reverse).
   if (children.length === 0) return null;
 
   const starts = children

@@ -369,6 +369,14 @@ model Job {
   @@index([plotId, status]) // composite for the hottest filter combo
 }
 
+/// (May 2026 audit B-P1-28) JobAction is APPEND-ONLY. Every
+/// start/stop/complete/note/signoff stamps a row used by Delay Report
+/// + Site Story aggregations. UPDATE and DELETE are blocked by a
+/// Postgres trigger installed via scripts/apply-immutability-triggers.ts
+/// — alongside EventLog. Do NOT use prisma.jobAction.update or
+/// prisma.jobAction.deleteMany in application code; the trigger will
+/// raise an exception. Genuine row fixes (GDPR, typo) require dropping
+/// the trigger temporarily — see the script header.
 model JobAction {
   id        String   @id @default(cuid())
   jobId     String
