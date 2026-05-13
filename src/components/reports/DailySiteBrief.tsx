@@ -1043,17 +1043,14 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
     if (!signOffTarget) return;
     setSignOffSubmitting(true);
     try {
-      if (signOffPhotos.length > 0) {
-        const fd = new FormData();
-        signOffPhotos.forEach((f) => fd.append("photos", f));
-        fd.append("tag", "after");
-        const photoRes = await fetch(`/api/jobs/${signOffTarget.id}/photos`, { method: "POST", body: fd });
-        if (!photoRes.ok) {
-          showToast("Photos failed to upload — sign-off cancelled", "error");
-          setSignOffSubmitting(false);
-          return;
-        }
-      }
+      // (May 2026 audit SM-P0-10) Order reversed — pre-fix photos
+      // uploaded FIRST, then complete + signoff ran. If the API
+      // action failed after a successful upload, the photos were
+      // orphaned on a job that was neither complete nor signed off.
+      // Now: do the state transition first (complete + signoff). If
+      // that succeeds, upload photos. If photo upload then fails the
+      // job is at least in the correct state and the user can retry
+      // photo upload from the job tab with no rollback needed.
       // If job is already COMPLETED, just sign off. Otherwise complete + signoff.
       const isAlreadyCompleted = signOffTarget.status === "COMPLETED";
       if (!isAlreadyCompleted) {
@@ -1064,6 +1061,22 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
       const res = await runSimpleAction(signOffTarget.id, "signoff", {
         signOffNotes: signOffNotes.trim() || undefined,
       });
+      // Photo upload AFTER state transitions succeed.
+      if (res.ok && signOffPhotos.length > 0) {
+        const fd = new FormData();
+        signOffPhotos.forEach((f) => fd.append("photos", f));
+        fd.append("tag", "after");
+        const photoRes = await fetch(`/api/jobs/${signOffTarget.id}/photos`, { method: "POST", body: fd });
+        if (!photoRes.ok) {
+          // Don't roll back the signoff — surface the orphaned-photo
+          // case clearly so the user knows to retry the photo upload
+          // from the job detail page.
+          showToast(
+            "Job signed off, but photos failed to upload. Open the job to retry.",
+            "error",
+          );
+        }
+      }
       if (res.ok) {
         const result = res.data as {
           _completionContext?: {

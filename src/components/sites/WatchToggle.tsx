@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Bell, BellOff } from "lucide-react";
+import { Bell, BellOff, AlertCircle, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 
@@ -32,21 +32,33 @@ export function WatchToggle({
   // muted = true when a WatchedSite row exists. The /watch GET still
   // returns `{ watching }` for compatibility; we read it as "muted".
   const [muted, setMuted] = useState<boolean | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [pending, setPending] = useState(false);
   const toast = useToast();
 
+  // (May 2026 audit SM-P0-11) Pre-fix a failed GET silently left
+  // `muted=null` which fell through to `isMuted=false` and rendered
+  // "Notifying" (green bell) — user believed they were subscribed
+  // when the system hadn't actually verified anything. Track the
+  // failure explicitly so the UI can show the unknown state.
   useEffect(() => {
     let cancelled = false;
+    setLoadFailed(false);
     fetch(`/api/sites/${siteId}/watch`)
-      .then((r) => r.json())
+      .then(async (r) => {
+        if (!r.ok) throw new Error(`status ${r.status}`);
+        return r.json();
+      })
       .then((data) => {
-        if (!cancelled && typeof data?.watching === "boolean") {
+        if (cancelled) return;
+        if (typeof data?.watching === "boolean") {
           setMuted(data.watching);
+        } else {
+          setLoadFailed(true);
         }
       })
       .catch(() => {
-        // Silent — toggle stays in its initial state and the click
-        // handler will surface any real error.
+        if (!cancelled) setLoadFailed(true);
       });
     return () => {
       cancelled = true;
@@ -77,6 +89,50 @@ export function WatchToggle({
       setPending(false);
     }
   };
+
+  // (May 2026 audit SM-P0-11) Render an explicit "unknown" state while
+  // we're still loading or after the GET failed — pre-fix this fell
+  // through to "Notifying" and lied to the user about the subscription.
+  if (loadFailed) {
+    return (
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => {
+          // retry by forcing the effect to re-run via a soft refresh
+          setLoadFailed(false);
+          setMuted(null);
+          fetch(`/api/sites/${siteId}/watch`)
+            .then(async (r) => (r.ok ? r.json() : null))
+            .then((data) => {
+              if (typeof data?.watching === "boolean") setMuted(data.watching);
+              else setLoadFailed(true);
+            })
+            .catch(() => setLoadFailed(true));
+        }}
+        aria-label="Notification preference unknown — click to retry"
+        title="Notification preference unknown — click to retry"
+        className="gap-1.5 border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100"
+      >
+        <AlertCircle className="size-4" aria-hidden="true" />
+        <span className="hidden sm:inline">Retry</span>
+      </Button>
+    );
+  }
+  if (muted === null) {
+    return (
+      <Button
+        variant="outline"
+        size="sm"
+        disabled
+        aria-busy="true"
+        aria-label={`Loading notification preference for ${siteName}`}
+        className="gap-1.5"
+      >
+        <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+      </Button>
+    );
+  }
 
   const isMuted = muted === true;
 
