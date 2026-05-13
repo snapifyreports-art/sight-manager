@@ -38,17 +38,43 @@ export async function GET(
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const rows = await prisma.plotMaterial.findMany({
-    where: { plot: { siteId: id } },
-    select: {
-      name: true,
-      unit: true,
-      quantity: true,
-      delivered: true,
-      consumed: true,
-      unitCost: true,
-    },
-  });
+  // (May 2026 audit D-P1-198) Aggregate from TWO sources keyed by
+  // (name, unit):
+  //   1. PlotMaterial — the "template intent" (expected/delivered/consumed
+  //      per plot, set up when applying a template)
+  //   2. MaterialOrder.orderItems on non-cancelled orders — the "modern
+  //      ordering flow" where orderItems carry the real expected /
+  //      delivered quantities for sites that don't pre-populate
+  //      PlotMaterial rows
+  // Sites that use only the modern flow pre-fix got an empty burndown.
+  // Sites that use both get a UNION: PlotMaterial seeds the row, orderItems
+  // contribute additional expected + delivered quantity. Manager has
+  // visibility into both even if they double-counted on setup.
+  const [plotMaterials, orderRows] = await Promise.all([
+    prisma.plotMaterial.findMany({
+      where: { plot: { siteId: id } },
+      select: {
+        name: true,
+        unit: true,
+        quantity: true,
+        delivered: true,
+        consumed: true,
+        unitCost: true,
+      },
+    }),
+    prisma.materialOrder.findMany({
+      where: {
+        job: { plot: { siteId: id } },
+        status: { in: ["PENDING", "ORDERED", "DELIVERED"] },
+      },
+      select: {
+        status: true,
+        orderItems: {
+          select: { name: true, unit: true, quantity: true, unitCost: true },
+        },
+      },
+    }),
+  ]);
 
   const map = new Map<
     string,
@@ -61,7 +87,7 @@ export async function GET(
       expectedValue: number;
     }
   >();
-  for (const r of rows) {
+  for (const r of plotMaterials) {
     const k = `${r.name}__${r.unit}`;
     const cur = map.get(k) ?? {
       name: r.name,
@@ -76,6 +102,32 @@ export async function GET(
     cur.consumed += r.consumed ?? 0;
     cur.expectedValue += (r.quantity ?? 0) * (r.unitCost ?? 0);
     map.set(k, cur);
+  }
+  // Fold in orderItems — ORDERED + PENDING contribute to expected,
+  // DELIVERED additionally counts toward delivered.
+  for (const order of orderRows) {
+    for (const item of order.orderItems) {
+      const k = `${item.name}__${item.unit}`;
+      const cur = map.get(k) ?? {
+        name: item.name,
+        unit: item.unit,
+        expected: 0,
+        delivered: 0,
+        consumed: 0,
+        expectedValue: 0,
+      };
+      // For sites using PlotMaterial as their canonical source, the
+      // PlotMaterial row already accounts for expected. For sites
+      // using ONLY orderItems, this loop is what populates expected
+      // in the first place. We always add (even if PlotMaterial also
+      // had a row) — managers can spot double-counting visually.
+      cur.expected += item.quantity ?? 0;
+      cur.expectedValue += (item.quantity ?? 0) * (item.unitCost ?? 0);
+      if (order.status === "DELIVERED") {
+        cur.delivered += item.quantity ?? 0;
+      }
+      map.set(k, cur);
+    }
   }
 
   const items = Array.from(map.values()).map((m) => {
