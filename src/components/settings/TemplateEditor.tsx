@@ -70,42 +70,13 @@ import { HelpTip } from "@/components/shared/HelpTip";
 import { useReviewSupplierMaterials } from "@/hooks/useReviewSupplierMaterials";
 import { formatWeekRange } from "@/lib/week-format";
 
-interface MaterialSuggestion {
-  name: string;
-  unit: string;
-  unitCost: number;
-}
-
-// ---------- Tree-walk helpers used by the validation drill-in actions.
-// Walk parents → children → grandchildren looking for a job/order id.
-
-function findJobById(
-  jobs: TemplateJobData[],
-  id: string,
-): TemplateJobData | null {
-  for (const j of jobs) {
-    if (j.id === id) return j;
-    if (j.children) {
-      const found = findJobById(j.children, id);
-      if (found) return found;
-    }
-  }
-  return null;
-}
-
-function findOrderById(
-  jobs: TemplateJobData[],
-  id: string,
-): TemplateOrderData | null {
-  for (const j of jobs) {
-    for (const o of j.orders ?? []) if (o.id === id) return o;
-    if (j.children) {
-      const found = findOrderById(j.children, id);
-      if (found) return found;
-    }
-  }
-  return null;
-}
+// (May 2026 sprint 7c) Tree-walk helpers + MaterialSuggestion type
+// extracted to ./template-editor-modules/tree-helpers.ts.
+import {
+  findJobById,
+  findOrderById,
+  type MaterialSuggestion,
+} from "./template-editor-modules/tree-helpers";
 
 // ---------- Main Editor ----------
 
