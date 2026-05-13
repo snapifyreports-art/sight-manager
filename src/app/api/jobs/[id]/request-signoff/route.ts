@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { sendPushToAll } from "@/lib/push";
+import { sendPushToSiteAudience } from "@/lib/push";
 import { canAccessSite } from "@/lib/site-access";
 import { apiError } from "@/lib/api-errors";
 
@@ -78,8 +78,11 @@ export async function POST(
       },
     });
 
-    // Send push notification
-    await sendPushToAll("JOBS_READY_FOR_SIGNOFF", {
+    // (May 2026 audit F-P1-23 follow-up) Per-site scope. Sibling
+    // routes (snag request-signoff, contractor share) just migrated;
+    // this is the third caller still on sendPushToAll. Now scoped to
+    // the job's site audience so only relevant users get pinged.
+    await sendPushToSiteAudience(job.plot.site.id, "JOBS_READY_FOR_SIGNOFF", {
       title: `Sign-Off Requested — ${job.name}`,
       body: `${plotLabel} on ${job.plot.site.name}: "${job.name}" is ready for sign-off`,
       url: `/jobs/${id}`,
