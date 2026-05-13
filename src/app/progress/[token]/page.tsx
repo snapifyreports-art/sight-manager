@@ -217,6 +217,24 @@ export default async function ProgressPage({
           <CustomerNotifyToggle token={token} />
         </header>
 
+        {/* (May 2026 audit O-P0) When the plot has no jobs yet
+            (buyer scanned the QR before templates were applied), skip
+            every section that would render "0 of 0 stages complete",
+            "Currently: undefined", or orphan photos. The empty-state
+            card below carries the entire message. */}
+        {total === 0 ? (
+          <section className="mb-8 rounded-2xl border border-dashed bg-white p-8 text-center">
+            <Hammer className="mx-auto size-10 text-slate-300" />
+            <p className="mt-4 text-base font-medium text-slate-700">
+              Your build hasn&apos;t started yet
+            </p>
+            <p className="mt-1 text-sm text-slate-500">
+              We&apos;re still preparing your home&apos;s schedule.
+              Updates will appear here as soon as work begins on site.
+            </p>
+          </section>
+        ) : (
+        <>
         {/* ─── Progress summary ─── */}
         <section className="mb-8 rounded-2xl border bg-white p-6 shadow-sm">
           <div className="flex items-center justify-between">
@@ -324,6 +342,8 @@ export default async function ProgressPage({
               Updates will appear here as soon as work begins on site.
             </p>
           </section>
+        )}
+        </>
         )}
 
         <footer className="mt-12 border-t pt-6 text-center text-xs text-slate-400">
