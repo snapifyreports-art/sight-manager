@@ -325,7 +325,7 @@ export function useOrderEmail(onSent?: (mode: Mode) => void): Result {
     //   - Textarea grows with min-h / max-h so long bodies are readable
     //     without forcing the dialog off-screen.
     <Dialog open={!!draft} onOpenChange={(o) => { if (!o) close(); }}>
-      <DialogContent className="flex max-h-[90vh] flex-col sm:max-w-2xl lg:max-w-3xl">
+      <DialogContent className="flex max-h-[min(90vh,calc(100dvh-4rem))] flex-col sm:max-w-2xl lg:max-w-3xl">
         <HelpTip title="About supplier email" anchor="below-left">
           <p><strong>How it works:</strong> clicking Send opens your default mail client with the message pre-filled. You review / edit there and hit Send in your mail client.</p>
           <p><strong>Why not send directly?</strong> Your mail client keeps the sent record in your usual Sent folder and uses your signature. Easier to audit later.</p>

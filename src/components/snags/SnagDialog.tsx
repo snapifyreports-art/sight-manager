@@ -612,7 +612,10 @@ export function SnagDialog({
           onOpenChange(o);
         }}
       >
-        <DialogContent className="max-h-[85vh] overflow-y-auto">
+        {/* (May 2026 audit UX-P0-4) Use dvh + min() so the cap respects
+            the dynamic viewport height when the mobile keyboard slides
+            up. Pre-fix tapping a text field hid the Save button. */}
+        <DialogContent className="max-h-[min(85vh,calc(100dvh-5rem))] overflow-y-auto">
           <HelpTip title="About Snags" anchor="below-left">
             <p><strong>What it does:</strong> records a defect found on-site so it can be tracked, photographed, and assigned to a contractor to fix.</p>
             <p><strong>Why:</strong> snags are how quality issues travel from inspection to closure. Linking a sub-job and contractor makes accountability explicit; the &ldquo;before&rdquo; / &ldquo;after&rdquo; photos are the evidence trail.</p>

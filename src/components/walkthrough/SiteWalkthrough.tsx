@@ -1283,7 +1283,7 @@ export default function SiteWalkthrough({
               <select
                 value={noteJobId || job.id}
                 onChange={(e) => { setNoteJobId(e.target.value || null); setShowJobPicker(null); }}
-                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full rounded-lg border border-border bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 h-11"
               >
                 {plotJobs.map((j) => (
                   <option key={j.id} value={j.id}>
@@ -1347,7 +1347,7 @@ export default function SiteWalkthrough({
                 <select
                   value={snagPriority}
                   onChange={(e) => setSnagPriority(e.target.value)}
-                  className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full rounded-lg border border-border bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 h-11"
                 >
                   <option value="LOW">Low</option>
                   <option value="MEDIUM">Medium</option>
@@ -1391,7 +1391,7 @@ export default function SiteWalkthrough({
                     setSnagContactId(selectedJob.contractor.id);
                   }
                 }}
-                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full rounded-lg border border-border bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 h-11"
               >
                 {plotJobs.map((j) => (
                   <option key={j.id} value={j.id}>
@@ -1406,7 +1406,7 @@ export default function SiteWalkthrough({
               <select
                 value={snagContactId || ""}
                 onChange={(e) => setSnagContactId(e.target.value || null)}
-                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full rounded-lg border border-border bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 h-11"
               >
                 <option value="">None</option>
                 {(() => {

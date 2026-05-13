@@ -375,7 +375,7 @@ function JobActionButton({
           <Button
             variant="outline"
             size="sm"
-            className="h-9 sm:h-6 gap-1 border-orange-200 px-2 text-xs sm:text-[10px] text-orange-700 hover:bg-orange-50"
+            className="h-9 gap-1 border-orange-200 px-2 text-xs text-orange-700 hover:bg-orange-50"
             onClick={(e) => {
               e.stopPropagation();
               onExtend(jobId);
@@ -387,7 +387,7 @@ function JobActionButton({
         <Button
           variant="outline"
           size="sm"
-          className="h-9 sm:h-6 gap-1 border-green-200 px-2 text-xs sm:text-[10px] text-green-700 hover:bg-green-50"
+          className="h-9 gap-1 border-green-200 px-2 text-xs text-green-700 hover:bg-green-50"
           onClick={(e) => {
             e.stopPropagation();
             onAction(jobId, "start");
@@ -406,7 +406,7 @@ function JobActionButton({
           <Button
             variant="outline"
             size="sm"
-            className="h-9 sm:h-6 gap-1 border-orange-200 px-2 text-xs sm:text-[10px] text-orange-700 hover:bg-orange-50"
+            className="h-9 gap-1 border-orange-200 px-2 text-xs text-orange-700 hover:bg-orange-50"
             onClick={(e) => {
               e.stopPropagation();
               onExtend(jobId);
@@ -418,7 +418,7 @@ function JobActionButton({
         <Button
           variant="outline"
           size="sm"
-          className="h-9 sm:h-6 gap-1 border-blue-200 px-2 text-xs sm:text-[10px] text-blue-700 hover:bg-blue-50"
+          className="h-9 gap-1 border-blue-200 px-2 text-xs text-blue-700 hover:bg-blue-50"
           onClick={(e) => {
             e.stopPropagation();
             onAction(jobId, "complete");
@@ -1287,19 +1287,19 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
             </span>
           ) : j.status === "IN_PROGRESS" ? (
             <>
-              <Button variant="outline" size="sm" className="h-9 sm:h-6 gap-1 border-blue-200 px-2 text-xs sm:text-[10px] text-blue-700 hover:bg-blue-50" onClick={(e) => { e.stopPropagation(); handleJobAction(j.id, "complete"); }}>
+              <Button variant="outline" size="sm" className="h-9 gap-1 border-blue-200 px-2 text-xs text-blue-700 hover:bg-blue-50" onClick={(e) => { e.stopPropagation(); handleJobAction(j.id, "complete"); }}>
                 <CheckCircle2 className="size-2.5" /> Complete
               </Button>
-              <Button variant="outline" size="sm" className="h-9 sm:h-6 gap-1 border-orange-200 px-2 text-xs sm:text-[10px] text-orange-700 hover:bg-orange-50" onClick={(e) => { e.stopPropagation(); handleExtendOpen(j.id); }}>
+              <Button variant="outline" size="sm" className="h-9 gap-1 border-orange-200 px-2 text-xs text-orange-700 hover:bg-orange-50" onClick={(e) => { e.stopPropagation(); handleExtendOpen(j.id); }}>
                 <Clock className="size-2.5" /> Extend
               </Button>
             </>
           ) : j.status === "NOT_STARTED" ? (
             <>
-              <Button variant="outline" size="sm" className="h-9 sm:h-6 gap-1 border-green-200 px-2 text-xs sm:text-[10px] text-green-700 hover:bg-green-50" onClick={(e) => { e.stopPropagation(); handleJobAction(j.id, "start"); }}>
+              <Button variant="outline" size="sm" className="h-9 gap-1 border-green-200 px-2 text-xs text-green-700 hover:bg-green-50" onClick={(e) => { e.stopPropagation(); handleJobAction(j.id, "start"); }}>
                 <Play className="size-2.5" /> Start
               </Button>
-              <Button variant="outline" size="sm" className="h-9 sm:h-6 gap-1 border-orange-200 px-2 text-xs sm:text-[10px] text-orange-700 hover:bg-orange-50" onClick={(e) => { e.stopPropagation(); handleExtendOpen(j.id); }}>
+              <Button variant="outline" size="sm" className="h-9 gap-1 border-orange-200 px-2 text-xs text-orange-700 hover:bg-orange-50" onClick={(e) => { e.stopPropagation(); handleExtendOpen(j.id); }}>
                 <Clock className="size-2.5" /> Extend
               </Button>
             </>
@@ -1336,7 +1336,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
           </span>
           <Button
             size="sm"
-            className="h-7 gap-1 bg-green-600 text-white hover:bg-green-700"
+            className="h-9 gap-1 bg-green-600 text-white hover:bg-green-700"
             disabled={bulkProcessing}
             onClick={() => handleBulkAction("start")}
           >
@@ -1344,7 +1344,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
           </Button>
           <Button
             size="sm"
-            className="h-7 gap-1 bg-blue-600 text-white hover:bg-blue-700"
+            className="h-9 gap-1 bg-blue-600 text-white hover:bg-blue-700"
             disabled={bulkProcessing}
             onClick={() => handleBulkAction("complete")}
           >
@@ -1710,7 +1710,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                   <Button
                     variant="outline"
                     size="sm"
-                    className="ml-auto h-6 gap-1 border-green-200 px-2 text-xs sm:text-[10px] text-green-700 hover:bg-green-50"
+                    className="ml-auto h-9 gap-1 border-green-200 px-2 text-xs text-green-700 hover:bg-green-50"
                     disabled={bulkProcessing}
                     onClick={(e) => { e.stopPropagation(); handleQuickBulk(startable.map((j) => j.id), "start"); }}
                   >
@@ -1835,13 +1835,13 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                                 <p className="text-[10px] font-semibold text-red-700 mb-1">Assign Contractor</p>
                                 <div className="flex gap-1">
                                   <select value={selectedContractorId} onChange={(e) => setSelectedContractorId(e.target.value)}
-                                    className="flex-1 rounded border px-2 py-1 text-[10px]">
+                                    className="flex-1 rounded border bg-white px-2 text-xs h-9">
                                     <option value="">Select...</option>
                                     {availableContractors.map((c) => (
                                       <option key={c.id} value={c.id}>{c.company || c.name}</option>
                                     ))}
                                   </select>
-                                  <Button size="sm" className="h-6 px-2 text-xs sm:text-[10px]" disabled={!selectedContractorId || assigningContractor} onClick={handleContractorAssign}>
+                                  <Button size="sm" className="h-9 px-2 text-xs" disabled={!selectedContractorId || assigningContractor} onClick={handleContractorAssign}>
                                     {assigningContractor ? <Loader2 className="size-3 animate-spin" /> : "Assign"}
                                   </Button>
                                 </div>
@@ -1853,13 +1853,13 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                                 <p className="text-[10px] font-semibold text-red-700 mb-1">Assign Team Member</p>
                                 <div className="flex gap-1">
                                   <select value={selectedAssigneeId} onChange={(e) => setSelectedAssigneeId(e.target.value)}
-                                    className="flex-1 rounded border px-2 py-1 text-[10px]">
+                                    className="flex-1 rounded border bg-white px-2 text-xs h-9">
                                     <option value="">Select...</option>
                                     {availableUsers.map((u) => (
                                       <option key={u.id} value={u.id}>{u.name}</option>
                                     ))}
                                   </select>
-                                  <Button size="sm" className="h-6 px-2 text-xs sm:text-[10px]" disabled={!selectedAssigneeId || assigningUser} onClick={() => handleAssigneeConfirm(j.id)}>
+                                  <Button size="sm" className="h-9 px-2 text-xs" disabled={!selectedAssigneeId || assigningUser} onClick={() => handleAssigneeConfirm(j.id)}>
                                     {assigningUser ? <Loader2 className="size-3 animate-spin" /> : "Assign"}
                                   </Button>
                                 </div>
@@ -1880,13 +1880,13 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                             <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
                           ) : j.status === "NOT_STARTED" ? (
                             <>
-                              <Button variant="outline" size="sm" className="h-9 sm:h-6 gap-1 border-green-200 px-2 text-xs sm:text-[10px] text-green-700 hover:bg-green-50" onClick={() => triggerJobAction({ id: j.id, name: j.name, status: "NOT_STARTED", startDate: null, endDate: null }, "start")}>
+                              <Button variant="outline" size="sm" className="h-9 gap-1 border-green-200 px-2 text-xs text-green-700 hover:bg-green-50" onClick={() => triggerJobAction({ id: j.id, name: j.name, status: "NOT_STARTED", startDate: null, endDate: null }, "start")}>
                                 <Play className="size-2.5" /> Start
                               </Button>
-                              <Button variant="outline" size="sm" className="h-9 sm:h-6 gap-1 border-orange-200 px-2 text-xs sm:text-[10px] text-orange-700 hover:bg-orange-50" onClick={() => handleExtendOpen(j.id)}>
+                              <Button variant="outline" size="sm" className="h-9 gap-1 border-orange-200 px-2 text-xs text-orange-700 hover:bg-orange-50" onClick={() => handleExtendOpen(j.id)}>
                                 <Clock className="size-2.5" /> Extend
                               </Button>
-                              <Button variant="outline" size="sm" className="h-9 sm:h-6 gap-1 border-amber-200 px-2 text-xs sm:text-[10px] text-amber-700 hover:bg-amber-50" onClick={() => {
+                              <Button variant="outline" size="sm" className="h-9gap-1 border-amber-200 px-2 text-xs text-amber-700 hover:bg-amber-50" onClick={() => {
                                 // In this branch the job row doesn't carry startDate/endDate
                                 // (it's the simplified "jobs starting today" view); the delay
                                 // endpoint fetches them server-side from the job record.
@@ -1894,12 +1894,12 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                               }}>
                                 <CalendarClock className="size-2.5" /> Delay
                               </Button>
-                              <Button variant="outline" size="sm" className="h-9 sm:h-6 gap-1 border-emerald-200 px-2 text-xs sm:text-[10px] text-emerald-700 hover:bg-emerald-50" onClick={() => {
+                              <Button variant="outline" size="sm" className="h-9gap-1 border-emerald-200 px-2 text-xs text-emerald-700 hover:bg-emerald-50" onClick={() => {
                                 openPullForwardDialog({ id: j.id, name: j.name, startDate: null, endDate: null });
                               }}>
                                 <CalendarClock className="size-2.5" /> Pull
                               </Button>
-                              <Button variant="outline" size="sm" className="h-9 sm:h-6 gap-1 px-2 text-xs sm:text-[10px]" onClick={() => openNoteDialog({ id: j.id, name: j.name })}>
+                              <Button variant="outline" size="sm" className="h-9gap-1 px-2 text-xs" onClick={() => openNoteDialog({ id: j.id, name: j.name })}>
                                 <StickyNote className="size-2.5" /> Note
                               </Button>
                             </>
@@ -1945,22 +1945,22 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                           <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
                         ) : (
                           <>
-                            <Button variant="outline" size="sm" className="h-9 sm:h-6 gap-1 border-orange-200 px-2 text-xs sm:text-[10px] text-orange-700 hover:bg-orange-50" onClick={() => handleExtendOpen(j.id)}>
+                            <Button variant="outline" size="sm" className="h-9 gap-1 border-orange-200 px-2 text-xs text-orange-700 hover:bg-orange-50" onClick={() => handleExtendOpen(j.id)}>
                               <Clock className="size-2.5" /> Extend
                             </Button>
-                            <Button size="sm" className="h-9 sm:h-6 gap-1 bg-emerald-600 px-2 text-xs sm:text-[10px] text-white hover:bg-emerald-700" onClick={() => handleJobAction(j.id, "complete")}>
+                            <Button size="sm" className="h-9gap-1 bg-emerald-600 px-2 text-xs text-white hover:bg-emerald-700" onClick={() => handleJobAction(j.id, "complete")}>
                               <CheckCircle2 className="size-2.5" /> Complete
                             </Button>
-                            <Button size="sm" className="h-9 sm:h-6 gap-1 bg-emerald-700 px-2 text-xs sm:text-[10px] text-white hover:bg-emerald-800" onClick={() => handleOpenSignOff(j)}>
+                            <Button size="sm" className="h-9gap-1 bg-emerald-700 px-2 text-xs text-white hover:bg-emerald-800" onClick={() => handleOpenSignOff(j)}>
                               <FileCheck className="size-2.5" /> Sign Off
                             </Button>
-                            <Button variant="outline" size="sm" className="h-9 sm:h-6 gap-1 px-2 text-xs sm:text-[10px]" onClick={() => setInlineSnagTarget({ jobId: j.id, plotId: j.plotId, contactId: (j as { contractors?: Array<{ contactId: string }> }).contractors?.[0]?.contactId })}>
+                            <Button variant="outline" size="sm" className="h-9gap-1 px-2 text-xs" onClick={() => setInlineSnagTarget({ jobId: j.id, plotId: j.plotId, contactId: (j as { contractors?: Array<{ contactId: string }> }).contractors?.[0]?.contactId })}>
                               <AlertTriangle className="size-2.5" /> Snag
                             </Button>
-                            <Button variant="outline" size="sm" className="h-9 sm:h-6 gap-1 px-2 text-xs sm:text-[10px]" onClick={() => openNoteDialog({ id: j.id, name: j.name })}>
+                            <Button variant="outline" size="sm" className="h-9gap-1 px-2 text-xs" onClick={() => openNoteDialog({ id: j.id, name: j.name })}>
                               <StickyNote className="size-2.5" /> Note
                             </Button>
-                            <Button variant="outline" size="sm" className="h-9 sm:h-6 gap-1 px-2 text-xs sm:text-[10px]" onClick={() => setPhotoTarget({ jobId: j.id, jobName: j.name })}>
+                            <Button variant="outline" size="sm" className="h-9gap-1 px-2 text-xs" onClick={() => setPhotoTarget({ jobId: j.id, jobName: j.name })}>
                               <Camera className="size-2.5" /> Photos
                             </Button>
                           </>
@@ -1986,10 +1986,10 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                         {j.startDate && <span className="text-amber-700"> · Due {format(new Date(j.startDate), "dd MMM")}</span>}
                       </p>
                       <JobActionStrip>
-                        <Button variant="outline" size="sm" className="h-9 sm:h-6 gap-1 border-green-200 px-2 text-xs sm:text-[10px] text-green-700 hover:bg-green-50" disabled={pendingActions.has(j.id)} onClick={() => triggerJobAction({ id: j.id, name: j.name, status: "NOT_STARTED", startDate: j.startDate, endDate: j.endDate ?? null }, "start")}>
+                        <Button variant="outline" size="sm" className="h-9 gap-1 border-green-200 px-2 text-xs text-green-700 hover:bg-green-50" disabled={pendingActions.has(j.id)} onClick={() => triggerJobAction({ id: j.id, name: j.name, status: "NOT_STARTED", startDate: j.startDate, endDate: j.endDate ?? null }, "start")}>
                           <Play className="size-2.5" /> Start
                         </Button>
-                        <Button variant="outline" size="sm" className="h-9 sm:h-6 gap-1 border-amber-200 px-2 text-xs sm:text-[10px] text-amber-700 hover:bg-amber-50" onClick={() => {
+                        <Button variant="outline" size="sm" className="h-9gap-1 border-amber-200 px-2 text-xs text-amber-700 hover:bg-amber-50" onClick={() => {
                           // Pre-fill with the working-day gap between the original planned
                           // start and today, so the user just has to confirm the common case.
                           const planned = j.startDate ? new Date(j.startDate) : date;
@@ -2001,7 +2001,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                         }}>
                           <CalendarClock className="size-2.5" /> Delay
                         </Button>
-                        <Button variant="outline" size="sm" className="h-9 sm:h-6 gap-1 border-emerald-200 px-2 text-xs sm:text-[10px] text-emerald-700 hover:bg-emerald-50" onClick={() => {
+                        <Button variant="outline" size="sm" className="h-9gap-1 border-emerald-200 px-2 text-xs text-emerald-700 hover:bg-emerald-50" onClick={() => {
                           openPullForwardDialog({ id: j.id, name: j.name, startDate: j.startDate ?? null, endDate: j.endDate ?? null });
                         }}>
                           <CalendarClock className="size-2.5" /> Pull
@@ -2063,12 +2063,12 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                               {j.blockedById ? (
                                 <Link
                                   href={`/jobs/${j.blockedById}`}
-                                  className="inline-flex h-9 items-center gap-1 rounded-md border border-blue-200 bg-blue-50 px-2 text-xs text-blue-700 hover:bg-blue-100 sm:h-6 sm:text-[10px]"
+                                  className="inline-flex h-9 items-center gap-1 rounded-md border border-blue-200 bg-blue-50 px-2 text-xs text-blue-700 hover:bg-blue-100sm:text-[10px]"
                                 >
                                   <Briefcase className="size-2.5" /> Open {j.blockedBy}
                                 </Link>
                               ) : null}
-                              <Link href={`/jobs/${j.id}`} className="inline-flex h-9 items-center gap-1 rounded-md border px-2 text-xs text-slate-600 hover:bg-slate-100 sm:h-6 sm:text-[10px]">
+                              <Link href={`/jobs/${j.id}`} className="inline-flex h-9 items-center gap-1 rounded-md border px-2 text-xs text-slate-600 hover:bg-slate-100sm:text-[10px]">
                                 <Briefcase className="size-2.5" /> View this job
                               </Link>
                             </JobActionStrip>
@@ -2089,7 +2089,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                             <Button
                               variant="outline"
                               size="sm"
-                              className="ml-auto h-6 gap-1 border-red-200 px-2 text-xs sm:text-[10px] text-red-700 hover:bg-red-50"
+                              className="ml-auto h-9 gap-1 border-red-200 px-2 text-xs text-red-700 hover:bg-red-50"
                               disabled={bulkProcessing}
                               onClick={(e) => { e.stopPropagation(); handleQuickBulk(completable.map((j) => j.id), "complete"); }}
                             >
@@ -2126,7 +2126,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                           <Button
                             variant="outline"
                             size="sm"
-                            className="h-7 shrink-0 border-green-200 px-2 text-xs sm:text-[10px] text-green-700 hover:bg-green-50"
+                            className="h-9 shrink-0 border-green-200 px-2 text-xs text-green-700 hover:bg-green-50"
                             disabled={isOrderPending(d.id)}
                             onClick={() => handleOrderAction(d.id, "DELIVERED")}
                           >
@@ -2160,23 +2160,23 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                               {daysSince > 0 && ` · Completed ${daysSince} day${daysSince !== 1 ? "s" : ""} ago`}
                             </p>
                             <JobActionStrip>
-                              <Button size="sm" variant="outline" className="h-9 sm:h-6 gap-1 border-amber-300 px-2 text-xs sm:text-[10px] text-amber-700 hover:bg-amber-100"
+                              <Button size="sm" variant="outline" className="h-9gap-1 border-amber-300 px-2 text-xs text-amber-700 hover:bg-amber-100"
                                 onClick={() => setSignOffTarget({ id: j.id, name: j.name, status: "COMPLETED", plot: j.plot })}>
                                 <FileCheck className="size-2.5" /> Sign Off
                               </Button>
-                              <Button variant="outline" size="sm" className="h-9 sm:h-6 gap-1 px-2 text-xs sm:text-[10px]" onClick={() => setInlineSnagTarget({ jobId: j.id, plotId: j.plotId, contactId: (j.contractors as Array<{ contactId?: string }>)?.[0]?.contactId })}>
+                              <Button variant="outline" size="sm" className="h-9gap-1 px-2 text-xs" onClick={() => setInlineSnagTarget({ jobId: j.id, plotId: j.plotId, contactId: (j.contractors as Array<{ contactId?: string }>)?.[0]?.contactId })}>
                                 <AlertTriangle className="size-2.5" /> Snag
                               </Button>
-                              <Button variant="outline" size="sm" className="h-9 sm:h-6 gap-1 px-2 text-xs sm:text-[10px]" onClick={() => openNoteDialog({ id: j.id, name: j.name })}>
+                              <Button variant="outline" size="sm" className="h-9gap-1 px-2 text-xs" onClick={() => openNoteDialog({ id: j.id, name: j.name })}>
                                 <StickyNote className="size-2.5" /> Note
                               </Button>
-                              <Button variant="outline" size="sm" className="h-9 sm:h-6 gap-1 px-2 text-xs sm:text-[10px]" onClick={() => setPhotoTarget({ jobId: j.id, jobName: j.name })}>
+                              <Button variant="outline" size="sm" className="h-9gap-1 px-2 text-xs" onClick={() => setPhotoTarget({ jobId: j.id, jobName: j.name })}>
                                 <Camera className="size-2.5" /> Photos
                               </Button>
                               {pendingActions.has(j.id) ? (
                                 <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
                               ) : (
-                                <Button variant="outline" size="sm" className="h-9 sm:h-6 gap-1 border-slate-300 px-2 text-xs sm:text-[10px] text-slate-600 hover:bg-slate-50" onClick={() => handleReopenJob(j.id, j.name)}>
+                                <Button variant="outline" size="sm" className="h-9gap-1 border-slate-300 px-2 text-xs text-slate-600 hover:bg-slate-50" onClick={() => handleReopenJob(j.id, j.name)}>
                                   <RotateCcw className="size-2.5" /> Reopen
                                 </Button>
                               )}
@@ -2223,7 +2223,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                         <Button
                           variant="outline"
                           size="sm"
-                          className="h-6 border-green-200 px-2 text-xs sm:text-[10px] text-green-700 hover:bg-green-50"
+                          className="h-9 border-green-200 px-2 text-xs text-green-700 hover:bg-green-50"
                           disabled={isOrderPending(d.id)}
                           onClick={() => handleOrderAction(d.id, "DELIVERED")}
                         >
@@ -2315,12 +2315,12 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                           ) : (
                             <>
                               {hasEmail && (
-                                <Button variant="outline" size="sm" className="h-6 border-violet-200 px-2 text-xs sm:text-[10px] text-violet-700 hover:bg-violet-50"
+                                <Button variant="outline" size="sm" className="h-9 border-violet-200 px-2 text-xs text-violet-700 hover:bg-violet-50"
                                   onClick={sendGroup}>
                                   <Mail className="mr-1 size-2.5" />{group.length > 1 ? `Send (${group.length})` : "Send Order"}
                                 </Button>
                               )}
-                              <Button variant="outline" size="sm" className="h-6 border-blue-200 px-2 text-xs sm:text-[10px] text-blue-700 hover:bg-blue-50"
+                              <Button variant="outline" size="sm" className="h-9 border-blue-200 px-2 text-xs text-blue-700 hover:bg-blue-50"
                                 onClick={() => handleGroupOrderAction(groupIds, "ORDERED")}>
                                 <Package className="mr-1 size-2.5" />{hasEmail ? "Mark Sent" : "Place Order"}
                               </Button>
@@ -2386,16 +2386,16 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                         <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
                       ) : (
                         <>
-                          <Button variant="outline" size="sm" className="h-9 sm:h-6 gap-1 border-blue-200 px-2 text-xs sm:text-[10px] text-blue-700 hover:bg-blue-50" onClick={() => handleJobAction(j.id, "complete")}>
+                          <Button variant="outline" size="sm" className="h-9 gap-1 border-blue-200 px-2 text-xs text-blue-700 hover:bg-blue-50" onClick={() => handleJobAction(j.id, "complete")}>
                             <CheckCircle2 className="size-2.5" /> Complete
                           </Button>
-                          <Button variant="outline" size="sm" className="h-9 sm:h-6 gap-1 border-orange-200 px-2 text-xs sm:text-[10px] text-orange-700 hover:bg-orange-50" onClick={() => handleExtendOpen(j.id)}>
+                          <Button variant="outline" size="sm" className="h-9 gap-1 border-orange-200 px-2 text-xs text-orange-700 hover:bg-orange-50" onClick={() => handleExtendOpen(j.id)}>
                             <Clock className="size-2.5" /> Extend
                           </Button>
-                          <Button variant="outline" size="sm" className="h-9 sm:h-6 gap-1 px-2 text-xs sm:text-[10px]" onClick={() => setInlineSnagTarget({ jobId: j.id, plotId: (j as { plotId?: string }).plotId || "", contactId: (j as { contractors?: Array<{ contactId?: string }> }).contractors?.[0]?.contactId })}>
+                          <Button variant="outline" size="sm" className="h-9gap-1 px-2 text-xs" onClick={() => setInlineSnagTarget({ jobId: j.id, plotId: (j as { plotId?: string }).plotId || "", contactId: (j as { contractors?: Array<{ contactId?: string }> }).contractors?.[0]?.contactId })}>
                             <AlertTriangle className="size-2.5" /> Snag
                           </Button>
-                          <Button variant="outline" size="sm" className="h-9 sm:h-6 gap-1 px-2 text-xs sm:text-[10px]" onClick={() => openNoteDialog({ id: j.id, name: j.name })}>
+                          <Button variant="outline" size="sm" className="h-9gap-1 px-2 text-xs" onClick={() => openNoteDialog({ id: j.id, name: j.name })}>
                             <StickyNote className="size-2.5" /> Note
                           </Button>
                         </>
@@ -2448,15 +2448,15 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                       </p>
                       <div className="mt-1.5 flex flex-wrap items-center gap-1 border-t border-purple-100 pt-1.5">
                         <span className="mr-auto text-[10px] font-medium text-muted-foreground">Actions</span>
-                        <Button variant="outline" size="sm" className="h-9 sm:h-6 gap-1 border-green-200 px-2 text-xs sm:text-[10px] text-green-700 hover:bg-green-50" onClick={() => triggerJobAction({ id: j.id, name: j.name, status: "NOT_STARTED", startDate: j.startDate, endDate: j.endDate }, "start")}>
+                        <Button variant="outline" size="sm" className="h-9 gap-1 border-green-200 px-2 text-xs text-green-700 hover:bg-green-50" onClick={() => triggerJobAction({ id: j.id, name: j.name, status: "NOT_STARTED", startDate: j.startDate, endDate: j.endDate }, "start")}>
                           <Play className="size-2.5" /> Start Now
                         </Button>
-                        <Button variant="outline" size="sm" className="h-9 sm:h-6 gap-1 border-purple-200 px-2 text-xs sm:text-[10px] text-purple-700 hover:bg-purple-50" onClick={() => {
+                        <Button variant="outline" size="sm" className="h-9gap-1 border-purple-200 px-2 text-xs text-purple-700 hover:bg-purple-50" onClick={() => {
                           openDelayDialog({ id: j.id, name: j.name, startDate: j.startDate, endDate: j.endDate });
                         }}>
                           <CalendarClock className="size-2.5" /> Delay Further
                         </Button>
-                        <Button variant="outline" size="sm" className="h-9 sm:h-6 gap-1 border-emerald-200 px-2 text-xs sm:text-[10px] text-emerald-700 hover:bg-emerald-50" onClick={() => {
+                        <Button variant="outline" size="sm" className="h-9gap-1 border-emerald-200 px-2 text-xs text-emerald-700 hover:bg-emerald-50" onClick={() => {
                           openPullForwardDialog({ id: j.id, name: j.name, startDate: j.startDate, endDate: j.endDate });
                         }}>
                           <CalendarClock className="size-2.5" /> Pull
@@ -2526,7 +2526,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                               const mLower = m.toLowerCase();
                               if (mLower.includes("sign-off") || mLower.includes("signoff") || mLower.includes("sign off")) {
                                 return (
-                                  <Button key={m} variant="outline" size="sm" className="h-7 gap-1 border-amber-300 px-2.5 text-[10px] text-amber-700 hover:bg-amber-100"
+                                  <Button key={m} variant="outline" size="sm" className="h-9 gap-1 border-amber-300 px-2.5 text-xs text-amber-700 hover:bg-amber-100"
                                     onClick={() => setSignOffTarget({ id: item.id, name: item.title, status: "COMPLETED", plot: undefined })}>
                                     <FileCheck className="size-3" /> Add Sign-Off Notes
                                   </Button>
@@ -2534,7 +2534,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                               }
                               if (mLower.includes("photo")) {
                                 return (
-                                  <Button key={m} variant="outline" size="sm" className="h-7 gap-1 border-amber-300 px-2.5 text-[10px] text-amber-700 hover:bg-amber-100"
+                                  <Button key={m} variant="outline" size="sm" className="h-9 gap-1 border-amber-300 px-2.5 text-xs text-amber-700 hover:bg-amber-100"
                                     onClick={() => setPhotoTarget({ jobId: item.id, jobName: item.title })}>
                                     <Camera className="size-3" /> Upload Photos
                                   </Button>
@@ -2542,7 +2542,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                               }
                               if (mLower.includes("assignee") || mLower.includes("assigned")) {
                                 return (
-                                  <Button key={m} variant="outline" size="sm" className="h-7 gap-1 border-amber-300 px-2.5 text-[10px] text-amber-700 hover:bg-amber-100"
+                                  <Button key={m} variant="outline" size="sm" className="h-9 gap-1 border-amber-300 px-2.5 text-xs text-amber-700 hover:bg-amber-100"
                                     onClick={() => { setChecklistExpand({ jobId: item.id, item: "assignee" }); }}>
                                     <UserPlus className="size-3" /> Assign Team Member
                                   </Button>
@@ -2550,7 +2550,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                               }
                               if (mLower.includes("contractor")) {
                                 return (
-                                  <Button key={m} variant="outline" size="sm" className="h-7 gap-1 border-amber-300 px-2.5 text-[10px] text-amber-700 hover:bg-amber-100"
+                                  <Button key={m} variant="outline" size="sm" className="h-9 gap-1 border-amber-300 px-2.5 text-xs text-amber-700 hover:bg-amber-100"
                                     onClick={() => handleContractorAssignOpen(item.id, item.title)}>
                                     <HardHat className="size-3" /> Assign Contractor
                                   </Button>
@@ -2575,13 +2575,13 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                               <p className="text-[10px] font-semibold text-amber-700 mb-1">Assign Team Member</p>
                               <div className="flex gap-1">
                                 <select value={selectedAssigneeId} onChange={(e) => setSelectedAssigneeId(e.target.value)}
-                                  className="flex-1 rounded border px-2 py-1 text-[10px]">
+                                  className="flex-1 rounded border bg-white px-2 text-xs h-9">
                                   <option value="">Select...</option>
                                   {availableUsers.map((u) => (
                                     <option key={u.id} value={u.id}>{u.name}</option>
                                   ))}
                                 </select>
-                                <Button size="sm" className="h-6 px-2 text-xs sm:text-[10px]" disabled={!selectedAssigneeId || assigningUser} onClick={() => handleAssigneeConfirm(item.id)}>
+                                <Button size="sm" className="h-9 px-2 text-xs" disabled={!selectedAssigneeId || assigningUser} onClick={() => handleAssigneeConfirm(item.id)}>
                                   {assigningUser ? <Loader2 className="size-3 animate-spin" /> : "Assign"}
                                 </Button>
                               </div>
@@ -2665,12 +2665,12 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                         {isPendingSnag ? (
                           <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
                         ) : snag.status === "OPEN" ? (
-                          <Button variant="outline" size="sm" className="h-6 border-blue-200 px-2 text-xs sm:text-[10px] text-blue-700 hover:bg-blue-50"
+                          <Button variant="outline" size="sm" className="h-9 border-blue-200 px-2 text-xs text-blue-700 hover:bg-blue-50"
                             onClick={() => handleSnagAction(snag.id, "IN_PROGRESS")}>
                             <Play className="mr-1 size-2.5" />Start
                           </Button>
                         ) : (
-                          <Button variant="outline" size="sm" className="h-6 border-green-200 px-2 text-xs sm:text-[10px] text-green-700 hover:bg-green-50"
+                          <Button variant="outline" size="sm" className="h-9 border-green-200 px-2 text-xs text-green-700 hover:bg-green-50"
                             onClick={() => handleSnagResolveOpen(snag)}>
                             <CheckCircle2 className="mr-1 size-2.5" />Resolve
                           </Button>
@@ -2990,7 +2990,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                                 setRefreshKey((k) => k + 1);
                               }}
                             />
-                            <Button size="sm" variant="outline" className="h-9 sm:h-6 gap-1 text-xs sm:text-[10px]"
+                            <Button size="sm" variant="outline" className="h-9gap-1 text-xs"
                               disabled={anyPending}
                               onClick={() => allIds.forEach((id) => handleOrderAction(id, "DELIVERED"))}>
                               {anyPending ? <Loader2 className="size-3 animate-spin" /> : <CheckCircle2 className="size-3" />}
@@ -3098,12 +3098,12 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                       ) : (
                         <>
                           {hasEmail && (
-                            <Button variant="outline" size="sm" className="h-6 border-violet-200 px-2 text-xs sm:text-[10px] text-violet-700 hover:bg-violet-50"
+                            <Button variant="outline" size="sm" className="h-9 border-violet-200 px-2 text-xs text-violet-700 hover:bg-violet-50"
                               onClick={sendGroup}>
                               <Mail className="mr-1 size-2.5" />{group.length > 1 ? `Send (${group.length})` : "Send Order"}
                             </Button>
                           )}
-                          <Button variant="outline" size="sm" className="h-6 border-blue-200 px-2 text-xs sm:text-[10px] text-blue-700 hover:bg-blue-50"
+                          <Button variant="outline" size="sm" className="h-9 border-blue-200 px-2 text-xs text-blue-700 hover:bg-blue-50"
                             onClick={() => handleGroupOrderAction(groupIds, "ORDERED")}>
                             <Package className="mr-1 size-2.5" />{hasEmail ? "Mark Sent" : "Place Order"}
                           </Button>

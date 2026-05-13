@@ -1167,7 +1167,12 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
         {/* (May 2026 audit #97) Bumped from sm:max-w-lg to sm:max-w-2xl —
             this panel renders orders + photos + notes in tabs; lg felt
             cramped on desktop. */}
-        <DialogContent className="w-[calc(100vw-2rem)] sm:max-w-2xl max-h-[85vh] overflow-y-auto">
+        {/* (May 2026 audit UX-P0-4) max-h-[85vh] hid the action buttons
+            behind the soft keyboard whenever a text field was focused on
+            mobile. Switch to dvh (dynamic viewport height) so the cap
+            adjusts when mobile chrome shows/hides + the keyboard slides
+            up. min() keeps the existing desktop ceiling. */}
+        <DialogContent className="w-[calc(100vw-2rem)] sm:max-w-2xl max-h-[min(85vh,calc(100dvh-5rem))] overflow-y-auto">
           <DialogHeader>
             <div className="flex items-center gap-2">
               <div

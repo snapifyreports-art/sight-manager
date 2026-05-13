@@ -532,23 +532,23 @@ function JobRow({
         ) : (
           <>
             {variant === "start" ? (
-              <Button size="sm" variant="outline" className="h-9 sm:h-6 gap-1 border-green-200 px-2 text-xs sm:text-[10px] text-green-700 hover:bg-green-50"
+              <Button size="sm" variant="outline" className="h-9gap-1 border-green-200 px-2 text-xs text-green-700 hover:bg-green-50"
                 onClick={() => onAction(job.id, "start")}>
                 <Play className="size-2.5" /> Start
               </Button>
             ) : (
-              <Button size="sm" variant="outline" className="h-9 sm:h-6 gap-1 border-blue-200 px-2 text-xs sm:text-[10px] text-blue-700 hover:bg-blue-50"
+              <Button size="sm" variant="outline" className="h-9gap-1 border-blue-200 px-2 text-xs text-blue-700 hover:bg-blue-50"
                 onClick={() => onAction(job.id, "complete")}>
                 <CheckCircle2 className="size-2.5" /> Complete
               </Button>
             )}
             {/* Delay + Pull Forward — parity with other action surfaces. */}
-            <Button size="sm" variant="outline" className="h-9 sm:h-6 gap-1 border-emerald-200 px-2 text-xs sm:text-[10px] text-emerald-700 hover:bg-emerald-50"
+            <Button size="sm" variant="outline" className="h-9gap-1 border-emerald-200 px-2 text-xs text-emerald-700 hover:bg-emerald-50"
               onClick={() => onPullForward(job)}
               title="Shift start earlier">
               Pull
             </Button>
-            <Button size="sm" variant="outline" className="h-9 sm:h-6 gap-1 border-red-200 px-2 text-xs sm:text-[10px] text-red-700 hover:bg-red-50"
+            <Button size="sm" variant="outline" className="h-9gap-1 border-red-200 px-2 text-xs text-red-700 hover:bg-red-50"
               onClick={() => onDelay(job)}
               title="Push end date back with a reason">
               Delay
@@ -595,7 +595,7 @@ function SignOffRow({
         {isPending ? (
           <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
         ) : (
-          <Button size="sm" variant="outline" className="h-9 sm:h-6 gap-1 border-amber-300 px-2 text-xs sm:text-[10px] text-amber-700 hover:bg-amber-100"
+          <Button size="sm" variant="outline" className="h-9gap-1 border-amber-300 px-2 text-xs text-amber-700 hover:bg-amber-100"
             onClick={() => onSignOff(job.id)}>
             <FileCheck className="size-2.5" /> Sign Off
           </Button>
@@ -643,19 +643,19 @@ function OrderRow({
         {isPending ? (
           <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
         ) : variant === "delivery" ? (
-          <Button size="sm" variant="outline" className="h-9 sm:h-6 gap-1 border-green-200 px-2 text-xs sm:text-[10px] text-green-700 hover:bg-green-50"
+          <Button size="sm" variant="outline" className="h-9gap-1 border-green-200 px-2 text-xs text-green-700 hover:bg-green-50"
             onClick={() => onAction(order.id, "DELIVERED")}>
             <CheckCircle2 className="size-2.5" /> Mark Received
           </Button>
         ) : (
           <>
             {hasEmail && (
-              <Button size="sm" variant="outline" className="h-9 sm:h-6 gap-1 border-violet-200 px-2 text-xs sm:text-[10px] text-violet-700 hover:bg-violet-50"
+              <Button size="sm" variant="outline" className="h-9gap-1 border-violet-200 px-2 text-xs text-violet-700 hover:bg-violet-50"
                 onClick={() => onSend(order)}>
                 <Mail className="size-2.5" /> Send Order
               </Button>
             )}
-            <Button size="sm" variant="outline" className="h-9 sm:h-6 gap-1 border-blue-200 px-2 text-xs sm:text-[10px] text-blue-700 hover:bg-blue-50"
+            <Button size="sm" variant="outline" className="h-9gap-1 border-blue-200 px-2 text-xs text-blue-700 hover:bg-blue-50"
               onClick={() => onAction(order.id, "ORDERED")}>
               <Package className="size-2.5" /> {hasEmail ? "Mark Sent" : "Place Order"}
             </Button>
