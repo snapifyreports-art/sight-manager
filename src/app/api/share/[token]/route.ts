@@ -25,6 +25,7 @@ export async function GET(
       plotNumber: true,
       houseType: true,
       description: true,
+      shareEnabled: true,
       site: { select: { id: true, name: true, location: true } },
       jobs: {
         orderBy: { sortOrder: "asc" },
@@ -44,7 +45,11 @@ export async function GET(
     },
   });
 
-  if (!plot) {
+  // (May 2026 audit B-P1-17) Honour the customer-share kill switch.
+  // Pre-fix a previously-issued signed token kept working even after
+  // the manager flipped `Plot.shareEnabled` off. /api/progress/[token]
+  // already checks this; this older share path didn't.
+  if (!plot || !plot.shareEnabled) {
     return NextResponse.json({ error: "Plot not found" }, { status: 404 });
   }
 

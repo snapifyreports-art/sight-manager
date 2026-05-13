@@ -46,13 +46,19 @@ export async function GET(req: NextRequest) {
     // (Daily Brief, Delay Report, lateness cron). The push count
     // diverged from what the user saw in-app. All job counts filter
     // to LEAF jobs only since parents are derived rollups.
+    // (May 2026 audit B-P1-18) Use `todayStart` not `now` here. Dates
+    // in the DB are typically stored at midnight UTC; `now` includes
+    // the cron's hours/minutes (~05:00 UTC) so a job with endDate=today
+    // would satisfy `endDate < now` and falsely register as overdue
+    // when it's actually still due today. todayStart aligns with the
+    // day-boundary the rest of the app uses.
     prisma.job.count({
-      where: { ...whereJobEndOverdue(now), children: { none: {} } },
+      where: { ...whereJobEndOverdue(todayStart), children: { none: {} } },
     }),
     prisma.materialOrder.count({
       where: {
         status: "ORDERED",
-        expectedDeliveryDate: { lt: now },
+        expectedDeliveryDate: { lt: todayStart },
       },
     }),
     prisma.job.count({

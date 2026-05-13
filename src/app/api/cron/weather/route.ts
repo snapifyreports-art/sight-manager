@@ -1,9 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { fetchWeatherForPostcode } from "@/lib/weather";
-import { sendPushToAll } from "@/lib/push";
+import { sendPushToSiteAudience } from "@/lib/push";
 import { startOfDay, endOfDay, addDays } from "date-fns";
 import type { NotificationType } from "@prisma/client";
+
+// (May 2026 audit B-P1-22) Weather pushes switched from sendPushToAll
+// to sendPushToSiteAudience. Pre-fix 10 active sites = 10 pushes to
+// every user, even users with no access to those sites — significant
+// spam during multi-site rollouts. The notifications cron already
+// uses sendPushToSiteAudience correctly; this brings weather in line.
 
 export const dynamic = "force-dynamic";
 
@@ -76,8 +82,8 @@ export async function GET(req: NextRequest) {
 
       logged++;
 
-      // Send daily weather summary push notification for every site
-      await sendPushToAll("WEATHER_ALERT" as NotificationType, {
+      // Send daily weather summary push to this site's audience only.
+      await sendPushToSiteAudience(site.id, "WEATHER_ALERT" as NotificationType, {
         title: `Weather — ${site.name}`,
         body: `Today: ${CATEGORY_LABELS[today.category] ?? today.category}, ${today.tempMin}°C–${today.tempMax}°C`,
         url: `/sites/${site.id}?tab=programme`,
@@ -109,7 +115,7 @@ export async function GET(req: NextRequest) {
             if (isRainy) alertParts.push(CATEGORY_LABELS[tomorrow.category] ?? tomorrow.category);
             if (isCold) alertParts.push(`${tomorrow.tempMin}°C low`);
 
-            await sendPushToAll("WEATHER_ALERT" as NotificationType, {
+            await sendPushToSiteAudience(site.id, "WEATHER_ALERT" as NotificationType, {
               title: `Weather Alert — ${site.name}`,
               body: `Tomorrow: ${alertParts.join(", ")}. ${weatherSensitiveJobCount} weather-sensitive job${weatherSensitiveJobCount !== 1 ? "s" : ""} at risk.`,
               url: `/sites/${site.id}`,
