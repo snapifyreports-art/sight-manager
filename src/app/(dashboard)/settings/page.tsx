@@ -13,6 +13,13 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
 
   const [templates, users, sites] = await Promise.all([
     prisma.plotTemplate.findMany({
+      // (May 2026 bug Keith reported) Filter out archived templates
+      // by default — pre-fix the settings page server-loaded EVERY
+      // template including archived ones, so "deleted" (= archived)
+      // templates kept coming back on refresh. The PlotTemplatesSection
+      // doesn't yet have a "Show archived" toggle; the soft-archive is
+      // strictly hidden until that UI ships.
+      where: { archivedAt: null },
       orderBy: { createdAt: "desc" },
       include: { jobs: templateJobsInclude },
     }),

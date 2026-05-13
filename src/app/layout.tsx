@@ -7,6 +7,7 @@ import { DevDateProvider } from "@/lib/dev-date-context";
 import { FetchPatchProvider } from "@/components/providers/FetchPatchProvider";
 import { GlobalLoadingBar } from "@/components/layout/GlobalLoadingBar";
 import { ToastProvider } from "@/components/ui/toast";
+import { BusyOverlayProvider } from "@/components/ui/busy-overlay";
 
 export const metadata: Metadata = {
   title: "Sight Manager",
@@ -52,7 +53,9 @@ export default function RootLayout({
           <DevDateProvider>
             <TooltipProvider>
               <ToastProvider>
-                {children}
+                <BusyOverlayProvider>
+                  {children}
+                </BusyOverlayProvider>
               </ToastProvider>
             </TooltipProvider>
           </DevDateProvider>

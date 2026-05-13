@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/dialog";
 import { CreateSiteWizard } from "./CreateSiteWizard";
 import { useToast, fetchErrorMessage } from "@/components/ui/toast";
+import { useBusyOverlay } from "@/components/ui/busy-overlay";
 import { useConfirmAction } from "@/hooks/useConfirmAction";
 
 // ---------- Types ----------
@@ -92,6 +93,7 @@ export function SitesClient({
 }) {
   const router = useRouter();
   const toast = useToast();
+  const { withLock } = useBusyOverlay();
   const searchParams = useSearchParams();
   const [sites, setSites] = useState(initialSites);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -159,13 +161,19 @@ export function SitesClient({
       ),
       confirmLabel: "Delete Site",
       onConfirm: async () => {
-        const res = await fetch(`/api/sites/${site.id}`, { method: "DELETE" });
-        if (!res.ok) {
-          throw new Error(await fetchErrorMessage(res, "Failed to delete site"));
-        }
-        setSites((prev) => prev.filter((s) => s.id !== site.id));
-        toast.success(`${site.name} deleted`);
-        router.refresh();
+        // (May 2026 Keith bug report) Site delete cascades through
+        // plots/jobs/orders/snags/documents — lock the screen so the
+        // user can't double-click and trigger a parallel delete, or
+        // navigate away mid-cascade.
+        await withLock(`Deleting ${site.name}…`, async () => {
+          const res = await fetch(`/api/sites/${site.id}`, { method: "DELETE" });
+          if (!res.ok) {
+            throw new Error(await fetchErrorMessage(res, "Failed to delete site"));
+          }
+          setSites((prev) => prev.filter((s) => s.id !== site.id));
+          toast.success(`${site.name} deleted`);
+          router.refresh();
+        });
       },
     });
   }

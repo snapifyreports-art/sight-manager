@@ -63,10 +63,15 @@ export async function POST(request: NextRequest) {
         name: name.trim(),
         description: description?.trim() || null,
         typeLabel: typeLabel?.trim() || null,
-        // New templates start as drafts so a half-built one can't be
-        // applied to a live site by accident. User flips Live in the
-        // editor when ready.
-        isDraft: true,
+        // (May 2026 Keith bug report) New templates default to LIVE.
+        // Pre-fix every new template started as a hidden Draft —
+        // users created a template, then tried to use it during site
+        // creation, and saw "No templates found" because the wizard
+        // filters `liveOnly=true`. They had to find the "Mark Live"
+        // toggle in the editor, an undocumented step.
+        // Users who want draft-style staging can still flip to Draft
+        // in the editor after creation.
+        isDraft: false,
       },
       include: {
         jobs: templateJobsInclude,

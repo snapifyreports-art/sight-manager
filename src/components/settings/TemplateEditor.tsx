@@ -65,6 +65,7 @@ import {
 } from "@/lib/stage-library";
 import type { StageDefinition } from "@/lib/stage-library";
 import { useToast, fetchErrorMessage } from "@/components/ui/toast";
+import { useBusyOverlay } from "@/components/ui/busy-overlay";
 import { HelpTip } from "@/components/shared/HelpTip";
 import { useReviewSupplierMaterials } from "@/hooks/useReviewSupplierMaterials";
 import { formatWeekRange } from "@/lib/week-format";
@@ -120,6 +121,7 @@ export function TemplateEditor({
   onUpdate,
 }: TemplateEditorProps) {
   const toast = useToast();
+  const { withLock } = useBusyOverlay();
 
   // ---------- API URL helper (May 2026 full-fat variants rework) ----------
   // When `template.isVariant` is true, the editor is scoped to a variant.
@@ -151,6 +153,25 @@ export function TemplateEditor({
     template.description ?? ""
   );
   const [metaTypeLabel, setMetaTypeLabel] = useState(template.typeLabel ?? "");
+
+  // (May 2026 Keith bug report) Sync local meta state when the
+  // template prop changes (e.g., navigating between variants, or
+  // reloading after a save). Pre-fix `useState(template.name)`
+  // initialized the field on first mount only — switching from
+  // template A to variant B left metaName showing A's name in the
+  // edit dialog. Display itself reads `template.name` directly so
+  // wasn't affected, but the edit dialog opened with stale values.
+  useEffect(() => {
+    if (!editingMeta) {
+      setMetaName(template.name);
+      setMetaDescription(template.description ?? "");
+      setMetaTypeLabel(template.typeLabel ?? "");
+    }
+    // Only resync when the template ID changes — preserves in-flight
+    // edits if the user has metaName open while the prop merely
+    // refreshes the same template (e.g. after a child save).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [template.id]);
   const [savingMeta, setSavingMeta] = useState(false);
   const [togglingDraft, setTogglingDraft] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -1009,6 +1030,11 @@ export function TemplateEditor({
   async function handleSaveSubJob() {
     if (!subJobName.trim() || !subJobCode.trim() || !subJobParentId) return;
     setSavingSubJob(true);
+    // (May 2026 Keith bug report) Wrap the multi-step write
+    // (create sub-job → recalculate → refetch template) in the
+    // global busy overlay so the user can't click another action
+    // mid-flight. Scrolling is blocked too.
+    return withLock("Adding sub-job…", async () => {
     try {
       const startWeek = subJobParentEndWeek + 1;
       const isDays = subJobDurationUnit === "days";
@@ -1046,12 +1072,23 @@ export function TemplateEditor({
       const tplRes = await fetch(apiUrl(""), { cache: "no-store" });
       const updated = await tplRes.json();
       onUpdate(updated);
+      // (May 2026 Keith bug report) Auto-expand the parent stage so
+      // the new sub-job is visible immediately. Pre-fix the parent
+      // stayed collapsed; user added a sub-job, saw nothing change,
+      // and assumed the action failed. The new row is sitting inside
+      // a closed container.
+      setExpandedJobs((prev) => {
+        const next = new Set(prev);
+        next.add(subJobParentId);
+        return next;
+      });
       setSubJobDialogOpen(false);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to create sub-job");
     } finally {
       setSavingSubJob(false);
     }
+    });
   }
 
   // ---------- Inline duration save ----------

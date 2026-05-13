@@ -1441,7 +1441,14 @@ model EventLog {
   delayReasonType String? // WEATHER_RAIN | WEATHER_TEMPERATURE | OTHER — set when type=SCHEDULE_CASCADED
   createdAt       DateTime  @default(now())
 
-  site Site? @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  // (May 2026 Keith bug report) Site FK is SetNull, not Cascade. Pre-
+  // fix Site delete tried to cascade-delete EventLog rows, which was
+  // blocked by the eventlog_no_delete immutability trigger from batch
+  // 143, so site delete always failed. Schema-audit also explicitly
+  // wanted SetNull here — closed-site EventLogs are the audit trail
+  // a regulator wants to read. Trigger updated to allow this specific
+  // SetNull update (see scripts/apply-eventlog-cascade-fix.ts).
+  site Site? @relation(fields: [siteId], references: [id], onDelete: SetNull)
   plot Plot? @relation(fields: [plotId], references: [id], onDelete: SetNull)
   job  Job?  @relation(fields: [jobId], references: [id], onDelete: SetNull)
   user User? @relation(fields: [userId], references: [id], onDelete: SetNull)

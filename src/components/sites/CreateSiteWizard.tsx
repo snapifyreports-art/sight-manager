@@ -39,6 +39,7 @@ import {
   DialogClose,
 } from "@/components/ui/dialog";
 import { useToast, fetchErrorMessage } from "@/components/ui/toast";
+import { useBusyOverlay } from "@/components/ui/busy-overlay";
 import { usePlotCreation } from "@/hooks/usePlotCreation";
 import { HelpTip } from "@/components/shared/HelpTip";
 
@@ -335,6 +336,7 @@ export function CreateSiteWizard({
   const [siteManagerId, setSiteManagerId] = useState("");
   const [users, setUsers] = useState<{ id: string; name: string }[]>([]);
   const toast = useToast();
+  const { begin: beginBusy, end: endBusy } = useBusyOverlay();
 
   useEffect(() => {
     (async () => {
@@ -674,6 +676,11 @@ export function CreateSiteWizard({
     const batches = batchesOverride ?? plotBatches;
     setSubmitting(true);
     setError("");
+    // (May 2026 Keith bug report) Lock the screen while we run the
+    // multi-phase site creation (site → batches → orders). Pre-fix the
+    // user could click around mid-create — and did, sometimes
+    // triggering double submits or navigating away mid-write.
+    const busyKey = beginBusy("Creating site...");
 
     try {
       // Phase 1: Create site
@@ -769,6 +776,7 @@ export function CreateSiteWizard({
     } finally {
       setSubmitting(false);
       setSubmitProgress("");
+      endBusy(busyKey);
     }
   }, [
     siteName,
@@ -781,6 +789,8 @@ export function CreateSiteWizard({
     siteManagerId,
     onCreated,
     onOpenChange,
+    beginBusy,
+    endBusy,
   ]);
 
   const dialogWidth =

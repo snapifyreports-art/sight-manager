@@ -29,6 +29,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useToast, fetchErrorMessage } from "@/components/ui/toast";
+import { useBusyOverlay } from "@/components/ui/busy-overlay";
 import { useConfirmAction } from "@/hooks/useConfirmAction";
 import type { TemplateData, TemplateVariantData } from "./types";
 
@@ -49,6 +50,7 @@ export function TemplateVariantsSection({
   onOpenVariant: (variantId: string) => void;
 }) {
   const toast = useToast();
+  const { withLock } = useBusyOverlay();
   const { confirmAction, dialogs: confirmDialogs } = useConfirmAction();
 
   const [variants, setVariants] = useState<TemplateVariantData[]>([]);
@@ -94,6 +96,11 @@ export function TemplateVariantsSection({
   async function handleCreate() {
     if (!newName.trim()) return;
     setCreating(true);
+    // (May 2026 Keith bug report) Lock the screen across the
+    // multi-step create flow (POST variant → POST seed → reload list
+    // → open editor). Pre-fix the user could click around mid-create
+    // and end up in a half-built state.
+    await withLock("Creating variant…", async () => {
     try {
       // 1. Create the variant
       const res = await fetch(
@@ -146,6 +153,7 @@ export function TemplateVariantsSection({
     } finally {
       setCreating(false);
     }
+    });
   }
 
   function handleDelete(v: TemplateVariantData) {

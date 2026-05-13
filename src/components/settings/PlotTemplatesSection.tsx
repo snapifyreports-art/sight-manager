@@ -52,6 +52,7 @@ import { TemplateAuditLog } from "./TemplateAuditLog";
 import type { TemplateData } from "./types";
 import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 import { useConfirmAction } from "@/hooks/useConfirmAction";
+import { useBusyOverlay } from "@/components/ui/busy-overlay";
 
 type SortKey =
   | "recent"
@@ -78,6 +79,7 @@ export function PlotTemplatesSection({
   const router = useRouter();
   const searchParams = useSearchParams();
   const toast = useToast();
+  const { withLock } = useBusyOverlay();
   const [templates, setTemplates] = useState(initialTemplates);
   const [cloningId, setCloningId] = useState<string | null>(null);
 
@@ -150,8 +152,14 @@ export function PlotTemplatesSection({
     }
 
     // Variant restore: fetch the full variant data on demand.
+    // (May 2026 Keith bug report) Pre-fix this compared
+    // `editingVariant.variantId !== varId` but the /full response
+    // shape has NO `variantId` field — `id` IS the variant's id.
+    // So the check was always TRUE → redundant re-fetch every time
+    // the URL changed, racing with openVariant's own fetch. Now we
+    // compare against `editingVariant.id` (or templateId for sanity).
     if (varId) {
-      if (!editingVariant || editingVariant.variantId !== varId) {
+      if (!editingVariant || editingVariant.id !== varId) {
         setLoadingVariant(true);
         fetch(`/api/plot-templates/${tplId}/variants/${varId}/full`, {
           cache: "no-store",
@@ -332,12 +340,19 @@ export function PlotTemplatesSection({
       ),
       confirmLabel: "Archive",
       onConfirm: async () => {
-        const res = await fetch(`/api/plot-templates/${templateId}`, { method: "DELETE" });
-        if (!res.ok) {
-          throw new Error(await fetchErrorMessage(res, "Failed to archive template"));
-        }
-        setTemplates((prev) => prev.filter((t) => t.id !== templateId));
-        toast.success(`${templateName} archived`);
+        await withLock(`Archiving ${templateName}…`, async () => {
+          const res = await fetch(`/api/plot-templates/${templateId}`, { method: "DELETE" });
+          if (!res.ok) {
+            throw new Error(await fetchErrorMessage(res, "Failed to archive template"));
+          }
+          setTemplates((prev) => prev.filter((t) => t.id !== templateId));
+          toast.success(`${templateName} archived`);
+          // (May 2026 Keith bug report) Refresh the server-rendered
+          // page so settings re-fetches with the archived filter
+          // applied. Pre-fix archived templates kept reappearing on
+          // navigation because the SSR didn't filter them.
+          router.refresh();
+        });
       },
     });
   }
