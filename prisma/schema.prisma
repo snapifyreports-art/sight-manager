@@ -206,6 +206,9 @@ model Site {
   toolboxTalks     ToolboxTalk[]
   nonConformances  NCR[]
   latenessEvents   LatenessEvent[]
+
+  @@index([status]) // (audit P-*) `status: { not: COMPLETED }` is the
+  //                   most common Site filter in cron + dashboard queries
 }
 
 model RainedOffDay {
@@ -349,6 +352,13 @@ model Job {
   @@index([plotId])       // hot: programme, daily-brief, reports join on plot
   @@index([status])       // hot: "NOT_STARTED where startDate < today" etc.
   @@index([parentId])     // hot: children / rollup checks
+  // (May 2026 audit P-*) Date-range filters appear on every Daily Brief
+  // / Programme / lateness-cron query; pre-fix these were sequential
+  // scans on big-site data sets.
+  @@index([startDate])
+  @@index([endDate])
+  @@index([actualEndDate])
+  @@index([plotId, status]) // composite for the hottest filter combo
 }
 
 model JobAction {
@@ -398,6 +408,7 @@ model JobPhoto {
   annotations PhotoAnnotation[]
 
   @@index([jobId, sharedWithCustomer])
+  @@index([createdAt]) // (audit P-*) photo grids order by createdAt DESC
 }
 
 model Supplier {
@@ -474,6 +485,11 @@ model MaterialOrder {
   @@index([status])                // hot: Tasks filters status=PENDING globally
   @@index([expectedDeliveryDate])  // hot: deliveries-today / upcoming-deliveries range queries
   @@index([supplierId])            // hot: Supplier Performance report groups orders by supplier
+  // (May 2026 audit P-*) Cash flow / supplier performance / late-cron
+  // queries filter on these regularly.
+  @@index([dateOfOrder])
+  @@index([deliveredDate])
+  @@index([contactId])
 }
 
 model OrderItem {
@@ -698,6 +714,9 @@ model PlotMaterial {
   updatedAt       DateTime @updatedAt
 
   plot Plot @relation(fields: [plotId], references: [id], onDelete: Cascade)
+
+  @@index([plotId]) // (audit S-P1) was missing — every budget /
+  //                   plot-detail / handover query filters on plotId
 }
 
 model TemplateJob {
@@ -895,6 +914,8 @@ model Snag {
   @@index([plotId])      // hot: snag lists per plot
   @@index([status])      // hot: "OPEN / IN_PROGRESS" filter on every snag view
   @@index([contactId])   // hot: contractor comms "Snags Assigned" filter
+  @@index([createdAt])   // (audit P-*) stale-snag > N days queries
+  @@index([resolvedAt])  // (audit P-*) avg resolution-time queries
 }
 
 model SnagPhoto {
