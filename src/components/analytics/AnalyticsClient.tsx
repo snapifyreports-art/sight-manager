@@ -1136,10 +1136,15 @@ interface ContractorRow {
   jobs: Array<{
     jobId: string;
     jobName: string;
+    status: string;
     start: string;
     end: string;
     plotLabel: string;
     siteName: string;
+    // (May 2026 audit D-P1) `daysLate > 0` → render the job slot in
+    // red so a manager scanning the calendar can spot who's running
+    // over without leaving this widget.
+    daysLate: number;
   }>;
 }
 
@@ -1169,23 +1174,40 @@ function ContractorCalendarWidget() {
                 {c.company && <span className="text-xs text-slate-500">· {c.name}</span>}
               </p>
               <ul className="ml-3 mt-1 space-y-0.5 text-xs text-slate-600">
-                {c.jobs.map((j) => (
-                  <li key={j.jobId}>
-                    <span className="font-medium text-slate-800">
-                      {j.plotLabel}
-                    </span>{" "}
-                    · {j.jobName} ·{" "}
-                    {new Date(j.start).toLocaleDateString("en-GB", {
-                      day: "numeric",
-                      month: "short",
-                    })}{" "}
-                    →{" "}
-                    {new Date(j.end).toLocaleDateString("en-GB", {
-                      day: "numeric",
-                      month: "short",
-                    })}
-                  </li>
-                ))}
+                {c.jobs.map((j) => {
+                  const isLate = j.daysLate > 0;
+                  return (
+                    <li
+                      key={j.jobId}
+                      className={isLate ? "text-red-700" : undefined}
+                    >
+                      <span
+                        className={
+                          isLate
+                            ? "font-semibold text-red-700"
+                            : "font-medium text-slate-800"
+                        }
+                      >
+                        {j.plotLabel}
+                      </span>{" "}
+                      · {j.jobName} ·{" "}
+                      {new Date(j.start).toLocaleDateString("en-GB", {
+                        day: "numeric",
+                        month: "short",
+                      })}{" "}
+                      →{" "}
+                      {new Date(j.end).toLocaleDateString("en-GB", {
+                        day: "numeric",
+                        month: "short",
+                      })}
+                      {isLate && (
+                        <span className="ml-1 font-semibold">
+                          ({j.daysLate} WD late)
+                        </span>
+                      )}
+                    </li>
+                  );
+                })}
               </ul>
             </li>
           ))}

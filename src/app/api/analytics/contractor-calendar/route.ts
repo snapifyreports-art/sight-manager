@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getUserSiteIds } from "@/lib/site-access";
+import { differenceInWorkingDays } from "@/lib/working-days";
+import { getServerStartOfDay } from "@/lib/dev-date";
 
 export const dynamic = "force-dynamic";
 
@@ -30,7 +32,10 @@ export async function GET(req: NextRequest) {
     26,
   );
   const horizon = new Date(Date.now() + weeks * 7 * 24 * 60 * 60 * 1000);
-  const now = new Date();
+  // (May 2026 audit D-P1) Use the dev-date-aware start-of-day so
+  // simulations + replays see the same "today" as every other lateness
+  // surface. Pre-fix `new Date()` was wall-clock real-time only.
+  const now = getServerStartOfDay(req);
 
   const links = await prisma.jobContractor.findMany({
     where: {
@@ -78,6 +83,11 @@ export async function GET(req: NextRequest) {
         end: string;
         plotLabel: string;
         siteName: string;
+        // (May 2026 audit D-P1) Lateness overlay — `daysLate > 0`
+        // means this job has already crossed its planned endDate.
+        // Widget renders late slots in red so a manager scanning the
+        // calendar can spot who's running over.
+        daysLate: number;
       }>;
     }
   >();
@@ -89,6 +99,12 @@ export async function GET(req: NextRequest) {
       company: l.contact.company,
       jobs: [],
     };
+    // Compute daysLate same way the Lateness SSOT does — working-day
+    // arithmetic anchored to today, only for jobs still not COMPLETED.
+    let daysLate = 0;
+    if (l.job.status !== "COMPLETED" && l.job.endDate < now) {
+      daysLate = Math.max(0, differenceInWorkingDays(now, l.job.endDate));
+    }
     cur.jobs.push({
       jobId: l.job.id,
       jobName: l.job.name,
@@ -99,6 +115,7 @@ export async function GET(req: NextRequest) {
         ? `Plot ${l.job.plot.plotNumber}`
         : l.job.plot.name,
       siteName: l.job.plot.site.name,
+      daysLate,
     });
     map.set(l.contact.id, cur);
   }
