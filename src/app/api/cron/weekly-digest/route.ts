@@ -243,7 +243,12 @@ export async function GET(req: NextRequest) {
           stat("snags raised", s.snagsRaised, "#fee2e2"),
           stat("snags resolved", s.snagsResolved, "#dcfce7"),
           stat("photos", s.photos, "#e0e7ff"),
-          stat("delays", s.delays, "#fef3c7"),
+          // (May 2026 audit D-P1) Pill renamed to "delay events"
+          // because each SCHEDULE_CASCADED row often represents N
+          // shifted jobs but the count is rows, not jobs. Director
+          // comparing "3 delays" against the in-app DelayReport
+          // (which counts jobs) used to see contradictory figures.
+          stat("delay events", s.delays, "#fef3c7"),
           // (May 2026 audit #145) Stale snag highlight in red. Catches
           // the eye in a sea of green / blue chips so a manager scrolling
           // past doesn't miss long-rotting snags.

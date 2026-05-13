@@ -121,7 +121,11 @@ export default async function DashboardPage() {
     prisma.job.findMany({
       take: 8,
       where: {
-        ...whereJobEndOverdue(new Date()),
+        // (May 2026 audit D-P2) Use the dev-date-aware `today` so QA
+        // simulating a future date sees consistent counts in the
+        // At-Risk panel. Pre-fix this called `whereJobEndOverdue(new
+        // Date())` which bypassed dev-date.
+        ...whereJobEndOverdue(today),
         ...jobSiteWhere,
         children: { none: {} },
       },

@@ -44,8 +44,8 @@ import {
  *   02_Plots/Plot_<N>_<HouseType>/...
  *   03_Contractor_Analysis/
  *   04_Supplier_Analysis/
- *   05_Cost_Analysis/    (TODO: budget + cash-flow PDFs)
- *   06_Reports/          (TODO: delay-report-final.pdf)
+ *   05_Cost_Analysis/    budget-vs-actual.pdf + cash-flow.pdf
+ *   06_Reports/          delay-report-final.pdf
  *
  * Each Supabase-hosted document/photo is fetched via its public URL
  * and streamed into the ZIP — no service-role key needed because the
@@ -342,9 +342,16 @@ export async function buildHandoverArchive({
         daysLate = 0;
       } else if (r.job.actualEndDate) {
         row.jobsLate++;
-        // Working-day count between original and actual end
-        const ms = r.job.actualEndDate.getTime() - r.job.originalEndDate.getTime();
-        daysLate = Math.max(0, Math.round(ms / (1000 * 60 * 60 * 24)));
+        // (May 2026 audit D-P2) Comment lied — was actually calendar-day
+        // division (`Math.round(ms/86400000)`). Route through the SSOT
+        // working-day helper so this matches the in-app contractor-
+        // analysis route, which is the canonical "days attributed" for
+        // each contractor.
+        const { differenceInWorkingDays } = await import("@/lib/working-days");
+        daysLate = Math.max(
+          0,
+          differenceInWorkingDays(r.job.actualEndDate, r.job.originalEndDate),
+        );
         row.totalDelayDaysAttributed += daysLate;
       }
     }

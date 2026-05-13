@@ -129,8 +129,17 @@ export async function GET(req: NextRequest) {
         },
       },
     }),
+    // (May 2026 audit D-P1) `totalSpend` previously summed ALL orderItems
+    // in scope including those belonging to CANCELLED orders — over-
+    // counted churned work in the portfolio total. Filter at the
+    // query level so the reduce below stays unchanged.
     prisma.orderItem.findMany({
-      where: plotFilter.plot ? { order: { job: plotFilter } } : {},
+      where: {
+        order: {
+          status: { not: "CANCELLED" },
+          ...(plotFilter.plot ? { job: plotFilter } : {}),
+        },
+      },
       select: { totalCost: true },
     }),
     prisma.jobContractor.findMany({
