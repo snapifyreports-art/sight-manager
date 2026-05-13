@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { snapToWorkingDay } from "@/lib/working-days";
+import { sessionHasPermission } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -11,12 +12,17 @@ export async function POST() {
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  // Role guard. This is a destructive DB-wide write — only ADMIN/CEO
-  // should be able to run it. Previously any authenticated user could
-  // trigger it, which is fine for a single-tenant deployment but should
-  // not stay open as we add users. P2 from the May 2026 audit.
-  const role = (session.user as { role?: string }).role;
-  if (role !== "ADMIN" && role !== "CEO") {
+  // (May 2026 audit B-4) Role guard previously checked for `"ADMIN"` which
+  // isn't a value in the UserRole enum — only literal "CEO" actually passed.
+  // SUPER_ADMIN and DIRECTOR were silently excluded from a destructive
+  // DB-wide write that should be available to all exec roles. Use the
+  // canonical helper which understands SUPER_ADMIN / CEO / DIRECTOR bypass.
+  if (
+    !sessionHasPermission(
+      session.user as { role?: string; permissions?: string[] },
+      "MANAGE_USERS",
+    )
+  ) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 

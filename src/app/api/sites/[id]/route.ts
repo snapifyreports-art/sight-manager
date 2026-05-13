@@ -76,6 +76,40 @@ export async function PUT(
   const body = await request.json();
   const { name, description, location, address, postcode, status, assignedToId } = body;
 
+  // (May 2026 audit B-1) Pre-fix this route had NO RBAC at all — any
+  // authenticated user (including a CONTRACTOR with no UserSite row)
+  // could rename any site, flip its status, or reassign it to
+  // themselves (which auto-grants UserSite access below). Now: must
+  // (a) have site access, AND (b) hold EDIT_PROGRAMME permission. Plus
+  // assignedToId changes additionally require MANAGE_USERS because
+  // they implicitly grant another user site access.
+  if (!(await canAccessSite(session.user.id, (session.user as { role: string }).role, id))) {
+    return NextResponse.json({ error: "You do not have access to this site" }, { status: 403 });
+  }
+  if (
+    !sessionHasPermission(
+      session.user as { role?: string; permissions?: string[] },
+      "EDIT_PROGRAMME",
+    )
+  ) {
+    return NextResponse.json(
+      { error: "You do not have permission to edit this site" },
+      { status: 403 },
+    );
+  }
+  if (
+    assignedToId !== undefined &&
+    !sessionHasPermission(
+      session.user as { role?: string; permissions?: string[] },
+      "MANAGE_USERS",
+    )
+  ) {
+    return NextResponse.json(
+      { error: "Only managers can reassign sites — assigning grants access" },
+      { status: 403 },
+    );
+  }
+
   const existing = await prisma.site.findUnique({ where: { id } });
   if (!existing) {
     return NextResponse.json({ error: "Site not found" }, { status: 404 });

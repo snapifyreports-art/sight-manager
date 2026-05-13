@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getServerCurrentDate } from "@/lib/dev-date";
+import { canAccessSite } from "@/lib/site-access";
 import { apiError } from "@/lib/api-errors";
 import { sendPushToSiteAudience } from "@/lib/push";
 
@@ -18,6 +19,28 @@ export async function GET(
   }
 
   const { id } = await params;
+
+  // (May 2026 audit B-2) Pre-fix neither GET nor POST checked site-access
+  // — a Site A manager could read or write snags on a Plot belonging to
+  // Site B. Look up the plot's site, then 404 if the caller can't see it
+  // (404 not 403 so we don't leak existence to a stranger).
+  const plotForAccess = await prisma.plot.findUnique({
+    where: { id },
+    select: { siteId: true },
+  });
+  if (!plotForAccess) {
+    return NextResponse.json({ error: "Plot not found" }, { status: 404 });
+  }
+  if (
+    !(await canAccessSite(
+      session.user.id,
+      (session.user as { role: string }).role,
+      plotForAccess.siteId,
+    ))
+  ) {
+    return NextResponse.json({ error: "Plot not found" }, { status: 404 });
+  }
+
   const { searchParams } = new URL(req.url);
   const status = searchParams.get("status");
   const priority = searchParams.get("priority");
@@ -58,6 +81,26 @@ export async function POST(
 
   if (!description?.trim()) {
     return NextResponse.json({ error: "Description required" }, { status: 400 });
+  }
+
+  // (May 2026 audit B-2) Site-access guard for POST. Mirror the GET
+  // check — fetch the plot's siteId, 404 if the caller can't see it.
+  // Pre-fix a Site A manager could POST snags onto a Site B plot.
+  const accessCheckPlot = await prisma.plot.findUnique({
+    where: { id },
+    select: { siteId: true },
+  });
+  if (!accessCheckPlot) {
+    return NextResponse.json({ error: "Plot not found" }, { status: 404 });
+  }
+  if (
+    !(await canAccessSite(
+      session.user.id,
+      (session.user as { role: string }).role,
+      accessCheckPlot.siteId,
+    ))
+  ) {
+    return NextResponse.json({ error: "Plot not found" }, { status: 404 });
   }
 
   const validPriorities = ["LOW", "MEDIUM", "HIGH", "CRITICAL"];

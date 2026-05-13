@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { hash } from "bcryptjs";
-import { hasPermission } from "@/lib/permissions";
+import { sessionHasPermission } from "@/lib/permissions";
 import { apiError } from "@/lib/api-errors";
 
 export const dynamic = "force-dynamic";
@@ -16,7 +16,13 @@ export async function GET(
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  if (!hasPermission(session.user.permissions, "MANAGE_USERS")) {
+  // (May 2026 audit B-5) Use sessionHasPermission for SUPER_ADMIN/CEO/DIRECTOR bypass.
+  if (
+    !sessionHasPermission(
+      session.user as { role?: string; permissions?: string[] },
+      "MANAGE_USERS",
+    )
+  ) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -56,7 +62,13 @@ export async function PUT(
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  if (!hasPermission(session.user.permissions, "MANAGE_USERS")) {
+  // (May 2026 audit B-5) Use sessionHasPermission for SUPER_ADMIN/CEO/DIRECTOR bypass.
+  if (
+    !sessionHasPermission(
+      session.user as { role?: string; permissions?: string[] },
+      "MANAGE_USERS",
+    )
+  ) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -124,7 +136,13 @@ export async function DELETE(
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  if (!hasPermission(session.user.permissions, "MANAGE_USERS")) {
+  // (May 2026 audit B-5) Use sessionHasPermission for SUPER_ADMIN/CEO/DIRECTOR bypass.
+  if (
+    !sessionHasPermission(
+      session.user as { role?: string; permissions?: string[] },
+      "MANAGE_USERS",
+    )
+  ) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 

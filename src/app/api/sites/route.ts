@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getUserSiteIds } from "@/lib/site-access";
+import { sessionHasPermission } from "@/lib/permissions";
 import { apiError } from "@/lib/api-errors";
 
 export const dynamic = "force-dynamic";
@@ -40,6 +41,23 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  // (May 2026 audit B-3) Pre-fix this route was open to any authenticated
+  // user — including CONTRACTORs — who could spawn a site, auto-grant
+  // themselves UserSite access (line below), and optionally include an
+  // assignedToId to grant a confederate access too. Gate behind
+  // EDIT_PROGRAMME (the same permission required to edit a site).
+  if (
+    !sessionHasPermission(
+      session.user as { role?: string; permissions?: string[] },
+      "EDIT_PROGRAMME",
+    )
+  ) {
+    return NextResponse.json(
+      { error: "You do not have permission to create sites" },
+      { status: 403 },
+    );
+  }
+
   const body = await request.json();
   const { name, description, location, address, postcode, assignedToId } = body;
 
@@ -48,6 +66,29 @@ export async function POST(request: NextRequest) {
       { error: "Site name is required" },
       { status: 400 }
     );
+  }
+
+  // Validate that any passed assignedToId exists and is a manager-or-above
+  // — otherwise the silent UserSite grant below would let an arbitrary
+  // contractor be flagged as the manager of a brand-new site.
+  if (assignedToId) {
+    const assignee = await prisma.user.findUnique({
+      where: { id: assignedToId },
+      select: { id: true, role: true },
+    });
+    if (!assignee) {
+      return NextResponse.json(
+        { error: "assignedToId does not match a known user" },
+        { status: 400 },
+      );
+    }
+    const managerRoles = ["SUPER_ADMIN", "CEO", "DIRECTOR", "SITE_MANAGER"];
+    if (!managerRoles.includes(assignee.role)) {
+      return NextResponse.json(
+        { error: "Site can only be assigned to a manager-or-above user" },
+        { status: 400 },
+      );
+    }
   }
 
   try {

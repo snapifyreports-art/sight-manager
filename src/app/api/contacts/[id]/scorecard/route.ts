@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { getUserSiteIds } from "@/lib/site-access";
 
 export const dynamic = "force-dynamic";
 
@@ -38,9 +39,28 @@ export async function GET(
     return NextResponse.json({ error: "Contact not found" }, { status: 404 });
   }
 
-  // Jobs this contractor is on, leaf only.
+  // (May 2026 audit D-7 / B-RBAC) Scope the rollup to the caller's
+  // accessible sites. Pre-fix the scorecard aggregated jobs and snags
+  // across EVERY site the contractor had ever worked on regardless of
+  // the caller's UserSite grants — a contractor's score for sites the
+  // user couldn't access leaked through. Now: scope by siteId in every
+  // query. `null` from getUserSiteIds means "full access" (exec/admin).
+  const accessibleSiteIds = await getUserSiteIds(
+    session.user.id,
+    (session.user as { role: string }).role,
+  );
+
+  // Jobs this contractor is on, leaf only, scoped to accessible sites.
   const jobLinks = await prisma.jobContractor.findMany({
-    where: { contactId: id, job: { children: { none: {} } } },
+    where: {
+      contactId: id,
+      job: {
+        children: { none: {} },
+        ...(accessibleSiteIds !== null
+          ? { plot: { siteId: { in: accessibleSiteIds } } }
+          : {}),
+      },
+    },
     select: {
       job: {
         select: {
@@ -76,9 +96,14 @@ export async function GET(
   }
   const onTime = completed.length - daysLateJobs;
 
-  // Snags raised against this contractor.
+  // Snags raised against this contractor, also scoped to accessible sites.
   const snags = await prisma.snag.findMany({
-    where: { contactId: id },
+    where: {
+      contactId: id,
+      ...(accessibleSiteIds !== null
+        ? { plot: { siteId: { in: accessibleSiteIds } } }
+        : {}),
+    },
     select: { status: true, createdAt: true, resolvedAt: true },
   });
   const snagsResolved = snags.filter(

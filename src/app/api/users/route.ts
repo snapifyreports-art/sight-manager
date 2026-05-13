@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { hash } from "bcryptjs";
-import { hasPermission, DEFAULT_PERMISSIONS } from "@/lib/permissions";
+import { sessionHasPermission, DEFAULT_PERMISSIONS } from "@/lib/permissions";
 import type { UserRole } from "@prisma/client";
 import { apiError } from "@/lib/api-errors";
 
@@ -14,7 +14,17 @@ export async function GET() {
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  if (!hasPermission(session.user.permissions, "MANAGE_USERS")) {
+  // (May 2026 audit B-5) sessionHasPermission understands the
+  // SUPER_ADMIN / CEO / DIRECTOR role-based bypass. The bare
+  // hasPermission(permissions, ...) form fails for execs whose
+  // UserPermission rows haven't been seeded, locking them out of
+  // user-management despite the role being designed to bypass.
+  if (
+    !sessionHasPermission(
+      session.user as { role?: string; permissions?: string[] },
+      "MANAGE_USERS",
+    )
+  ) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -41,7 +51,17 @@ export async function POST(req: NextRequest) {
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  if (!hasPermission(session.user.permissions, "MANAGE_USERS")) {
+  // (May 2026 audit B-5) sessionHasPermission understands the
+  // SUPER_ADMIN / CEO / DIRECTOR role-based bypass. The bare
+  // hasPermission(permissions, ...) form fails for execs whose
+  // UserPermission rows haven't been seeded, locking them out of
+  // user-management despite the role being designed to bypass.
+  if (
+    !sessionHasPermission(
+      session.user as { role?: string; permissions?: string[] },
+      "MANAGE_USERS",
+    )
+  ) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
