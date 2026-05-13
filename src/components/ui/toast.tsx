@@ -82,12 +82,17 @@ export function ToastProvider({ children }: { children: ReactNode }) {
           (May 2026 a11y audit #122) aria-live="polite" + aria-atomic
           on the container so screen-reader announcements don't
           interleave when two toasts fire close together. */}
+      {/* (May 2026 audit UX-P2) Toast viewport positioned bottom-right
+          on phones, top-right on tablet+ desktop. Pre-fix the top-right
+          position on a 375px phone covered the page title and stacked
+          toasts obscured the entire header. `max-sm:bottom-24` keeps
+          clear of the floating action button on mobile. */}
       <div
         role="region"
         aria-label="Notifications"
         aria-live="polite"
         aria-atomic="false"
-        className="pointer-events-none fixed right-4 top-4 z-[9999] flex max-w-md flex-col gap-2 print:hidden"
+        className="pointer-events-none fixed right-4 z-[9999] flex max-w-md flex-col gap-2 max-sm:bottom-24 sm:top-4 print:hidden"
       >
         {toasts.map((t) => (
           <ToastItem key={t.id} toast={t} onDismiss={dismiss} />
