@@ -673,6 +673,68 @@ export async function buildHandoverArchive({
     })
     .sort((a, b) => b.delayDays - a.delayDays);
 
+  // (May 2026 audit D-P0-8) Currently-overdue jobs — NOT_STARTED or
+  // IN_PROGRESS past their endDate. Pre-fix the PDF omitted these
+  // entirely so the largest delay bucket was invisible in the buyer
+  // pack. Now pulled and rendered above the completed-late table.
+  const todayForReport = new Date();
+  todayForReport.setHours(0, 0, 0, 0);
+  const overdueRaw = await prisma.job.findMany({
+    where: {
+      plot: { siteId },
+      endDate: { lt: todayForReport },
+      status: { not: "COMPLETED" },
+      children: { none: {} },
+    },
+    select: {
+      name: true,
+      status: true,
+      endDate: true,
+      weatherAffected: true,
+      plot: { select: { name: true, plotNumber: true } },
+      contractors: {
+        select: { contact: { select: { name: true, company: true } } },
+        take: 1,
+      },
+    },
+    orderBy: { endDate: "asc" },
+  });
+  const { differenceInWorkingDays } = await import("@/lib/working-days");
+  const currentlyOverdueJobs = overdueRaw.map((j) => ({
+    plotName: j.plot.plotNumber ? `Plot ${j.plot.plotNumber}` : j.plot.name,
+    name: j.name,
+    status: j.status,
+    daysLate: j.endDate
+      ? Math.max(0, differenceInWorkingDays(todayForReport, j.endDate))
+      : 0,
+    isWeatherExcused: !!j.weatherAffected,
+    contractor: j.contractors[0]?.contact
+      ? j.contractors[0].contact.company || j.contractors[0].contact.name
+      : null,
+  }));
+
+  // Lateness rollup (LatenessEvent table — open + resolved across the site).
+  const latenessRows = await prisma.latenessEvent.findMany({
+    where: { siteId },
+    select: { resolvedAt: true, daysLate: true, reasonCode: true },
+  });
+  const openLatenessRows = latenessRows.filter((r) => !r.resolvedAt);
+  const resolvedLatenessRows = latenessRows.filter((r) => r.resolvedAt);
+  const reasonCounts = new Map<string, number>();
+  for (const r of openLatenessRows) {
+    reasonCounts.set(r.reasonCode, (reasonCounts.get(r.reasonCode) ?? 0) + r.daysLate);
+  }
+  const sortedReasons = Array.from(reasonCounts.entries()).sort((a, b) => b[1] - a[1]);
+  const latenessSummary = latenessRows.length > 0
+    ? {
+        openCount: openLatenessRows.length,
+        openDays: openLatenessRows.reduce((s, r) => s + r.daysLate, 0),
+        resolvedCount: resolvedLatenessRows.length,
+        resolvedDays: resolvedLatenessRows.reduce((s, r) => s + r.daysLate, 0),
+        topReason: sortedReasons[0]?.[0] ?? null,
+      }
+    : undefined;
+
   // Overdue deliveries (open orders past expected date).
   const overdueDeliveriesRaw = await prisma.materialOrder.findMany({
     where: {
@@ -699,7 +761,9 @@ export async function buildHandoverArchive({
     totalRainDays,
     totalTemperatureDays,
     delayedJobs,
+    currentlyOverdueJobs,
     overdueDeliveries,
+    latenessSummary,
   });
   archive.append(delayPdf, { name: "06_Reports/delay-report-final.pdf" });
 

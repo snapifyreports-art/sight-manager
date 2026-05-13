@@ -852,6 +852,7 @@ interface DelayReportShape {
   totalWeatherImpactDays: number;
   totalRainDays: number;
   totalTemperatureDays: number;
+  /** Completed-late jobs (actualEnd > endDate). */
   delayedJobs: Array<{
     plotName: string;
     name: string;
@@ -860,12 +861,33 @@ interface DelayReportShape {
     weatherReasonType: string | null;
     delayReason: string | null;
   }>;
+  /** (May 2026 audit D-P0-8) Currently-overdue leaf jobs — NOT_STARTED
+   *  or IN_PROGRESS past their endDate. Pre-fix the PDF omitted these
+   *  entirely so the buyer pack hid the largest delay bucket. */
+  currentlyOverdueJobs?: Array<{
+    plotName: string;
+    name: string;
+    status: string;
+    daysLate: number;
+    isWeatherExcused: boolean;
+    contractor: string | null;
+  }>;
   overdueDeliveries: Array<{
     items: string;
     supplier: string;
     expectedDate: string | null;
     job: string;
   }>;
+  /** (May 2026 audit D-P0-8) Lateness rollup — totals across the site
+   *  from the LatenessEvent table. Lets a director see "12 WD lost
+   *  this site, mostly weather" at a glance without reading the table. */
+  latenessSummary?: {
+    openCount: number;
+    openDays: number;
+    resolvedCount: number;
+    resolvedDays: number;
+    topReason: string | null;
+  };
 }
 
 export async function renderDelayReportPdf(
@@ -884,10 +906,36 @@ export async function renderDelayReportPdf(
   doc.text(`Generated ${format(new Date(), "dd MMM yyyy HH:mm")}`, 14, 36);
   doc.setTextColor(0);
 
+  // (May 2026 audit D-P0-8) Lead with the LatenessEvent rollup so the
+  // reader sees the headline before scrolling tables.
+  if (data.latenessSummary) {
+    doc.setFontSize(12);
+    doc.text("Lateness summary", 14, 48);
+    autoTable(doc, {
+      startY: 52,
+      body: [
+        [
+          "Open events",
+          `${data.latenessSummary.openCount} (${data.latenessSummary.openDays} WD lost)`,
+        ],
+        [
+          "Resolved events",
+          `${data.latenessSummary.resolvedCount} (${data.latenessSummary.resolvedDays} WD historic)`,
+        ],
+        ["Top reason", data.latenessSummary.topReason ?? "—"],
+      ],
+      styles: { fontSize: 10, cellPadding: 1.5 },
+      columnStyles: { 0: { cellWidth: 60, fontStyle: "bold" } },
+    });
+  }
+
+  const weatherStartY = data.latenessSummary
+    ? (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 12
+    : 48;
   doc.setFontSize(12);
-  doc.text("Weather impact", 14, 48);
+  doc.text("Weather impact", 14, weatherStartY);
   autoTable(doc, {
-    startY: 52,
+    startY: weatherStartY + 4,
     body: [
       ["Total weather impact days", String(data.totalWeatherImpactDays)],
       ["  · Rain", String(data.totalRainDays)],
@@ -896,6 +944,34 @@ export async function renderDelayReportPdf(
     styles: { fontSize: 10, cellPadding: 1.5 },
     columnStyles: { 0: { cellWidth: 100, fontStyle: "bold" } },
   });
+
+  // (May 2026 audit D-P0-8) Currently-overdue jobs are the largest
+  // bucket on most sites. Pre-fix the PDF omitted them entirely — so
+  // the buyer pack hid the worst-looking data. Render before the
+  // completed-late table so it's first in the reader's eye.
+  if (data.currentlyOverdueJobs && data.currentlyOverdueJobs.length > 0) {
+    const lastY = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY ?? 80;
+    doc.setFontSize(12);
+    doc.text(
+      `Currently overdue jobs (${data.currentlyOverdueJobs.length})`,
+      14,
+      lastY + 12,
+    );
+    autoTable(doc, {
+      startY: lastY + 16,
+      head: [["Plot", "Job", "Status", "WD overdue", "Contractor", "Weather?"]],
+      body: data.currentlyOverdueJobs.map((j) => [
+        j.plotName,
+        j.name,
+        j.status === "IN_PROGRESS" ? "In progress" : j.status === "NOT_STARTED" ? "Not started" : j.status,
+        String(j.daysLate),
+        j.contractor ?? "—",
+        j.isWeatherExcused ? "Yes" : "No",
+      ]),
+      styles: { fontSize: 8, cellPadding: 1 },
+      headStyles: { fillColor: [254, 226, 226], textColor: [127, 29, 29] },
+    });
+  }
 
   if (data.delayedJobs.length > 0) {
     const lastY = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY ?? 80;
