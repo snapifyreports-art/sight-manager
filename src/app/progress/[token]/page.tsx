@@ -38,6 +38,45 @@ function aggregateStatus(statuses: string[]): Status {
 // Relative descriptors so we never write a hard date to the customer.
 // Buckets are intentionally fuzzy ("a few days ago", "last week") —
 // less precise = less anxiety / contractual reading.
+// (May 2026 audit O-11) Customer-facing stage names — pre-fix the
+// page rendered the raw `Job.name` value which is whatever the
+// manager typed when applying the template ("1F-INTERNAL",
+// "SF-EXTERNAL", "P&D"). Builder jargon, not buyer-friendly.
+// Translate common patterns to plain language; everything else
+// falls through to the original name (manager's hand-typed names
+// are usually fine, only the auto-coded ones are cryptic).
+function buyerFriendlyStageName(raw: string): string {
+  const upper = raw.toUpperCase().trim();
+  // Exact-match prefixes first (most specific)
+  const prefixMap: Record<string, string> = {
+    "1F-INTERNAL": "First Fix",
+    "1F-EXTERNAL": "First Fix (external)",
+    "1F": "First Fix",
+    "2F-INTERNAL": "Second Fix",
+    "2F-EXTERNAL": "Second Fix (external)",
+    "2F": "Second Fix",
+    "SF-EXTERNAL": "Second Fix (external)",
+    "SF-INTERNAL": "Second Fix",
+    "SF": "Second Fix",
+    "P&D": "Decorating",
+    "P AND D": "Decorating",
+    "M&E": "Mechanical & Electrical",
+    "M AND E": "Mechanical & Electrical",
+    "RAMS": "Site preparation",
+    "DPC": "Damp-proofing",
+    "KCO": "Quality sign-off",
+  };
+  if (prefixMap[upper]) return prefixMap[upper];
+  // Strip the "1F-"/"2F-"/"SF-" prefix for everything else
+  const stripped = upper.replace(/^(1F|2F|SF)[-\s]/, "");
+  if (stripped !== upper && prefixMap[stripped]) return prefixMap[stripped];
+  // Capitalise first letter, lowercase the rest if it's ALL CAPS
+  if (raw === upper && raw.length > 2) {
+    return raw.charAt(0) + raw.slice(1).toLowerCase();
+  }
+  return raw;
+}
+
 function relativeWhen(date: Date): string {
   const ms = Date.now() - date.getTime();
   const day = 24 * 60 * 60 * 1000;
@@ -117,7 +156,9 @@ export default async function ProgressPage({
 
   const milestones: Milestone[] = plot.jobs.map((j) => ({
     id: j.id,
-    name: j.name,
+    // (May 2026 audit O-11) Translate cryptic stage codes to buyer-
+    // friendly names before they reach the page.
+    name: buyerFriendlyStageName(j.name),
     status: aggregateStatus(
       j.children.length > 0 ? j.children.map((c) => c.status) : [j.status],
     ),

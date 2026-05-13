@@ -37,17 +37,23 @@ export default async function QrRedirectPage({
     redirect(`/progress/${plot.shareToken}`);
   }
 
-  // Plot exists but no share link, or link disabled. Friendly message.
+  // (May 2026 audit O-P1) Distinguish "plot exists but share disabled"
+  // from "plot doesn't exist at all". A buyer with an old QR printed
+  // before the plot was deleted/renamed should see a clearly different
+  // message — the site team needs to know "stale QR" vs "no setup yet"
+  // when they get a call.
+  const isUnknownPlot = !plot;
   return (
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-b from-slate-50 to-white p-4">
       <div className="max-w-md rounded-2xl border bg-white p-8 text-center shadow-sm">
         <AlertCircle className="mx-auto size-12 text-amber-400" />
         <h1 className="mt-4 text-xl font-semibold text-slate-800">
-          This QR isn&apos;t linked yet
+          {isUnknownPlot ? "We can't find this home" : "This QR isn't linked yet"}
         </h1>
         <p className="mt-2 text-sm text-slate-500">
-          The home this code points to doesn&apos;t have a customer page
-          set up yet. Please get in touch with the site team.
+          {isUnknownPlot
+            ? "This QR code points to a home that's no longer in our system. Please contact the site office for a fresh link."
+            : "The home this code points to doesn't have a customer page set up yet. Please get in touch with the site team."}
         </p>
       </div>
     </div>
