@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { randomBytes } from "crypto";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { templateJobsInclude } from "@/lib/template-includes";
 import { createJobsFromTemplate } from "@/lib/apply-template-helpers";
 import { canAccessSite } from "@/lib/site-access";
 import { sessionHasPermission } from "@/lib/permissions";

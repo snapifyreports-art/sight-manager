@@ -255,6 +255,21 @@ export async function GET(req: NextRequest) {
   }
 
   const durationMs = Date.now() - startedAt;
+
+  // (May 2026 audit B-P2-6) Summary EventLog row when work happened
+  // so an operator scanning the events log can tell when the cron
+  // last ran. Matches the pattern used by the reconcile cron.
+  if (opened > 0 || updated > 0 || resolved > 0 || errors.length > 0) {
+    await prisma.eventLog
+      .create({
+        data: {
+          type: "NOTIFICATION",
+          description: `Lateness cron: ${opened} opened, ${updated} updated, ${resolved} resolved${errors.length > 0 ? ` (${errors.length} errors)` : ""} — ${jobsScanned} jobs + ${ordersScanned} orders scanned in ${durationMs}ms`,
+        },
+      })
+      .catch((err) => console.warn("[lateness cron] summary log failed:", err));
+  }
+
   return NextResponse.json({
     jobsScanned,
     ordersScanned,

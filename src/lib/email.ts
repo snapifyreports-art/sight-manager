@@ -14,6 +14,25 @@ function getResend() {
 const FROM_ADDRESS =
   process.env.EMAIL_FROM || "Sight Manager <onboarding@resend.dev>";
 
+// (May 2026 audit B-P2-14) Escape user-controlled strings before
+// interpolation into HTML template bodies. Snag descriptions, plot
+// names, contractor names — any of these could in theory contain
+// `<`, `"`, `&`, etc. and break or be exploited via the rendered
+// HTML in the recipient's mail client (Resend delivers the body
+// as-is). Modern clients strip <script> but `<img src=x
+// onerror=...>` and CSS-based attacks vary by client. Cheaper to
+// escape on output than to trust every consumer is sanitising
+// at input.
+function escapeHtml(s: string | null | undefined): string {
+  if (s == null) return "";
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 export async function sendEmail({
   to,
   subject,
@@ -77,19 +96,26 @@ export function deliveryConfirmedEmail({
   siteName: string;
   plotName: string;
 }) {
+  // Escape user-controlled strings before interpolating into the
+  // HTML body — see escapeHtml() comment.
+  const safeContractorName = escapeHtml(contractorName);
+  const safeJobName = escapeHtml(jobName);
+  const safeSupplierName = escapeHtml(supplierName);
+  const safeSiteName = escapeHtml(siteName);
+  const safePlotName = escapeHtml(plotName);
   return {
     subject: `Delivery Confirmed — ${jobName}`,
     html: baseTemplate(`
       <h2 style="margin:0 0 16px;color:#0f172a;font-size:20px;">Delivery Confirmed</h2>
       <p style="margin:0 0 16px;color:#475569;font-size:14px;line-height:1.6;">
-        Hi ${contractorName},
+        Hi ${safeContractorName},
       </p>
       <p style="margin:0 0 24px;color:#475569;font-size:14px;line-height:1.6;">
-        A delivery from <strong>${supplierName}</strong> has been confirmed for the following job:
+        A delivery from <strong>${safeSupplierName}</strong> has been confirmed for the following job:
       </p>
       <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:16px;margin:0 0 24px;">
-        <p style="margin:0 0 4px;color:#0f172a;font-size:15px;font-weight:600;">${jobName}</p>
-        <p style="margin:0;color:#64748b;font-size:13px;">${siteName} &mdash; ${plotName}</p>
+        <p style="margin:0 0 4px;color:#0f172a;font-size:15px;font-weight:600;">${safeJobName}</p>
+        <p style="margin:0;color:#64748b;font-size:13px;">${safeSiteName} &mdash; ${safePlotName}</p>
       </div>
       <p style="margin:0;color:#475569;font-size:14px;line-height:1.6;">
         Materials are now on site and ready for use.
@@ -123,13 +149,23 @@ export function snagRaisedEmail({
   };
   const color = priorityColors[priority] || "#d97706";
 
+  // Escape user-controlled content. Photo URLs come from our own
+  // Supabase signed-URL flow so they're trusted, but everything else
+  // could in principle contain HTML.
+  const safeContractor = escapeHtml(contractorName);
+  const safeDescription = escapeHtml(description);
+  const safeLocation = escapeHtml(location);
+  const safeSiteName = escapeHtml(siteName);
+  const safePlotName = escapeHtml(plotName);
+  const safePriority = escapeHtml(priority);
+
   const photosHtml =
     photoUrls.length > 0
       ? `<div style="margin:16px 0;">
           ${photoUrls
             .map(
               (url) =>
-                `<img src="${url}" alt="Snag photo" style="max-width:200px;max-height:150px;border-radius:6px;margin:4px;border:1px solid #e2e8f0;" />`
+                `<img src="${escapeHtml(url)}" alt="Snag photo" style="max-width:200px;max-height:150px;border-radius:6px;margin:4px;border:1px solid #e2e8f0;" />`
             )
             .join("")}
         </div>`
@@ -140,16 +176,16 @@ export function snagRaisedEmail({
     html: baseTemplate(`
       <h2 style="margin:0 0 16px;color:#0f172a;font-size:20px;">Snag Raised</h2>
       <p style="margin:0 0 16px;color:#475569;font-size:14px;line-height:1.6;">
-        Hi ${contractorName},
+        Hi ${safeContractor},
       </p>
       <p style="margin:0 0 24px;color:#475569;font-size:14px;line-height:1.6;">
         A snag has been raised that requires your attention:
       </p>
       <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:16px;margin:0 0 16px;">
-        <p style="margin:0 0 8px;color:#0f172a;font-size:15px;font-weight:600;">${description}</p>
-        <p style="margin:0 0 4px;color:#64748b;font-size:13px;">${siteName} &mdash; ${plotName}</p>
-        ${location ? `<p style="margin:0 0 4px;color:#64748b;font-size:13px;">Location: ${location}</p>` : ""}
-        <p style="margin:0;"><span style="display:inline-block;background:${color};color:#fff;font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px;">${priority}</span></p>
+        <p style="margin:0 0 8px;color:#0f172a;font-size:15px;font-weight:600;">${safeDescription}</p>
+        <p style="margin:0 0 4px;color:#64748b;font-size:13px;">${safeSiteName} &mdash; ${safePlotName}</p>
+        ${location ? `<p style="margin:0 0 4px;color:#64748b;font-size:13px;">Location: ${safeLocation}</p>` : ""}
+        <p style="margin:0;"><span style="display:inline-block;background:${color};color:#fff;font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px;">${safePriority}</span></p>
       </div>
       ${photosHtml}
       <p style="margin:0;color:#475569;font-size:14px;line-height:1.6;">
@@ -172,19 +208,24 @@ export function nextStageReadyEmail({
   siteName: string;
   plotName: string;
 }) {
+  const safeContractor = escapeHtml(contractorName);
+  const safeCompleted = escapeHtml(completedJobName);
+  const safeNext = escapeHtml(nextJobName);
+  const safeSite = escapeHtml(siteName);
+  const safePlot = escapeHtml(plotName);
   return {
     subject: `Next Stage Ready — ${nextJobName}`,
     html: baseTemplate(`
       <h2 style="margin:0 0 16px;color:#0f172a;font-size:20px;">Next Stage Ready</h2>
       <p style="margin:0 0 16px;color:#475569;font-size:14px;line-height:1.6;">
-        Hi ${contractorName},
+        Hi ${safeContractor},
       </p>
       <p style="margin:0 0 24px;color:#475569;font-size:14px;line-height:1.6;">
-        <strong>${completedJobName}</strong> has been completed and signed off. The next stage is now ready to begin:
+        <strong>${safeCompleted}</strong> has been completed and signed off. The next stage is now ready to begin:
       </p>
       <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:16px;margin:0 0 24px;">
-        <p style="margin:0 0 4px;color:#166534;font-size:15px;font-weight:600;">${nextJobName}</p>
-        <p style="margin:0;color:#15803d;font-size:13px;">${siteName} &mdash; ${plotName}</p>
+        <p style="margin:0 0 4px;color:#166534;font-size:15px;font-weight:600;">${safeNext}</p>
+        <p style="margin:0;color:#15803d;font-size:13px;">${safeSite} &mdash; ${safePlot}</p>
       </div>
       <p style="margin:0;color:#475569;font-size:14px;line-height:1.6;">
         Please review the job details and begin work at your earliest convenience.
