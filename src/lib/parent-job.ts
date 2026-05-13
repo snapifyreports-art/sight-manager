@@ -10,7 +10,7 @@
  *   - status:
  *       COMPLETED    if every child is COMPLETED
  *       IN_PROGRESS  if any child is IN_PROGRESS
- *       ON_HOLD      if every child is ON_HOLD or COMPLETED (mixed hold)
+ *       ON_HOLD      if any child is ON_HOLD (no IN_PROGRESS — IN_PROGRESS wins)
  *       NOT_STARTED  otherwise
  *
  * This file provides `recomputeParentFromChildren(tx, parentId)` which callers
@@ -76,17 +76,21 @@ export async function recomputeParentFromChildren(
   // Status derivation — mirrors Keith's model:
   //   all COMPLETED → COMPLETED
   //   any IN_PROGRESS → IN_PROGRESS
-  //   all (ON_HOLD | COMPLETED) with at least one ON_HOLD → ON_HOLD
+  //   any ON_HOLD (with no IN_PROGRESS) → ON_HOLD
   //   otherwise → NOT_STARTED
+  //
+  // (May 2026 audit B-P1-23) Pre-fix the ON_HOLD branch required EVERY
+  // non-ON_HOLD child to be COMPLETED. So a parent with 4 NOT_STARTED
+  // sub-jobs + 1 ON_HOLD sub-job fell to the "otherwise → NOT_STARTED"
+  // branch — pausing a scheduled sub-job had no visible effect on the
+  // parent. Now: any ON_HOLD child propagates ON_HOLD to the parent
+  // (provided no child is actively in-progress, which still wins).
   let status: JobStatus = "NOT_STARTED";
   if (statuses.length > 0 && statuses.every((s) => s === "COMPLETED")) {
     status = "COMPLETED";
   } else if (statuses.some((s) => s === "IN_PROGRESS")) {
     status = "IN_PROGRESS";
-  } else if (
-    statuses.some((s) => s === "ON_HOLD") &&
-    statuses.every((s) => s === "ON_HOLD" || s === "COMPLETED")
-  ) {
+  } else if (statuses.some((s) => s === "ON_HOLD")) {
     status = "ON_HOLD";
   }
 
