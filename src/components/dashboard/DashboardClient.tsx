@@ -84,6 +84,10 @@ interface OverdueJob {
   id: string;
   name: string;
   endDate: string | null;
+  /** Server-computed working-day lateness, anchored to dev-date-aware
+   *  today. Pre-computed so the panel stays consistent with the
+   *  Lateness SSOT (see audit D-P1-1). */
+  daysLate: number;
   plot: {
     id: string;
     name: string;
@@ -96,6 +100,8 @@ interface StaleSnag {
   id: string;
   description: string;
   createdAt: string;
+  /** Server-computed working-day age, anchored to dev-date-aware today. */
+  daysOpen: number;
   priority: string;
   plot: {
     id: string;
@@ -389,11 +395,12 @@ function AtRiskPanel({
 }) {
   if (overdueJobs.length === 0 && staleSnags.length === 0) return null;
 
-  const dayCount = (iso: string | null): number => {
-    if (!iso) return 0;
-    const ms = Date.now() - new Date(iso).getTime();
-    return Math.max(0, Math.floor(ms / (24 * 60 * 60 * 1000)));
-  };
+  // (May 2026 audit D-P1-1) `daysLate` / `daysOpen` are now pre-computed
+  // server-side using working-day arithmetic. The old client-side
+  // `dayCount` returned calendar days off `Date.now()` (browser clock
+  // + ignored dev-date), which disagreed with the Lateness SSOT
+  // headline ("6 working days lost" in LatenessSummary vs "8d late"
+  // in the panel — same job).
 
   return (
     <Card className="border-amber-200 bg-amber-50/30">
@@ -414,29 +421,26 @@ function AtRiskPanel({
               Overdue jobs ({overdueJobs.length})
             </p>
             <ul className="space-y-1.5">
-              {overdueJobs.map((j) => {
-                const days = dayCount(j.endDate);
-                return (
-                  <li key={j.id}>
-                    <Link
-                      href={`/sites/${j.plot.site.id}/plots/${j.plot.id}`}
-                      className="flex items-center justify-between gap-2 rounded-md bg-white px-3 py-2 text-xs ring-1 ring-amber-100 hover:ring-amber-300"
-                    >
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate font-medium text-slate-900">
-                          {j.plot.plotNumber ? `Plot ${j.plot.plotNumber}` : j.plot.name} · {j.name}
-                        </p>
-                        <p className="truncate text-[11px] text-slate-500">
-                          {j.plot.site.name}
-                        </p>
-                      </div>
-                      <span className="shrink-0 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
-                        {days}d late
-                      </span>
-                    </Link>
-                  </li>
-                );
-              })}
+              {overdueJobs.map((j) => (
+                <li key={j.id}>
+                  <Link
+                    href={`/sites/${j.plot.site.id}/plots/${j.plot.id}`}
+                    className="flex items-center justify-between gap-2 rounded-md bg-white px-3 py-2 text-xs ring-1 ring-amber-100 hover:ring-amber-300"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-medium text-slate-900">
+                        {j.plot.plotNumber ? `Plot ${j.plot.plotNumber}` : j.plot.name} · {j.name}
+                      </p>
+                      <p className="truncate text-[11px] text-slate-500">
+                        {j.plot.site.name}
+                      </p>
+                    </div>
+                    <span className="shrink-0 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
+                      {j.daysLate} WD late
+                    </span>
+                  </Link>
+                </li>
+              ))}
             </ul>
           </div>
         )}
@@ -448,29 +452,26 @@ function AtRiskPanel({
               Stale snags &gt;30d ({staleSnags.length})
             </p>
             <ul className="space-y-1.5">
-              {staleSnags.map((s) => {
-                const days = dayCount(s.createdAt);
-                return (
-                  <li key={s.id}>
-                    <Link
-                      href={`/sites/${s.plot.site.id}?tab=snags`}
-                      className="flex items-center justify-between gap-2 rounded-md bg-white px-3 py-2 text-xs ring-1 ring-amber-100 hover:ring-amber-300"
-                    >
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate font-medium text-slate-900">
-                          {s.description}
-                        </p>
-                        <p className="truncate text-[11px] text-slate-500">
-                          {s.plot.plotNumber ? `Plot ${s.plot.plotNumber}` : s.plot.name} · {s.plot.site.name}
-                        </p>
-                      </div>
-                      <span className="shrink-0 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
-                        {days}d open
-                      </span>
-                    </Link>
-                  </li>
-                );
-              })}
+              {staleSnags.map((s) => (
+                <li key={s.id}>
+                  <Link
+                    href={`/sites/${s.plot.site.id}?tab=snags`}
+                    className="flex items-center justify-between gap-2 rounded-md bg-white px-3 py-2 text-xs ring-1 ring-amber-100 hover:ring-amber-300"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-medium text-slate-900">
+                        {s.description}
+                      </p>
+                      <p className="truncate text-[11px] text-slate-500">
+                        {s.plot.plotNumber ? `Plot ${s.plot.plotNumber}` : s.plot.name} · {s.plot.site.name}
+                      </p>
+                    </div>
+                    <span className="shrink-0 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
+                      {s.daysOpen} WD open
+                    </span>
+                  </Link>
+                </li>
+              ))}
             </ul>
           </div>
         )}

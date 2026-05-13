@@ -3,6 +3,9 @@ import { auth } from "@/lib/auth";
 import { getUserSiteIds } from "@/lib/site-access";
 import { DashboardClient, type DashboardData } from "@/components/dashboard/DashboardClient";
 import { whereJobEndOverdue } from "@/lib/lateness";
+import { differenceInWorkingDays } from "@/lib/working-days";
+import { cookies } from "next/headers";
+import { getServerCurrentDate } from "@/lib/dev-date";
 
 export const dynamic = "force-dynamic";
 
@@ -15,6 +18,19 @@ export default async function DashboardPage() {
   const siteIds = session
     ? await getUserSiteIds(session.user.id, session.user.role)
     : null;
+
+  // (May 2026 audit D-P1-1) Dev-date aware "today" for working-day
+  // arithmetic on the At-Risk panel rows below. Pre-fix the panel
+  // computed days-late on the client from `Date.now()` (calendar days
+  // + browser wall clock), which disagreed with the Lateness SSOT
+  // (working days + server). Compute server-side here and ship the
+  // pre-computed `daysLate` field on each row so the panel stays
+  // consistent with /api/lateness and LatenessSummary.
+  const cookieStore = await cookies();
+  const today = getServerCurrentDate({
+    cookies: { get: (n: string) => cookieStore.get(n) ?? undefined },
+  });
+  today.setHours(0, 0, 0, 0);
 
   // Build where clauses for site-filtered queries
   const siteWhere = siteIds !== null ? { id: { in: siteIds } } : {};
@@ -219,17 +235,24 @@ export default async function DashboardPage() {
       job: event.job,
     })),
     trafficLightJobs,
-    // (May 2026 audit #46) At-Risk panel feeds.
+    // (May 2026 audit #46 + D-P1-1) At-Risk panel feeds. `daysLate` is
+    // pre-computed server-side using working-day arithmetic anchored to
+    // the dev-date-aware `today` so it stays consistent with the
+    // Lateness SSOT (in-app LatenessSummary headline + Weekly Digest).
     overdueJobs: overdueJobs.map((j) => ({
       id: j.id,
       name: j.name,
       endDate: j.endDate?.toISOString() ?? null,
+      daysLate: j.endDate
+        ? Math.max(0, differenceInWorkingDays(today, j.endDate))
+        : 0,
       plot: j.plot,
     })),
     staleSnags: staleSnags.map((s) => ({
       id: s.id,
       description: s.description,
       createdAt: s.createdAt.toISOString(),
+      daysOpen: Math.max(0, differenceInWorkingDays(today, s.createdAt)),
       priority: s.priority,
       plot: s.plot,
     })),

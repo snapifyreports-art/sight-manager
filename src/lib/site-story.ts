@@ -338,6 +338,64 @@ export async function buildSiteStory(
   ];
 
   // ─── Variance summary ───────────────────────────────────────────────
+  // (May 2026 audit D-P0-1) Pre-fix this regex-parsed EventLog
+  // `description` strings for "delayed N day(s)" — only matched one
+  // cascade-trigger's format. Cascades from /api/jobs/[id]/cascade
+  // ("Schedule cascaded from … — +N WD") and the recent EXPAND_JOB
+  // ("Delivery push → expand job: end +N WD") didn't match the regex,
+  // so they fell back to "1 day" each. A site with 12 cascade events
+  // worth 47 WD reported as "12 WD lost". Silent.
+  //
+  // Now read from LatenessEvent — the canonical "days late" store. It
+  // has structured `daysLate` and `reasonCode` columns; no parsing
+  // needed. Includes both open and resolved events so the historical
+  // narrative is preserved.
+  //
+  // We also keep the EventLog list around for the timeline (delayEvents
+  // is referenced elsewhere in this file for the per-plot narrative),
+  // but only as a fallback if LatenessEvent has no entries — e.g. for
+  // sites that pre-date the lateness rollout (April 2026).
+  const latenessForVariance = await tx.latenessEvent.findMany({
+    where: { siteId },
+    select: { daysLate: true, reasonCode: true, plotId: true, jobId: true, id: true, wentLateOn: true },
+  });
+
+  const reasonCounts = new Map<string, number>();
+  let weatherDelayDays = 0;
+  let otherDelayDays = 0;
+
+  if (latenessForVariance.length > 0) {
+    for (const ev of latenessForVariance) {
+      const reason = ev.reasonCode;
+      reasonCounts.set(reason, (reasonCounts.get(reason) ?? 0) + 1);
+      if (reason === "WEATHER_RAIN" || reason === "WEATHER_TEMPERATURE" || reason === "WEATHER_WIND") {
+        weatherDelayDays += ev.daysLate;
+      } else {
+        otherDelayDays += ev.daysLate;
+      }
+    }
+  } else {
+    // Legacy fallback for sites with no LatenessEvent rows yet. Counts
+    // each cascade as +1 day (the old behaviour) so a pre-lateness site
+    // still shows reason breakdown.
+    const legacyDelayEvents = await tx.eventLog.findMany({
+      where: { siteId, type: "SCHEDULE_CASCADED", delayReasonType: { not: null } },
+      select: { delayReasonType: true },
+    });
+    for (const ev of legacyDelayEvents) {
+      const reason = ev.delayReasonType ?? "OTHER";
+      reasonCounts.set(reason, (reasonCounts.get(reason) ?? 0) + 1);
+      if (reason === "WEATHER_RAIN" || reason === "WEATHER_TEMPERATURE") {
+        weatherDelayDays += 1;
+      } else {
+        otherDelayDays += 1;
+      }
+    }
+  }
+
+  // EventLog list for the timeline narrative below — referenced when
+  // emitting per-plot story rows. Reads the same SCHEDULE_CASCADED rows
+  // regardless of the new vs legacy variance path above.
   const delayEvents = await tx.eventLog.findMany({
     where: {
       siteId,
@@ -354,22 +412,6 @@ export async function buildSiteStory(
     },
   });
 
-  const reasonCounts = new Map<string, number>();
-  let weatherDelayDays = 0;
-  let otherDelayDays = 0;
-  for (const ev of delayEvents) {
-    const reason = ev.delayReasonType ?? "OTHER";
-    reasonCounts.set(reason, (reasonCounts.get(reason) ?? 0) + 1);
-
-    // Parse "delayed N day(s)" out of the description for accumulation
-    const match = ev.description?.match(/delayed (\d+) day/i);
-    const days = match ? parseInt(match[1], 10) : 1;
-    if (reason === "WEATHER_RAIN" || reason === "WEATHER_TEMPERATURE") {
-      weatherDelayDays += days;
-    } else {
-      otherDelayDays += days;
-    }
-  }
   const delayReasonBreakdown = Array.from(reasonCounts.entries())
     .map(([reason, count]) => ({ reason, count }))
     .sort((a, b) => b.count - a.count);

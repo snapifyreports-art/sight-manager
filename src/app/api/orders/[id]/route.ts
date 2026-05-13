@@ -506,6 +506,16 @@ export async function PUT(
             } else if (latenessImpact.choice === "EXPAND_JOB") {
               // Keep trigger start, extend trigger end by deltaWD.
               // Successors and their PENDING orders shift by deltaWD.
+              //
+              // (May 2026 audit FC-P0 / B-9) Filter parent jobs out of
+              // the successor shift. Parent jobs are derived rollups —
+              // calculateCascade explicitly excludes them and re-derives
+              // them from children afterward; we mirror that contract
+              // here. Pre-fix parents got a direct date update, then
+              // `recomputeParentFromChildren` ran below and overwrote
+              // — wasteful AND meant the cascade engine's I6 parent-as-
+              // aggregate invariant was breached for an instant. Cheaper
+              // and cleaner to filter up-front.
               const newJobEnd = addWorkingDays(jobEnd, deltaWD);
               const allPlotJobs = await prisma.job.findMany({
                 where: {
@@ -514,12 +524,17 @@ export async function PUT(
                 },
                 orderBy: { sortOrder: "asc" },
               });
+              const parentIdsForExclusion = new Set<string>();
+              for (const j of allPlotJobs) {
+                if (j.parentId) parentIdsForExclusion.add(j.parentId);
+              }
               const trigger = allPlotJobs.find((j) => j.id === existing.jobId);
               if (trigger) {
                 const successors = allPlotJobs.filter(
                   (j) =>
                     j.id !== existing.jobId &&
                     j.status !== "COMPLETED" &&
+                    !parentIdsForExclusion.has(j.id) && // skip parent aggregates
                     j.sortOrder > trigger.sortOrder &&
                     j.startDate &&
                     j.endDate,
