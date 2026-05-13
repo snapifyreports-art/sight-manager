@@ -6,6 +6,9 @@ import { sessionHasPermission } from "@/lib/permissions";
 import { canAccessSite, getUserSiteIds } from "@/lib/site-access";
 import { apiError } from "@/lib/api-errors";
 import { enforceOrderInvariants } from "@/lib/order-invariants";
+import { addWorkingDays, differenceInWorkingDays } from "@/lib/working-days";
+import { calculateCascade } from "@/lib/cascade";
+import { openOrUpdateLateness } from "@/lib/lateness-event";
 
 export const dynamic = "force-dynamic";
 
@@ -287,6 +290,329 @@ export async function PUT(
         },
       },
     });
+
+    // (#191 phase 5) Manager-driven "Change Delivery Date" workflow.
+    // When the delivery date is pushed LATER than it was and the order
+    // is attached to a (non-completed) job, the system always:
+    //   1. Records a LatenessEvent attributed to the supplier so the
+    //      delay is captured in reporting + analytics. This fires
+    //      regardless of which UI surface initiated the edit (inline
+    //      editor, Daily Brief quick-edit, follow-up dialog, etc.) so
+    //      no lateness slips through unrecorded.
+    //   2. If the caller passed `latenessImpact`, ALSO applies the
+    //      manager's downstream impact choice:
+    //        PUSH_JOB   — shift job start to new_delivery + 1 WD and
+    //                     cascade everything downstream by that delta
+    //        EXPAND_JOB — keep job start, extend job end by delta WD,
+    //                     shift successors by the same delta
+    //        LEAVE_AS_IS — record lateness only, leave schedule alone
+    //
+    // Edge cases handled:
+    //   - oldDelivery null            → no lateness event; the order
+    //                                   didn't have a promise before.
+    //   - new <= old                  → delivery is being pulled
+    //                                   forward; not lateness, skip.
+    //   - completed/cancelled order   → invalid; skip impact.
+    //   - one-off order (no jobId)    → record lateness, but the
+    //                                   PUSH_JOB / EXPAND_JOB choices
+    //                                   have nothing to apply.
+    const latenessImpact = body.latenessImpact as
+      | {
+          choice: "PUSH_JOB" | "EXPAND_JOB" | "LEAVE_AS_IS";
+          reasonNote?: string;
+        }
+      | undefined;
+
+    if (data.expectedDeliveryDate && existing.expectedDeliveryDate) {
+      const oldDelivery = new Date(existing.expectedDeliveryDate);
+      oldDelivery.setHours(0, 0, 0, 0);
+      const newDelivery = new Date(data.expectedDeliveryDate as Date);
+      newDelivery.setHours(0, 0, 0, 0);
+      const deltaWD = differenceInWorkingDays(newDelivery, oldDelivery);
+
+      // Auto-fire on already-late orders (UX surfaces don't always show
+      // the picker, but the lateness still has to land). Pre-emptive
+      // pushes (old >= today) only fire when the manager went through
+      // the InlineOrderEditor's downstream-impact picker — passing
+      // latenessImpact signals deliberate intent to record this as
+      // lateness rather than just a quiet reschedule.
+      const isAlreadyLate = oldDelivery < today;
+      const shouldRecordLateness =
+        deltaWD > 0 &&
+        existing.status !== "DELIVERED" &&
+        existing.status !== "CANCELLED" &&
+        (isAlreadyLate || latenessImpact !== undefined);
+
+      if (shouldRecordLateness) {
+        const siteId = existing.job?.plot.siteId ?? existing.siteId ?? null;
+        if (siteId) {
+          // 1. Open or update the LatenessEvent on this order. Attributed
+          //    to supplier if there's a contact mapping (order.contactId);
+          //    note records the manager's reason if provided.
+          //
+          // wentLateOn convention matches the cron: original-delivery + 1
+          // day. For pre-emptive pushes where old is still in the future,
+          // use today+1 day so the unique key doesn't clash with a future
+          // cron run that opens its own (oldDelivery+1) event.
+          const wentLateOn = new Date(isAlreadyLate ? oldDelivery : today);
+          wentLateOn.setHours(0, 0, 0, 0);
+          wentLateOn.setDate(wentLateOn.getDate() + 1);
+
+          await openOrUpdateLateness(prisma, {
+            kind: "ORDER_DELIVERY_OVERDUE",
+            targetType: "order",
+            targetId: id,
+            siteId,
+            plotId: existing.job?.plotId ?? existing.plotId ?? null,
+            jobId: existing.jobId,
+            orderId: id,
+            wentLateOn,
+            daysLate: deltaWD,
+            reasonCode: "MATERIAL_LATE",
+            reasonNote: latenessImpact?.reasonNote ?? null,
+            attributedContactId: existing.contactId ?? null,
+            recordedById: session.user?.id ?? null,
+          }).catch((err) =>
+            console.error("[orders PUT] openOrUpdateLateness failed:", err),
+          );
+
+          // 2. Apply the manager's downstream impact decision (only
+          //    when latenessImpact was explicitly passed; surfaces
+          //    that don't show the picker leave the schedule alone).
+          if (
+            latenessImpact &&
+            existing.jobId &&
+            existing.job &&
+            (latenessImpact.choice === "PUSH_JOB" ||
+              latenessImpact.choice === "EXPAND_JOB") &&
+            existing.job.startDate &&
+            existing.job.endDate
+          ) {
+            const jobStart = new Date(existing.job.startDate);
+            const jobEnd = new Date(existing.job.endDate);
+            jobStart.setHours(0, 0, 0, 0);
+            jobEnd.setHours(0, 0, 0, 0);
+
+            if (latenessImpact.choice === "PUSH_JOB") {
+              // Push so the job starts the working day after the new
+              // delivery. New end preserves the job's working-day duration.
+              const desiredNewStart = addWorkingDays(newDelivery, 1);
+              const startDelta = differenceInWorkingDays(
+                desiredNewStart,
+                jobStart,
+              );
+              if (startDelta !== 0) {
+                const newJobEnd = addWorkingDays(jobEnd, startDelta);
+
+                // Reuse the existing cascade engine — passes the new end
+                // date for the trigger job; engine computes the WD delta
+                // and shifts trigger + successors uniformly.
+                const allPlotJobs = await prisma.job.findMany({
+                  where: { plotId: existing.job.plotId, status: { not: "ON_HOLD" } },
+                  orderBy: { sortOrder: "asc" },
+                });
+                const allOrders = await prisma.materialOrder.findMany({
+                  where: { jobId: { in: allPlotJobs.map((j) => j.id) } },
+                });
+                const cascade = calculateCascade(
+                  existing.jobId,
+                  newJobEnd,
+                  allPlotJobs.map((j) => ({
+                    id: j.id,
+                    name: j.name,
+                    startDate: j.startDate,
+                    endDate: j.endDate,
+                    sortOrder: j.sortOrder,
+                    status: j.status,
+                    parentId: j.parentId ?? null,
+                  })),
+                  allOrders.map((o) => ({
+                    id: o.id,
+                    jobId: o.jobId,
+                    dateOfOrder: o.dateOfOrder,
+                    expectedDeliveryDate: o.expectedDeliveryDate,
+                    status: o.status,
+                  })),
+                );
+
+                // Apply only the job + order updates that don't conflict
+                // — if any successor would land in the past we skip the
+                // cascade and log a warning; the lateness event is still
+                // recorded and the manager can re-trigger via the
+                // standard cascade UI.
+                if (cascade.conflicts.length === 0) {
+                  const jobMap = new Map(allPlotJobs.map((j) => [j.id, j]));
+                  await Promise.all([
+                    ...cascade.jobUpdates.map((u) => {
+                      const cur = jobMap.get(u.jobId);
+                      return prisma.job.update({
+                        where: { id: u.jobId },
+                        data: {
+                          startDate: u.newStart,
+                          endDate: u.newEnd,
+                          ...(!cur?.originalStartDate && cur?.startDate
+                            ? { originalStartDate: cur.startDate }
+                            : {}),
+                          ...(!cur?.originalEndDate && cur?.endDate
+                            ? { originalEndDate: cur.endDate }
+                            : {}),
+                        },
+                      });
+                    }),
+                    ...cascade.orderUpdates
+                      // Don't shift the order we just updated — it has
+                      // its new delivery date already.
+                      .filter((u) => u.orderId !== id)
+                      .map((u) =>
+                        prisma.materialOrder.update({
+                          where: { id: u.orderId },
+                          data: {
+                            dateOfOrder: u.newOrderDate,
+                            expectedDeliveryDate: u.newDeliveryDate,
+                          },
+                        }),
+                      ),
+                  ]);
+
+                  // Parent rollups
+                  const { recomputeParentFromChildren } = await import(
+                    "@/lib/parent-job"
+                  );
+                  const parentIds = new Set<string>();
+                  for (const u of cascade.jobUpdates) {
+                    const j = jobMap.get(u.jobId);
+                    if (j?.parentId) parentIds.add(j.parentId);
+                  }
+                  await Promise.all(
+                    Array.from(parentIds).map((pid) =>
+                      recomputeParentFromChildren(prisma, pid),
+                    ),
+                  );
+
+                  await prisma.eventLog
+                    .create({
+                      data: {
+                        type: "SCHEDULE_CASCADED",
+                        description: `Delivery push → cascade: ${cascade.deltaDays > 0 ? "+" : ""}${cascade.deltaDays} WD, ${cascade.jobUpdates.length} jobs shifted`,
+                        siteId,
+                        plotId: existing.job.plotId,
+                        jobId: existing.jobId,
+                        userId: session.user?.id ?? null,
+                      },
+                    })
+                    .catch(() => {});
+                }
+              }
+            } else if (latenessImpact.choice === "EXPAND_JOB") {
+              // Keep trigger start, extend trigger end by deltaWD.
+              // Successors and their PENDING orders shift by deltaWD.
+              const newJobEnd = addWorkingDays(jobEnd, deltaWD);
+              const allPlotJobs = await prisma.job.findMany({
+                where: {
+                  plotId: existing.job.plotId,
+                  status: { not: "ON_HOLD" },
+                },
+                orderBy: { sortOrder: "asc" },
+              });
+              const trigger = allPlotJobs.find((j) => j.id === existing.jobId);
+              if (trigger) {
+                const successors = allPlotJobs.filter(
+                  (j) =>
+                    j.id !== existing.jobId &&
+                    j.status !== "COMPLETED" &&
+                    j.sortOrder > trigger.sortOrder &&
+                    j.startDate &&
+                    j.endDate,
+                );
+                const allSuccessorOrders = await prisma.materialOrder.findMany({
+                  where: {
+                    jobId: { in: successors.map((j) => j.id) },
+                    status: "PENDING",
+                  },
+                });
+
+                await Promise.all([
+                  // Extend trigger end only — start stays.
+                  // (originalStartDate/EndDate are NOT NULL since the May
+                  // 2026 audit so we don't need to backfill them here.)
+                  prisma.job.update({
+                    where: { id: existing.jobId },
+                    data: { endDate: newJobEnd },
+                  }),
+                  // Shift successors by deltaWD (start + end).
+                  ...successors.map((j) =>
+                    prisma.job.update({
+                      where: { id: j.id },
+                      data: {
+                        startDate: addWorkingDays(j.startDate!, deltaWD),
+                        endDate: addWorkingDays(j.endDate!, deltaWD),
+                      },
+                    }),
+                  ),
+                  // Shift pending orders on successors.
+                  ...allSuccessorOrders.map((o) =>
+                    prisma.materialOrder.update({
+                      where: { id: o.id },
+                      data: {
+                        dateOfOrder: addWorkingDays(o.dateOfOrder, deltaWD),
+                        expectedDeliveryDate: o.expectedDeliveryDate
+                          ? addWorkingDays(o.expectedDeliveryDate, deltaWD)
+                          : null,
+                      },
+                    }),
+                  ),
+                ]);
+
+                // Parent rollups affected by either trigger or successors.
+                const { recomputeParentFromChildren } = await import(
+                  "@/lib/parent-job"
+                );
+                const parentIds = new Set<string>();
+                if (trigger.parentId) parentIds.add(trigger.parentId);
+                for (const s of successors) {
+                  if (s.parentId) parentIds.add(s.parentId);
+                }
+                await Promise.all(
+                  Array.from(parentIds).map((pid) =>
+                    recomputeParentFromChildren(prisma, pid),
+                  ),
+                );
+
+                await prisma.eventLog
+                  .create({
+                    data: {
+                      type: "SCHEDULE_CASCADED",
+                      description: `Delivery push → expand job: end +${deltaWD} WD, ${successors.length} successors shifted`,
+                      siteId,
+                      plotId: existing.job.plotId,
+                      jobId: existing.jobId,
+                      userId: session.user?.id ?? null,
+                    },
+                  })
+                  .catch(() => {});
+              }
+            }
+          }
+
+          // Audit row for the delivery push so the timeline shows
+          // "manager pushed delivery and chose X" (or just "pushed
+          // delivery") alongside the LATENESS_OPENED row above.
+          await prisma.eventLog
+            .create({
+              data: {
+                type: "ORDER_PLACED",
+                description: `Delivery date changed to ${newDelivery.toISOString().slice(0, 10)} (+${deltaWD} WD)${latenessImpact ? `. Impact: ${latenessImpact.choice}.` : "."}`,
+                siteId,
+                plotId: existing.job?.plotId ?? existing.plotId ?? null,
+                jobId: existing.jobId,
+                userId: session.user?.id ?? null,
+                delayReasonType: "MATERIAL_LATE",
+              },
+            })
+            .catch(() => {});
+        }
+      }
+    }
 
     // (May 2026 audit follow-up to #152) Per-site push on delivery
     // confirmation — site assignee + watchers + execs get notified

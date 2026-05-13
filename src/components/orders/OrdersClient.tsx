@@ -475,11 +475,30 @@ function InlineOrderEditor({
 }) {
   const toast = useToast();
   const [supplierId, setSupplierId] = useState(order.supplierId);
-  const [expectedDeliveryDate, setExpectedDeliveryDate] = useState(
-    order.expectedDeliveryDate ? order.expectedDeliveryDate.split("T")[0] : ""
-  );
+  const originalDelivery = order.expectedDeliveryDate
+    ? order.expectedDeliveryDate.split("T")[0]
+    : "";
+  const [expectedDeliveryDate, setExpectedDeliveryDate] = useState(originalDelivery);
   const [items, setItems] = useState<EditableItem[]>(itemsFromOrder(order));
   const [saving, setSaving] = useState(false);
+  // (#191 phase 5) Downstream-impact choice for a "push delivery later"
+  // edit. Visible only when:
+  //   - originalDelivery exists (order had a promise)
+  //   - new date is strictly after original
+  //   - order has an attached job whose status isn't COMPLETED
+  // Default PUSH_JOB so a manager who Just Saves doesn't accidentally
+  // leave the schedule diverged from reality.
+  const [latenessImpact, setLatenessImpact] = useState<
+    "PUSH_JOB" | "EXPAND_JOB" | "LEAVE_AS_IS"
+  >("PUSH_JOB");
+  const showLatenessImpact = (() => {
+    if (!originalDelivery || !expectedDeliveryDate) return false;
+    if (expectedDeliveryDate <= originalDelivery) return false;
+    if (!order.jobId) return false;
+    if (order.job?.status === "COMPLETED") return false;
+    if (order.status === "DELIVERED" || order.status === "CANCELLED") return false;
+    return true;
+  })();
 
   const visibleItems = items.filter((i) => !i._deleted);
 
@@ -538,6 +557,12 @@ function InlineOrderEditor({
         body: JSON.stringify({
           supplierId,
           expectedDeliveryDate: expectedDeliveryDate || null,
+          // (#191 phase 5) Tell the server the manager's downstream
+          // impact choice when this edit is pushing delivery later.
+          // Server validates the date-direction itself.
+          latenessImpact: showLatenessImpact
+            ? { choice: latenessImpact }
+            : undefined,
         }),
       });
       if (!orderRes.ok) {
@@ -646,6 +671,70 @@ function InlineOrderEditor({
               />
             </div>
           </div>
+
+          {/* (#191 phase 5) Downstream-impact picker. Appears only when
+              the manager is pushing delivery LATER than it was promised
+              and the order has a job that hasn't completed. The choice
+              records a LatenessEvent attributed to the supplier and
+              applies the schedule decision the manager picks. */}
+          {showLatenessImpact && (
+            <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 dark:border-amber-700 dark:bg-amber-950/30">
+              <p className="mb-2 text-xs font-semibold text-amber-900 dark:text-amber-200">
+                Delivery is being pushed later. What should happen to{" "}
+                <span className="font-bold">{order.job?.name ?? "the linked job"}</span>?
+              </p>
+              <div className="space-y-2">
+                <label className="flex cursor-pointer items-start gap-2 text-sm">
+                  <input
+                    type="radio"
+                    name={`impact-${order.id}`}
+                    className="mt-1"
+                    checked={latenessImpact === "PUSH_JOB"}
+                    onChange={() => setLatenessImpact("PUSH_JOB")}
+                  />
+                  <div className="flex-1">
+                    <p className="font-medium">Push job start back (cascade downstream)</p>
+                    <p className="text-xs text-muted-foreground">
+                      The job starts the working day after the new delivery; everything after it on the plot shifts by the same amount.
+                    </p>
+                  </div>
+                </label>
+                <label className="flex cursor-pointer items-start gap-2 text-sm">
+                  <input
+                    type="radio"
+                    name={`impact-${order.id}`}
+                    className="mt-1"
+                    checked={latenessImpact === "EXPAND_JOB"}
+                    onChange={() => setLatenessImpact("EXPAND_JOB")}
+                  />
+                  <div className="flex-1">
+                    <p className="font-medium">Keep job start, extend duration</p>
+                    <p className="text-xs text-muted-foreground">
+                      Crew begins on time and works around the missing material; the job's end moves out, and successors shift to match.
+                    </p>
+                  </div>
+                </label>
+                <label className="flex cursor-pointer items-start gap-2 text-sm">
+                  <input
+                    type="radio"
+                    name={`impact-${order.id}`}
+                    className="mt-1"
+                    checked={latenessImpact === "LEAVE_AS_IS"}
+                    onChange={() => setLatenessImpact("LEAVE_AS_IS")}
+                  />
+                  <div className="flex-1">
+                    <p className="font-medium">Record lateness, leave schedule alone</p>
+                    <p className="text-xs text-muted-foreground">
+                      No date changes — useful when there's buffer on this job, or you'll handle the impact manually.
+                    </p>
+                  </div>
+                </label>
+              </div>
+              <p className="mt-2 text-[11px] text-amber-800 dark:text-amber-300">
+                A lateness event will be recorded and attributed to {order.supplier?.name ?? "the supplier"}.
+              </p>
+            </div>
+          )}
 
           {/* Items table */}
           <div className="space-y-2">
