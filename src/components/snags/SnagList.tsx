@@ -107,20 +107,25 @@ export function SnagList({ snags, onSelect, onRefresh, showPlot, highlightId, si
   const [pendingClosePreview, setPendingClosePreview] = useState<string | null>(null);
   const closeFileRef = useRef<HTMLInputElement>(null);
   const highlightRef = useRef<HTMLDivElement>(null);
-  const [didAutoOpen, setDidAutoOpen] = useState(false);
+  // (May 2026 audit SM-P1) Pre-fix this was `useState<boolean>(false)` —
+  // once auto-opened it never auto-opened again, so clicking a SECOND
+  // snag link from Daily Brief in the same session silently did
+  // nothing. Track the last-opened id so changing highlightId
+  // triggers a fresh open.
+  const lastAutoOpenedRef = useRef<string | null>(null);
 
   // Auto-open highlighted snag
   useEffect(() => {
-    if (highlightId && !didAutoOpen && snags.length > 0) {
-      const snag = snags.find((s) => s.id === highlightId);
-      if (snag) {
-        onSelect(snag);
-        setDidAutoOpen(true);
-        // Scroll to highlighted card after render
-        setTimeout(() => highlightRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }), 100);
-      }
+    if (!highlightId || snags.length === 0) return;
+    if (lastAutoOpenedRef.current === highlightId) return;
+    const snag = snags.find((s) => s.id === highlightId);
+    if (snag) {
+      onSelect(snag);
+      lastAutoOpenedRef.current = highlightId;
+      // Scroll to highlighted card after render
+      setTimeout(() => highlightRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }), 100);
     }
-  }, [highlightId, snags, didAutoOpen, onSelect]);
+  }, [highlightId, snags, onSelect]);
 
   const filtered = snags.filter((s) => {
     if (filterStatus !== "all" && s.status !== filterStatus) return false;

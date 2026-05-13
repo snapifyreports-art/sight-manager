@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { format, addDays, differenceInCalendarDays } from "date-fns";
 import { differenceInWorkingDays } from "@/lib/working-days";
 import { PostCompletionDialog } from "@/components/PostCompletionDialog";
@@ -437,7 +438,35 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
   const { devDate } = useDevDate();
   const [data, setData] = useState<BriefData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [date, setDate] = useState(getCurrentDate());
+  // (May 2026 audit SM-P1) Seed date from URL `?date=YYYY-MM-DD` so
+  // navigating away and back preserves the selected day. Pre-fix the
+  // component remounted on every back-nav and reset to today, even
+  // if the manager had been looking at yesterday's brief.
+  const searchParams = useSearchParams();
+  const initialDateFromUrl = (() => {
+    const param = searchParams.get("date");
+    if (param) {
+      const parsed = new Date(param + "T00:00:00");
+      if (!isNaN(parsed.getTime())) return parsed;
+    }
+    return getCurrentDate();
+  })();
+  const [date, setDate] = useState(initialDateFromUrl);
+  // Sync URL when date changes so back-button + tab restore work.
+  useEffect(() => {
+    const ymd = format(date, "yyyy-MM-dd");
+    const today = format(getCurrentDate(), "yyyy-MM-dd");
+    const params = new URLSearchParams(window.location.search);
+    if (ymd === today) {
+      // Drop the param when on "today" so the URL stays clean.
+      params.delete("date");
+    } else {
+      params.set("date", ymd);
+    }
+    const qs = params.toString();
+    const newUrl = qs ? `?${qs}` : window.location.pathname;
+    window.history.replaceState(null, "", newUrl);
+  }, [date]);
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [upcomingOrdersOpen, setUpcomingOrdersOpen] = useState(false);
