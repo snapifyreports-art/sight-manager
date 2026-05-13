@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { sendPushToAll } from "@/lib/push";
+import { sendPushToSiteAudience } from "@/lib/push";
 import { canAccessSite } from "@/lib/site-access";
 import { apiError } from "@/lib/api-errors";
 
@@ -72,8 +72,10 @@ export async function POST(
       },
     });
 
-    // Send push notification
-    await sendPushToAll("JOBS_READY_FOR_SIGNOFF", {
+    // (May 2026 audit F-P1-23) Per-site scope. Pre-fix sendPushToAll
+    // blasted the snag-signoff request to every tenant user; now only
+    // the site audience (assignee + access-list - mutes) sees it.
+    await sendPushToSiteAudience(snag.plot.site.id, "JOBS_READY_FOR_SIGNOFF", {
       title: `Snag Sign-Off Requested`,
       body: `${plotLabel} on ${snag.plot.site.name}: "${snag.description}" — contractor says this is resolved`,
       url: `/sites/${snag.plot.site.id}?tab=snags&snagId=${id}`,

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { verifyContractorToken } from "@/lib/share-token";
 import { getSupabase, PHOTOS_BUCKET } from "@/lib/supabase";
-import { sendPushToAll } from "@/lib/push";
+import { sendPushToSiteAudience } from "@/lib/push";
 import { apiError } from "@/lib/api-errors";
 
 export const dynamic = "force-dynamic";
@@ -151,8 +151,11 @@ export async function POST(
       })
       .catch(() => {});
 
-    // Notify admins so they can come and verify the fix.
-    await sendPushToAll("JOBS_READY_FOR_SIGNOFF", {
+    // (May 2026 audit F-P1-23) Notify the site audience so the manager
+    // can come and verify the fix. Pre-fix sendPushToAll spammed every
+    // tenant user — now scoped to the site's assignee + access list
+    // minus mutes.
+    await sendPushToSiteAudience(snag.plot.site.id, "JOBS_READY_FOR_SIGNOFF", {
       title: "Snag Sign-Off Requested",
       body: `${plotLabel} on ${snag.plot.site.name}: "${snag.description}" — contractor says this is resolved`,
       url: `/sites/${snag.plot.site.id}?tab=snags&snagId=${snagId}`,
