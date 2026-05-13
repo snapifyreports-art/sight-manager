@@ -492,13 +492,6 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
     () => setRefreshKey((k) => k + 1)
   );
 
-  const toggleSection = (id: string) =>
-    setOpenSections((prev) => {
-      const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
-      return next;
-    });
-
   // Shared scroll-to-section helper used by pills + alerts. Body is
   // overflow-hidden (<main> is the scroll container), so the native
   // href="#id" does nothing. scrollIntoView works regardless.
@@ -673,31 +666,61 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
   // Auto-refresh when tab regains focus (real-time sync across views)
   useRefreshOnFocus(fetchData);
 
-  // (#187) Open every section that has at least one actionable item.
-  // Keith May 2026: "anything that can require attention shouldn't
-  // be collapsed". Pre-change only todays-jobs + in-progress were
-  // auto-expanded — Materials (which carries overdue deliveries +
-  // orders to send) stayed collapsed by default, silently hiding
-  // urgent items.
+  // (May 2026 audit SM-P1) Track which sections the user has manually
+  // toggled in this session so refreshes don't fight their choices.
+  // Pre-fix this useEffect rewrote `openSections` from scratch every
+  // time data refetched — Keith would close a section, do an action
+  // that triggered refetch (focus regain, action complete, etc.),
+  // and the section he just closed popped open again. Manual closes
+  // now stick for the session; auto-expand only kicks in for sections
+  // the user hasn't explicitly touched.
+  const [manuallyToggledSections, setManuallyToggledSections] = useState<Set<string>>(new Set());
+
   useEffect(() => {
     if (!data) return;
-    const open = new Set<string>();
-    // Today's Jobs always expanded.
-    open.add("todays-jobs");
-    if (data.activeJobs.length > 0) open.add("in-progress");
-    if (
-      data.ordersToPlace.length > 0 ||
-      data.deliveriesToday.length > 0 ||
-      (data.overdueDeliveries?.length ?? 0) > 0 ||
-      (data.upcomingOrders?.length ?? 0) > 0
-    ) {
-      open.add("materials");
-    }
-    if ((data.delayedJobs?.length ?? 0) > 0) open.add("delayed");
-    if ((data.needsAttention?.length ?? 0) > 0) open.add("needs-attention");
-    if ((data.inactivePlots?.length ?? 0) > 0) open.add("inactive-plots");
-    setOpenSections(open);
-  }, [data]);
+    setOpenSections((prev) => {
+      const open = new Set(prev);
+      // Sections the user hasn't touched get auto-managed based on
+      // whether they have content.
+      const autoSuggest = (key: string, hasContent: boolean) => {
+        if (manuallyToggledSections.has(key)) return; // user's choice wins
+        if (hasContent) open.add(key);
+        else open.delete(key);
+      };
+      // (#187) Keith's rule: "anything that can require attention
+      // shouldn't be collapsed". Today's jobs is always auto-open.
+      open.add("todays-jobs");
+      autoSuggest("in-progress", data.activeJobs.length > 0);
+      autoSuggest(
+        "materials",
+        data.ordersToPlace.length > 0 ||
+          data.deliveriesToday.length > 0 ||
+          (data.overdueDeliveries?.length ?? 0) > 0 ||
+          (data.upcomingOrders?.length ?? 0) > 0,
+      );
+      autoSuggest("delayed", (data.delayedJobs?.length ?? 0) > 0);
+      autoSuggest("needs-attention", (data.needsAttention?.length ?? 0) > 0);
+      autoSuggest("inactive-plots", (data.inactivePlots?.length ?? 0) > 0);
+      return open;
+    });
+  }, [data, manuallyToggledSections]);
+
+  // Wrap the toggle so we record which keys the user explicitly
+  // touched. Section components call this instead of setOpenSections
+  // directly — sticky overrides per session.
+  const toggleSection = useCallback((key: string) => {
+    setManuallyToggledSections((prev) => {
+      const next = new Set(prev);
+      next.add(key);
+      return next;
+    });
+    setOpenSections((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
 
   const prevDay = () => setDate((d) => new Date(d.getTime() - 86400000));
   const nextDay = () => setDate((d) => new Date(d.getTime() + 86400000));
