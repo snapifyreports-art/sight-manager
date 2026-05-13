@@ -106,6 +106,31 @@ export async function POST(
     );
   }
 
+  // (May 2026 audit O-P0) Cap subscriptions per plot. Pre-fix any
+  // caller with a valid share token could POST unlimited subscribe
+  // rows — a leaked token + a malicious script could enqueue
+  // thousands of dead endpoints that we'd then HTTPS-POST to from
+  // the customer-push cron every time the plot updates. 5 is the
+  // realistic upper bound for a household (parents' devices + a
+  // shared tablet). Existing subscriptions for the same endpoint
+  // upsert and don't count against the limit.
+  const PER_PLOT_LIMIT = 5;
+  const existing = await prisma.customerPushSubscription.findUnique({
+    where: { endpoint },
+    select: { id: true },
+  });
+  if (!existing) {
+    const count = await prisma.customerPushSubscription.count({
+      where: { plotId: plot.id },
+    });
+    if (count >= PER_PLOT_LIMIT) {
+      return NextResponse.json(
+        { error: "Subscription limit reached for this plot" },
+        { status: 429 },
+      );
+    }
+  }
+
   await prisma.customerPushSubscription.upsert({
     where: { endpoint },
     update: { plotId: plot.id, p256dh, auth, userAgent },
