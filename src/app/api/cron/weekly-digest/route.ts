@@ -113,11 +113,16 @@ export async function GET(req: NextRequest) {
       // (May 2026 audit #145) Stale-snag count: open snags older than
       // 30 days. Surfaces things slipping through the cracks.
       staleSnags: number;
+      // (#191) Lateness summary for the week.
+      latenessOpened: number;
+      latenessResolved: number;
+      latenessDaysLost: number;
+      latenessTopReason: string | null;
     };
 
     const summaries: SiteSummary[] = await Promise.all(
       sites.map(async (s) => {
-        const [jobsStarted, jobsCompleted, snagsRaised, snagsResolved, photos, delays, staleSnags] =
+        const [jobsStarted, jobsCompleted, snagsRaised, snagsResolved, photos, delays, staleSnags, latenessOpenedThisWeek, latenessResolvedThisWeek, openLatenessForWeek] =
           await Promise.all([
             prisma.job.count({
               where: {
@@ -166,7 +171,35 @@ export async function GET(req: NextRequest) {
                 createdAt: { lt: subDays(todayStart, 30) },
               },
             }),
+            // (#191) Lateness events opened this week on the site.
+            prisma.latenessEvent.count({
+              where: {
+                siteId: s.id,
+                wentLateOn: { gte: weekStart, lt: todayStart },
+              },
+            }),
+            // (#191) Lateness events resolved this week.
+            prisma.latenessEvent.count({
+              where: {
+                siteId: s.id,
+                resolvedAt: { gte: weekStart, lt: todayStart },
+              },
+            }),
+            // (#191) Open lateness events at end of week + their reasons,
+            // so the digest can summarise total WD lost + top reason.
+            prisma.latenessEvent.findMany({
+              where: { siteId: s.id, resolvedAt: null },
+              select: { daysLate: true, reasonCode: true },
+            }),
           ]);
+        // Aggregate the latenessForWeek list into total WD + top reason.
+        const latenessDaysLost = openLatenessForWeek.reduce((sum, e) => sum + e.daysLate, 0);
+        const reasonCounts = new Map<string, number>();
+        for (const e of openLatenessForWeek) {
+          reasonCounts.set(e.reasonCode, (reasonCounts.get(e.reasonCode) ?? 0) + e.daysLate);
+        }
+        const sortedReasons = Array.from(reasonCounts.entries()).sort((a, b) => b[1] - a[1]);
+        const latenessTopReason = sortedReasons.length > 0 ? sortedReasons[0][0] : null;
         return {
           siteId: s.id,
           siteName: s.name,
@@ -177,13 +210,17 @@ export async function GET(req: NextRequest) {
           photos,
           delays,
           staleSnags,
+          latenessOpened: latenessOpenedThisWeek,
+          latenessResolved: latenessResolvedThisWeek,
+          latenessDaysLost,
+          latenessTopReason,
         };
       }),
     );
 
     const totalActivity = summaries.reduce(
       (acc, s) =>
-        acc + s.jobsStarted + s.jobsCompleted + s.snagsRaised + s.snagsResolved + s.photos + s.delays + s.staleSnags,
+        acc + s.jobsStarted + s.jobsCompleted + s.snagsRaised + s.snagsResolved + s.photos + s.delays + s.staleSnags + s.latenessOpened + s.latenessResolved,
       0,
     );
 
@@ -213,16 +250,31 @@ export async function GET(req: NextRequest) {
           s.staleSnags > 0
             ? `<span style="background:#fecaca;color:#b91c1c;border-radius:9999px;padding:2px 8px;font-size:11px;margin-right:6px;font-weight:600;">${s.staleSnags} stale snag${s.staleSnags !== 1 ? "s" : ""} &gt;30d</span>`
             : "",
+          // (#191) Lateness pills — opened this week (amber) + resolved (green).
+          s.latenessOpened > 0
+            ? `<span style="background:#fef3c7;color:#92400e;border-radius:9999px;padding:2px 8px;font-size:11px;margin-right:6px;font-weight:600;">${s.latenessOpened} went late</span>`
+            : "",
+          s.latenessResolved > 0
+            ? `<span style="background:#dcfce7;color:#166534;border-radius:9999px;padding:2px 8px;font-size:11px;margin-right:6px;">${s.latenessResolved} lateness resolved</span>`
+            : "",
         ]
           .filter(Boolean)
           .join("");
-        if (!cells) return ""; // site had no activity — skip
+        // (#191) Lateness footer — total WD lost on currently-open events +
+        // top reason. Sits below the pills so a manager scanning the digest
+        // immediately sees the headline "you're 12 WD behind, mostly weather".
+        const latenessFooter =
+          s.latenessDaysLost > 0
+            ? `<div style="margin-top:8px;font-size:12px;color:#92400e;"><strong>${s.latenessDaysLost} working day${s.latenessDaysLost !== 1 ? "s" : ""} lost</strong>${s.latenessTopReason ? ` — top reason: ${s.latenessTopReason.replace(/_/g, " ").toLowerCase()}` : ""}</div>`
+            : "";
+        if (!cells && !latenessFooter) return ""; // site had no activity — skip
         return `
           <div style="border:1px solid #e2e8f0;border-radius:8px;padding:14px 16px;margin-bottom:12px;">
             <a href="${baseUrl}/sites/${s.siteId}?tab=story" style="text-decoration:none;color:#0f172a;">
               <p style="margin:0 0 8px;font-weight:600;font-size:14px;">${s.siteName}</p>
             </a>
             <div style="font-size:12px;color:#475569;">${cells}</div>
+            ${latenessFooter}
           </div>
         `;
       })

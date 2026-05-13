@@ -25,6 +25,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { fetchErrorMessage } from "@/components/ui/toast";
 import { ReportExportButtons } from "@/components/shared/ReportExportButtons";
+import { LatenessSummary } from "@/components/lateness/LatenessSummary";
 
 interface DelayReportProps {
   siteId: string;
@@ -284,6 +285,12 @@ export function DelayReport({ siteId }: DelayReportProps) {
 
   return (
     <div className="space-y-4">
+      {/* (#191) Lateness summary block at the top of the Delay Report
+          — surfaces every open lateness on the site with reason
+          breakdown + attribution. Sits alongside the rest of the
+          delay-justification narrative. */}
+      <LatenessSummary siteId={siteId} status="all" />
+
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-lg font-semibold">Delay Justification Report</h3>
         <div className="flex items-center gap-3">

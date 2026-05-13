@@ -822,6 +822,8 @@ export function AnalyticsClient() {
       {/* (May 2026 audit #167 + #52) */}
       <ProfitabilityWidget />
       <ContractorCalendarWidget />
+      {/* (#191) Cross-site lateness rollup. */}
+      <LatenessWidget />
     </div>
   );
 }
@@ -1120,6 +1122,150 @@ function ContractorCalendarWidget() {
             </li>
           ))}
         </ul>
+      </div>
+    </div>
+  );
+}
+
+// ────────── Cross-site lateness widget ──────────────────────────────────
+
+interface LatenessAnalytics {
+  byReason: Array<{ reason: string; openDays: number; resolvedDays: number; count: number }>;
+  bySite: Array<{ siteId: string; siteName: string; openCount: number; openDays: number; resolvedCount: number; resolvedDays: number }>;
+  byContractor: Array<{ contactId: string; name: string; company: string | null; count: number; days: number }>;
+  totals: { openCount: number; openDays: number; resolvedCount: number; resolvedDays: number };
+}
+
+const REASON_DISPLAY: Record<string, string> = {
+  WEATHER_RAIN: "Weather (rain)",
+  WEATHER_TEMPERATURE: "Weather (temperature)",
+  WEATHER_WIND: "Weather (wind)",
+  MATERIAL_LATE: "Material — late",
+  MATERIAL_WRONG: "Material — wrong",
+  MATERIAL_SHORT: "Material — short",
+  LABOUR_NO_SHOW: "Labour — no-show",
+  LABOUR_SHORT: "Labour — short-staffed",
+  DESIGN_CHANGE: "Design change",
+  SPEC_CLARIFICATION: "Spec clarification",
+  PREDECESSOR_LATE: "Predecessor late",
+  ACCESS_BLOCKED: "Access blocked",
+  INSPECTION_FAILED: "Inspection failed",
+  OTHER: "Not attributed",
+};
+
+function LatenessWidget() {
+  const [data, setData] = useState<LatenessAnalytics | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    fetch("/api/analytics/lateness", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!cancelled && d) setData(d);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="rounded-xl border bg-white p-4 text-center text-sm text-muted-foreground">
+        <Loader2 className="mx-auto size-5 animate-spin" />
+      </div>
+    );
+  }
+  if (!data || (data.totals.openCount === 0 && data.totals.resolvedCount === 0)) {
+    return null;
+  }
+
+  return (
+    <div className="rounded-xl border bg-white p-4">
+      <div className="mb-3 flex items-center gap-2">
+        <h3 className="font-semibold">Lateness</h3>
+        <span className="text-xs text-muted-foreground">
+          {data.totals.openDays + data.totals.resolvedDays} WD lost across {data.totals.openCount + data.totals.resolvedCount} events
+        </span>
+      </div>
+      <div className="space-y-4">
+        {/* By reason */}
+        {data.byReason.length > 0 && (
+          <div>
+            <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Working days lost by reason
+            </p>
+            <ul className="space-y-1.5">
+              {data.byReason.slice(0, 10).map((r) => {
+                const total = r.openDays + r.resolvedDays;
+                const maxTotal = data.byReason[0].openDays + data.byReason[0].resolvedDays;
+                const pct = maxTotal > 0 ? (total / maxTotal) * 100 : 0;
+                return (
+                  <li key={r.reason} className="space-y-0.5">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-medium">{REASON_DISPLAY[r.reason] ?? r.reason}</span>
+                      <span className="text-muted-foreground">
+                        <span className="font-semibold text-slate-700">{total}</span> WD · {r.count} event{r.count === 1 ? "" : "s"}
+                      </span>
+                    </div>
+                    <div className="h-1.5 overflow-hidden rounded-full bg-slate-100">
+                      <div
+                        className="h-full bg-gradient-to-r from-amber-400 to-red-500"
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
+
+        {/* By site */}
+        {data.bySite.length > 0 && (
+          <div>
+            <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Sites by lateness
+            </p>
+            <ul className="divide-y divide-slate-100 rounded-md border">
+              {data.bySite.slice(0, 8).map((s) => (
+                <li key={s.siteId} className="flex items-center justify-between px-3 py-1.5 text-xs">
+                  <Link href={`/sites/${s.siteId}`} className="font-medium text-blue-600 hover:underline">
+                    {s.siteName}
+                  </Link>
+                  <span className="text-muted-foreground">
+                    <span className="font-semibold text-slate-700">{s.openDays}</span> open · {s.resolvedDays} resolved · {s.openCount + s.resolvedCount} events
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* By contractor */}
+        {data.byContractor.length > 0 && (
+          <div>
+            <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Lateness attributed to contractor / supplier
+            </p>
+            <ul className="divide-y divide-slate-100 rounded-md border">
+              {data.byContractor.map((c) => (
+                <li key={c.contactId} className="flex items-center justify-between px-3 py-1.5 text-xs">
+                  <Link href={`/contacts/${c.contactId}`} className="font-medium text-blue-600 hover:underline">
+                    {c.company || c.name}
+                  </Link>
+                  <span className="text-muted-foreground">
+                    <span className="font-semibold text-slate-700">{c.days}</span> WD · {c.count} event{c.count === 1 ? "" : "s"}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
       </div>
     </div>
   );
