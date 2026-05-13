@@ -816,6 +816,88 @@ function RecentActivity({ events }: { events: EventLogEntry[] }) {
 // ---------- Main Dashboard Client ----------
 
 export function DashboardClient({ data }: { data: DashboardData }) {
+  // (May 2026 audit O-P0) Zero-sites onboarding state. Pre-fix a
+  // first-time user landed on the dashboard, saw 8 stat cards full of
+  // zeroes, an empty traffic-light grid, and an empty pie chart. The
+  // natural first action — "Create your first site" — was two clicks
+  // away on a page they had no reason to visit. Now: if there are
+  // zero sites total, replace the entire stat/widget grid with a
+  // welcome card that walks the user through the 3-step setup.
+  if (data.stats.totalSites === 0) {
+    return (
+      <div className="space-y-8">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900">
+            Welcome to Sight Manager
+          </h1>
+          <p className="mt-1 text-sm text-slate-500">
+            Let&apos;s get your first site set up.
+          </p>
+        </div>
+        <Card className="border-blue-200 bg-blue-50/50">
+          <CardContent className="p-6 sm:p-8">
+            <ol className="space-y-4">
+              <li className="flex items-start gap-3">
+                <span
+                  aria-hidden
+                  className="flex size-7 shrink-0 items-center justify-center rounded-full bg-blue-600 text-sm font-bold text-white"
+                >
+                  1
+                </span>
+                <div>
+                  <p className="font-semibold text-slate-900">Create a site</p>
+                  <p className="mt-0.5 text-sm text-slate-600">
+                    Sites are projects with plots, jobs, and a timeline.
+                  </p>
+                </div>
+              </li>
+              <li className="flex items-start gap-3">
+                <span
+                  aria-hidden
+                  className="flex size-7 shrink-0 items-center justify-center rounded-full bg-blue-300 text-sm font-bold text-white"
+                >
+                  2
+                </span>
+                <div>
+                  <p className="font-semibold text-slate-900">Add plots</p>
+                  <p className="mt-0.5 text-sm text-slate-600">
+                    Each plot represents a home or unit you&apos;re building.
+                  </p>
+                </div>
+              </li>
+              <li className="flex items-start gap-3">
+                <span
+                  aria-hidden
+                  className="flex size-7 shrink-0 items-center justify-center rounded-full bg-blue-200 text-sm font-bold text-blue-900"
+                >
+                  3
+                </span>
+                <div>
+                  <p className="font-semibold text-slate-900">
+                    Apply a template
+                  </p>
+                  <p className="mt-0.5 text-sm text-slate-600">
+                    Templates seed the standard build stages, durations,
+                    and materials — you can edit anything.
+                  </p>
+                </div>
+              </li>
+            </ol>
+            <div className="mt-6">
+              <Link
+                href="/sites?new=1"
+                className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-md shadow-blue-600/25 transition-all hover:shadow-lg"
+              >
+                <Building2 className="size-4" />
+                Create your first site
+              </Link>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-8">
       {/* Page Header */}
