@@ -28,6 +28,20 @@ export async function getUserSiteIds(
  * Build a Prisma `where` clause fragment to filter by site access.
  * Returns an empty object for admins (no filter), or { siteId: { in: [...] } } for others.
  * Use the `siteIdField` param when the field name differs (e.g. for nested relations).
+ *
+ * (May 2026 audit B-P1-37) DANGER: this is safe when spread into a
+ * top-level `where: { ...siteAccessFilter(...), other: stuff }`. It is
+ * UNSAFE inside an OR composition (`where: { OR: [siteAccessFilter, ...] }`)
+ * — the empty admin object spreads to "match everything" inside the OR
+ * and would grant access to records the user shouldn't see. Prefer the
+ * explicit pattern:
+ *   const accessibleSiteIds = await getUserSiteIds(userId, role);
+ *   where: {
+ *     ...(accessibleSiteIds !== null
+ *       ? { siteId: { in: accessibleSiteIds } }
+ *       : {}),
+ *   }
+ * which forces the caller to think about the OR vs AND placement.
  */
 export async function siteAccessFilter(
   userId: string,

@@ -57,8 +57,29 @@ export async function POST(
   const now = getServerCurrentDate(req);
   const results: Array<{ jobId: string; jobName: string; newStatus: string }> = [];
 
+  // (May 2026 audit B-P1-25) Sort the jobIds by (plotId, sortOrder) so
+  // an earlier job's auto-cascade lands BEFORE we evaluate a later
+  // sibling's lateness. Pre-fix the loop processed jobIds in whatever
+  // order the client supplied; if a downstream-late job's cascade ran
+  // first, its shifted positions then double-counted when the upstream
+  // job's cascade ran on the same plot. The cascade engine reads the
+  // current DB state each iteration so processing in plot order means
+  // the later-iteration sees the already-shifted (= correct) state.
+  const orderedJobs = await prisma.job.findMany({
+    where: { id: { in: jobIds } },
+    select: { id: true, plotId: true, sortOrder: true },
+  });
+  const orderedJobMap = new Map(orderedJobs.map((j) => [j.id, j]));
+  const sortedJobIds = [...jobIds].sort((a, b) => {
+    const ja = orderedJobMap.get(a);
+    const jb = orderedJobMap.get(b);
+    if (!ja || !jb) return 0;
+    if (ja.plotId !== jb.plotId) return ja.plotId.localeCompare(jb.plotId);
+    return ja.sortOrder - jb.sortOrder;
+  });
+
   // Process sequentially to respect Supabase connection limits
-  for (const jobId of jobIds) {
+  for (const jobId of sortedJobIds) {
     try {
       const job = await prisma.job.findUnique({
         where: { id: jobId },
