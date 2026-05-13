@@ -73,10 +73,23 @@ export function enforceOrderInvariants(
     leadTimeDays: patch.leadTimeDays ?? current.leadTimeDays ?? null,
   };
 
-  // (today is reserved for future invariants — e.g. "expectedDeliveryDate
-  // should not be in the past for an ORDERED order placed today" — but
-  // current invariants are purely relative between fields.)
-  void today;
+  // INV-3: when an order is being marked ORDERED today and the
+  // expectedDeliveryDate is in the past (e.g. left over from a
+  // legacy template apply, or shifted backward by an EXPAND_JOB
+  // path), pull it forward to today + leadTimeDays. Pre-fix this
+  // was documented as a future invariant but never implemented;
+  // EXPAND_JOB now relies on it to keep the order's delivery
+  // promise consistent after a status flip.
+  // (May 2026 audit B-P1-32 / B-P2-20 — `void today` removed.)
+  if (
+    patch.status === "ORDERED" &&
+    effective.expectedDeliveryDate &&
+    effective.expectedDeliveryDate < today
+  ) {
+    effective.expectedDeliveryDate = effective.leadTimeDays && effective.leadTimeDays > 0
+      ? addDays(today, effective.leadTimeDays)
+      : today;
+  }
 
   // INV-1: dateOfOrder <= expectedDeliveryDate
   // If both are set and the order is wrong, push expectedDeliveryDate

@@ -75,13 +75,20 @@ export async function GET(
 
     const allNotStarted = plot.jobs.every((j) => j.status === "NOT_STARTED");
 
+    // (May 2026 audit B-P2-19) RAG threshold re-tuned for working
+    // days. Pre-fix the heatmap kept the old 14-calendar-day cutoff
+    // even after #177 flipped maxOverdueDays to working days. 14 WD
+    // ≈ 3 weeks elapsed which is way past "red"; 10 WD ≈ 2 weeks is
+    // the right border. Amber covers 1-9 WD overdue.
+    const RED_WD_THRESHOLD = 10;
+
     if (totalJobs === 0 || allNotStarted) {
       ragStatus = "grey";
     } else if (completedJobs === totalJobs) {
       ragStatus = "green";
-    } else if (maxOverdueDays > 14 || (calcPercent < 50 && overdueJobCount > 0)) {
+    } else if (maxOverdueDays > RED_WD_THRESHOLD || (calcPercent < 50 && overdueJobCount > 0)) {
       ragStatus = "red";
-    } else if ((overdueJobCount > 0 && maxOverdueDays <= 14) || (calcPercent >= 50 && calcPercent < 90)) {
+    } else if ((overdueJobCount > 0 && maxOverdueDays <= RED_WD_THRESHOLD) || (calcPercent >= 50 && calcPercent < 90)) {
       ragStatus = "amber";
     } else if (overdueJobCount === 0 && calcPercent >= 90) {
       ragStatus = "green";
