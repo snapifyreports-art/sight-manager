@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { sendPushToAll } from "@/lib/push";
+import { sendPushToAll, sendPushToSiteAudience } from "@/lib/push";
 import { addDays } from "date-fns";
 import { getServerCurrentDate, getServerStartOfDay } from "@/lib/dev-date";
 import { checkCronAuth } from "@/lib/cron-auth";
@@ -157,14 +157,17 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  // Daily Brief notification — one per active site
+  // (#183) Daily Brief — one push per active site, scoped to the
+  // site's audience (assignee + accessible users minus mutes). Was
+  // sendPushToAll which spammed every tenant user with every site's
+  // brief regardless of relevance.
   const activeSites = await prisma.site.findMany({
     where: { status: "ACTIVE" },
     select: { id: true, name: true },
   });
   for (const site of activeSites) {
     notifications.push(
-      sendPushToAll("JOBS_STARTING_TODAY", {
+      sendPushToSiteAudience(site.id, "JOBS_STARTING_TODAY", {
         title: `Daily Brief — ${site.name}`,
         body: `Your daily brief for ${site.name} is ready`,
         url: `/daily-brief?site=${site.id}`,

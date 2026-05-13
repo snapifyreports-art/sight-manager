@@ -277,7 +277,7 @@ function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: boolean; on
                 router.push(`${pathname}?${params.toString()}`);
               }
             }}
-            className="w-full rounded-md border border-border/60 bg-background px-2 py-1.5 text-[12px] text-foreground shadow-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="w-full rounded-md border border-border/60 bg-background px-2.5 py-2 text-sm text-foreground shadow-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
           >
             <option value="">— All sites —</option>
             {sites.map((s) => (
@@ -348,7 +348,13 @@ function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: boolean; on
                           // view. Pre-fix: state was visible by colour only.
                           aria-current={isActive ? "page" : undefined}
                           className={cn(
-                            "flex items-center gap-1.5 rounded-md px-2 py-1 text-[12px] transition-colors",
+                            // (#185) Sub-tab links — bumped to py-2 +
+                            // text-[13px] so the touch target hits
+                            // ~36px tall on mobile (was ~25px, well
+                            // below the 44px minimum). The Manage Site
+                            // sub-tabs were the worst offender Keith
+                            // called out in the left-hand nav.
+                            "flex items-center gap-1.5 rounded-md px-2 py-2 text-[13px] transition-colors",
                             isActive
                               ? "font-medium text-blue-700"
                               : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"

@@ -97,31 +97,48 @@ export async function sendPushToSiteAudience(
 ) {
   configureWebPush();
 
+  // (#183) Default-include every user with access to the site.
+  // Previously this required users to explicitly "Watch" a site to
+  // receive any notifications — opt-in. Result: notifications
+  // silently never reached anyone who hadn't toggled Watch on. Now
+  // the WatchedSite row means MUTED instead of subscribed: presence
+  // of a row excludes that user; absence means subscribed.
+
   // 1. Site assignee
   const site = await prisma.site.findUnique({
     where: { id: siteId },
     select: { assignedToId: true },
   });
 
-  // 2. Watchers
-  const watchers = await prisma.watchedSite.findMany({
+  // 2. Every user with access to this site (UserSite join). This is
+  //    the new default audience — everyone with access gets pushed.
+  const accessRows = await prisma.userSite.findMany({
     where: { siteId },
     select: { userId: true },
   });
 
-  // 3. CEO + DIRECTOR
+  // 3. CEO + DIRECTOR — always included regardless of access table
+  //    membership, matching the legacy behaviour.
   const execs = await prisma.user.findMany({
     where: { role: { in: ["CEO", "DIRECTOR"] } },
     select: { id: true },
   });
 
+  // 4. Mutes — users who have explicitly opted OUT of this site's
+  //    notifications. Excluded below.
+  const muted = await prisma.watchedSite.findMany({
+    where: { siteId },
+    select: { userId: true },
+  });
+  const mutedIds = new Set(muted.map((m) => m.userId));
+
   const audience = Array.from(
     new Set(
       [
         site?.assignedToId,
-        ...watchers.map((w) => w.userId),
+        ...accessRows.map((a) => a.userId),
         ...execs.map((e) => e.id),
-      ].filter((id): id is string => !!id),
+      ].filter((id): id is string => !!id && !mutedIds.has(id)),
     ),
   );
   if (audience.length === 0) return;

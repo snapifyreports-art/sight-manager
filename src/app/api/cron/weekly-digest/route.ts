@@ -46,14 +46,15 @@ export async function GET(req: NextRequest) {
   const weekStart = subDays(todayStart, 7);
   const weekLabel = `${format(weekStart, "d MMM")}–${format(subDays(todayStart, 1), "d MMM")}`;
 
-  // Collect every user who has at least one watch or assignment.
-  // CEO/DIRECTOR with role-level access don't auto-subscribe — they
-  // pick their sites via the watch toggle the same as anyone else.
+  // (#183) Every user with at least one access row (UserSite) or
+  // assignment. Previously this required a watch row — opt-in. Post-
+  // flip, every user with site access gets the digest by default;
+  // muted sites (presence of WatchedSite row) are subtracted below.
   const users = await prisma.user.findMany({
     where: {
       email: { not: "" },
       OR: [
-        { watchedSites: { some: {} } },
+        { siteAccess: { some: { site: { status: { not: "COMPLETED" } } } } },
         { assignedSites: { some: { status: { not: "COMPLETED" } } } },
       ],
     },
@@ -61,12 +62,17 @@ export async function GET(req: NextRequest) {
       id: true,
       name: true,
       email: true,
-      watchedSites: {
+      siteAccess: {
+        where: { site: { status: { not: "COMPLETED" } } },
         select: { siteId: true },
       },
       assignedSites: {
         where: { status: { not: "COMPLETED" } },
         select: { id: true },
+      },
+      // WatchedSite rows now mean MUTED — subtract from the audience.
+      watchedSites: {
+        select: { siteId: true },
       },
     },
   });
@@ -76,13 +82,15 @@ export async function GET(req: NextRequest) {
   const failed: Array<{ userId: string; error: string }> = [];
 
   for (const u of users) {
-    // Union of watched + assigned site IDs — dedup.
+    // (#183) Default: subscribed to every accessible + assigned site.
+    // Subtract any WatchedSite rows (now meaning "muted").
+    const mutedIds = new Set(u.watchedSites.map((w) => w.siteId));
     const siteIds = Array.from(
       new Set([
-        ...u.watchedSites.map((w) => w.siteId),
+        ...u.siteAccess.map((a) => a.siteId),
         ...u.assignedSites.map((s) => s.id),
       ]),
-    );
+    ).filter((id) => !mutedIds.has(id));
     if (siteIds.length === 0) continue;
 
     // Fetch site names + per-site activity counts in parallel.

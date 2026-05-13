@@ -304,17 +304,16 @@ function StatsCards({ stats }: { stats: StatsData }) {
   );
 }
 
-// ---------- Watched Sites Panel ----------
+// ---------- Muted Sites Panel ----------
 //
-// (May 2026 audit follow-up to #152) Renders the sites the current
-// user has opted in to watching. Empty state coaches them to use the
-// Watch button on a site header. Each card links into the site so
-// the panel doubles as a personal-shortcuts panel.
+// (#183) Renders the sites the current user has explicitly MUTED
+// (post-Watch-to-Mute flip). Default is now "subscribed to every site
+// you have access to" — this panel surfaces only the exceptions, so
+// the user can unmute quickly if they over-muted.
 
 function WatchedSitesPanel({ sites }: { sites: WatchedSite[] }) {
   if (sites.length === 0) {
-    // Don't render empty state on dashboard — most managers won't
-    // start watching anything for weeks. Keep the dashboard calm.
+    // No mutes — dashboard stays calm.
     return null;
   }
   return (
@@ -322,17 +321,16 @@ function WatchedSitesPanel({ sites }: { sites: WatchedSite[] }) {
       <CardHeader className="pb-3">
         <div className="flex items-center gap-2">
           <Star
-            className="size-4 fill-amber-400 text-amber-500"
+            className="size-4 fill-slate-300 text-slate-500"
             aria-hidden="true"
           />
-          <CardTitle className="text-base">Sites you&apos;re watching</CardTitle>
+          <CardTitle className="text-base">Muted sites</CardTitle>
           <span className="text-sm font-normal text-muted-foreground">
             ({sites.length})
           </span>
         </div>
         <CardDescription className="text-xs">
-          Your personal radar. Use the Watch button on a site header to add
-          or remove.
+          Notifications are off for these sites. Click any to unmute.
         </CardDescription>
       </CardHeader>
       <CardContent className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
