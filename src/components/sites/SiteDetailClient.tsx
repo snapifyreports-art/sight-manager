@@ -913,7 +913,11 @@ export function SiteDetailClient({
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          {/* (#182) Action strip wraps on narrow viewports — was a
+              non-wrapping flex row that pushed buttons off-screen on
+              phones once Raise Snag + Edit + Watch + Add Plot were
+              all visible together. */}
+          <div className="flex flex-wrap items-center gap-2">
             {/* (May 2026 audit #152) Watch this site — per-user
                 notification opt-in. Star toggle that POST/DELETEs to
                 /api/sites/[id]/watch. */}
@@ -1784,7 +1788,7 @@ export function SiteDetailClient({
                       rows={3}
                     />
                   </div>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <div className="space-y-2">
                       <Label htmlFor="edit-location">Location</Label>
                       <Input

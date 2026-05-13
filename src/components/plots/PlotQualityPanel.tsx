@@ -419,7 +419,7 @@ function VariationsSection({ plotId }: { plotId: string }) {
                 placeholder="Customer / Designer / Site team"
               />
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
                 <Label htmlFor="v-cost">Cost delta (£)</Label>
                 <Input
@@ -761,7 +761,7 @@ function DrawScheduleSection({ plotId }: { plotId: string }) {
                 placeholder="e.g. DPC complete (30%)"
               />
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
                 <Label htmlFor="dr-amt">Amount (£) *</Label>
                 <Input

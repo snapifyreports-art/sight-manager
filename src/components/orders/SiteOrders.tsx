@@ -1027,8 +1027,10 @@ export function SiteOrders({ siteId }: SiteOrdersProps) {
                       </p>
                     ) : (
                       <div className="space-y-1.5">
-                        {/* Column headers */}
-                        <div className="grid grid-cols-[1fr_60px_60px_72px_20px] gap-1.5 px-0.5 text-[10px] font-medium text-muted-foreground">
+                        {/* (#182) Column headers — only on md+. On
+                            mobile each item is a labelled card so the
+                            headers would be redundant. */}
+                        <div className="hidden grid-cols-[1fr_60px_60px_72px_20px] gap-1.5 px-0.5 text-[10px] font-medium text-muted-foreground md:grid">
                           <span>Item</span>
                           <span>Qty/plot</span>
                           <span>Unit</span>
@@ -1036,63 +1038,93 @@ export function SiteOrders({ siteId }: SiteOrdersProps) {
                           <span />
                         </div>
                         {orderItems.map((item) => (
-                          <div key={item.id} className="grid grid-cols-[1fr_60px_60px_72px_20px] items-center gap-1.5">
-                            <Input
-                              placeholder="e.g. Facing bricks"
-                              value={item.name}
-                              onChange={(e) =>
-                                setOrderItems((prev) =>
-                                  prev.map((i) => i.id === item.id ? { ...i, name: e.target.value } : i)
-                                )
-                              }
-                              className="h-7 text-xs"
-                            />
-                            <Input
-                              type="number"
-                              min="0"
-                              step="any"
-                              placeholder="1"
-                              value={item.qtyPerPlot}
-                              onChange={(e) =>
-                                setOrderItems((prev) =>
-                                  prev.map((i) => i.id === item.id ? { ...i, qtyPerPlot: e.target.value } : i)
-                                )
-                              }
-                              className="h-7 text-xs"
-                            />
-                            <Input
-                              placeholder="no."
-                              value={item.unit}
-                              onChange={(e) =>
-                                setOrderItems((prev) =>
-                                  prev.map((i) => i.id === item.id ? { ...i, unit: e.target.value } : i)
-                                )
-                              }
-                              className="h-7 text-xs"
-                            />
-                            <div className="relative">
-                              <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[11px] text-muted-foreground">£</span>
+                          <div
+                            key={item.id}
+                            className="rounded-md border bg-slate-50/50 p-2 md:grid md:grid-cols-[1fr_60px_60px_72px_20px] md:items-center md:gap-1.5 md:border-0 md:bg-transparent md:p-0"
+                          >
+                            <div className="grid grid-cols-[auto_1fr] items-center gap-2 md:contents">
+                              <span className="text-[10px] font-medium text-muted-foreground md:hidden">
+                                Item
+                              </span>
+                              <Input
+                                placeholder="e.g. Facing bricks"
+                                value={item.name}
+                                onChange={(e) =>
+                                  setOrderItems((prev) =>
+                                    prev.map((i) =>
+                                      i.id === item.id ? { ...i, name: e.target.value } : i,
+                                    ),
+                                  )
+                                }
+                                className="h-7 text-xs"
+                              />
+                              <span className="text-[10px] font-medium text-muted-foreground md:hidden">
+                                Qty/plot
+                              </span>
                               <Input
                                 type="number"
                                 min="0"
                                 step="any"
-                                placeholder="0.00"
-                                value={item.unitCost}
+                                placeholder="1"
+                                value={item.qtyPerPlot}
                                 onChange={(e) =>
                                   setOrderItems((prev) =>
-                                    prev.map((i) => i.id === item.id ? { ...i, unitCost: e.target.value } : i)
+                                    prev.map((i) =>
+                                      i.id === item.id ? { ...i, qtyPerPlot: e.target.value } : i,
+                                    ),
                                   )
                                 }
-                                className="h-7 pl-5 text-xs"
+                                className="h-7 text-xs"
                               />
+                              <span className="text-[10px] font-medium text-muted-foreground md:hidden">
+                                Unit
+                              </span>
+                              <Input
+                                placeholder="no."
+                                value={item.unit}
+                                onChange={(e) =>
+                                  setOrderItems((prev) =>
+                                    prev.map((i) =>
+                                      i.id === item.id ? { ...i, unit: e.target.value } : i,
+                                    ),
+                                  )
+                                }
+                                className="h-7 text-xs"
+                              />
+                              <span className="text-[10px] font-medium text-muted-foreground md:hidden">
+                                Unit cost
+                              </span>
+                              <div className="relative">
+                                <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[11px] text-muted-foreground">£</span>
+                                <Input
+                                  type="number"
+                                  min="0"
+                                  step="any"
+                                  placeholder="0.00"
+                                  value={item.unitCost}
+                                  onChange={(e) =>
+                                    setOrderItems((prev) =>
+                                      prev.map((i) =>
+                                        i.id === item.id ? { ...i, unitCost: e.target.value } : i,
+                                      ),
+                                    )
+                                  }
+                                  className="h-7 pl-5 text-xs"
+                                />
+                              </div>
+                              {/* Delete button — full width on mobile,
+                                  icon-only on desktop. */}
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setOrderItems((prev) => prev.filter((i) => i.id !== item.id))
+                                }
+                                className="col-span-2 mt-1 inline-flex items-center justify-center gap-1 rounded-md border border-red-200 bg-white px-2 py-1 text-[11px] text-red-600 hover:bg-red-50 md:col-span-1 md:mt-0 md:border-0 md:bg-transparent md:px-0 md:py-0 md:text-muted-foreground md:hover:bg-transparent md:hover:text-red-500"
+                              >
+                                <Trash2 className="size-3.5" />
+                                <span className="md:hidden">Remove item</span>
+                              </button>
                             </div>
-                            <button
-                              type="button"
-                              onClick={() => setOrderItems((prev) => prev.filter((i) => i.id !== item.id))}
-                              className="flex items-center justify-center text-muted-foreground hover:text-red-500"
-                            >
-                              <Trash2 className="size-3.5" />
-                            </button>
                           </div>
                         ))}
                         {/* Per-plot total */}

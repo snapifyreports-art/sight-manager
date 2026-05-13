@@ -1061,7 +1061,7 @@ export function SnagDialog({
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
                 <label htmlFor="snag-location" className="text-xs font-medium">Location</label>
                 <Input
@@ -1130,7 +1130,7 @@ export function SnagDialog({
               </div>
             )}
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
                 <label htmlFor="snag-contractor" className="text-xs font-medium">Contractor</label>
                 <select
@@ -1172,7 +1172,7 @@ export function SnagDialog({
             </div>
 
             {isEditing && (
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div>
                   <label htmlFor="snag-status" className="text-xs font-medium">Status</label>
                   <select

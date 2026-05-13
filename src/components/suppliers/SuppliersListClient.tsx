@@ -202,7 +202,7 @@ export function SuppliersListClient({ suppliers: initial }: { suppliers: Supplie
                 placeholder="Supplier name"
               />
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
                 <label className="text-xs font-medium">Contact Name</label>
                 <Input
@@ -219,7 +219,7 @@ export function SuppliersListClient({ suppliers: initial }: { suppliers: Supplie
                 />
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
                 <label className="text-xs font-medium">Email</label>
                 <Input

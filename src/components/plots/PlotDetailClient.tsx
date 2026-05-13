@@ -229,7 +229,7 @@ function AddJobDialog({
           </div>
 
           <div className="space-y-1">
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="job-start-date">Start Date</Label>
                 <Input
@@ -1006,7 +1006,9 @@ export function PlotDetailClient({
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        {/* (#182) Action strip wraps on narrow viewports — Share /
+            Recalculate / Edit / Delete pushed off-screen on phones. */}
+        <div className="flex flex-wrap items-center gap-2">
           <Button
             variant="outline"
             size="sm"

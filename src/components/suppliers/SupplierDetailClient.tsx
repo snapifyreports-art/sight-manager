@@ -541,7 +541,7 @@ export function SupplierDetailClient({ supplier: initial }: { supplier: Supplier
                 placeholder="Material name"
               />
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
                 <label className="text-xs font-medium">Unit</label>
                 <Input
@@ -561,7 +561,7 @@ export function SupplierDetailClient({ supplier: initial }: { supplier: Supplier
                 />
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
                 <label className="text-xs font-medium">Category</label>
                 <Input
@@ -614,7 +614,7 @@ export function SupplierDetailClient({ supplier: initial }: { supplier: Supplier
                 onChange={(e) => setSupplierForm((f) => ({ ...f, name: e.target.value }))}
               />
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
                 <label className="text-xs font-medium">Contact Name</label>
                 <Input
@@ -630,7 +630,7 @@ export function SupplierDetailClient({ supplier: initial }: { supplier: Supplier
                 />
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
                 <label className="text-xs font-medium">Email</label>
                 <Input

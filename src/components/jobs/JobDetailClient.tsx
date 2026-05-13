@@ -760,7 +760,10 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          {/* (#182) Action strip wraps on narrow viewports — Status +
+              Start/Stop/Complete/Sign-Off/Delay buttons used to push
+              off-screen on phones when all visible together. */}
+          <div className="flex flex-wrap items-center gap-2">
             <JobStatusBadge status={job.status} size="md" />
             {job.status !== "IN_PROGRESS" && job.status !== "COMPLETED" && (
               <Button
