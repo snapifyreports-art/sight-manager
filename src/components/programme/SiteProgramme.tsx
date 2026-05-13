@@ -143,9 +143,20 @@ function shortDate(dateStr: string | null): string {
   return format(new Date(dateStr), "dd/MM");
 }
 
-function ApprovalDot({ approved }: { approved: boolean }) {
+function ApprovalDot({
+  approved,
+  label,
+}: {
+  approved: boolean;
+  /** (May 2026 audit UX-P0-5) Required for screen readers \u2014 pre-fix
+   *  the dot relied on green-vs-white colour alone to convey state.
+   *  Caller passes "Gas approval", "Electric approval", etc. */
+  label?: string;
+}) {
   return (
     <div
+      role="img"
+      aria-label={`${label ?? "Approval"}: ${approved ? "approved" : "pending"}`}
       className={`size-3.5 rounded-sm text-center text-[8px] font-bold leading-[14px] ${
         approved
           ? "bg-green-500 text-white"
@@ -1587,10 +1598,10 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                           {shortDate(plot.legalDate)}
                         </div>
                         <div className="flex w-[72px] items-center justify-center gap-1 px-1">
-                          <ApprovalDot approved={plot.approvalG} />
-                          <ApprovalDot approved={plot.approvalE} />
-                          <ApprovalDot approved={plot.approvalW} />
-                          <ApprovalDot approved={plot.approvalKCO} />
+                          <ApprovalDot approved={plot.approvalG} label="Gas approval" />
+                          <ApprovalDot approved={plot.approvalE} label="Electric approval" />
+                          <ApprovalDot approved={plot.approvalW} label="Water approval" />
+                          <ApprovalDot approved={plot.approvalKCO} label="KCO" />
                         </div>
                         <div className="w-[44px] px-1 font-medium">
                           {stageLabel}
@@ -1706,8 +1717,13 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                     to interact with. */}
                 {todayIndex >= 0 && (
                   <>
-                    {/* Semi-transparent highlight column behind today */}
+                    {/* Semi-transparent highlight column behind today.
+                        (May 2026 audit UX-P0-6) role+aria so screen
+                        readers announce "today" alongside the visual
+                        red highlight; previously colour-only. */}
                     <div
+                      role="img"
+                      aria-label="Today's column on the programme"
                       className="pointer-events-none absolute top-0 z-[5] bg-red-500/[0.06]"
                       style={{
                         left: todayIndex * cellWidth,
@@ -1717,6 +1733,7 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                     />
                     {/* Today label at top */}
                     <div
+                      aria-hidden="true"
                       className="pointer-events-none absolute z-20 -translate-x-1/2 rounded-b bg-red-500 px-1.5 py-0.5 text-[9px] font-bold leading-none text-white shadow-sm"
                       style={{
                         left: todayIndex * cellWidth + cellWidth / 2,
@@ -1725,8 +1742,10 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                     >
                       Today
                     </div>
-                    {/* Red vertical line */}
+                    {/* Red vertical line — aria-hidden because the column
+                        highlight above already conveys "today" to AT. */}
                     <div
+                      aria-hidden="true"
                       className="pointer-events-none absolute top-0 z-10 bg-red-500"
                       style={{
                         left: todayIndex * cellWidth + cellWidth / 2 - 1,
