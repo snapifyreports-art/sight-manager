@@ -18,23 +18,35 @@ export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
+  // (May 2026 audit O-P1) Pre-fix the form jumped to "Check your inbox"
+  // even when the fetch literally failed (offline, DNS, CORS) — the
+  // user thought a reset link was coming when nothing was sent. Now
+  // we surface a transient error and keep the form mounted so they
+  // can retry. The success path still keeps account-enumeration
+  // protection (same "matches an account" copy).
+  const [networkError, setNetworkError] = useState<string | null>(null);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
+    setNetworkError(null);
     try {
-      await fetch("/api/auth/request-reset", {
+      const res = await fetch("/api/auth/request-reset", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: email.trim() }),
       });
+      if (!res.ok) {
+        // Server returned non-2xx (shouldn't happen — endpoint is
+        // designed to always 200 — but be defensive).
+        setNetworkError("Something went wrong on our end. Please try again.");
+        return;
+      }
+      setSubmitted(true);
     } catch {
-      // The endpoint always succeeds from the client's perspective —
-      // a network failure is the only thing we should react to, and
-      // even then the user can just try again.
+      setNetworkError("Couldn't reach the server. Check your connection and try again.");
     } finally {
       setLoading(false);
-      setSubmitted(true);
     }
   }
 
@@ -71,6 +83,14 @@ export default function ForgotPasswordPage() {
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+            {networkError && (
+              <div
+                role="alert"
+                className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700"
+              >
+                {networkError}
+              </div>
+            )}
             <div className="flex flex-col gap-2">
               <Label htmlFor="email" className="text-[13px] font-medium text-slate-700">
                 Email
