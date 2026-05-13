@@ -135,7 +135,10 @@ function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: boolean; on
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const router = useRouter();
-  const currentTab = searchParams.get("tab") || "plots";
+  // (May 2026 audit F-P1-18) Default landing tab is "daily-brief" so
+  // the sidebar matches SiteDetailClient's default — site manager's
+  // first scan of the morning is "what needs my attention now".
+  const currentTab = searchParams.get("tab") || "daily-brief";
   const { data: session } = useSession();
 
   // Detect current site from URL

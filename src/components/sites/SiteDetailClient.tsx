@@ -540,15 +540,19 @@ export function SiteDetailClient({
   const [bulkStep, setBulkStep] = useState<"config" | "suppliers">("config");
 
   // Controlled tabs + overdue alerts (UX #6)
-  const [activeTab, setActiveTab] = useState(initialTab || "plots");
+  // (May 2026 audit F-P1-18) Default landing tab is "daily-brief" rather
+  // than "plots". The site manager's first question every morning is
+  // "what's the state today?" — Daily Brief answers that. Plots is
+  // useful but a step removed from operational reality.
+  const [activeTab, setActiveTab] = useState(initialTab || "daily-brief");
   const [visitedTabs, setVisitedTabs] = useState<Set<string>>(
-    new Set([initialTab || "plots"])
+    new Set([initialTab || "daily-brief"])
   );
   const [overdueCount, setOverdueCount] = useState(0);
 
   // Sync tab when navigating via sidebar links (prop changes on client-side nav)
   useEffect(() => {
-    const tab = initialTab || "plots";
+    const tab = initialTab || "daily-brief";
     setActiveTab(tab);
     setVisitedTabs((prev) => (prev.has(tab) ? prev : new Set(prev).add(tab)));
   }, [initialTab]);
