@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { format, parseISO } from "date-fns";
 import {
   HardHat,
@@ -18,12 +19,15 @@ import {
   Clock,
   CheckCircle2,
   PlayCircle,
+  Archive,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { JobStatusBadge, SnagStatusBadge, SnagPriorityBadge } from "@/components/shared/StatusBadge";
 import { LatenessSummary } from "@/components/lateness/LatenessSummary";
+import { useToast, fetchErrorMessage } from "@/components/ui/toast";
+import { useConfirmAction } from "@/hooks/useConfirmAction";
 
 interface Contact {
   id: string;
@@ -126,6 +130,43 @@ interface Scorecard {
 export function ContactDetailClient({ contact, jobs, snags, documents, orders }: Props) {
   const [activeTab, setActiveTab] = useState<"jobs" | "snags" | "documents" | "orders">("jobs");
   const [scorecard, setScorecard] = useState<Scorecard | null>(null);
+  const [archiving, setArchiving] = useState(false);
+  const toast = useToast();
+  const router = useRouter();
+  // (May 2026 audit S-P0) Archive button on detail page mirrors the
+  // list-page action — surfaces soft-delete anywhere the contact is
+  // displayed, not just the master list. Same confirm flow + same API.
+  const { confirmAction, dialogs: confirmDialogs } = useConfirmAction();
+
+  function handleArchive() {
+    confirmAction({
+      title: "Archive Contractor",
+      description: (
+        <>
+          Archive{" "}
+          <span className="font-medium text-foreground">{contact.name}</span>?
+          They&apos;ll disappear from pickers but every job they did,
+          snag they raised, and document they uploaded stays attached
+          to them. You can restore later from the contractors list.
+        </>
+      ),
+      confirmLabel: "Archive",
+      onConfirm: async () => {
+        setArchiving(true);
+        try {
+          const res = await fetch(`/api/contacts/${contact.id}`, { method: "DELETE" });
+          if (!res.ok) {
+            throw new Error(await fetchErrorMessage(res, "Failed to archive contractor"));
+          }
+          toast.success(`${contact.name} archived`);
+          router.push("/contacts");
+          router.refresh();
+        } finally {
+          setArchiving(false);
+        }
+      },
+    });
+  }
 
   // (May 2026 audit #179) Pull the scorecard on mount. Best-effort —
   // if the API errors we just don't render the panel.
@@ -201,6 +242,19 @@ export function ContactDetailClient({ contact, jobs, snags, documents, orders }:
                 </span>
               )}
             </div>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleArchive}
+              disabled={archiving}
+              className="border-amber-200 text-amber-700 hover:bg-amber-50"
+              title="Archive (soft-delete — restorable from contacts list)"
+            >
+              <Archive className="size-3.5" aria-hidden />
+              <span className="ml-1 hidden sm:inline">{archiving ? "Archiving..." : "Archive"}</span>
+            </Button>
           </div>
         </div>
 
@@ -513,6 +567,8 @@ export function ContactDetailClient({ contact, jobs, snags, documents, orders }:
           </CardContent>
         </Card>
       )}
+      {/* Confirm-archive dialog */}
+      {confirmDialogs}
     </div>
   );
 }

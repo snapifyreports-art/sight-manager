@@ -18,6 +18,7 @@ import {
   Check,
   X,
   Loader2,
+  Archive,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -118,6 +119,42 @@ export function SupplierDetailClient({ supplier: initial }: { supplier: Supplier
   );
 
   const categories = [...new Set(items.map((i) => i.category).filter(Boolean))] as string[];
+
+  // ── Supplier Archive (soft-delete) ──
+  // (May 2026 audit S-P0) Surfaces the soft-archive action on the
+  // detail page — was list-only. DELETE on the API stamps archivedAt
+  // so all historical orders / pricelist stay attributed; the row
+  // just disappears from pickers and the active list.
+  const [archiving, setArchiving] = useState(false);
+  function handleArchive() {
+    confirmAction({
+      title: "Archive Supplier",
+      description: (
+        <>
+          Archive{" "}
+          <span className="font-medium text-foreground">{supplier.name}</span>?
+          They&apos;ll disappear from pickers but every order placed
+          and every pricelist item stays attached to them. You can
+          restore later from the suppliers list.
+        </>
+      ),
+      confirmLabel: "Archive",
+      onConfirm: async () => {
+        setArchiving(true);
+        try {
+          const res = await fetch(`/api/suppliers/${supplier.id}`, { method: "DELETE" });
+          if (!res.ok) {
+            throw new Error(await fetchErrorMessage(res, "Failed to archive supplier"));
+          }
+          showToast(`${supplier.name} archived`);
+          router.push("/suppliers");
+          router.refresh();
+        } finally {
+          setArchiving(false);
+        }
+      },
+    });
+  }
 
   // ── Supplier Edit ──
   const handleUpdateSupplier = async () => {
@@ -310,9 +347,22 @@ export function SupplierDetailClient({ supplier: initial }: { supplier: Supplier
             )}
           </div>
         </div>
-        <Button variant="outline" size="sm" onClick={() => setEditSupplierOpen(true)}>
-          <Pencil className="mr-1 size-3" /> Edit
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => setEditSupplierOpen(true)}>
+            <Pencil className="mr-1 size-3" /> Edit
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleArchive}
+            disabled={archiving}
+            className="border-amber-200 text-amber-700 hover:bg-amber-50"
+            title="Archive (soft-delete — restorable from suppliers list)"
+          >
+            <Archive className="mr-1 size-3" aria-hidden />
+            {archiving ? "Archiving..." : "Archive"}
+          </Button>
+        </div>
       </div>
 
       {/* Stats row */}

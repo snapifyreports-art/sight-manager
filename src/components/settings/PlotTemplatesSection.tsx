@@ -316,24 +316,28 @@ export function PlotTemplatesSection({
     }
   }
 
+  // (May 2026 audit S-P0) DELETE is now soft-archive — the route
+  // stamps `archivedAt` instead of dropping the row so plots already
+  // built from this template keep their provenance.
   function handleOpenDelete(templateId: string, templateName: string) {
     confirmAction({
-      title: "Delete Template",
+      title: "Archive Template",
       description: (
         <>
-          Delete <span className="font-medium text-foreground">{templateName}</span>?
-          This will permanently delete this template and all its jobs and orders.
-          This action cannot be undone.
+          Archive <span className="font-medium text-foreground">{templateName}</span>?
+          It will disappear from the apply-to-plot picker but every plot
+          already built from this template keeps its job structure and
+          template provenance. You can restore later.
         </>
       ),
-      confirmLabel: "Delete Template",
+      confirmLabel: "Archive",
       onConfirm: async () => {
         const res = await fetch(`/api/plot-templates/${templateId}`, { method: "DELETE" });
         if (!res.ok) {
-          throw new Error(await fetchErrorMessage(res, "Failed to delete template"));
+          throw new Error(await fetchErrorMessage(res, "Failed to archive template"));
         }
         setTemplates((prev) => prev.filter((t) => t.id !== templateId));
-        toast.success(`${templateName} deleted`);
+        toast.success(`${templateName} archived`);
       },
     });
   }
@@ -735,9 +739,9 @@ export function PlotTemplatesSection({
                           e.stopPropagation();
                           handleOpenDelete(template.id, template.name);
                         }}
-                        className="flex size-8 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-red-50 hover:text-red-600 sm:size-7"
-                        title="Delete template"
-                        aria-label="Delete template"
+                        className="flex size-8 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-amber-50 hover:text-amber-600 sm:size-7"
+                        title="Archive template (soft-delete — restorable)"
+                        aria-label="Archive template"
                       >
                         <Trash2 className="size-4" />
                       </button>
