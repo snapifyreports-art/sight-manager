@@ -50,7 +50,11 @@ export async function GET(
           endDate: true,
           weatherAffected: true,
           description: true,
-          plot: { select: { plotNumber: true, name: true } },
+          // (May 2026 audit D-P2) Include plot.id so the UI can filter
+          // by stable plotId rather than the plotNumber string match
+          // (which collides when two plots on different sites share
+          // the same number after a re-numbering).
+          plot: { select: { id: true, plotNumber: true, name: true } },
           assignedTo: { select: { name: true } },
           contractors: {
             include: {

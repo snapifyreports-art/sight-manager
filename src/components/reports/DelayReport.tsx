@@ -44,7 +44,10 @@ interface DelayedJob {
   isWeatherExcused: boolean;
   weatherReasonType: "RAIN" | "TEMPERATURE" | null;
   causes: string[];
-  plot: { plotNumber: string | null; name: string };
+  // (May 2026 audit D-P2) plot.id added so filter can match on stable
+  // plotId rather than the previous plotNumber string match (which
+  // collided when two plots on different sites shared a number).
+  plot: { id: string; plotNumber: string | null; name: string };
   assignedTo: string | null;
   contractor: string | null;
   lateOrders: Array<{
@@ -236,9 +239,11 @@ export function DelayReport({ siteId }: DelayReportProps) {
 
   if (!data) return null;
 
-  // Apply plot filter (by plot number since plot.id not available here)
+  // (May 2026 audit D-P2) Filter by stable plot.id. Pre-fix used
+  // `plotNumber || name` string match which collided when two plots
+  // across sites shared a re-numbered identifier.
   const filterByPlot = (job: DelayedJob) =>
-    selectedPlots.size === 0 || selectedPlots.has(job.plot?.plotNumber || job.plot?.name || "");
+    selectedPlots.size === 0 || (job.plot && selectedPlots.has(job.plot.id));
 
   const s = data.summary;
   const filteredJobs = data.delayedJobs.filter(filterByPlot);
@@ -317,16 +322,18 @@ export function DelayReport({ siteId }: DelayReportProps) {
             All
           </button>
           {plots.map((p) => {
-            const key = p.plotNumber || p.name;
+            // (May 2026 audit D-P2) Filter keyed by stable plotId
+            // rather than plotNumber/name string. Selection survives
+            // re-numbering and never collides cross-site.
             return (
               <button
                 key={p.id}
                 onClick={() => setSelectedPlots((prev) => {
                   const next = new Set(prev);
-                  if (next.has(key)) next.delete(key); else next.add(key);
+                  if (next.has(p.id)) next.delete(p.id); else next.add(p.id);
                   return next;
                 })}
-                className={`rounded-full px-2.5 py-1 text-[10px] font-medium transition-colors ${selectedPlots.has(key) ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}
+                className={`rounded-full px-2.5 py-1 text-[10px] font-medium transition-colors ${selectedPlots.has(p.id) ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}
               >
                 {p.plotNumber ? `P${p.plotNumber}` : p.name}
               </button>
