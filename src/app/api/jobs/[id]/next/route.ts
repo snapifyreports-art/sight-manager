@@ -2,7 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { calculateCascade } from "@/lib/cascade";
-import { differenceInDays } from "date-fns";
+import { differenceInWorkingDays } from "@/lib/working-days";
+
+// (May 2026 audit B-P1-2) Cascade engine uses working-day arithmetic
+// internally — using calendar-days here was creating false-positive
+// "cascade needed" branches when the actualEnd was within the same
+// working week as the planned end but the dates straddled a weekend.
 
 export const dynamic = "force-dynamic";
 
@@ -117,7 +122,7 @@ export async function GET(
   };
 
   if (job.actualEndDate && job.endDate) {
-    const deltaDays = differenceInDays(job.actualEndDate, job.endDate);
+    const deltaDays = differenceInWorkingDays(job.actualEndDate, job.endDate);
     if (deltaDays !== 0) {
       const allOrders = await prisma.materialOrder.findMany({
         where: { jobId: { in: allPlotJobs.map((j) => j.id) } },

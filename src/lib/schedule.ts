@@ -1,4 +1,13 @@
-import { differenceInCalendarDays } from "date-fns";
+import { differenceInWorkingDays } from "./working-days";
+
+// (May 2026 audit B-P1-1) `getPlotScheduleStatus` used to call
+// `differenceInCalendarDays` with a 3-day threshold. A Friday→Monday
+// shift is 3 calendar days but ZERO working days — the plot read as
+// "behind" when no working time was actually lost. This helper feeds
+// the sidebar pills, plot list status chips, and the Programme view's
+// status pill, so the noise from weekend-straddling shifts was very
+// visible. Routing through the working-days SSOT matches the rest
+// of the app's calibration.
 
 export type ScheduleStatus =
   | "ahead"
@@ -69,7 +78,9 @@ export function getPlotScheduleStatus(
 
   const orig = new Date(current.originalStartDate as string);
   const curr = new Date(current.startDate as string);
-  const days = differenceInCalendarDays(orig, curr); // positive = curr is earlier = ahead
+  // Working-day deviation. Sign convention preserved: positive = curr
+  // is earlier (i.e. moved ahead of the original).
+  const days = differenceInWorkingDays(orig, curr);
 
   if (days > THRESHOLD_DAYS) return { status: "ahead", daysDeviation: days };
   if (days < -THRESHOLD_DAYS) return { status: "behind", daysDeviation: days };

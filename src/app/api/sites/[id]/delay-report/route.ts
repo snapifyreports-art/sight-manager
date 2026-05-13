@@ -1,9 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { differenceInDays } from "date-fns";
 import { getServerCurrentDate } from "@/lib/dev-date";
 import { canAccessSite } from "@/lib/site-access";
+import { differenceInWorkingDays } from "@/lib/working-days";
+
+// (May 2026 audit B-P1-4) `daysOverdue` / `daysLate` switched from
+// `differenceInWorkingDays` (calendar) to `differenceInWorkingDays`. The
+// view consumer pairs these alongside the LatenessSummary headline
+// which is working-day — same job was reporting different "days
+// late" counts in different cells of the same report.
 
 export const dynamic = "force-dynamic";
 
@@ -148,7 +154,7 @@ export async function GET(
 
   // Calculate delay details per job
   const delayedJobs = overdueJobs.map((job) => {
-    const daysOverdue = job.endDate ? differenceInDays(today, job.endDate) : 0;
+    const daysOverdue = job.endDate ? differenceInWorkingDays(today, job.endDate) : 0;
 
     // Count weather impact days overlapping this job's scheduled period
     const jobRainDays = job.startDate && job.endDate
@@ -264,7 +270,7 @@ export async function GET(
           expectedDate: o.expectedDeliveryDate?.toISOString() ?? null,
           deliveredDate: o.deliveredDate?.toISOString() ?? null,
           daysLate: o.expectedDeliveryDate
-            ? differenceInDays(
+            ? differenceInWorkingDays(
                 o.deliveredDate ? new Date(o.deliveredDate) : today,
                 new Date(o.expectedDeliveryDate)
               )
@@ -282,7 +288,7 @@ export async function GET(
       plotNumber: j.plot.plotNumber,
       scheduledEnd: j.endDate!.toISOString(),
       actualEnd: j.actualEndDate!.toISOString(),
-      daysLate: differenceInDays(j.actualEndDate!, j.endDate!),
+      daysLate: differenceInWorkingDays(j.actualEndDate!, j.endDate!),
     }));
 
   const weatherExcusedJobs = delayedJobs.filter((j) => j.isWeatherExcused);
@@ -312,7 +318,7 @@ export async function GET(
       job: d.job?.name ?? "",
       plot: d.job?.plot ?? { plotNumber: null, name: "" },
       daysOverdue: d.expectedDeliveryDate
-        ? differenceInDays(today, new Date(d.expectedDeliveryDate))
+        ? differenceInWorkingDays(today, new Date(d.expectedDeliveryDate))
         : 0,
     })),
     completedLateTrend,

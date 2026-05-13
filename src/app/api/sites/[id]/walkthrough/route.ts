@@ -2,8 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getServerCurrentDate } from "@/lib/dev-date";
-import { differenceInCalendarDays } from "date-fns";
 import { canAccessSite } from "@/lib/site-access";
+import { differenceInWorkingDays } from "@/lib/working-days";
+
+// (May 2026 audit B-P1-6) Walkthrough status copy switched from
+// calendar-days to working-days arithmetic for the "N days behind"
+// / "N days ahead" copy. Matches the rest of the app.
 
 export const dynamic = "force-dynamic";
 
@@ -134,7 +138,7 @@ export async function GET(
       scheduleStatus = "complete";
     } else if (currentJob) {
       if (currentJob.status === "IN_PROGRESS" && currentJob.endDate) {
-        const delta = differenceInCalendarDays(today, currentJob.endDate);
+        const delta = differenceInWorkingDays(today, currentJob.endDate);
         if (delta > 2) {
           scheduleStatus = "behind";
           scheduleDays = delta;
@@ -145,7 +149,7 @@ export async function GET(
           scheduleStatus = "on_track";
         }
       } else if (currentJob.status === "NOT_STARTED" && currentJob.startDate) {
-        const delta = differenceInCalendarDays(today, currentJob.startDate);
+        const delta = differenceInWorkingDays(today, currentJob.startDate);
         if (delta > 2) {
           scheduleStatus = "behind";
           scheduleDays = delta;

@@ -1,10 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { differenceInDays } from "date-fns";
 import { getServerCurrentDate } from "@/lib/dev-date";
 import { getUserSiteIds, canAccessSite } from "@/lib/site-access";
 import { isJobEndOverdue } from "@/lib/lateness";
+import { differenceInWorkingDays } from "@/lib/working-days";
+
+// (May 2026 audit B-P1-3) All duration / delay / lead-time calculations
+// below switched from `differenceInWorkingDays` (calendar) to
+// `differenceInWorkingDays`. The whole app is calibrated in working
+// days; the analytics report was reporting systematically inflated
+// numbers for any range that spanned weekends ("planned 7 days, actual
+// 10 days" when the actual delta was 7 working days = same).
 
 export const dynamic = "force-dynamic";
 
@@ -208,7 +215,7 @@ export async function GET(req: NextRequest) {
 
   for (const job of jobs) {
     if (!job.startDate || !job.endDate) continue;
-    const plannedDays = differenceInDays(
+    const plannedDays = differenceInWorkingDays(
       new Date(job.endDate),
       new Date(job.startDate)
     );
@@ -222,7 +229,7 @@ export async function GET(req: NextRequest) {
     entry.count++;
 
     if (job.actualStartDate && job.actualEndDate) {
-      const actualDays = differenceInDays(
+      const actualDays = differenceInWorkingDays(
         new Date(job.actualEndDate),
         new Date(job.actualStartDate)
       );
@@ -280,7 +287,7 @@ export async function GET(req: NextRequest) {
     if (j.status === "COMPLETED") {
       entry.completedJobs++;
       if (j.endDate && j.actualEndDate) {
-        const delay = differenceInDays(
+        const delay = differenceInWorkingDays(
           new Date(j.actualEndDate),
           new Date(j.endDate)
         );
@@ -354,14 +361,14 @@ export async function GET(req: NextRequest) {
     if (order.status === "DELIVERED" && order.deliveredDate) {
       totalDeliveries++;
       if (order.expectedDeliveryDate) {
-        const deliveryDelay = differenceInDays(
+        const deliveryDelay = differenceInWorkingDays(
           new Date(order.deliveredDate),
           new Date(order.expectedDeliveryDate)
         );
         if (deliveryDelay <= 0) onTimeDeliveries++;
       }
       if (order.dateOfOrder) {
-        const lt = differenceInDays(
+        const lt = differenceInWorkingDays(
           new Date(order.deliveredDate),
           new Date(order.dateOfOrder)
         );

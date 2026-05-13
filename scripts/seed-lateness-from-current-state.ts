@@ -2,9 +2,17 @@
  * (#191) One-shot: run the lateness scanner logic locally against
  * prod DB to backfill LatenessEvent rows for everything currently
  * late. Same logic as /api/cron/lateness but runnable without HTTP.
+ *
+ * (May 2026 audit B-P1-7) Previously the `daysLate` calculation here
+ * used calendar days (`Math.floor((today - date) / 86400000)`) while
+ * the cron used working days. Running this script against a DB that
+ * already had cron-generated rows would overwrite with calendar-day
+ * values via the upsert path — inflated daysLate. Aligned to working
+ * days so the seed + cron are interchangeable.
  */
 import { PrismaClient } from "@prisma/client";
 import { openOrUpdateLateness } from "../src/lib/lateness-event";
+import { differenceInWorkingDays } from "../src/lib/working-days";
 
 const prisma = new PrismaClient();
 
@@ -38,7 +46,7 @@ async function main() {
       const wentLateOn = new Date(j.endDate);
       wentLateOn.setHours(0, 0, 0, 0);
       wentLateOn.setDate(wentLateOn.getDate() + 1);
-      const days = Math.max(1, Math.floor((today.getTime() - j.endDate.getTime()) / 86400000));
+      const days = Math.max(1, differenceInWorkingDays(today, j.endDate));
       const r = await openOrUpdateLateness(prisma, {
         kind: "JOB_END_OVERDUE", targetType: "job", targetId: j.id,
         siteId: j.plot.siteId, plotId: j.plotId, jobId: j.id,
@@ -50,7 +58,7 @@ async function main() {
       const wentLateOn = new Date(j.startDate);
       wentLateOn.setHours(0, 0, 0, 0);
       wentLateOn.setDate(wentLateOn.getDate() + 1);
-      const days = Math.max(1, Math.floor((today.getTime() - j.startDate.getTime()) / 86400000));
+      const days = Math.max(1, differenceInWorkingDays(today, j.startDate));
       const r = await openOrUpdateLateness(prisma, {
         kind: "JOB_START_OVERDUE", targetType: "job", targetId: j.id,
         siteId: j.plot.siteId, plotId: j.plotId, jobId: j.id,
@@ -83,7 +91,7 @@ async function main() {
       const wentLateOn = new Date(o.expectedDeliveryDate);
       wentLateOn.setHours(0, 0, 0, 0);
       wentLateOn.setDate(wentLateOn.getDate() + 1);
-      const days = Math.max(1, Math.floor((today.getTime() - o.expectedDeliveryDate.getTime()) / 86400000));
+      const days = Math.max(1, differenceInWorkingDays(today, o.expectedDeliveryDate));
       const r = await openOrUpdateLateness(prisma, {
         kind: "ORDER_DELIVERY_OVERDUE", targetType: "order", targetId: o.id,
         siteId, plotId, jobId: o.jobId ?? null, orderId: o.id,
@@ -96,7 +104,7 @@ async function main() {
       const wentLateOn = new Date(o.dateOfOrder);
       wentLateOn.setHours(0, 0, 0, 0);
       wentLateOn.setDate(wentLateOn.getDate() + 1);
-      const days = Math.max(1, Math.floor((today.getTime() - o.dateOfOrder.getTime()) / 86400000));
+      const days = Math.max(1, differenceInWorkingDays(today, o.dateOfOrder));
       const r = await openOrUpdateLateness(prisma, {
         kind: "ORDER_SEND_OVERDUE", targetType: "order", targetId: o.id,
         siteId, plotId, jobId: o.jobId ?? null, orderId: o.id,
