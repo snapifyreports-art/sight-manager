@@ -113,7 +113,7 @@ export default async function ContractorSharePage({
   const nextJobs = jobs.filter((j) => j.status === "NOT_STARTED");
   const completedJobs = jobs.filter((j) => j.status === "COMPLETED");
 
-  const openSnags = await prisma.snag.findMany({
+  const openSnagsRaw = await prisma.snag.findMany({
     where: { contactId, plot: { siteId }, status: { in: ["OPEN", "IN_PROGRESS"] } },
     select: {
       id: true, description: true, status: true, priority: true, location: true, notes: true,
@@ -121,6 +121,22 @@ export default async function ContractorSharePage({
       photos: { select: { id: true, url: true, tag: true }, orderBy: { createdAt: "asc" } },
     },
     orderBy: [{ priority: "desc" }, { createdAt: "asc" }],
+  });
+  // (May 2026 audit O-P0) The single `Snag.notes` text column is
+  // append-only — both admin notes and contractor-via-link replies
+  // accumulate in the same field. Pre-fix the contractor portal
+  // rendered the WHOLE field, leaking internal admin notes like
+  // "third time this contractor's missed it" to the contractor. Now
+  // we filter to only the contractor-prefixed lines server-side
+  // before the data ever reaches the public page. Schema fix
+  // (separate internalNotes / publicNotes columns) is tracked for a
+  // future sprint — this is the lower-risk in-flight mitigation.
+  const openSnags = openSnagsRaw.map((s) => {
+    if (!s.notes) return s;
+    const contractorLines = s.notes
+      .split("\n")
+      .filter((line) => /^\[[^\]]+\]\s+Contractor notes/i.test(line));
+    return { ...s, notes: contractorLines.length > 0 ? contractorLines.join("\n") : null };
   });
 
   // Contractor-scoped documents (RAMS, method statements) — visible here
