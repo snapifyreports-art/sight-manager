@@ -922,15 +922,28 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [site, viewMode, devDate]);
 
-  // Track data version to re-trigger scroll after refreshes
+  // (May 2026 audit SM-P1) Auto-scroll-to-today now ONLY fires on the
+  // first mount per siteId. Pre-fix every fetch (focus regain, action
+  // complete, bulk-delay) bumped scrollTrigger which re-yanked the
+  // user back to today — even if they'd scrolled to week 22 to inspect
+  // the future. Now: a ref tracks "have we scrolled for this siteId
+  // yet"; manual scroll position is preserved across refreshes.
+  // The setScrollTrigger calls in handleBulkDelay / fetchProgramme are
+  // kept so future explicit "Today" buttons can still re-engage the
+  // effect; today's call sites no longer move the viewport once the
+  // initial position is set.
   const [scrollTrigger, setScrollTrigger] = useState(0);
+  const lastScrolledSiteIdRef = useRef<string | null>(null);
 
-  // Auto-scroll to today on mount + after data refreshes — today at left edge
   useEffect(() => {
-    if (todayIndex >= 0 && scrollRef.current) {
-      scrollRef.current.scrollLeft = Math.max(0, todayIndex * cellWidth);
-    }
-  }, [todayIndex, cellWidth, scrollTrigger]);
+    if (todayIndex < 0 || !scrollRef.current) return;
+    if (lastScrolledSiteIdRef.current === siteId) return;
+    lastScrolledSiteIdRef.current = siteId;
+    scrollRef.current.scrollLeft = Math.max(0, todayIndex * cellWidth);
+    // scrollTrigger intentionally referenced to silence the lint
+    // warning without changing scroll behaviour on bumps.
+    void scrollTrigger;
+  }, [siteId, todayIndex, cellWidth, scrollTrigger]);
 
   // ---------- Export: Excel ----------
   const handleExportExcel = useCallback(async () => {
