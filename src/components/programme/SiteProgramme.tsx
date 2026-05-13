@@ -45,229 +45,35 @@ const LEFT_PANEL_EXPANDED = 520;
 // Collapsed: just Plot (52px)
 const LEFT_PANEL_COLLAPSED = 52;
 
-// ---------- Types ----------
+// (May 2026 sprint 7b) Type definitions extracted to
+// `./programme-modules/types.ts`.
+import type {
+  ProgrammeJob,
+  ProgrammePlot,
+  ProgrammeSite,
+  WeatherDay,
+} from "./programme-modules/types";
 
-interface ProgrammeOrder {
-  id: string;
-  dateOfOrder: string;
-  expectedDeliveryDate: string | null;
-  leadTimeDays: number | null;
-  status: string;
-  supplier: { name: string };
-}
+// (May 2026 sprint 7b) WEATHER_ROW_HEIGHT + weatherEmoji extracted
+// to `./programme-modules/`. See helpers.ts.
+import { WEATHER_ROW_HEIGHT } from "./programme-modules/types";
+import { weatherEmoji } from "./programme-modules/helpers";
 
-interface ProgrammeJob {
-  id: string;
-  name: string;
-  status: string;
-  stageCode: string | null;
-  startDate: string | null;
-  endDate: string | null;
-  originalStartDate?: string | null;
-  originalEndDate?: string | null;
-  actualStartDate?: string | null;
-  actualEndDate?: string | null;
-  sortOrder: number;
-  weatherAffected?: boolean;
-  parentId: string | null;
-  parentStage: string | null;
-  orders?: ProgrammeOrder[];
-  _count?: { photos: number; actions: number };
-  // For synthetic parent jobs: all calendar positions where dots should appear
-  // (one per child with photos/notes — keeps Jobs and Sub-Jobs views consistent)
-  _dotStartDates?: string[];
-}
+// (May 2026 sprint 7b) Helpers + ApprovalDot extracted to
+// `./programme-modules/`. See helpers.ts + ApprovalDot.tsx.
+import { getWeekKey, shortDate } from "./programme-modules/helpers";
+import { ApprovalDot } from "./programme-modules/ApprovalDot";
 
-interface ProgrammePlot {
-  id: string;
-  name: string;
-  plotNumber: string | null;
-  houseType: string | null;
-  reservationType: string | null;
-  reservationDate: string | null;
-  exchangeDate: string | null;
-  legalDate: string | null;
-  approvalG: boolean;
-  approvalE: boolean;
-  approvalW: boolean;
-  approvalKCO: boolean;
-  buildCompletePercent: number;
-  // Source template + variant captured at apply time. Surfaced in the
-  // expanded left panel "House" column so it's clear which template /
-  // variant a plot came from. SetNull on relation, so either may be
-  // null if the source was deleted (or for manually-created plots).
-  sourceTemplate: { id: string; name: string } | null;
-  sourceVariant: { id: string; name: string } | null;
-  jobs: ProgrammeJob[];
-}
+// (May 2026 sprint 7b) Export helpers extracted to
+// `./programme-modules/helpers.ts`.
+import {
+  getJobStageForCell,
+  getActiveStageLabel,
+  hexToRgb,
+  getPlotStatus,
+} from "./programme-modules/helpers";
 
-interface ProgrammeSite {
-  id: string;
-  name: string;
-  postcode: string | null;
-  rainedOffDays?: { date: string; type: "RAIN" | "TEMPERATURE"; note?: string | null }[];
-  plots: ProgrammePlot[];
-}
 
-interface WeatherDay {
-  date: string;
-  category: string;
-  tempMax: number;
-  tempMin: number;
-}
-
-const WEATHER_ROW_HEIGHT = 22;
-
-function weatherEmoji(category: string): string {
-  switch (category) {
-    case "clear": return "\u2600\uFE0F";
-    case "partly_cloudy": return "\u26C5";
-    case "cloudy": return "\u2601\uFE0F";
-    case "fog": return "\uD83C\uDF2B\uFE0F";
-    case "rain": return "\uD83C\uDF27\uFE0F";
-    case "snow": return "\uD83C\uDF28\uFE0F";
-    case "thunder": return "\u26C8\uFE0F";
-    default: return "\u2601\uFE0F";
-  }
-}
-
-// ---------- Helpers ----------
-
-function getWeekKey(date: Date): string {
-  const ws = startOfWeek(date, { weekStartsOn: 1 });
-  return format(ws, "yyyy-MM-dd");
-}
-
-function shortDate(dateStr: string | null): string {
-  if (!dateStr) return "\u2014";
-  return format(new Date(dateStr), "dd/MM");
-}
-
-function ApprovalDot({
-  approved,
-  label,
-}: {
-  approved: boolean;
-  /** (May 2026 audit UX-P0-5) Required for screen readers \u2014 pre-fix
-   *  the dot relied on green-vs-white colour alone to convey state.
-   *  Caller passes "Gas approval", "Electric approval", etc. */
-  label?: string;
-}) {
-  return (
-    <div
-      role="img"
-      aria-label={`${label ?? "Approval"}: ${approved ? "approved" : "pending"}`}
-      className={`flex size-3.5 items-center justify-center rounded-sm ${
-        approved
-          ? "bg-green-500 text-white"
-          : "border border-slate-300 bg-white"
-      }`}
-    >
-      {/* (May 2026 audit UX-P2) Vector check at 10px renders crisply
-          at any zoom. Pre-fix this used a literal "\u2713" character at
-          text-[8px] \u2014 below the 9px font-hinting floor, easy to mis-
-          render on retina + Windows systems where 8px characters
-          collapse to a single pixel. */}
-      {approved && <Check className="size-2.5" aria-hidden />}
-    </div>
-  );
-}
-
-// ---------- Export helpers ----------
-
-// Status priority for picking a "dominant" job when multiple overlap
-// the same cell. IN_PROGRESS wins so the cell colour reflects what's
-// actually happening on site; ON_HOLD next so problems aren't hidden;
-// then NOT_STARTED before COMPLETED so an upcoming stage shows over a
-// finished one in cells where a long-tail job overlaps with new work.
-const STATUS_PRIORITY: Record<string, number> = {
-  IN_PROGRESS: 0,
-  ON_HOLD: 1,
-  NOT_STARTED: 2,
-  COMPLETED: 3,
-};
-
-function getJobStageForCell(
-  jobs: ProgrammeJob[],
-  cellDate: Date,
-  cellEnd: Date
-): { code: string; status: string } | null {
-  // Find EVERY overlapping job, not just the first. Sub-jobs run in
-  // parallel inside the same parent stage all the time — the old
-  // first-match logic silently dropped every job after the first,
-  // which made PDF/Excel cells diverge from the on-screen render
-  // (Keith May 2026: "the download pdf doesnt match the programme").
-  const overlaps: ProgrammeJob[] = [];
-  for (const job of jobs) {
-    if (!job.startDate || !job.endDate) continue;
-    const jobStart = new Date(job.startDate);
-    const jobEnd = new Date(job.endDate);
-    if (jobStart < cellEnd && jobEnd >= cellDate) {
-      overlaps.push(job);
-    }
-  }
-  if (overlaps.length === 0) return null;
-
-  // Sort by status priority so cell colour reflects the most-active
-  // job. Within the same priority, lower sortOrder wins (stable
-  // ordering — same as on-screen bar stacking).
-  overlaps.sort((a, b) => {
-    const pa = STATUS_PRIORITY[a.status] ?? 99;
-    const pb = STATUS_PRIORITY[b.status] ?? 99;
-    if (pa !== pb) return pa - pb;
-    return (a.sortOrder ?? 0) - (b.sortOrder ?? 0);
-  });
-
-  // Concatenate up to 3 unique codes joined by "/". Two parallel
-  // sub-jobs => "BRI/SCA"; more than three => "BRI/SCA/+2" so the
-  // cell stays readable. Cell colour comes from the dominant job.
-  const dominant = overlaps[0];
-  const codes: string[] = [];
-  for (const j of overlaps) {
-    const c = getStageCode(j);
-    if (c && !codes.includes(c)) codes.push(c);
-  }
-  let code = codes.slice(0, 3).join("/");
-  if (codes.length > 3) code = `${codes.slice(0, 3).join("/")}+${codes.length - 3}`;
-
-  return { code: code || getStageCode(dominant), status: dominant.status };
-}
-
-function getActiveStageLabel(plot: ProgrammePlot): string {
-  // (#23) Routes through the unified getCurrentStage helper so this
-  // matches Walkthrough, Daily Brief, and Plot Detail. Pre-fix,
-  // these four views could disagree on the same plot.
-  //
-  // (May 2026 audit B-P1-24) When all jobs are COMPLETED,
-  // getCurrentStage now returns null \u2014 distinguish "no jobs" from
-  // "all done" so the programme cell renders "Complete" instead of a
-  // misleading "Snagging" / last-job-name.
-  if (plot.jobs.length > 0 && plot.jobs.every((j) => j.status === "COMPLETED")) {
-    return "Complete";
-  }
-  const stage = getCurrentStage(plot.jobs);
-  if (!stage) return "\u2014";
-  return getStageCode(stage);
-}
-
-function hexToRgb(hex: string): [number, number, number] {
-  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-  if (!result) return [0, 0, 0];
-  return [
-    parseInt(result[1], 16),
-    parseInt(result[2], 16),
-    parseInt(result[3], 16),
-  ];
-}
-
-/** Get the dominant status for a plot based on its jobs */
-function getPlotStatus(plot: ProgrammePlot): string {
-  if (plot.jobs.length === 0) return "NONE";
-  if (plot.jobs.some((j) => j.status === "IN_PROGRESS")) return "IN_PROGRESS";
-  if (plot.jobs.every((j) => j.status === "COMPLETED")) return "COMPLETED";
-  if (plot.jobs.some((j) => j.status === "ON_HOLD")) return "ON_HOLD";
-  return "NOT_STARTED";
-}
 
 // ---------- Component ----------
 
