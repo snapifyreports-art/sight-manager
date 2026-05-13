@@ -2172,13 +2172,17 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                 })}
 
                 {/* Weekend background stripes (day view) */}
+                {/* Weekend stripes — z-[1] so they sit BELOW the today
+                    highlight (z-[5]). Pre-fix the weekend stripe with no
+                    z-index drew on top of today, hiding the red tint on
+                    "today is a Sunday/Saturday". (May 2026 audit SM-P2) */}
                 {viewMode === "day" &&
                   columns.map(
                     (col, i) =>
                       col.isWeekendDay && (
                         <div
                           key={`wknd-${col.key}`}
-                          className="pointer-events-none absolute top-0 bg-slate-200/30"
+                          className="pointer-events-none absolute top-0 z-[1] bg-slate-200/30"
                           style={{
                             left: i * cellWidth,
                             width: cellWidth,
