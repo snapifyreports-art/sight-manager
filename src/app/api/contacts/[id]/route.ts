@@ -122,6 +122,12 @@ export async function PUT(
         type: body.type ?? existing.type,
         company: body.company !== undefined ? body.company || null : existing.company,
         notes: body.notes !== undefined ? body.notes || null : existing.notes,
+        // (May 2026 audit S-P0) Accept archivedAt to restore or
+        // re-archive via PATCH. `null` clears it; ISO string stamps.
+        ...(body.archivedAt === null ? { archivedAt: null } : {}),
+        ...(typeof body.archivedAt === "string"
+          ? { archivedAt: new Date(body.archivedAt) }
+          : {}),
       },
     });
 
@@ -156,10 +162,16 @@ export async function DELETE(
   }
 
   try {
-    await prisma.contact.delete({ where: { id } });
+    // (May 2026 audit S-P0) Soft-archive instead of hard-delete.
+    // Contact history (jobs they did, snags they raised, RAMS they
+    // uploaded) all survives. Restore by PATCHing `archivedAt: null`.
+    await prisma.contact.update({
+      where: { id },
+      data: { archivedAt: new Date() },
+    });
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, archived: true });
   } catch (err) {
-    return apiError(err, "Failed to delete contact");
+    return apiError(err, "Failed to archive contact");
   }
 }

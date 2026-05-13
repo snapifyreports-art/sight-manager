@@ -15,10 +15,17 @@ export async function GET(req: NextRequest) {
 
   const { searchParams } = new URL(req.url);
   const type = searchParams.get("type");
+  const includeArchived = searchParams.get("include") === "archived";
 
-  const where: { type?: ContactType } = {};
+  const where: { type?: ContactType; archivedAt?: null } = {};
   if (type === "SUPPLIER" || type === "CONTRACTOR") {
     where.type = type;
+  }
+  // (May 2026 audit S-P0) Filter archived contacts out of pickers /
+  // lists by default. `?include=archived` exposes ex-contractors for
+  // the admin restore flow.
+  if (!includeArchived) {
+    where.archivedAt = null;
   }
 
   // Scope linked sites to what the caller can access

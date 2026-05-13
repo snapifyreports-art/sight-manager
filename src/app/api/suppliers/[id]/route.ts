@@ -59,11 +59,45 @@ export async function PUT(
         type: body.type !== undefined ? body.type : existing.type,
         emailTemplate: body.emailTemplate !== undefined ? body.emailTemplate : existing.emailTemplate,
         accountNumber: body.accountNumber !== undefined ? body.accountNumber : existing.accountNumber,
+        // (May 2026 audit S-P0) Accept archivedAt for soft-delete / restore.
+        ...(body.archivedAt === null ? { archivedAt: null } : {}),
+        ...(typeof body.archivedAt === "string"
+          ? { archivedAt: new Date(body.archivedAt) }
+          : {}),
       },
     });
 
     return NextResponse.json(supplier);
   } catch (err) {
     return apiError(err, "Failed to update supplier");
+  }
+}
+
+// (May 2026 audit S-P0) DELETE = soft-archive. Suppliers with
+// historical orders / lateness events / template-order references
+// can't be hard-deleted (FK Restrict would block anyway). Archive
+// stamps `archivedAt` so the supplier drops out of pickers but every
+// historical order keeps its supplier name + accountNumber.
+export async function DELETE(
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const session = await auth();
+  if (!session) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  const { id } = await params;
+  const existing = await prisma.supplier.findUnique({ where: { id } });
+  if (!existing) {
+    return NextResponse.json({ error: "Supplier not found" }, { status: 404 });
+  }
+  try {
+    await prisma.supplier.update({
+      where: { id },
+      data: { archivedAt: new Date() },
+    });
+    return NextResponse.json({ success: true, archived: true });
+  } catch (err) {
+    return apiError(err, "Failed to archive supplier");
   }
 }

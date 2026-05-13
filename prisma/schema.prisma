@@ -428,6 +428,9 @@ model Supplier {
   type          String?
   emailTemplate String?
   accountNumber String?
+  /// (May 2026 audit S-P0) Soft-delete. Suppliers with historical
+  /// orders stay queryable; archived ones drop out of the pickers.
+  archivedAt    DateTime?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
@@ -530,6 +533,11 @@ model Contact {
   type      ContactType
   company   String?
   notes     String?
+  /// (May 2026 audit S-P0) Soft-delete pattern. Same as User —
+  /// `archivedAt` non-null means the contact is offboarded.
+  /// Filtered out of pickers + scorecard rollups but historical
+  /// references (jobs they did, snags they raised) survive.
+  archivedAt DateTime?
   createdAt DateTime    @default(now())
   updatedAt DateTime    @updatedAt
 
@@ -554,6 +562,10 @@ model PlotTemplate {
   // every existing template stays "live" on schema upgrade; the UI flips
   // newly-created templates to draft until the user marks them ready.
   isDraft     Boolean  @default(false)
+  /// (May 2026 audit S-P0) Soft-archive. Lets the team retire an old
+  /// template (e.g. discontinued house type) without losing the link
+  /// from historical Plots that were applied from it.
+  archivedAt  DateTime?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 

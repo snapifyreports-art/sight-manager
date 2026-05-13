@@ -48,7 +48,7 @@ export async function PUT(
 
   const { id } = await params;
   const body = await request.json();
-  const { name, description, typeLabel, isDraft } = body;
+  const { name, description, typeLabel, isDraft, archivedAt } = body;
 
   const existing = await prisma.plotTemplate.findUnique({ where: { id } });
   if (!existing) {
@@ -70,6 +70,12 @@ export async function PUT(
           typeLabel: typeLabel?.trim() || null,
         }),
         ...(typeof isDraft === "boolean" && { isDraft }),
+        // (May 2026 audit S-P0) Accept archivedAt for soft-delete /
+        // restore via PUT. `null` restores; ISO string archives.
+        ...(archivedAt === null ? { archivedAt: null } : {}),
+        ...(typeof archivedAt === "string"
+          ? { archivedAt: new Date(archivedAt) }
+          : {}),
       },
       include: {
         jobs: templateJobsInclude,
@@ -131,10 +137,18 @@ export async function DELETE(
   }
 
   try {
-    await prisma.plotTemplate.delete({ where: { id } });
+    // (May 2026 audit S-P0) Soft-archive. Templates with historical
+    // Plot references (Plot.sourceTemplateId) can't be hard-deleted
+    // anyway — the FK would block. Archive stamps `archivedAt` so the
+    // template drops out of the apply-to-plot picker but every
+    // previously-applied plot keeps its template provenance.
+    await prisma.plotTemplate.update({
+      where: { id },
+      data: { archivedAt: new Date() },
+    });
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, archived: true });
   } catch (err) {
-    return apiError(err, "Failed to delete template");
+    return apiError(err, "Failed to archive template");
   }
 }

@@ -6,7 +6,7 @@ import { apiError } from "@/lib/api-errors";
 export const dynamic = "force-dynamic";
 
 // GET /api/suppliers — list all suppliers, with linked sites derived from orders
-export async function GET() {
+export async function GET(req: NextRequest) {
   const session = await auth();
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -20,7 +20,12 @@ export async function GET() {
     ? {}
     : { job: { plot: { siteId: { in: accessibleSiteIds } } } };
 
+  // (May 2026 audit S-P0) Active suppliers only by default;
+  // `?include=archived` for the admin restore flow.
+  const includeArchived = new URL(req.url).searchParams.get("include") === "archived";
+
   const suppliers = await prisma.supplier.findMany({
+    where: includeArchived ? {} : { archivedAt: null },
     orderBy: { name: "asc" },
     include: {
       _count: { select: { orders: true, materials: true } },

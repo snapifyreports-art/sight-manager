@@ -19,9 +19,17 @@ export async function GET(request: NextRequest) {
 
   const { searchParams } = new URL(request.url);
   const liveOnly = searchParams.get("liveOnly") === "true";
+  const includeArchived = searchParams.get("include") === "archived";
+
+  // (May 2026 audit S-P0) `liveOnly` already excludes drafts. Add the
+  // archived filter: by default both archived templates AND archived-
+  // tagged ones drop out. `?include=archived` exposes them for restore.
+  const whereClause: Record<string, unknown> = {};
+  if (liveOnly) whereClause.isDraft = false;
+  if (!includeArchived) whereClause.archivedAt = null;
 
   const templates = await prisma.plotTemplate.findMany({
-    where: liveOnly ? { isDraft: false } : undefined,
+    where: whereClause,
     orderBy: { createdAt: "desc" },
     include: {
       jobs: templateJobsInclude,
