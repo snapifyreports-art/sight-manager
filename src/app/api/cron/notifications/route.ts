@@ -190,23 +190,45 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  // Snag re-inspection reminders — snags resolved 7+ days ago that aren't CLOSED
+  // Snag re-inspection reminders — snags resolved 7+ days ago that aren't CLOSED.
+  // (May 2026 audit D-P2) Per-site scoping. Pre-fix this was a single
+  // `sendPushToAll` with the tenant-wide reinspection count — push
+  // subscribers on a quiet site saw "47 snags need re-inspection" from
+  // other sites. Now we fan-out per-active-site and push only to that
+  // site's audience.
   const sevenDaysAgo = addDays(now, -7);
-  const reinspectionSnags = await prisma.snag.count({
+  const reinspectionBySite = await prisma.snag.groupBy({
+    by: ["plotId"],
     where: {
       status: "RESOLVED",
       resolvedAt: { lte: sevenDaysAgo },
     },
+    _count: { _all: true },
   });
-  if (reinspectionSnags > 0) {
-    notifications.push(
-      sendPushToAll("JOBS_READY_FOR_SIGNOFF", {
-        title: "Snag Re-Inspections Due",
-        body: `${reinspectionSnags} resolved snag${reinspectionSnags !== 1 ? "s" : ""} need re-inspection (7+ days since resolution)`,
-        url: "/tasks",
-        tag: "snag-reinspection",
-      })
-    );
+  if (reinspectionBySite.length > 0) {
+    // groupBy gave plotId — map to siteId in a single batch.
+    const plotIds = reinspectionBySite.map((g) => g.plotId);
+    const plots = await prisma.plot.findMany({
+      where: { id: { in: plotIds } },
+      select: { id: true, siteId: true },
+    });
+    const plotToSite = new Map(plots.map((p) => [p.id, p.siteId]));
+    const siteCounts = new Map<string, number>();
+    for (const g of reinspectionBySite) {
+      const siteId = plotToSite.get(g.plotId);
+      if (!siteId) continue;
+      siteCounts.set(siteId, (siteCounts.get(siteId) ?? 0) + g._count._all);
+    }
+    for (const [siteId, count] of siteCounts) {
+      notifications.push(
+        sendPushToSiteAudience(siteId, "JOBS_READY_FOR_SIGNOFF", {
+          title: "Snag Re-Inspections Due",
+          body: `${count} resolved snag${count !== 1 ? "s" : ""} need re-inspection (7+ days since resolution)`,
+          url: `/sites/${siteId}?tab=snags&filter=resolved`,
+          tag: `snag-reinspection-${siteId}`,
+        })
+      );
+    }
   }
 
   await Promise.allSettled(notifications);
