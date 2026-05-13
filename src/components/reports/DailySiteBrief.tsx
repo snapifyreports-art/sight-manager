@@ -110,6 +110,8 @@ import { JobActionButton } from "./daily-brief/JobActionButton";
 import { SnagsSection } from "./daily-brief/SnagsSection";
 import { RecentActivitySection } from "./daily-brief/RecentActivitySection";
 import { UpcomingDeliveriesSection } from "./daily-brief/UpcomingDeliveriesSection";
+import { PendingSignoffsSection } from "./daily-brief/PendingSignoffsSection";
+import { InactivePlotsSections } from "./daily-brief/InactivePlotsSections";
 
 export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
   const { devDate } = useDevDate();
@@ -2359,186 +2361,22 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
         onSnagResolveOpen={handleSnagResolveOpen}
       />
 
-      {/* Pending Sign-offs — collapsible */}
-      {data.pendingSignOffs && data.pendingSignOffs.length > 0 && (
-        <Card id="section-pending-signoffs" className="border-amber-200">
-          <CardHeader className="cursor-pointer select-none pb-2" onClick={() => toggleSection("pending-signoffs")}>
-            <CardTitle className="flex items-center gap-2 text-sm text-amber-800">
-              <AlertTriangle className="size-4 text-amber-500" />
-              Pending Sign-offs ({data.pendingSignOffs.length})
-              <ChevronDown className={cn("ml-auto size-3.5 shrink-0 transition-transform duration-200", openSections.has("pending-signoffs") && "rotate-180")} />
-            </CardTitle>
-            <CardDescription className="text-xs">Jobs still open while subsequent work has started</CardDescription>
-          </CardHeader>
-          {openSections.has("pending-signoffs") && (
-            <CardContent>
-              <div className="space-y-2">
-                {data.pendingSignOffs.map((j) => (
-                  <a
-                    key={j.id}
-                    href={`/jobs/${j.id}`}
-                    className="flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 hover:bg-amber-100 transition-colors"
-                  >
-                    <div>
-                      <p className="text-sm font-medium text-amber-900">{j.name}</p>
-                      <p className="text-xs text-amber-600">
-                        {j.plot.plotNumber ? `Plot ${j.plot.plotNumber}` : j.plot.name}
-                      </p>
-                    </div>
-                    <span className="rounded-full bg-amber-200 px-2 py-0.5 text-[10px] font-semibold text-amber-800">
-                      Sign Off
-                    </span>
-                  </a>
-                ))}
-              </div>
-            </CardContent>
-          )}
-        </Card>
-      )}
+      {/* Pending Sign-offs — extracted. */}
+      <PendingSignoffsSection
+        data={data}
+        openSections={openSections}
+        toggleSection={toggleSection}
+      />
 
-      {/* Inactive Plots section header */}
-      <div className="mt-6 flex items-center gap-2 border-b-2 border-amber-200 pb-1">
-        <PauseCircle className="size-4 text-amber-600" />
-        <h2 className="text-xs font-bold text-amber-900 uppercase tracking-widest">Inactive Plots</h2>
-        <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-700">{(data.inactivePlots?.length || 0)} plots need decisions</span>
-      </div>
-
-      {/* Awaiting Contractor Confirmation */}
-      {(data.inactivePlots ?? []).filter((p) => p.inactivityType === "awaiting_contractor").length > 0 && (
-        <Card id="section-contractor-confirmations" className="border-orange-200 bg-orange-50/40">
-          <CardHeader className="cursor-pointer select-none pb-2" onClick={() => toggleSection("contractor-confirmations")}>
-            <CardTitle className="flex items-center gap-2 text-sm text-orange-700">
-              <HardHat className="size-4" />
-              Awaiting Contractor Confirmation ({(data.inactivePlots ?? []).filter((p) => p.inactivityType === "awaiting_contractor").length})
-              <ChevronDown className={cn("ml-auto size-3.5 shrink-0 transition-transform duration-200", openSections.has("contractor-confirmations") && "rotate-180")} />
-            </CardTitle>
-            <p className="text-xs text-orange-600">Contractor needs to confirm availability before work can begin</p>
-          </CardHeader>
-          {openSections.has("contractor-confirmations") && (
-            <CardContent className="space-y-2 pt-0">
-              {(data.inactivePlots ?? []).filter((p) => p.inactivityType === "awaiting_contractor").map((p) => (
-                <div key={p.id} className="rounded-xl border border-orange-200 bg-white p-3">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-semibold text-foreground">
-                        {p.plotNumber ? `Plot ${p.plotNumber}` : p.name}
-                        {p.houseType && <span className="ml-1.5 text-xs font-normal text-muted-foreground">({p.houseType})</span>}
-                      </p>
-                      <p className="text-xs text-orange-700 mt-0.5">{p.nextJob?.name || "Next job"}</p>
-                      {p.nextJob?.contractorName && (
-                        <p className="text-xs font-medium mt-1">{p.nextJob.contractorName}</p>
-                      )}
-                    </div>
-                    <span className="rounded px-2 py-0.5 text-[10px] font-semibold bg-orange-100 text-orange-700">Awaiting</span>
-                  </div>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {p.nextJob?.contractorPhone && (
-                      <a href={`tel:${p.nextJob.contractorPhone}`}
-                        className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors">
-                        <Phone className="size-3" /> Call
-                      </a>
-                    )}
-                    {p.nextJob?.contractorEmail && (
-                      <a href={`mailto:${p.nextJob.contractorEmail}`}
-                        className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors">
-                        <Mail className="size-3" /> Email
-                      </a>
-                    )}
-                    {p.nextJob && (
-                      <button
-                        onClick={() => triggerJobAction({ id: p.nextJob!.id, name: p.nextJob!.name, status: "NOT_STARTED", startDate: p.nextJob!.startDate ?? null, endDate: p.nextJob!.endDate ?? null }, "start")}
-                        className="flex items-center gap-1.5 rounded-lg bg-green-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-green-700 transition-colors">
-                        <CheckCircle className="size-3" /> Confirmed — Start Job
-                      </button>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </CardContent>
-          )}
-        </Card>
-      )}
-
-      {/* Inactive Plots — plots with no in-progress jobs that need attention */}
-      {(data.inactivePlots ?? []).length > 0 && (
-        <Card id="section-inactive-plots" className="border-amber-200 bg-amber-50/40">
-          <CardHeader className="cursor-pointer select-none pb-2" onClick={() => toggleSection("inactive-plots")}>
-            <CardTitle className="flex items-center gap-2 text-sm text-amber-700">
-              <PauseCircle className="size-4" />
-              Inactive Plots ({data.inactivePlots!.length})
-              <ChevronDown className={cn("ml-auto size-3.5 shrink-0 transition-transform duration-200", openSections.has("inactive-plots") && "rotate-180")} />
-            </CardTitle>
-            <CardDescription className="text-xs text-amber-600/80">
-              Plots with no active jobs — need attention
-            </CardDescription>
-          </CardHeader>
-          {openSections.has("inactive-plots") && (
-            <CardContent className="space-y-2">
-              {data.inactivePlots!.map((p) => {
-                const hasContractor = p.hasContractor ?? !!p.nextJob?.contractorName;
-                const ordersPending = p.ordersPending ?? 0;
-                const ordersOrdered = p.ordersOrdered ?? 0;
-                const ordersTotal = p.ordersTotal ?? 0;
-                const allDelivered = ordersTotal === 0 || (ordersPending === 0 && ordersOrdered === 0);
-                const allSent = ordersPending === 0;
-                return (
-                  <div key={p.id} className="rounded-xl border border-amber-200 bg-white p-3">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm font-semibold text-foreground">
-                          {p.plotNumber ? `Plot ${p.plotNumber}` : p.name}
-                          {p.houseType && <span className="ml-1.5 text-xs font-normal text-muted-foreground">({p.houseType})</span>}
-                        </p>
-                        <p className="text-xs text-amber-700 mt-0.5">{p.label}</p>
-                      </div>
-                      <span className={cn("rounded px-2 py-0.5 text-[10px] font-semibold",
-                        p.inactivityType === "not_started" ? "bg-slate-100 text-slate-600" :
-                        p.inactivityType === "deferred" ? "bg-amber-100 text-amber-700" :
-                        p.inactivityType === "awaiting_contractor" ? "bg-orange-100 text-orange-700" :
-                        p.inactivityType === "awaiting_materials" ? "bg-red-100 text-red-700" :
-                        "bg-blue-100 text-blue-700"
-                      )}>
-                        {p.inactivityType === "not_started" ? "Not Started" :
-                         p.inactivityType === "deferred" ? "Deferred" :
-                         p.inactivityType === "awaiting_contractor" ? "Contractor" :
-                         p.inactivityType === "awaiting_materials" ? "Materials" :
-                         "Waiting"}
-                      </span>
-                    </div>
-                    {/* Checklist */}
-                    {p.nextJob && (
-                      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs">
-                        <span className={hasContractor ? "text-green-700" : "text-red-600"}>
-                          {hasContractor ? <Check className="inline size-3 mr-0.5" /> : <X className="inline size-3 mr-0.5" />}
-                          Contractor {hasContractor ? "assigned" : "not assigned"}
-                        </span>
-                        <span className={allSent ? "text-green-700" : "text-red-600"}>
-                          {allSent ? <Check className="inline size-3 mr-0.5" /> : <X className="inline size-3 mr-0.5" />}
-                          {ordersPending > 0 ? `${ordersPending} order${ordersPending !== 1 ? "s" : ""} not sent` : "Orders sent"}
-                        </span>
-                        <span className={allDelivered ? "text-green-700" : "text-amber-600"}>
-                          {allDelivered ? <Check className="inline size-3 mr-0.5" /> : <Clock className="inline size-3 mr-0.5" />}
-                          {allDelivered ? "Materials on site" : `${ordersOrdered} awaiting delivery`}
-                        </span>
-                      </div>
-                    )}
-                    {p.nextJob && (
-                      <div className="mt-2 flex flex-wrap gap-2">
-                        <button
-                          onClick={() => triggerJobAction({ id: p.nextJob!.id, name: p.nextJob!.name, status: "NOT_STARTED", startDate: p.nextJob!.startDate ?? null, endDate: p.nextJob!.endDate ?? null }, "start")}
-                          className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 transition-colors"
-                        >
-                          <PlayCircle className="size-3" /> Start {p.nextJob.name}
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </CardContent>
-          )}
-        </Card>
-      )}
+      {/* Inactive Plots cluster — Awaiting Contractor + Inactive list.
+          Extracted as a single composite so the section banner above
+          them stays adjacent. */}
+      <InactivePlotsSections
+        data={data}
+        openSections={openSections}
+        toggleSection={toggleSection}
+        onTriggerStart={(job) => triggerJobAction(job, "start")}
+      />
 
       {/* Pipeline section header */}
       <div className="mt-6 flex items-center gap-2 border-b-2 border-indigo-200 pb-1">
