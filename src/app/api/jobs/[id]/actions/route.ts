@@ -465,6 +465,126 @@ export async function POST(
   // so the parent stretches with its children and its status follows theirs
   await recomputeParentOf(prisma, id);
 
+  // (#189) Auto-cascade on LATE completion. Pre-fix: a job that
+  // finished after its planned endDate would set actualEndDate=now but
+  // leave downstream jobs frozen at their old planned dates — leading
+  // to "Substructure overlapping with the still-running Foundation"
+  // because Substructure's startDate sat in the past while Foundation
+  // was still IN_PROGRESS. DailyBrief had a client-side prompt that
+  // offered the cascade but only fired on that surface and required
+  // user confirmation. SSOT principle: the math is the math; if a
+  // job finishes late, every downstream date MUST shift by the same
+  // delta automatically — no surface-specific prompting.
+  //
+  // Early completion is NOT auto-cascaded — the manager decides
+  // whether to pull downstream forward (the old "manager always
+  // decides for pull-forward" rule still holds).
+  if (action === "complete" && job?.actualEndDate && job.endDate) {
+    const planned = new Date(job.endDate);
+    const actual = new Date(job.actualEndDate);
+    // Strip time so we compare working-day-aligned dates only.
+    planned.setHours(0, 0, 0, 0);
+    actual.setHours(0, 0, 0, 0);
+    if (actual.getTime() > planned.getTime()) {
+      try {
+        const { calculateCascade } = await import("@/lib/cascade");
+        const allPlotJobs = await prisma.job.findMany({
+          where: { plotId: existing.plotId, status: { not: "ON_HOLD" } },
+          orderBy: { sortOrder: "asc" },
+        });
+        const allOrders = await prisma.materialOrder.findMany({
+          where: { jobId: { in: allPlotJobs.map((j) => j.id) } },
+        });
+        const result = calculateCascade(
+          id,
+          actual,
+          allPlotJobs.map((j) => ({
+            id: j.id,
+            name: j.name,
+            startDate: j.startDate,
+            endDate: j.endDate,
+            sortOrder: j.sortOrder,
+            status: j.status,
+            parentId: j.parentId ?? null,
+          })),
+          allOrders.map((o) => ({
+            id: o.id,
+            jobId: o.jobId,
+            dateOfOrder: o.dateOfOrder,
+            expectedDeliveryDate: o.expectedDeliveryDate,
+            status: o.status,
+          })),
+        );
+        // Apply job + order updates. The trigger itself is also in
+        // jobUpdates — but we already wrote actualEndDate=now, and the
+        // cascade engine would overwrite startDate/endDate with delta-
+        // shifted values which is wrong (the trigger DID finish on
+        // its actualEndDate, so its endDate should be actualEndDate
+        // for downstream math but we should not lose the original
+        // planned endDate to originalEndDate which is captured
+        // automatically below).
+        const jobMap = new Map(allPlotJobs.map((j) => [j.id, j]));
+        await Promise.all([
+          ...result.jobUpdates
+            // Skip the trigger — it already has actualEndDate set;
+            // we only want to shift DOWNSTREAM jobs.
+            .filter((u) => u.jobId !== id)
+            .map((u) => {
+              const current = jobMap.get(u.jobId);
+              return prisma.job.update({
+                where: { id: u.jobId },
+                data: {
+                  startDate: u.newStart,
+                  endDate: u.newEnd,
+                  ...(!current?.originalStartDate && current?.startDate
+                    ? { originalStartDate: current.startDate }
+                    : {}),
+                  ...(!current?.originalEndDate && current?.endDate
+                    ? { originalEndDate: current.endDate }
+                    : {}),
+                },
+              });
+            }),
+          ...result.orderUpdates.map((u) =>
+            prisma.materialOrder.update({
+              where: { id: u.orderId },
+              data: {
+                dateOfOrder: u.newOrderDate,
+                expectedDeliveryDate: u.newDeliveryDate,
+              },
+            }),
+          ),
+        ]);
+        // Parent rollups for moved children.
+        const { recomputeParentFromChildren } = await import("@/lib/parent-job");
+        const parentIds = new Set<string>();
+        for (const u of result.jobUpdates) {
+          const j = jobMap.get(u.jobId);
+          if (j?.parentId) parentIds.add(j.parentId);
+        }
+        await Promise.all(
+          Array.from(parentIds).map((pid) => recomputeParentFromChildren(prisma, pid)),
+        );
+        // EventLog so this auto-cascade is visible in audit.
+        await prisma.eventLog.create({
+          data: {
+            type: "SCHEDULE_CASCADED",
+            description: `Auto-cascaded ${result.jobUpdates.length - 1} downstream job(s) — "${existing.name}" finished ${result.deltaDays} working day(s) late`,
+            siteId: existing.plot.siteId,
+            plotId: existing.plotId,
+            jobId: id,
+            userId: session.user.id,
+            delayReasonType: "OTHER",
+          },
+        });
+      } catch (cascadeErr) {
+        // Don't fail the complete action if the cascade post-process
+        // hiccups; surface in logs so we can chase it.
+        console.error("[ACTIONS] Auto-cascade on late complete failed:", cascadeErr);
+      }
+    }
+  }
+
   // Auto-update plot buildCompletePercent on EVERY status-affecting action.
   // Centralised in `recomputePlotPercent` so we can grep for it across
   // every mutation site (May 2026 audit found this was running in only

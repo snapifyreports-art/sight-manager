@@ -213,6 +213,104 @@ export async function POST(
         await recomputeParentOf(prisma, jobId);
       }
 
+      // (#189) Auto-cascade on LATE completion — mirrors
+      // /api/jobs/[id]/actions. Bulk complete sets actualEndDate=now;
+      // if that's later than the planned endDate the downstream MUST
+      // shift by the delta or it'll overlap with this still-active
+      // chain. Manager doesn't have to remember to click anything.
+      if (action === "complete" && job.endDate) {
+        const planned = new Date(job.endDate);
+        const actual = new Date(now);
+        planned.setHours(0, 0, 0, 0);
+        actual.setHours(0, 0, 0, 0);
+        if (actual.getTime() > planned.getTime()) {
+          try {
+            const { calculateCascade } = await import("@/lib/cascade");
+            const allPlotJobs = await prisma.job.findMany({
+              where: { plotId: job.plotId, status: { not: "ON_HOLD" } },
+              orderBy: { sortOrder: "asc" },
+            });
+            const allOrders = await prisma.materialOrder.findMany({
+              where: { jobId: { in: allPlotJobs.map((j) => j.id) } },
+            });
+            const cascadeResult = calculateCascade(
+              jobId,
+              actual,
+              allPlotJobs.map((j) => ({
+                id: j.id,
+                name: j.name,
+                startDate: j.startDate,
+                endDate: j.endDate,
+                sortOrder: j.sortOrder,
+                status: j.status,
+                parentId: j.parentId ?? null,
+              })),
+              allOrders.map((o) => ({
+                id: o.id,
+                jobId: o.jobId,
+                dateOfOrder: o.dateOfOrder,
+                expectedDeliveryDate: o.expectedDeliveryDate,
+                status: o.status,
+              })),
+            );
+            const jobMap = new Map(allPlotJobs.map((j) => [j.id, j]));
+            await Promise.all([
+              ...cascadeResult.jobUpdates
+                .filter((u) => u.jobId !== jobId)
+                .map((u) => {
+                  const current = jobMap.get(u.jobId);
+                  return prisma.job.update({
+                    where: { id: u.jobId },
+                    data: {
+                      startDate: u.newStart,
+                      endDate: u.newEnd,
+                      ...(!current?.originalStartDate && current?.startDate
+                        ? { originalStartDate: current.startDate }
+                        : {}),
+                      ...(!current?.originalEndDate && current?.endDate
+                        ? { originalEndDate: current.endDate }
+                        : {}),
+                    },
+                  });
+                }),
+              ...cascadeResult.orderUpdates.map((u) =>
+                prisma.materialOrder.update({
+                  where: { id: u.orderId },
+                  data: {
+                    dateOfOrder: u.newOrderDate,
+                    expectedDeliveryDate: u.newDeliveryDate,
+                  },
+                }),
+              ),
+            ]);
+            const { recomputeParentFromChildren } = await import("@/lib/parent-job");
+            const parentIds = new Set<string>();
+            for (const u of cascadeResult.jobUpdates) {
+              const j = jobMap.get(u.jobId);
+              if (j?.parentId) parentIds.add(j.parentId);
+            }
+            await Promise.all(
+              Array.from(parentIds).map((pid) =>
+                recomputeParentFromChildren(prisma, pid),
+              ),
+            );
+            await prisma.eventLog.create({
+              data: {
+                type: "SCHEDULE_CASCADED",
+                description: `Auto-cascaded ${cascadeResult.jobUpdates.length - 1} downstream job(s) — "${job.name}" finished ${cascadeResult.deltaDays} working day(s) late (bulk complete)`,
+                siteId,
+                plotId: job.plotId,
+                jobId,
+                userId: session.user.id,
+                delayReasonType: "OTHER",
+              },
+            });
+          } catch (cascadeErr) {
+            console.error("[BULK-STATUS] Auto-cascade on late complete failed:", cascadeErr);
+          }
+        }
+      }
+
       // Recalculate plot buildCompletePercent — centralised in
       // recomputePlotPercent so every mutation site uses the same
       // formula (May 2026 audit).

@@ -302,6 +302,53 @@ If any of these grows to a third consumer, extract.
 
 ---
 
+## Concept: "Propagation completeness — does every change reach everyone who depends on it?"
+
+Keith rightly called this out: the original SSOT audit checked that
+two views reading the same logical field got the same value. It did
+NOT check that every WRITE which should trigger downstream effects
+actually fires them. That's a different invariant — and we had two
+gaps in it.
+
+**Gap 1: Late completion didn't cascade.** Marking a job COMPLETE
+sets `actualEndDate = now`. If `now > endDate` (the job finished
+late), the planned downstream dates are now sitting in the past
+relative to the actual end. The downstream jobs should shift forward
+by the working-day delta. Pre-fix this only happened if the user
+clicked through a DailySiteBrief-only confirmation dialog — and the
+prompt didn't fire in JobDetailClient or bulk-status paths at all.
+
+**Gap 2: IN_PROGRESS-past-endDate accumulated overlaps daily.** Even
+without an explicit completion event, a job that's still running
+past its planned `endDate` leaves downstream sitting in the past
+relative to today. Foundation running 3 days over means Substructure
+(originally planned to start when Foundation ended) is 3 days in
+the past — visible on the Gantt as an overlap, and surfaced in the
+DailyBrief as "blocked by Foundation". The system never auto-pushed
+Foundation's `endDate` or shifted downstream.
+
+| Where | Was | Now |
+|---|---|---|
+| `/api/jobs/[id]/actions` complete branch | sets `actualEndDate=now`, parent recompute, plot percent — but no downstream cascade if late | If `actualEndDate > endDate`, runs `calculateCascade` and applies the delta to every downstream job + order. EventLog row records the auto-shift. |
+| `/api/sites/[id]/bulk-status` complete branch | Same gap as above | Same fix mirrored. |
+| `/api/cron/reconcile` | Only recomputed `plot.buildCompletePercent` + parent rollups | Adds a per-plot pass: any job that's late-completed OR in-progress-past-endDate AND has downstream sitting in the past triggers an auto-cascade. Logged so the manager sees what was reconciled overnight. |
+
+**Backfill**: `scripts/reconcile-late-completion-overlaps.ts` —
+report-only by default, `--apply` to commit. Ran on prod: Plot 1
+had Scaff matt in-progress past endDate, 35 downstream jobs sitting
+in the past. Shifted 35 jobs by 1 working day, programme now
+sequential.
+
+**Principle**: SSOT isn't just about field values matching across
+views. It's about every write that SHOULD have a downstream effect
+actually firing one. When the math says "predecessor moved → every
+successor moves with it", the code must enforce that everywhere
+the predecessor can be moved.
+
+**Status**: ✅ Fixed batch 106.
+
+---
+
 ## The principle going forward
 
 Two rules, learned from the cases above:
