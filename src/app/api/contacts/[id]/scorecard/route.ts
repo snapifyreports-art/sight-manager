@@ -82,16 +82,27 @@ export async function GET(
   const signedOff = completed.filter((j) => j.signedOffAt);
 
   // Days late: leaf jobs where actualEndDate > endDate (planned).
+  // (May 2026 audit F-P1-21) Route through differenceInWorkingDays
+  // so the scorecard's "Avg days late" agrees with the Daily Brief +
+  // Analytics + Lateness SSOT for the same contractor. Pre-fix this
+  // used `Math.ceil(ms / 86400000)` (calendar days, ceiling) — the
+  // same plot's days-late could differ by 1-2 days between the
+  // scorecard and the daily brief depending on whether the late
+  // window crossed a weekend.
+  const { differenceInWorkingDays } = await import("@/lib/working-days");
   let daysLateTotal = 0;
   let daysLateJobs = 0;
   for (const j of completed) {
     if (!j.endDate || !j.actualEndDate) continue;
     if (j.actualEndDate.getTime() > j.endDate.getTime()) {
-      const days = Math.ceil(
-        (j.actualEndDate.getTime() - j.endDate.getTime()) / (24 * 60 * 60 * 1000),
+      const days = Math.max(
+        0,
+        differenceInWorkingDays(j.actualEndDate, j.endDate),
       );
-      daysLateTotal += days;
-      daysLateJobs += 1;
+      if (days > 0) {
+        daysLateTotal += days;
+        daysLateJobs += 1;
+      }
     }
   }
   const onTime = completed.length - daysLateJobs;
