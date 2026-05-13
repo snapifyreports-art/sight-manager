@@ -48,9 +48,20 @@ export async function GET(
   );
 
   // Shape it like a PlotTemplate so TemplateEditor can render it.
+  // (May 2026 critical bug fix) TemplateEditor's apiUrl() reads
+  // `template.variantId` to decide whether to scope writes with
+  // `?variantId=X`. Pre-fix this field WAS NOT in the response —
+  // only `id` (= variant id) + `templateId` (= base id) + `isVariant`.
+  // Result: variantId was always undefined, apiUrl returned base
+  // URLs, and EVERY edit inside the variant editor (rename, add
+  // sub-job, add order, change material) silently mutated the BASE
+  // template. Variants have been silently corrupting the base since
+  // the variants rework. Emitting `variantId` here makes apiUrl
+  // scope correctly without touching the consumer.
   const shaped = {
     id: variant.id,
     templateId: templateId,
+    variantId: variant.id,
     name: variant.name,
     description: variant.description,
     typeLabel: baseTemplate?.typeLabel ?? null,

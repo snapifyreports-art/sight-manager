@@ -83,12 +83,14 @@ export function useOrderStatus(
       markPending([orderId], true);
       const silent = opts?.silent ?? options.silent ?? false;
       try {
-        // Attach timestamps so downstream reports show real placement /
-        // delivery moments rather than template defaults.
+        // (May 2026 critical bug) DO NOT send client-side timestamps.
+        // Pre-fix the hook stamped `new Date().toISOString()` as the
+        // dateOfOrder / deliveredDate which bypassed dev-date entirely.
+        // Simulation runs corrupted every order's timing. The server
+        // /api/orders/[id] PUT auto-stamps when the field is omitted
+        // (via getServerCurrentDate, dev-date-aware). Let the server
+        // do it — single source of truth.
         const body: Record<string, unknown> = { status: newStatus };
-        const now = new Date().toISOString();
-        if (newStatus === "ORDERED") body.dateOfOrder = now;
-        if (newStatus === "DELIVERED") body.deliveredDate = now;
 
         const res = await fetch(`/api/orders/${orderId}`, {
           method: "PUT",

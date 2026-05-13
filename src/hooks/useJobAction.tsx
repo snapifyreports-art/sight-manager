@@ -4,7 +4,7 @@ import { useState, useCallback, useEffect } from "react";
 import { differenceInCalendarDays, addDays, format } from "date-fns";
 import { AlertTriangle, Loader2, Truck, Mail } from "lucide-react";
 import { addWorkingDays, differenceInWorkingDays, isWorkingDay, snapToWorkingDay } from "@/lib/working-days";
-import { useToast } from "@/components/ui/toast";
+import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 import { OrderDeliveryFollowUpDialog } from "@/components/orders/OrderDeliveryFollowUpDialog";
 import { useOrderEmail, type SendOrderGroupInput } from "@/hooks/useOrderEmail";
 import { fetchUrgentOrderEmailGroups } from "@/lib/urgent-order-email";
@@ -620,28 +620,57 @@ export function useJobAction(
 
   const handlePreStartConfirm = useCallback(async () => {
     if (!preStartChecks || !activeJob) return;
+    const originalChecks = preStartChecks;
     const { prevJob, undeliveredOrders, signOffPrev, markDelivered } =
       preStartChecks;
     setPreStartChecks(null);
     setPreStartLoading(true);
     try {
+      // (May 2026 critical bug) Pre-fix these fetches had no .ok
+      // checks. If the predecessor sign-off failed (403, 500, race
+      // with a parallel complete), the flow silently fell through to
+      // start the current job — leaving the predecessor IN_PROGRESS
+      // and the user believing they'd signed it off. Same for orders.
+      // Now: surface failures, abort the flow, restore the dialog so
+      // the user can retry.
       if (signOffPrev && prevJob) {
-        await fetch(`/api/jobs/${prevJob.id}/actions`, {
+        const signOffRes = await fetch(`/api/jobs/${prevJob.id}/actions`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action: "complete" }),
         });
+        if (!signOffRes.ok) {
+          toast.error(
+            await fetchErrorMessage(
+              signOffRes,
+              `Couldn't sign off ${prevJob.name} — try the pre-start dialog again or sign off manually`,
+            ),
+          );
+          // Restore the dialog so the user can retry.
+          setPreStartChecks(originalChecks);
+          setPreStartLoading(false);
+          return;
+        }
       }
       if (markDelivered && undeliveredOrders.length > 0) {
-        await Promise.all(
+        const results = await Promise.all(
           undeliveredOrders.map((o) =>
             fetch(`/api/orders/${o.id}`, {
               method: "PUT",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ status: "DELIVERED" }),
-            })
-          )
+            }),
+          ),
         );
+        const failed = results.filter((r) => !r.ok).length;
+        if (failed > 0) {
+          toast.error(
+            `${failed} of ${undeliveredOrders.length} orders failed to mark delivered — pre-start aborted, please retry`,
+          );
+          setPreStartChecks(originalChecks);
+          setPreStartLoading(false);
+          return;
+        }
       }
       // Re-check early/late start after pre-start issues resolved
       const today = new Date();
@@ -1352,39 +1381,71 @@ export function useJobAction(
                           {isPending && (
                             <button
                               onClick={async () => {
-                                // Fetch full order to build email
+                                // (May 2026 critical bug) Pre-fix this
+                                // path silently flipped status to
+                                // ORDERED EVEN when the supplier had
+                                // no email — no email opened, no toast,
+                                // but the order was marked sent. Now:
+                                // fetch the order, check email exists,
+                                // only flip status on success.
                                 const orderRes = await fetch(`/api/orders/${order.id}`);
-                                if (orderRes.ok) {
-                                  const orderData = await orderRes.json();
-                                  const { buildOrderMailto } = await import("@/lib/order-email");
-                                  if (orderData.supplier?.contactEmail) {
-                                    const mailto = buildOrderMailto(orderData.supplier.contactEmail, {
-                                      supplierName: orderData.supplier.name,
-                                      supplierContactName: orderData.supplier.contactName,
-                                      supplierAccountNumber: orderData.supplier.accountNumber,
-                                      jobName: orderData.job?.name || activeJob?.name || "",
-                                      siteName: orderData.job?.plot?.site?.name || "",
-                                      siteAddress: orderData.job?.plot?.site?.address || "",
-                                      sitePostcode: orderData.job?.plot?.site?.postcode || "",
-                                      plotNumbers: [orderData.job?.plot?.plotNumber ? `Plot ${orderData.job.plot.plotNumber}` : ""],
-                                      items: (orderData.orderItems || []).map((i: { name: string; quantity: number; unit: string; unitCost: number }) => ({ name: i.name, quantity: i.quantity, unit: i.unit, unitCost: i.unitCost })),
-                                      itemsDescriptionFallback: orderData.itemsDescription,
-                                      expectedDeliveryDate: orderData.expectedDeliveryDate,
-                                      orderDate: new Date().toISOString(),
-                                      urgentDelivery: true,
-                                    });
-                                    window.open(mailto, "_blank");
-                                  }
+                                if (!orderRes.ok) {
+                                  toast.error("Couldn't load order details");
+                                  return;
                                 }
-                                // Mark as ORDERED with actual placement date
-                                await fetch(`/api/orders/${order.id}`, {
+                                const orderData = await orderRes.json();
+                                if (!orderData.supplier?.contactEmail) {
+                                  toast.error(
+                                    `${orderData.supplier?.name || "Supplier"} has no email — use 'Mark Sent' to record this order was placed another way.`,
+                                  );
+                                  return;
+                                }
+                                const { buildOrderMailto } = await import(
+                                  "@/lib/order-email"
+                                );
+                                const mailto = buildOrderMailto(
+                                  orderData.supplier.contactEmail,
+                                  {
+                                    supplierName: orderData.supplier.name,
+                                    supplierContactName: orderData.supplier.contactName,
+                                    supplierAccountNumber: orderData.supplier.accountNumber,
+                                    jobName: orderData.job?.name || activeJob?.name || "",
+                                    siteName: orderData.job?.plot?.site?.name || "",
+                                    siteAddress: orderData.job?.plot?.site?.address || "",
+                                    sitePostcode: orderData.job?.plot?.site?.postcode || "",
+                                    plotNumbers: [
+                                      orderData.job?.plot?.plotNumber
+                                        ? `Plot ${orderData.job.plot.plotNumber}`
+                                        : "",
+                                    ],
+                                    items: (orderData.orderItems || []).map(
+                                      (i: { name: string; quantity: number; unit: string; unitCost: number }) => ({
+                                        name: i.name,
+                                        quantity: i.quantity,
+                                        unit: i.unit,
+                                        unitCost: i.unitCost,
+                                      }),
+                                    ),
+                                    itemsDescriptionFallback: orderData.itemsDescription,
+                                    expectedDeliveryDate: orderData.expectedDeliveryDate,
+                                    orderDate: new Date().toISOString(),
+                                    urgentDelivery: true,
+                                  },
+                                );
+                                window.open(mailto, "_blank");
+                                // Mark as ORDERED. Server stamps
+                                // dateOfOrder using dev-date-aware
+                                // getServerCurrentDate — don't send
+                                // client-side wall-clock time.
+                                const putRes = await fetch(`/api/orders/${order.id}`, {
                                   method: "PUT",
                                   headers: { "Content-Type": "application/json" },
-                                  body: JSON.stringify({
-                                    status: "ORDERED",
-                                    dateOfOrder: new Date().toISOString(),
-                                  }),
+                                  body: JSON.stringify({ status: "ORDERED" }),
                                 });
+                                if (!putRes.ok) {
+                                  toast.error("Email opened but failed to mark order sent");
+                                  return;
+                                }
                                 setOrderResolution((prev) => prev ? { ...prev, resolved: new Set(prev.resolved).add(order.id) } : prev);
                               }}
                               className="rounded bg-amber-500 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-amber-600"

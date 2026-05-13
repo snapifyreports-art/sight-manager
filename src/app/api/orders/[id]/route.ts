@@ -187,12 +187,19 @@ export async function PUT(
 
     data.status = body.status;
 
-    // Auto-set dateOfOrder when status changes to ORDERED (if not explicitly set)
-    // Mirrors the behavior of start → PENDING→ORDERED auto-progression
+    // Auto-set dateOfOrder when status changes to ORDERED (if not
+    // explicitly set on the request). Mirrors PENDING→ORDERED auto-
+    // progression on job start.
+    // (May 2026 critical bug) Pre-fix this required `!existing.dateOfOrder`
+    // which meant template orders (which DO have a dateOfOrder set at
+    // apply time) never got their date updated on transition to
+    // ORDERED — the row kept the template's planned date instead of
+    // when the order was actually sent. Now we stamp on every
+    // PENDING→ORDERED transition unless the caller explicitly passed
+    // a dateOfOrder (e.g. backdating from the order detail dialog).
     if (
       body.status === "ORDERED" &&
       existing.status !== "ORDERED" &&
-      !existing.dateOfOrder &&
       body.dateOfOrder === undefined
     ) {
       data.dateOfOrder = getServerCurrentDate(req);
