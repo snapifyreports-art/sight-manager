@@ -512,7 +512,25 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
   const processedPlots = useMemo(() => {
     return filteredPlots.map((plot) => {
       if (jobView === "subjobs") {
-        return { ...plot, jobs: plot.jobs.filter((j) => !!j.parentStage) };
+        // (May 2026 Keith bug report) Sub-jobs view shows every actual
+        // sub-job (has a parentStage) PLUS any top-level stage that has
+        // NO sub-jobs of its own. A leaf stage IS the work item — pre-fix
+        // the filter dropped it entirely, so the plot row rendered empty
+        // for that stage. A stage "has children" when some job's
+        // parentStage matches its stageCode (the same parent↔child link
+        // the "jobs" view uses below).
+        const stagesWithChildren = new Set(
+          plot.jobs.map((j) => j.parentStage).filter(Boolean),
+        );
+        return {
+          ...plot,
+          jobs: plot.jobs.filter(
+            (j) =>
+              !!j.parentStage || // an actual sub-job
+              !j.stageCode || // top-level, no stageCode — nothing can be keyed to it
+              !stagesWithChildren.has(j.stageCode), // top-level leaf stage
+          ),
+        };
       }
 
       // "jobs" view: show top-level jobs (no parentStage) as-is,
