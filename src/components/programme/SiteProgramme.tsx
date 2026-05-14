@@ -1554,17 +1554,19 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                       return (
                         <div
                           key={`weather-${col.key}`}
-                          className={`flex shrink-0 items-center justify-center border-r cursor-pointer transition-colors ${bgClass}`}
+                          className={`flex shrink-0 flex-col items-center justify-center gap-0 border-r cursor-pointer leading-none transition-colors ${bgClass}`}
                           style={{ width: cellWidth }}
                           title={
                             weather
-                              ? `${weather.category} ${weather.tempMax}°/${weather.tempMin}°${hasImpact ? ` (${impactLabel.toUpperCase()}${impactNote ? `: ${impactNote}` : ""})` : " — click to log weather impact"}`
+                              ? `${weather.category} ${Math.round(weather.tempMax)}°/${Math.round(weather.tempMin)}°${hasImpact ? ` (${impactLabel.toUpperCase()}${impactNote ? `: ${impactNote}` : ""})` : " — click to log weather impact"}`
                               : hasImpact
                                 ? `${impactLabel.toUpperCase()}${impactNote ? `: ${impactNote}` : ""} — click to edit`
                                 : "Click to log weather impact"
                           }
                           onClick={(e) => openRainedOffPopover(colDate, e)}
                         >
+                          {/* Icon — weather-impact marker takes precedence
+                              over the forecast emoji when one is logged. */}
                           {hasImpact ? (
                             <span className="text-[11px]">{impactIcon}</span>
                           ) : weather ? (
@@ -1572,6 +1574,23 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                               {weatherEmoji(weather.category)}
                             </span>
                           ) : null}
+                          {/* (May 2026 Keith request) Forecast max/min temp
+                              under the icon. Min tinted blue at ≤2°C — a
+                              frost-risk flag for concrete / brickwork. */}
+                          {weather && (
+                            <span className="mt-px text-[8px] font-medium tabular-nums text-slate-600">
+                              {Math.round(weather.tempMax)}°
+                              <span
+                                className={
+                                  weather.tempMin <= 2
+                                    ? "text-sky-600"
+                                    : "text-slate-400"
+                                }
+                              >
+                                /{Math.round(weather.tempMin)}°
+                              </span>
+                            </span>
+                          )}
                         </div>
                       );
                     })}

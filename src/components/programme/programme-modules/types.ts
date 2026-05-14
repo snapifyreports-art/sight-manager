@@ -98,4 +98,6 @@ export const STATUS_PRIORITY: Record<string, number> = {
   COMPLETED: 3,
 };
 
-export const WEATHER_ROW_HEIGHT = 22;
+// (May 2026 Keith request) Bumped 22 → 32 so the day-view weather row
+// can stack the forecast icon AND the max/min temperature under it.
+export const WEATHER_ROW_HEIGHT = 32;
