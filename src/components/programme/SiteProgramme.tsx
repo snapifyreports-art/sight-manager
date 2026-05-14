@@ -87,8 +87,11 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
   // Centralised job start hook for bulk actions
   const { triggerAction: triggerBulkStart, dialogs: bulkStartDialogs } = useJobAction(
     async () => {
-      // Refresh programme data after bulk action
-      const freshData = await fetch(`/api/sites/${siteId}/programme`, { cache: "no-store" }).then((r) => r.json());
+      // (May 2026 pattern sweep) Pre-fix chained .then(.json) — error
+      // payloads silently replaced the programme state. Guard on .ok.
+      const r = await fetch(`/api/sites/${siteId}/programme`, { cache: "no-store" });
+      if (!r.ok) return;
+      const freshData = await r.json();
       setSite(freshData);
     }
   );
@@ -131,14 +134,18 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
   const [scheduleStatuses, setScheduleStatuses] = useState<Record<string, { status: string; daysDeviation: number; awaitingRestart: boolean }>>({});
 
   useEffect(() => {
+    // (May 2026 pattern sweep) Guard with .ok + cancellation flag.
+    let cancelled = false;
     fetch(`/api/sites/${siteId}/plot-schedules`)
-      .then((r) => r.json())
-      .then((arr: Array<{ plotId: string; status: string; daysDeviation: number; awaitingRestart: boolean }>) => {
+      .then((r) => (r.ok ? r.json() : null))
+      .then((arr: Array<{ plotId: string; status: string; daysDeviation: number; awaitingRestart: boolean }> | null) => {
+        if (!arr || cancelled) return;
         const map: Record<string, { status: string; daysDeviation: number; awaitingRestart: boolean }> = {};
         for (const item of arr) map[item.plotId] = item;
         setScheduleStatuses(map);
       })
       .catch(() => {});
+    return () => { cancelled = true; };
   }, [siteId]);
 
   // Select mode state (bulk actions)
@@ -185,7 +192,11 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
       });
       if (!res.ok) throw new Error("Failed");
       const result = await res.json();
-      const freshData = await fetch(`/api/sites/${siteId}/programme`, { cache: "no-store" }).then((r) => r.json());
+      // (May 2026 pattern sweep) Pre-fix this refetch was chained .then(.json)
+      // — an error payload would have clobbered programme state silently.
+      const refresh = await fetch(`/api/sites/${siteId}/programme`, { cache: "no-store" });
+      if (!refresh.ok) throw new Error("Failed to refresh programme");
+      const freshData = await refresh.json();
       setSite(freshData);
       setScrollTrigger((n) => n + 1);
       setDelayDialogOpen(false);
@@ -214,9 +225,13 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
   const leftPanelWidth = (expanded ? LEFT_PANEL_EXPANDED : LEFT_PANEL_COLLAPSED) + selectColWidth;
 
   const fetchProgramme = useCallback(() => {
+    // (May 2026 pattern sweep) Pre-fix this main loader chained .then(.json)
+    // unconditionally — an error payload (e.g. 403 returning {error:"..."})
+    // would have replaced site state, rendering a broken programme view.
     fetch(`/api/sites/${siteId}/programme`, { cache: "no-store" })
-      .then((r) => r.json())
+      .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
+        if (!data) return;
         setSite(data);
         setScrollTrigger((n) => n + 1);
         if (data?.rainedOffDays) {
@@ -321,6 +336,13 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ date: dateStr, note: note || null, type: rainedOffType }),
         });
+        // (May 2026 pattern sweep) Pre-fix we parsed JSON regardless of
+        // status, surfacing an error payload as a "logged" success
+        // toast. Now: bail on !ok with the proper error message and
+        // revert the optimistic state below.
+        if (!res.ok) {
+          throw new Error(`Server rejected (${res.status})`);
+        }
         const result = await res.json();
         const icon = rainedOffType === "TEMPERATURE" ? "🌡️" : "☔";
         const label = rainedOffType === "TEMPERATURE" ? "Temperature impact" : "Rain day";
@@ -362,11 +384,18 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
       setRainedOffPopover(null);
 
       try {
-        await fetch(`/api/sites/${siteId}/rained-off`, {
+        // (May 2026 pattern sweep) Pre-fix bare fetch — a 4xx/5xx
+        // didn't trigger the catch block, so the optimistic UI removal
+        // never reverted on server failure. Throw on !ok so the catch
+        // below restores state and shows the error.
+        const res = await fetch(`/api/sites/${siteId}/rained-off`, {
           method: "DELETE",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ date: dateStr, type: typeToRemove }),
         });
+        if (!res.ok) {
+          throw new Error(`Server rejected (${res.status})`);
+        }
       } catch {
         // Revert on error
         setWeatherImpactMap((prev) => {
@@ -376,9 +405,10 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
           next.set(dateStr, existing);
           return next;
         });
+        showToast("Failed to remove weather impact", "error");
       }
     },
-    [siteId, rainedOffPopover, rainedOffType]
+    [siteId, rainedOffPopover, rainedOffType, showToast]
   );
 
   // (May 2026 audit SM-P1) Close the weather-impact popover on Escape.

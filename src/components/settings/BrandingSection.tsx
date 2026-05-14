@@ -30,15 +30,19 @@ export function BrandingSection() {
   const toast = useToast();
 
   useEffect(() => {
+    // (May 2026 pattern sweep) Guard with .ok + cancellation flag.
+    let cancelled = false;
     fetch("/api/settings/branding")
-      .then((r) => r.json())
+      .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
+        if (!d || cancelled) return;
         if (d.brandName) setBrandName(d.brandName);
         if (d.logoUrl) setLogoUrl(d.logoUrl);
         if (d.primaryColor) setPrimaryColor(d.primaryColor);
         if (d.supportEmail) setSupportEmail(d.supportEmail);
       })
-      .finally(() => setLoading(false));
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, []);
 
   async function save() {

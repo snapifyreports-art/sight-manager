@@ -7,6 +7,7 @@ import {
   nextStageReadyEmail,
   snagRaisedEmail,
 } from "@/lib/email";
+import { sessionHasPermission } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -51,6 +52,20 @@ export async function POST(req: NextRequest) {
   const session = await auth();
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  // (May 2026 pattern sweep) Sending out a supplier / contractor email
+  // is an order-management action; gate on MANAGE_ORDERS to match the
+  // rest of the supplier-comms surface.
+  if (
+    !sessionHasPermission(
+      session.user as { role?: string; permissions?: string[] },
+      "MANAGE_ORDERS",
+    )
+  ) {
+    return NextResponse.json(
+      { error: "You do not have permission to send emails" },
+      { status: 403 },
+    );
   }
 
   const body = await req.json();

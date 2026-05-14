@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { format, addDays, differenceInCalendarDays } from "date-fns";
@@ -337,19 +337,30 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
   // tried to access `data.activeJobs.length`, `data.summary`, etc.
   // On network errors the unhandled rejection was swallowed by
   // .finally and the user got a permanent loading state.
+  // (May 2026 pattern sweep) Generation counter — rapid date prev/next
+  // clicks let yesterday's brief land on top of today's after the user
+  // had already moved on. useRefreshOnFocus + manual refresh could
+  // also interleave with each other.
+  const fetchGen = useRef(0);
+
   const fetchData = useCallback(async () => {
+    const myGen = ++fetchGen.current;
     setLoading(true);
     try {
       const dateStr = format(date, "yyyy-MM-dd");
       const r = await fetch(`/api/sites/${siteId}/daily-brief?date=${dateStr}`);
+      if (myGen !== fetchGen.current) return;
       if (!r.ok) {
         throw new Error(await fetchErrorMessage(r, "Failed to load daily brief"));
       }
-      setData(await r.json());
+      const json = await r.json();
+      if (myGen !== fetchGen.current) return;
+      setData(json);
     } catch (err) {
+      if (myGen !== fetchGen.current) return;
       toast.error(err instanceof Error ? err.message : "Failed to load daily brief");
     } finally {
-      setLoading(false);
+      if (myGen === fetchGen.current) setLoading(false);
     }
   }, [siteId, date, toast]);
 
@@ -557,7 +568,11 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
     setSavingRainedOff(true);
     try {
       const dateStr = format(date, "yyyy-MM-dd");
-      await fetch(`/api/sites/${siteId}/rained-off`, {
+      // (May 2026 pattern sweep) Pre-fix this fetch swallowed failures.
+      // A 500 from the recompute, or a 403 from canAccessSite, left the
+      // user looking at a "Saving..." toast that turned into "Done"
+      // even though nothing changed server-side.
+      const res = await fetch(`/api/sites/${siteId}/rained-off`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -566,6 +581,10 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
           delayJobs: rainedOffDelay,
         }),
       });
+      if (!res.ok) {
+        showToast(await fetchErrorMessage(res, "Failed to mark rained off"));
+        return;
+      }
       setRainedOffDialogOpen(false);
       setRainedOffNote("");
       setRefreshKey((k) => k + 1);
@@ -578,10 +597,18 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
 
   const handleUndoRainedOff = async () => {
     const dateStr = format(date, "yyyy-MM-dd");
-    await fetch(`/api/sites/${siteId}/rained-off?date=${dateStr}`, {
-      method: "DELETE",
-    });
-    setRefreshKey((k) => k + 1);
+    try {
+      const res = await fetch(`/api/sites/${siteId}/rained-off?date=${dateStr}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) {
+        showToast(await fetchErrorMessage(res, "Failed to undo rained off"));
+        return;
+      }
+      setRefreshKey((k) => k + 1);
+    } catch {
+      showToast("Network error — please try again");
+    }
   };
 
   // Snag resolve dialog handlers (P5)
@@ -669,6 +696,9 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
     if (!selectedAssigneeId) return;
     setAssigningUser(true);
     try {
+      // (May 2026 pattern sweep) Pre-fix .ok gated only the close+refresh
+      // path; failures left the dialog open with no error toast — the
+      // user assumed the assign hadn't fired and kept clicking.
       const res = await fetch(`/api/jobs/${jobId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -677,7 +707,11 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
       if (res.ok) {
         setChecklistExpand(null);
         setRefreshKey((k) => k + 1);
+      } else {
+        showToast(await fetchErrorMessage(res, "Failed to assign user"));
       }
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Network error assigning user");
     } finally {
       setAssigningUser(false);
     }
@@ -704,7 +738,14 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
         const fd = new FormData();
         snagResolvePhotos.forEach((f) => fd.append("photos", f));
         fd.append("tag", "after");
-        await fetch(`/api/snags/${snagResolveTarget.id}/photos`, { method: "POST", body: fd });
+        // (May 2026 pattern sweep) Photo upload was bare fetch — if it
+        // failed the snag still got marked RESOLVED with no after-photo
+        // evidence. Now: abort the resolve flow if photo upload fails.
+        const photoRes = await fetch(`/api/snags/${snagResolveTarget.id}/photos`, { method: "POST", body: fd });
+        if (!photoRes.ok) {
+          showToast(await fetchErrorMessage(photoRes, "Photo upload failed — snag NOT resolved"));
+          return;
+        }
       }
       const res = await fetch(`/api/snags/${snagResolveTarget.id}`, {
         method: "PATCH",
@@ -989,6 +1030,8 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
     if (!contractorAssignTarget || !selectedContractorId) return;
     setAssigningContractor(true);
     try {
+      // (May 2026 pattern sweep) Pre-fix .ok only gated the close+refresh
+      // path — failures left the dialog open silently.
       const res = await fetch(`/api/jobs/${contractorAssignTarget.jobId}/contractors`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -998,7 +1041,11 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
         setContractorAssignTarget(null);
         setSelectedContractorId("");
         fetchData();
+      } else {
+        showToast(await fetchErrorMessage(res, "Failed to assign contractor"));
       }
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Network error assigning contractor");
     } finally {
       setAssigningContractor(false);
     }

@@ -5,6 +5,7 @@ import { canAccessSite } from "@/lib/site-access";
 import { isWorkingDay, differenceInWorkingDays, addWorkingDays, snapToWorkingDay } from "@/lib/working-days";
 import { apiError } from "@/lib/api-errors";
 import { getServerCurrentDate } from "@/lib/dev-date";
+import { sessionHasPermission } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -275,6 +276,17 @@ export async function POST(
     const session = await auth();
     if (!session) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    if (
+      !sessionHasPermission(
+        session.user as { role?: string; permissions?: string[] },
+        "EDIT_PROGRAMME",
+      )
+    ) {
+      return NextResponse.json(
+        { error: "You do not have permission to pull jobs forward" },
+        { status: 403 },
+      );
     }
 
     const { id } = await params;

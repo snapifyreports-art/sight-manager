@@ -142,18 +142,42 @@ export function SiteQuantsClient({
     }
   }, [siteId]);
 
-  useEffect(() => { refresh(); }, [refresh]);
+  // (May 2026 pattern sweep) Cancellation flag for site-switch race +
+  // out-of-order responses from back-to-back updates.
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError("");
+    fetch(`/api/sites/${siteId}/quants`)
+      .then((r) => {
+        if (!r.ok) throw new Error(`Failed to load (HTTP ${r.status})`);
+        return r.json();
+      })
+      .then((d) => { if (!cancelled) setData(d); })
+      .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load"); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [siteId]);
 
   // Per-plot inline delivered/consumed update
   async function updatePerPlot(m: ManualPerPlot, patch: Partial<Pick<ManualPerPlot, "delivered" | "consumed" | "quantity">>) {
+    // (May 2026 pattern sweep) Pre-fix this PUT swallowed errors and
+    // still refreshed — the UI silently reverted to the old value with
+    // no toast / banner explaining why.
     try {
-      await fetch(`/api/plots/${m.plotId}/materials/${m.id}`, {
+      const res = await fetch(`/api/plots/${m.plotId}/materials/${m.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(patch),
       });
+      if (!res.ok) {
+        toast.error(await fetchErrorMessage(res, "Failed to update material"));
+        return;
+      }
       refresh();
-    } catch {}
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Network error updating material");
+    }
   }
 
   // One-off order status transitions — delegated to shared hook
@@ -180,8 +204,18 @@ export function SiteQuantsClient({
       danger: true,
     });
     if (!ok) return;
-    await fetch(`/api/plots/${m.plotId}/materials/${m.id}`, { method: "DELETE" });
-    refresh();
+    // (May 2026 pattern sweep) Surface delete failures instead of
+    // silently refreshing and leaving the row in place.
+    try {
+      const res = await fetch(`/api/plots/${m.plotId}/materials/${m.id}`, { method: "DELETE" });
+      if (!res.ok) {
+        toast.error(await fetchErrorMessage(res, "Failed to delete material"));
+        return;
+      }
+      refresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Network error deleting material");
+    }
   }
 
   async function submitManual() {

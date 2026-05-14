@@ -373,19 +373,26 @@ export function CreateSiteWizard({
   const { begin: beginBusy, end: endBusy } = useBusyOverlay();
 
   useEffect(() => {
+    // (May 2026 pattern sweep) Cancellation flag — avoid setState /
+    // toast after unmount if the wizard closes mid-fetch.
+    let cancelled = false;
     (async () => {
       try {
         const res = await fetch("/api/users");
+        if (cancelled) return;
         if (!res.ok) {
           toast.error(await fetchErrorMessage(res, "Failed to load users"));
           return;
         }
         const data: { id: string; name: string }[] = await res.json();
+        if (cancelled) return;
         setUsers(data.map((u) => ({ id: u.id, name: u.name })));
       } catch (e) {
+        if (cancelled) return;
         toast.error(e instanceof Error ? e.message : "Failed to load users");
       }
     })();
+    return () => { cancelled = true; };
   }, [toast]);
 
   // Step 2: Plot batches
@@ -495,6 +502,9 @@ export function CreateSiteWizard({
   // Fetch templates when entering step 2
   useEffect(() => {
     if (step === "plot-batches" && templates.length === 0) {
+      // (May 2026 pattern sweep) Cancellation flag — rapid step
+      // navigation could let an older response overwrite.
+      let cancelled = false;
       setLoadingTemplates(true);
       Promise.all([
         fetch("/api/plot-templates?liveOnly=true").then(async (r) => {
@@ -507,13 +517,16 @@ export function CreateSiteWizard({
         }),
       ])
         .then(([tpls, sups]) => {
+          if (cancelled) return;
           setTemplates(tpls);
           setSuppliers(sups);
         })
         .catch((e: unknown) => {
+          if (cancelled) return;
           toast.error(e instanceof Error ? e.message : "Failed to load templates and suppliers");
         })
-        .finally(() => setLoadingTemplates(false));
+        .finally(() => { if (!cancelled) setLoadingTemplates(false); });
+      return () => { cancelled = true; };
     }
   }, [step, templates.length, toast]);
 

@@ -6,6 +6,7 @@ import { templateJobsInclude } from "@/lib/template-includes";
 import { createJobsFromTemplate } from "@/lib/apply-template-helpers";
 import { canAccessSite } from "@/lib/site-access";
 import { friendlyMessage } from "@/lib/api-errors";
+import { sessionHasPermission } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -54,6 +55,22 @@ export async function POST(request: NextRequest) {
   ) {
     return NextResponse.json(
       { error: "You do not have access to this site" },
+      { status: 403 },
+    );
+  }
+
+  // (May 2026 pattern sweep) Match apply-template (single) — batch apply
+  // is just a multi-plot wrapper around the same mutation surface.
+  // Pre-fix it relied on canAccessSite alone, so any contractor with a
+  // UserSite row could spawn dozens of plots via the batch endpoint.
+  if (
+    !sessionHasPermission(
+      session.user as { role?: string; permissions?: string[] },
+      "EDIT_PROGRAMME",
+    )
+  ) {
+    return NextResponse.json(
+      { error: "You do not have permission to create plots" },
       { status: 403 },
     );
   }

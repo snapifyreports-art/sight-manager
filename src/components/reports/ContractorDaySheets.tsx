@@ -5,6 +5,7 @@ import { format, addDays, differenceInCalendarDays } from "date-fns";
 import { getCurrentDate } from "@/lib/dev-date";
 import { useDevDate } from "@/lib/dev-date-context";
 import { useJobAction } from "@/hooks/useJobAction";
+import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 import {
   Users,
   HardHat,
@@ -251,6 +252,7 @@ function JobRow({
 
 export function ContractorDaySheets({ siteId }: ContractorDaySheetsProps) {
   const { devDate } = useDevDate();
+  const toast = useToast();
   const [data, setData] = useState<DaySheetsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [date, setDate] = useState(getCurrentDate());
@@ -277,10 +279,15 @@ export function ContractorDaySheets({ siteId }: ContractorDaySheetsProps) {
   useEffect(() => {
     setLoading(true);
     const dateStr = format(date, "yyyy-MM-dd");
+    // (May 2026 pattern sweep) Guard with .ok AND cancellation flag —
+    // rapid prev/next-day clicks could swap in yesterday's data under
+    // today's header otherwise.
+    let cancelled = false;
     fetch(`/api/sites/${siteId}/day-sheets?date=${dateStr}`)
-      .then((r) => r.json())
-      .then(setData)
-      .finally(() => setLoading(false));
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (d && !cancelled) setData(d); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, [siteId, date, devDate, refreshKey]);
 
   const prevDay = () => setDate((d) => new Date(d.getTime() - 86400000));
@@ -316,11 +323,17 @@ export function ContractorDaySheets({ siteId }: ContractorDaySheetsProps) {
     setPendingActions((prev) => new Set(prev).add(jobId));
     try {
       const job = findJob(jobId);
+      // (May 2026 pattern sweep) Pre-fix any non-ok response (e.g. 403
+      // / 500 from action enforcement) silently no-op'd; now we toast.
       const res = await fetch(`/api/jobs/${jobId}/actions`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action }),
       });
+      if (!res.ok) {
+        toast.error(await fetchErrorMessage(res, `Failed to ${action}`));
+        return;
+      }
       if (res.ok) {
         const result = await res.json();
         setRefreshKey((k) => k + 1);
@@ -410,9 +423,12 @@ export function ContractorDaySheets({ siteId }: ContractorDaySheetsProps) {
         setExtendTarget(null);
         setExtendPreview(null);
         setRefreshKey((k) => k + 1);
+      } else {
+        // (May 2026 pattern sweep) Was silent — now toast.
+        toast.error(await fetchErrorMessage(res, "Failed to extend job"));
       }
-    } catch {
-      // ignore
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Network error extending job");
     } finally {
       setExtendLoading(false);
     }
@@ -431,9 +447,11 @@ export function ContractorDaySheets({ siteId }: ContractorDaySheetsProps) {
         setCascadeTarget(null);
         setCascadePreview(null);
         setRefreshKey((k) => k + 1);
+      } else {
+        toast.error(await fetchErrorMessage(res, "Failed to apply cascade"));
       }
-    } catch {
-      // ignore
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Network error applying cascade");
     } finally {
       setCascadeLoading(false);
     }

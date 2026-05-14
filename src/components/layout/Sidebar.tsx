@@ -173,10 +173,14 @@ function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: boolean; on
 
   // Fetch sites list for the picker
   useEffect(() => {
+    // (May 2026 pattern sweep) Guard with .ok — error payload would
+    // otherwise crash the .map call below — plus a cancellation flag
+    // so an unmount mid-fetch doesn't setState.
+    let cancelled = false;
     fetch("/api/sites")
-      .then((r) => r.json())
+      .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
-        if (Array.isArray(data)) {
+        if (Array.isArray(data) && !cancelled) {
           const list = data.map((s: { id: string; name: string; status: string }) => ({
             id: s.id,
             name: s.name,
@@ -197,6 +201,7 @@ function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: boolean; on
         }
       })
       .catch(() => {});
+    return () => { cancelled = true; };
   }, []);
 
   // Derive the effective site directly (no effect needed) — prefer URL path,
@@ -662,10 +667,13 @@ export function MobileSiteBar() {
   const selectedSiteId = siteIdFromPath || siteParam;
 
   useEffect(() => {
+    // (May 2026 pattern sweep) Guard + cancellation flag.
+    let cancelled = false;
     fetch("/api/sites")
-      .then((r) => r.json())
-      .then((data) => { if (Array.isArray(data)) setSites(data); })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => { if (Array.isArray(data) && !cancelled) setSites(data); })
       .catch(() => {});
+    return () => { cancelled = true; };
   }, []);
 
   const isOnSitePage = !!siteMatch?.[1];

@@ -251,23 +251,29 @@ export function SiteOrders({ siteId }: SiteOrdersProps) {
     })();
   };
 
+  // (May 2026 pattern sweep) Cancellation flag for site-switch race.
   useEffect(() => {
+    let cancelled = false;
     (async () => {
       try {
         const res = await fetch(`/api/sites/${siteId}/orders`);
+        if (cancelled) return;
         if (!res.ok) {
           toast.error(await fetchErrorMessage(res, "Failed to load orders"));
           return;
         }
         const data = await res.json();
+        if (cancelled) return;
         setOrders(data.orders || data);
         if (data.site) setSiteInfo(data.site);
       } catch (e) {
+        if (cancelled) return;
         toast.error(e instanceof Error ? e.message : "Failed to load orders");
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     })();
+    return () => { cancelled = true; };
   }, [siteId, toast]);
 
   // Load wizard data when dialog opens
@@ -327,21 +333,30 @@ export function SiteOrders({ siteId }: SiteOrdersProps) {
   // Fetch supplier materials when a supplier is selected
   useEffect(() => {
     if (!supplierId) { setSupplierMaterials([]); setCatalogueOpen(false); return; }
+    // (May 2026 pattern sweep) Cancellation flag — rapid supplier
+    // picker changes could land an older supplier's catalog in the
+    // autocomplete and a quick add-item would associate the wrong
+    // material with the order.
+    let cancelled = false;
     (async () => {
       try {
         const res = await fetch(`/api/suppliers/${supplierId}/materials`);
+        if (cancelled) return;
         if (!res.ok) {
           toast.error(await fetchErrorMessage(res, "Failed to load supplier materials"));
           setSupplierMaterials([]);
           return;
         }
         const data = await res.json();
+        if (cancelled) return;
         setSupplierMaterials(Array.isArray(data) ? data : []);
       } catch (e) {
+        if (cancelled) return;
         toast.error(e instanceof Error ? e.message : "Failed to load supplier materials");
         setSupplierMaterials([]);
       }
     })();
+    return () => { cancelled = true; };
   }, [supplierId, toast]);
 
   // Unique job names across selected plots, grouped by parentStage

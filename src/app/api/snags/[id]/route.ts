@@ -6,6 +6,7 @@ import { getServerCurrentDate } from "@/lib/dev-date";
 import { canAccessSite } from "@/lib/site-access";
 import { addDays, format } from "date-fns";
 import { apiError } from "@/lib/api-errors";
+import { sessionHasPermission } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -223,6 +224,19 @@ export async function DELETE(
   const session = await auth();
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  // (May 2026 pattern sweep) Snag DELETE is a hard delete; gate on
+  // DELETE_ITEMS to match every other destructive verb.
+  if (
+    !sessionHasPermission(
+      session.user as { role?: string; permissions?: string[] },
+      "DELETE_ITEMS",
+    )
+  ) {
+    return NextResponse.json(
+      { error: "You do not have permission to delete snags" },
+      { status: 403 },
+    );
   }
 
   const { id } = await params;

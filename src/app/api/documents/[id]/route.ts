@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { getSupabase, PHOTOS_BUCKET } from "@/lib/supabase";
 import { canAccessSite } from "@/lib/site-access";
 import { apiError } from "@/lib/api-errors";
+import { sessionHasPermission } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -26,12 +27,26 @@ export async function DELETE(
 
   // Access check:
   //   - Site-scoped docs: caller must have access to the site
-  //   - Contact-scoped docs (RAMS — siteId null, contactId set): any
-  //     authenticated user (no site to scope against). Admins + managers
-  //     both reach the Contractor Comms view where delete is triggered.
+  //   - Contact-scoped docs (RAMS — siteId null, contactId set): require
+  //     MANAGE_ORDERS — matches the upload gate so contractors can't
+  //     delete an arbitrary RAMS row.
   if (doc.siteId) {
     if (!(await canAccessSite(session.user.id, (session.user as { role: string }).role, doc.siteId))) {
       return NextResponse.json({ error: "You do not have access to this site" }, { status: 403 });
+    }
+  } else if (doc.contactId) {
+    // (May 2026 pattern sweep) Contact-scoped delete must match the
+    // contact-doc upload gate — MANAGE_ORDERS.
+    if (
+      !sessionHasPermission(
+        session.user as { role?: string; permissions?: string[] },
+        "MANAGE_ORDERS",
+      )
+    ) {
+      return NextResponse.json(
+        { error: "You do not have permission to delete contact documents" },
+        { status: 403 },
+      );
     }
   }
 

@@ -28,6 +28,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { JobActionStrip } from "@/components/reports/JobActionStrip";
+import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 import type { BriefData, UpcomingDelivery } from "./types";
 
 export interface UpcomingDeliveriesSectionProps {
@@ -47,6 +48,7 @@ export function UpcomingDeliveriesSection({
   onOrderAction,
   onRefresh,
 }: UpcomingDeliveriesSectionProps) {
+  const toast = useToast();
   return (
     <Card id="section-upcoming-deliveries">
       <CardHeader
@@ -180,16 +182,44 @@ export function UpcomingDeliveriesSection({
                                   }
                                   onChange={async (e) => {
                                     if (!e.target.value) return;
+                                    // (May 2026 pattern sweep) Pre-fix
+                                    // this loop fired N PUTs and
+                                    // refreshed regardless. Any silent
+                                    // failure (403, 500) left the UI
+                                    // claiming the date update worked
+                                    // when it didn't. Now: count
+                                    // failures, toast if any.
+                                    const failures: string[] = [];
                                     for (const id of allIds) {
-                                      await fetch(`/api/orders/${id}`, {
-                                        method: "PUT",
-                                        headers: {
-                                          "Content-Type": "application/json",
-                                        },
-                                        body: JSON.stringify({
-                                          expectedDeliveryDate: e.target.value,
-                                        }),
-                                      });
+                                      try {
+                                        const res = await fetch(`/api/orders/${id}`, {
+                                          method: "PUT",
+                                          headers: {
+                                            "Content-Type": "application/json",
+                                          },
+                                          body: JSON.stringify({
+                                            expectedDeliveryDate: e.target.value,
+                                          }),
+                                        });
+                                        if (!res.ok) {
+                                          failures.push(
+                                            await fetchErrorMessage(res, `Order ${id} failed`),
+                                          );
+                                        }
+                                      } catch (err) {
+                                        failures.push(
+                                          err instanceof Error
+                                            ? err.message
+                                            : `Order ${id} — network error`,
+                                        );
+                                      }
+                                    }
+                                    if (failures.length > 0) {
+                                      toast.error(
+                                        `${failures.length} of ${allIds.length} delivery date${
+                                          allIds.length === 1 ? "" : "s"
+                                        } failed to update.`,
+                                      );
                                     }
                                     onRefresh();
                                   }}

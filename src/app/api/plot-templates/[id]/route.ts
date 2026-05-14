@@ -3,6 +3,25 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { templateJobsInclude, normaliseTemplateParentDates } from "@/lib/template-includes";
 import { apiError } from "@/lib/api-errors";
+import { sessionHasPermission } from "@/lib/permissions";
+
+// (May 2026 pattern sweep) Templates = programme building blocks.
+// Mutation verbs all require EDIT_PROGRAMME; a CONTRACTOR with valid
+// auth used to be able to PUT/DELETE here freely.
+function requireEditProgramme(session: { user: unknown }) {
+  if (
+    !sessionHasPermission(
+      session.user as { role?: string; permissions?: string[] },
+      "EDIT_PROGRAMME",
+    )
+  ) {
+    return NextResponse.json(
+      { error: "You do not have permission to manage templates" },
+      { status: 403 },
+    );
+  }
+  return null;
+}
 
 export const dynamic = "force-dynamic";
 
@@ -45,6 +64,8 @@ export async function PUT(
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  const denied = requireEditProgramme(session);
+  if (denied) return denied;
 
   const { id } = await params;
   const body = await request.json();
@@ -125,6 +146,8 @@ export async function DELETE(
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  const denied = requireEditProgramme(session);
+  if (denied) return denied;
 
   const { id } = await params;
 

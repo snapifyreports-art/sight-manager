@@ -71,8 +71,15 @@ export function SiteNCRs({ siteId }: { siteId: string }) {
     }
   };
 
+  // (May 2026 pattern sweep) Cancellation flag for site-switch race.
   useEffect(() => {
-    void refresh();
+    let cancelled = false;
+    setLoading(true);
+    fetch(`/api/sites/${siteId}/ncrs`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (d && !cancelled) setNcrs(d); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [siteId]);
 

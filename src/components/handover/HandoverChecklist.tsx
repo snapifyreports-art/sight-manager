@@ -81,25 +81,54 @@ export function HandoverChecklist({ plotId }: { plotId: string }) {
     })();
   }, [plotId]);
 
+  // (May 2026 pattern sweep) Cancellation flag for plot-switch race.
   useEffect(() => {
-    fetchData();
-    // Fetch available documents for linking — supplementary, fails silently
+    let cancelled = false;
+    setLoadError(null);
+    setLoading(true);
+    (async () => {
+      try {
+        const res = await fetch(`/api/plots/${plotId}/handover`);
+        if (cancelled) return;
+        if (!res.ok) {
+          setLoadError(await fetchErrorMessage(res, "Failed to load handover checklist"));
+          return;
+        }
+        const d = await res.json();
+        if (!cancelled) setData(d);
+      } catch (e) {
+        if (!cancelled) setLoadError(e instanceof Error ? e.message : "Network error loading handover checklist");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plotId]);
+
+  // Available-documents lookup runs separately so a docs fetch failure
+  // doesn't block the main handover panel.
+  useEffect(() => {
+    let cancelled = false;
     (async () => {
       try {
         const plotRes = await fetch(`/api/plots/${plotId}`);
-        if (!plotRes.ok) return;
+        if (cancelled || !plotRes.ok) return;
         const plot = await plotRes.json();
+        if (cancelled) return;
         if (plot.siteId) {
           const docRes = await fetch(`/api/sites/${plot.siteId}/documents`);
-          if (!docRes.ok) return;
+          if (cancelled || !docRes.ok) return;
           const d = await docRes.json();
+          if (cancelled) return;
           if (Array.isArray(d)) setDocs(d);
         }
       } catch {
         // Supplementary — main error UX covered by handover fetch
       }
     })();
-  }, [plotId, fetchData]);
+    return () => { cancelled = true; };
+  }, [plotId]);
 
   const handleCheck = async (itemId: string, checked: boolean) => {
     const res = await fetch(`/api/plots/${plotId}/handover`, {

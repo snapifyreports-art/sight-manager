@@ -86,9 +86,24 @@ export function PlotCustomerViewTab({ plotId }: { plotId: string }) {
     setLoadingPhotos(false);
   }, [plotId]);
 
+  // (May 2026 pattern sweep) Cancellation flag — rapid plot navigation
+  // let an older plot's link / journal / photos land in the new tab.
   useEffect(() => {
-    refreshAll();
-  }, [refreshAll]);
+    let cancelled = false;
+    Promise.all([
+      fetch(`/api/plots/${plotId}/customer-link`, { cache: "no-store" }),
+      fetch(`/api/plots/${plotId}/journal`, { cache: "no-store" }),
+      fetch(`/api/plots/${plotId}/customer-photos`, { cache: "no-store" }),
+    ]).then(async ([linkRes, journalRes, photoRes]) => {
+      if (cancelled) return;
+      if (linkRes.ok) setLink(await linkRes.json());
+      if (cancelled) return;
+      if (journalRes.ok) setEntries(await journalRes.json());
+      if (cancelled) return;
+      if (photoRes.ok) setPhotos(await photoRes.json());
+    }).finally(() => { if (!cancelled) setLoadingPhotos(false); });
+    return () => { cancelled = true; };
+  }, [plotId]);
 
   // ─── Link actions ───────────────────────────────────────────────────
   async function generateLink(rotate: boolean) {

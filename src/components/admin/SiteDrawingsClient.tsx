@@ -77,7 +77,21 @@ export function SiteDrawingsClient({ siteId, plots }: { siteId: string; plots: P
     }
   }, [siteId]);
 
-  useEffect(() => { refresh(); }, [refresh]);
+  // (May 2026 pattern sweep) Cancellation flag for site-switch race.
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError("");
+    fetch(`/api/sites/${siteId}/documents?category=DRAWING`)
+      .then((r) => {
+        if (!r.ok) throw new Error(`Failed to load (HTTP ${r.status})`);
+        return r.json();
+      })
+      .then((d) => { if (!cancelled) setDrawings(d); })
+      .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load"); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [siteId]);
 
   const { siteWide, byPlot } = useMemo(() => {
     const sw: Drawing[] = [];

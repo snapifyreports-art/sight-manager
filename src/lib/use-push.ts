@@ -110,6 +110,13 @@ export function usePush() {
       if (res.ok) {
         setSubscription(sub);
         setStatus("subscribed");
+      } else {
+        // (May 2026 pattern sweep) Pre-fix the server rejecting left the
+        // browser subscribed locally but the server had no record —
+        // status flipped silently with no push notifications arriving.
+        // Now: clean up the local subscription so retry can succeed.
+        await sub.unsubscribe().catch(() => {});
+        console.error("Push server registration failed:", res.status);
       }
     } catch (err) {
       console.error("Push subscription failed:", err);

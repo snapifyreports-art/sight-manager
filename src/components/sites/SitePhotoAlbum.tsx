@@ -68,9 +68,22 @@ export function SitePhotoAlbum({
     [siteId],
   );
 
+  // (May 2026 pattern sweep) Cancellation flag — switching sites
+  // quickly let an older site's photos land in the album.
   useEffect(() => {
-    void loadPage(null);
-  }, [loadPage]);
+    let cancelled = false;
+    setLoading(true);
+    fetch(`/api/sites/${siteId}/photos`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!data || cancelled) return;
+        setPhotos(data.photos);
+        setCursor(data.nextCursor);
+        setHasMore(!!data.nextCursor);
+      })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [siteId]);
 
   const stageOptions = Array.from(
     new Set(photos.map((p) => p.stageCode).filter((s): s is string => !!s)),

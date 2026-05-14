@@ -245,6 +245,14 @@ export async function DELETE(
   }
 
   const { id } = await params;
+
+  // (May 2026 pattern sweep) Pre-fix DELETE skipped canAccessSite even
+  // though POST had it. Any authenticated user could erase weather
+  // records for a site they don't belong to.
+  if (!(await canAccessSite(session.user.id, (session.user as { role: string }).role, id))) {
+    return NextResponse.json({ error: "You do not have access to this site" }, { status: 403 });
+  }
+
   const { date, type } = await req.json();
 
   if (!date) {

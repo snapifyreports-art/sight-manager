@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
@@ -96,6 +96,22 @@ export function SupplierDetailClient({ supplier: initial }: { supplier: Supplier
 
   // Pricelist state
   const [items, setItems] = useState<MaterialItem[]>(initial.materials);
+
+  // (May 2026 pattern sweep) Sync supplier + form + items to prop
+  // changes — after server-side mutation + router.refresh() pre-fix
+  // the form stayed stale until a fresh mount.
+  useEffect(() => {
+    setSupplier(initial);
+    setSupplierForm({
+      name: initial.name,
+      contactName: initial.contactName || "",
+      contactEmail: initial.contactEmail || "",
+      contactNumber: initial.contactNumber || "",
+      type: initial.type || "",
+      accountNumber: initial.accountNumber || "",
+    });
+    setItems(initial.materials);
+  }, [initial]);
   const [search, setSearch] = useState("");
   const [addOpen, setAddOpen] = useState(false);
   const [addForm, setAddForm] = useState({ name: "", unit: "each", unitCost: "", category: "", sku: "" });

@@ -48,7 +48,16 @@ export function PlotMaterialsSection({ plotId }: { plotId: string }) {
     setLoading(false);
   }, [plotId]);
 
-  useEffect(() => { load(); }, [load]);
+  // (May 2026 pattern sweep) Cancellation flag for plot-switch race.
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    fetch(`/api/plots/${plotId}/materials`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (d && !cancelled) setMaterials(d); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [plotId]);
 
   async function updateField(m: PlotMaterial, patch: Partial<Pick<PlotMaterial, "delivered" | "consumed" | "quantity">>) {
     try {

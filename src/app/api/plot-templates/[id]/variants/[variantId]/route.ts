@@ -2,6 +2,22 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { apiError } from "@/lib/api-errors";
+import { sessionHasPermission } from "@/lib/permissions";
+
+function requireEditProgramme(session: { user: unknown }) {
+  if (
+    !sessionHasPermission(
+      session.user as { role?: string; permissions?: string[] },
+      "EDIT_PROGRAMME",
+    )
+  ) {
+    return NextResponse.json(
+      { error: "You do not have permission to manage templates" },
+      { status: 403 },
+    );
+  }
+  return null;
+}
 
 export const dynamic = "force-dynamic";
 
@@ -13,6 +29,8 @@ export async function PATCH(
   const session = await auth();
   if (!session)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const denied = requireEditProgramme(session);
+  if (denied) return denied;
 
   const { id: templateId, variantId } = await params;
   const body = await req.json();
@@ -42,6 +60,8 @@ export async function DELETE(
   const session = await auth();
   if (!session)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const denied = requireEditProgramme(session);
+  if (denied) return denied;
 
   const { id: templateId, variantId } = await params;
   try {

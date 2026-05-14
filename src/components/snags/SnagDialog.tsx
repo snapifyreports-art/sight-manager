@@ -165,27 +165,32 @@ export function SnagDialog({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Fetch users, contacts, and jobs when dialog opens
+  // (May 2026 pattern sweep) Cancellation flag — rapid open/close of
+  // the dialog could let a stale users / contacts list overwrite a
+  // fresher one.
   useEffect(() => {
     if (!open) return;
+    let cancelled = false;
 
     if ((!usersProp || usersProp.length === 0) && users.length === 0) {
       setLoadingUsers(true);
       (async () => {
         try {
           const res = await fetch("/api/users", { cache: "no-store" });
+          if (cancelled) return;
           if (!res.ok) {
             const msg = await fetchErrorMessage(res, "Failed to load users");
             setLoadError((prev) => prev ?? msg);
             return;
           }
           const data = await res.json();
-          if (Array.isArray(data)) {
+          if (!cancelled && Array.isArray(data)) {
             setUsers(data.map((u: SnagUser) => ({ id: u.id, name: u.name })));
           }
         } catch (e) {
-          setLoadError((prev) => prev ?? (e instanceof Error ? e.message : "Failed to load users"));
+          if (!cancelled) setLoadError((prev) => prev ?? (e instanceof Error ? e.message : "Failed to load users"));
         } finally {
-          setLoadingUsers(false);
+          if (!cancelled) setLoadingUsers(false);
         }
       })();
     }
@@ -194,13 +199,14 @@ export function SnagDialog({
       (async () => {
         try {
           const res = await fetch("/api/contacts?type=CONTRACTOR", { cache: "no-store" });
+          if (cancelled) return;
           if (!res.ok) {
             const msg = await fetchErrorMessage(res, "Failed to load contractors");
             setLoadError((prev) => prev ?? msg);
             return;
           }
           const data = await res.json();
-          if (Array.isArray(data)) {
+          if (!cancelled && Array.isArray(data)) {
             setContacts(
               data.map((c: SnagContact & { company?: string }) => ({
                 id: c.id,
@@ -211,19 +217,25 @@ export function SnagDialog({
             );
           }
         } catch (e) {
-          setLoadError((prev) => prev ?? (e instanceof Error ? e.message : "Failed to load contractors"));
+          if (!cancelled) setLoadError((prev) => prev ?? (e instanceof Error ? e.message : "Failed to load contractors"));
         }
       })();
     }
+    return () => { cancelled = true; };
   }, [open, usersProp, users.length, contacts.length]);
 
   // Fetch jobs for the plot
+  // (May 2026 pattern sweep) Cancellation flag — rapid plot/snag
+  // switches could leave the prior plot's jobs in the picker, and a
+  // careless save would attach the snag to a job from another plot.
   useEffect(() => {
     if (!open || !plotId) return;
+    let cancelled = false;
 
     (async () => {
       try {
         const res = await fetch(`/api/plots/${plotId}`, { cache: "no-store" });
+        if (cancelled) return;
         if (!res.ok) {
           const msg = await fetchErrorMessage(res, "Failed to load jobs");
           setLoadError((prev) => prev ?? msg);
@@ -231,13 +243,14 @@ export function SnagDialog({
         }
         const data = await res.json();
         // The plot endpoint should include jobs — if not, fetch separately
-        if (data.jobs && Array.isArray(data.jobs)) {
+        if (!cancelled && data.jobs && Array.isArray(data.jobs)) {
           setJobs(data.jobs);
         }
       } catch (e) {
-        setLoadError((prev) => prev ?? (e instanceof Error ? e.message : "Failed to load jobs"));
+        if (!cancelled) setLoadError((prev) => prev ?? (e instanceof Error ? e.message : "Failed to load jobs"));
       }
     })();
+    return () => { cancelled = true; };
   }, [open, plotId]);
 
   // Fetch photos for existing snags
@@ -247,23 +260,31 @@ export function SnagDialog({
       return;
     }
 
+    // (May 2026 pattern sweep) Cancellation flag. Pre-fix opening
+    // different snags rapidly via Daily Brief jumps rendered the
+    // prior snag's photos under the new snag's header.
+    let cancelled = false;
     setLoadingPhotos(true);
     (async () => {
       try {
         const res = await fetch(`/api/snags/${snag.id}/photos`, { cache: "no-store" });
+        if (cancelled) return;
         if (!res.ok) {
           const msg = await fetchErrorMessage(res, "Failed to load photos");
           setLoadError((prev) => prev ?? msg);
           return;
         }
         const data = await res.json();
+        if (cancelled) return;
         if (Array.isArray(data)) setSnagPhotos(data);
       } catch (e) {
+        if (cancelled) return;
         setLoadError((prev) => prev ?? (e instanceof Error ? e.message : "Failed to load photos"));
       } finally {
-        setLoadingPhotos(false);
+        if (!cancelled) setLoadingPhotos(false);
       }
     })();
+    return () => { cancelled = true; };
   }, [open, snag]);
 
   // Clear load error when dialog closes
@@ -422,6 +443,10 @@ export function SnagDialog({
           if (Array.isArray(newPhotos)) {
             setSnagPhotos((prev) => [...newPhotos, ...prev]);
           }
+        } else {
+          // (May 2026 pattern sweep) Pre-fix failures silently fell
+          // through to onSaved() — user thought upload worked.
+          toast.error(await fetchErrorMessage(res, "Photo upload failed"));
         }
         onSaved();
       } finally {

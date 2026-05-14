@@ -45,6 +45,9 @@ export function PlotQRCode({
 
   useEffect(() => {
     if (!plotId || !siteId) return;
+    // (May 2026 pattern sweep) Cancellation flag — switching plots
+    // rapidly could land the previous plot's QR data URL.
+    let cancelled = false;
     const url = getPlotQrUrl({ siteId, plotId });
     QRCode.toDataURL(url, {
       width: 256,
@@ -52,8 +55,9 @@ export function PlotQRCode({
       color: { dark: "#000000", light: "#ffffff" },
       errorCorrectionLevel: "M",
     })
-      .then(setQrDataUrl)
+      .then((d) => { if (!cancelled) setQrDataUrl(d); })
       .catch(console.error);
+    return () => { cancelled = true; };
   }, [plotId, siteId]);
 
   const handleDownload = () => {

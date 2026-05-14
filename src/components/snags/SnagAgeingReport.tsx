@@ -62,10 +62,15 @@ export function SnagAgeingReport({ siteId }: { siteId: string }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // (May 2026 pattern sweep) Guard with .ok + cancellation flag —
+    // site swap or rapid devDate jog could land stale ageing data.
+    let cancelled = false;
+    setLoading(true);
     fetch(`/api/sites/${siteId}/snag-report`)
-      .then((r) => r.json())
-      .then(setData)
-      .finally(() => setLoading(false));
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (d && !cancelled) setData(d); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, [siteId, devDate]);
 
   if (loading) {

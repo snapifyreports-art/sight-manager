@@ -88,22 +88,29 @@ export function useJobContractorPicker(
   // Fetch contacts when dialog opens (only first time — cached afterward).
   useEffect(() => {
     if (!target || allContacts.length > 0) return;
+    // (May 2026 pattern sweep) Cancellation flag — rapid open/close of
+    // different jobs could let an older response land.
+    let cancelled = false;
     setLoadingContacts(true);
     (async () => {
       try {
         const res = await fetch("/api/contacts?type=CONTRACTOR");
+        if (cancelled) return;
         if (!res.ok) {
           toast.error(await fetchErrorMessage(res, "Failed to load contractors"));
           return;
         }
         const data = await res.json() as ContractorContact[];
+        if (cancelled) return;
         setAllContacts(data);
       } catch (e) {
+        if (cancelled) return;
         toast.error(e instanceof Error ? e.message : "Failed to load contractors");
       } finally {
-        setLoadingContacts(false);
+        if (!cancelled) setLoadingContacts(false);
       }
     })();
+    return () => { cancelled = true; };
   }, [target, allContacts.length, toast]);
 
   function toggle(id: string) {

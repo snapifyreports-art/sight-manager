@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canAccessSite } from "@/lib/site-access";
 import { apiError } from "@/lib/api-errors";
+import { sessionHasPermission } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -16,7 +17,7 @@ export const dynamic = "force-dynamic";
  *         body: { updates: Array<{ photoId, shared }> }
  */
 
-async function authoriseAdmin(plotId: string) {
+async function authoriseAdmin(plotId: string, requiredPermission?: string) {
   const session = await auth();
   if (!session) return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
 
@@ -28,6 +29,20 @@ async function authoriseAdmin(plotId: string) {
 
   if (!(await canAccessSite(session.user.id, (session.user as { role: string }).role, plot.siteId))) {
     return { error: NextResponse.json({ error: "You do not have access to this site" }, { status: 403 }) };
+  }
+  if (
+    requiredPermission &&
+    !sessionHasPermission(
+      session.user as { role?: string; permissions?: string[] },
+      requiredPermission,
+    )
+  ) {
+    return {
+      error: NextResponse.json(
+        { error: `You do not have permission (${requiredPermission})` },
+        { status: 403 },
+      ),
+    };
   }
   return { plot };
 }
@@ -63,7 +78,7 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const result = await authoriseAdmin(id);
+  const result = await authoriseAdmin(id, "EDIT_PROGRAMME");
   if ("error" in result) return result.error;
 
   const body = await req.json().catch(() => ({}));

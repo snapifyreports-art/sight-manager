@@ -103,12 +103,16 @@ export function TemplateOrdersTableDialog({
   // Lazy-fetch suppliers when the dialog opens
   useEffect(() => {
     if (!open) return;
+    // (May 2026 pattern sweep) Cancellation flag — same open/close-rapid
+    // race as the contractors table dialog.
+    let cancelled = false;
     fetch("/api/suppliers", { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : []))
-      .then((d: SupplierData[]) =>
-        setSuppliers(Array.isArray(d) ? d : []),
-      )
-      .catch(() => setSuppliers([]));
+      .then((d: SupplierData[]) => {
+        if (!cancelled) setSuppliers(Array.isArray(d) ? d : []);
+      })
+      .catch(() => { if (!cancelled) setSuppliers([]); });
+    return () => { cancelled = true; };
   }, [open]);
 
   function update(orderId: string, patch: Partial<Draft>) {

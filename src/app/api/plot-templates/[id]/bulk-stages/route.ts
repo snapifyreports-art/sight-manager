@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { UK_HOUSEBUILDING_STAGES } from "@/lib/stage-library";
 import { templateJobsInclude, variantJobsInclude, normaliseTemplateParentDates } from "@/lib/template-includes";
 import { apiError } from "@/lib/api-errors";
+import { sessionHasPermission } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -15,6 +16,17 @@ export async function POST(
   const session = await auth();
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  if (
+    !sessionHasPermission(
+      session.user as { role?: string; permissions?: string[] },
+      "EDIT_PROGRAMME",
+    )
+  ) {
+    return NextResponse.json(
+      { error: "You do not have permission to manage templates" },
+      { status: 403 },
+    );
   }
 
   const { id } = await params;

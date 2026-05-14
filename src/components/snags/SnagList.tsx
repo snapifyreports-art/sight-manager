@@ -28,6 +28,7 @@ import {
 import { SnagStatusBadge, SnagPriorityBadge } from "@/components/shared/StatusBadge";
 import { InlinePriorityPicker } from "./InlinePriorityPicker";
 import { useSnagAction, type SnagStatus } from "@/hooks/useSnagAction";
+import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 
 interface SnagPhoto {
   id: string;
@@ -62,6 +63,7 @@ interface SnagListProps {
 }
 
 export function SnagList({ snags, onSelect, onRefresh, showPlot, highlightId, siteId }: SnagListProps) {
+  const toast = useToast();
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [filterPriority, setFilterPriority] = useState<string>("all");
   const [filterContractor, setFilterContractor] = useState<string>("all");
@@ -200,15 +202,27 @@ export function SnagList({ snags, onSelect, onRefresh, showPlot, highlightId, si
     if (!closeSnag) return;
     setClosingInProgress(true);
     try {
+      // (May 2026 pattern sweep) Both fetches inside this handler used
+      // to silently swallow failures. A 500 on the photo upload then
+      // landed CLOSED status on the snag with no after-photo — the
+      // close-out evidence was gone. Now: abort + toast on photo fail,
+      // abort + toast on PATCH fail.
+
       // 1. Upload "after" photo if provided
       if (pendingCloseFile) {
         const formData = new FormData();
         formData.append("photos", pendingCloseFile);
         formData.append("tag", "after");
-        await fetch(`/api/snags/${closeSnag.id}/photos`, {
+        const photoRes = await fetch(`/api/snags/${closeSnag.id}/photos`, {
           method: "POST",
           body: formData,
         });
+        if (!photoRes.ok) {
+          toast.error(
+            await fetchErrorMessage(photoRes, "Photo upload failed — snag NOT closed"),
+          );
+          return;
+        }
       }
 
       // 2. Build updated notes
@@ -219,7 +233,7 @@ export function SnagList({ snags, onSelect, onRefresh, showPlot, highlightId, si
         : undefined;
 
       // 3. PATCH snag to CLOSED
-      await fetch(`/api/snags/${closeSnag.id}`, {
+      const patchRes = await fetch(`/api/snags/${closeSnag.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -227,6 +241,10 @@ export function SnagList({ snags, onSelect, onRefresh, showPlot, highlightId, si
           ...(closingNote !== undefined && { notes: closingNote }),
         }),
       });
+      if (!patchRes.ok) {
+        toast.error(await fetchErrorMessage(patchRes, "Failed to close snag"));
+        return;
+      }
 
       // 4. Clean up and refresh
       setCloseSnag(null);
@@ -235,6 +253,8 @@ export function SnagList({ snags, onSelect, onRefresh, showPlot, highlightId, si
       setPendingCloseFile(null);
       setCloseNote("");
       onRefresh?.();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Network error closing snag");
     } finally {
       setClosingInProgress(false);
     }

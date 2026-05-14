@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { AlertTriangle, CheckCircle2, Camera, Loader2 } from "lucide-react";
 
 interface Snag {
@@ -34,6 +34,13 @@ export function SnagSignOffCard({ snag, token }: { snag: Snag; token: string }) 
   const [submitting, setSubmitting] = useState(false);
   const [requested, setRequested] = useState(snag.status === "IN_PROGRESS");
   const [error, setError] = useState<string | null>(null);
+
+  // (May 2026 pattern sweep) Sync requested to prop changes — on
+  // subsequent page renders with updated snag prop the button could
+  // otherwise show wrong state.
+  useEffect(() => {
+    setRequested(snag.status === "IN_PROGRESS");
+  }, [snag.status]);
 
   const hasDetail = (snag.photos && snag.photos.length > 0) || snag.notes;
 

@@ -2,6 +2,22 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/lib/auth";
 import { apiError } from "@/lib/api-errors";
+import { sessionHasPermission } from "@/lib/permissions";
+
+function requireManageOrders(session: { user: unknown }) {
+  if (
+    !sessionHasPermission(
+      session.user as { role?: string; permissions?: string[] },
+      "MANAGE_ORDERS",
+    )
+  ) {
+    return NextResponse.json(
+      { error: "You do not have permission to manage orders" },
+      { status: 403 },
+    );
+  }
+  return null;
+}
 
 export const dynamic = "force-dynamic";
 
@@ -13,6 +29,8 @@ export async function PUT(
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  const denied = requireManageOrders(session);
+  if (denied) return denied;
 
   const { id, itemId } = await params;
   const body = await req.json();
@@ -65,6 +83,8 @@ export async function DELETE(
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  const denied = requireManageOrders(session);
+  if (denied) return denied;
 
   const { id, itemId } = await params;
 

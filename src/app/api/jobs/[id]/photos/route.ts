@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { getSupabase, PHOTOS_BUCKET } from "@/lib/supabase";
 import { canAccessSite } from "@/lib/site-access";
 import { apiError } from "@/lib/api-errors";
+import { sessionHasPermission } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -206,6 +207,20 @@ export async function DELETE(
   const session = await auth();
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  // (May 2026 pattern sweep) Hard-deleting a photo needs DELETE_ITEMS.
+  // The companion POST / PATCH stay site-access-only since uploading
+  // and tagging photos is part of the day-to-day site workflow.
+  if (
+    !sessionHasPermission(
+      session.user as { role?: string; permissions?: string[] },
+      "DELETE_ITEMS",
+    )
+  ) {
+    return NextResponse.json(
+      { error: "You do not have permission to delete photos" },
+      { status: 403 },
+    );
   }
 
   const { id } = await params;

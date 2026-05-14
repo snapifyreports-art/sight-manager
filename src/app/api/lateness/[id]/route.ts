@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canAccessSite } from "@/lib/site-access";
 import { apiError } from "@/lib/api-errors";
+import { sessionHasPermission } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -30,6 +31,17 @@ export async function PATCH(
     if (!event) return NextResponse.json({ error: "Not found" }, { status: 404 });
     if (!(await canAccessSite(session.user.id, (session.user as { role: string }).role, event.siteId))) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+    if (
+      !sessionHasPermission(
+        session.user as { role?: string; permissions?: string[] },
+        "EDIT_PROGRAMME",
+      )
+    ) {
+      return NextResponse.json(
+        { error: "You do not have permission to attribute lateness" },
+        { status: 403 },
+      );
     }
 
     const body = await req.json();

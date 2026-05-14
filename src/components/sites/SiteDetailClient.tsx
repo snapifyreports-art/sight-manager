@@ -302,19 +302,30 @@ function SiteSnags({ siteId, plots, initialSnagId }: { siteId: string; plots: Ar
   }, [actionParam, plotIdParam]);
 
   const loadSnags = useCallback(() => {
+    // (May 2026 pattern sweep) Pre-fix chained .then(setSnags) accepted
+    // error payloads as data. Guard with .ok.
     fetch(`/api/sites/${siteId}/snags`)
-      .then((r) => r.json())
-      .then(setSnags)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (d) setSnags(d); })
       .finally(() => setLoading(false));
   }, [siteId]);
 
   useEffect(() => {
-    loadSnags();
+    // (May 2026 pattern sweep) Cancellation flag — switching sites
+    // quickly let an older site's snags + users land in the new site's
+    // view. Guard both fetches with .ok and cancelled.
+    let cancelled = false;
+    fetch(`/api/sites/${siteId}/snags`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (d && !cancelled) setSnags(d); })
+      .finally(() => { if (!cancelled) setLoading(false); });
     fetch("/api/users")
-      .then((r) => r.json())
-      .then((data: Array<{ id: string; name: string }>) =>
-        setUsers(data.map((u) => ({ id: u.id, name: u.name })))
-      );
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: Array<{ id: string; name: string }> | null) => {
+        if (!data || cancelled) return;
+        setUsers(data.map((u) => ({ id: u.id, name: u.name })));
+      });
+    return () => { cancelled = true; };
   }, [siteId, loadSnags]);
 
   if (loading) {
@@ -430,15 +441,23 @@ function SiteDocuments({ siteId }: { siteId: string }) {
   const [loading, setLoading] = useState(true);
 
   const loadDocs = useCallback(() => {
+    // (May 2026 pattern sweep) Guard with .ok.
     fetch(`/api/sites/${siteId}/documents`)
-      .then((r) => r.json())
-      .then(setDocs)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (d) setDocs(d); })
       .finally(() => setLoading(false));
   }, [siteId]);
 
   useEffect(() => {
-    loadDocs();
-  }, [siteId, loadDocs]);
+    // (May 2026 pattern sweep) Cancellation flag for site-switch race.
+    let cancelled = false;
+    fetch(`/api/sites/${siteId}/documents`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (d && !cancelled) setDocs(d); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [siteId]);
 
   if (loading) {
     return (
@@ -489,9 +508,12 @@ export function SiteDetailClient({
     site.assignedTo ? [{ id: site.assignedTo.id, name: site.assignedTo.name }] : []
   );
   useEffect(() => {
+    // (May 2026 pattern sweep) Guard with .ok.
     fetch("/api/users")
-      .then((r) => r.json())
-      .then((data: { id: string; name: string }[]) => setSiteUsers(data.map((u) => ({ id: u.id, name: u.name }))))
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: { id: string; name: string }[] | null) => {
+        if (Array.isArray(data)) setSiteUsers(data.map((u) => ({ id: u.id, name: u.name })));
+      })
       .catch(() => {});
   }, []);
 
@@ -533,14 +555,20 @@ export function SiteDetailClient({
   const [scheduleStatuses, setScheduleStatuses] = useState<Record<string, { status: string; daysDeviation: number; awaitingRestart: boolean }>>({});
 
   useEffect(() => {
+    // (May 2026 pattern sweep) Guard with .ok + cancellation flag —
+    // switching sites quickly let an older site's schedule statuses
+    // appear under the new site's plot map.
+    let cancelled = false;
     fetch(`/api/sites/${site.id}/plot-schedules`)
-      .then((r) => r.json())
-      .then((arr: Array<{ plotId: string; status: string; daysDeviation: number; awaitingRestart: boolean }>) => {
+      .then((r) => (r.ok ? r.json() : null))
+      .then((arr: Array<{ plotId: string; status: string; daysDeviation: number; awaitingRestart: boolean }> | null) => {
+        if (!arr || cancelled) return;
         const map: Record<string, { status: string; daysDeviation: number; awaitingRestart: boolean }> = {};
         for (const item of arr) map[item.plotId] = item;
         setScheduleStatuses(map);
       })
       .catch(() => {});
+    return () => { cancelled = true; };
   }, [site.id]);
 
   // Template mode state
@@ -639,14 +667,19 @@ export function SiteDetailClient({
 
   // Fetch overdue count on mount (UX #6)
   useEffect(() => {
+    // (May 2026 pattern sweep) Guard with .ok + cancellation flag —
+    // older site's overdueCount could land in current site's banner.
+    let cancelled = false;
     fetch(`/api/sites/${site.id}/daily-brief`)
-      .then((r) => r.json())
+      .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
+        if (cancelled) return;
         if (data?.summary?.overdueJobCount) {
           setOverdueCount(data.summary.overdueJobCount);
         }
       })
       .catch(() => {});
+    return () => { cancelled = true; };
   }, [site.id]);
 
   // Fetch templates and suppliers when dialog opens in template/bulk mode
@@ -656,17 +689,23 @@ export function SiteDetailClient({
       (plotMode === "template" || plotMode === "bulk") &&
       templates.length === 0
     ) {
+      // (May 2026 pattern sweep) Guard with .ok + cancellation flag —
+      // closing dialog during loading could otherwise leave a stale
+      // template list in state.
+      let cancelled = false;
       setLoadingTemplates(true);
       Promise.all([
-        fetch("/api/plot-templates?liveOnly=true").then((r) => r.json()),
-        fetch("/api/suppliers").then((r) => r.json()),
+        fetch("/api/plot-templates?liveOnly=true").then((r) => (r.ok ? r.json() : null)),
+        fetch("/api/suppliers").then((r) => (r.ok ? r.json() : null)),
       ])
         .then(([tpls, sups]) => {
-          setTemplates(tpls);
-          setSuppliers(sups);
+          if (cancelled) return;
+          if (Array.isArray(tpls)) setTemplates(tpls);
+          if (Array.isArray(sups)) setSuppliers(sups);
         })
         .catch(console.error)
-        .finally(() => setLoadingTemplates(false));
+        .finally(() => { if (!cancelled) setLoadingTemplates(false); });
+      return () => { cancelled = true; };
     }
   }, [addPlotDialogOpen, plotMode, templates.length]);
 

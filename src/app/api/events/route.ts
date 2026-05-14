@@ -115,6 +115,23 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // (May 2026 pattern sweep) Pre-fix POST accepted any caller-supplied
+  // siteId/plotId/jobId without verifying access. Any authenticated user
+  // could spam audit-log entries against any site they don't belong to,
+  // or cross-attribute events between tenants.
+  if (siteId) {
+    const accessibleSiteIds = await getUserSiteIds(
+      session.user.id,
+      (session.user as { role: string }).role,
+    );
+    if (accessibleSiteIds !== null && !accessibleSiteIds.includes(siteId)) {
+      return NextResponse.json(
+        { error: "You do not have access to this site" },
+        { status: 403 },
+      );
+    }
+  }
+
   const event = await prisma.eventLog.create({
     data: {
       type: type as EventType,

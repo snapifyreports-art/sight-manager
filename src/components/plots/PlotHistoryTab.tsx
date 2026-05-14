@@ -219,9 +219,27 @@ export function PlotHistoryTab({ plotId }: { plotId: string }) {
     [plotId]
   );
 
+  // (May 2026 pattern sweep) Cancellation flag for plot-switch race.
   useEffect(() => {
-    fetchEvents(1);
-  }, [fetchEvents]);
+    let cancelled = false;
+    setLoading(true);
+    const params = new URLSearchParams({ plotId, page: "1", limit: "50" });
+    fetch(`/api/events?${params.toString()}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!data || cancelled) return;
+        setEvents(data.events);
+        setHasMore(1 < data.totalPages);
+      })
+      .catch(console.error)
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false);
+          setLoadingMore(false);
+        }
+      });
+    return () => { cancelled = true; };
+  }, [plotId]);
 
   function handleLoadMore() {
     const nextPage = page + 1;

@@ -247,18 +247,28 @@ export default function SiteWalkthrough({
   const touchStart = useRef<number | null>(null);
   const touchDelta = useRef<number>(0);
 
+  // (May 2026 pattern sweep) Generation counter — useRefreshOnFocus +
+  // rapid site navigation + post-mutation refetch could race; older
+  // response landing on top of newer one.
+  const walkthroughGen = useRef(0);
+
   const fetchData = useCallback(async (quiet = false) => {
+    const myGen = ++walkthroughGen.current;
     if (!quiet) setLoading(true);
     else setRefreshing(true);
     try {
       const res = await fetch(`/api/sites/${siteId}/walkthrough`);
+      if (myGen !== walkthroughGen.current) return;
       if (res.ok) {
         const json = await res.json();
+        if (myGen !== walkthroughGen.current) return;
         setData(json);
       }
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (myGen === walkthroughGen.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, [siteId]);
 
@@ -522,7 +532,15 @@ export default function SiteWalkthrough({
         if (snagPhotos.length > 0) {
           const fd = new FormData();
           snagPhotos.forEach((f) => fd.append("photos", f));
-          await fetch(`/api/snags/${snagData.id}/photos`, { method: "POST", body: fd });
+          // (May 2026 pattern sweep) Pre-fix this bare fetch swallowed
+          // failures and the snag-raised toast fired regardless — user
+          // thought photos uploaded when they didn't.
+          const photoRes = await fetch(`/api/snags/${snagData.id}/photos`, { method: "POST", body: fd });
+          if (!photoRes.ok) {
+            showToast("Snag raised but photo upload failed", "error");
+            await refresh();
+            return;
+          }
         }
         closeModal();
         showToast("Snag raised", "success");

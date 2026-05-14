@@ -60,27 +60,32 @@ export function TemplateCompareDialog({
   }, [initialA, initialB]);
 
   // Pull full data when ids change
+  // (May 2026 pattern sweep) Guard with .ok + cancellation flag.
   useEffect(() => {
     if (!aId) {
       setADetail(null);
       return;
     }
+    let cancelled = false;
     setLoadingA(true);
     fetch(`/api/plot-templates/${aId}`, { cache: "no-store" })
-      .then((r) => r.json())
-      .then((d) => setADetail(d))
-      .finally(() => setLoadingA(false));
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (!cancelled) setADetail(d); })
+      .finally(() => { if (!cancelled) setLoadingA(false); });
+    return () => { cancelled = true; };
   }, [aId]);
   useEffect(() => {
     if (!bId) {
       setBDetail(null);
       return;
     }
+    let cancelled = false;
     setLoadingB(true);
     fetch(`/api/plot-templates/${bId}`, { cache: "no-store" })
-      .then((r) => r.json())
-      .then((d) => setBDetail(d))
-      .finally(() => setLoadingB(false));
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (!cancelled) setBDetail(d); })
+      .finally(() => { if (!cancelled) setLoadingB(false); });
+    return () => { cancelled = true; };
   }, [bId]);
 
   const diff = useMemo(() => {

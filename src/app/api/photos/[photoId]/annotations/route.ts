@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canAccessSite } from "@/lib/site-access";
 import { apiError } from "@/lib/api-errors";
+import { sessionHasPermission } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -17,7 +18,7 @@ export const dynamic = "force-dynamic";
  * serialises whatever shape it wants. Backend just persists.
  */
 
-async function authoriseByPhoto(photoId: string) {
+async function authoriseByPhoto(photoId: string, requiredPermission?: string) {
   const session = await auth();
   if (!session) return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
   const photo = await prisma.jobPhoto.findUnique({
@@ -30,6 +31,23 @@ async function authoriseByPhoto(photoId: string) {
     !(await canAccessSite(session.user.id, (session.user as { role: string }).role, siteId))
   ) {
     return { error: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
+  }
+  // POST stays site-access-only (annotating a photo is day-to-day site
+  // work) — DELETE passes "DELETE_ITEMS" so the destructive verb is
+  // gated like every other delete in the codebase.
+  if (
+    requiredPermission &&
+    !sessionHasPermission(
+      session.user as { role?: string; permissions?: string[] },
+      requiredPermission,
+    )
+  ) {
+    return {
+      error: NextResponse.json(
+        { error: `You do not have permission (${requiredPermission})` },
+        { status: 403 },
+      ),
+    };
   }
   return { session, plotId };
 }
@@ -85,7 +103,7 @@ export async function DELETE(
   { params }: { params: Promise<{ photoId: string }> },
 ) {
   const { photoId } = await params;
-  const a = await authoriseByPhoto(photoId);
+  const a = await authoriseByPhoto(photoId, "DELETE_ITEMS");
   if ("error" in a) return a.error;
   const url = new URL(req.url);
   const annotationId = url.searchParams.get("annotationId");

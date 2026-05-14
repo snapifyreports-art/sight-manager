@@ -87,6 +87,20 @@ export async function PUT(
   if (!(await canAccessSite(session.user.id, (session.user as { role: string }).role, existing.site.id))) {
     return NextResponse.json({ error: "You do not have access to this site" }, { status: 403 });
   }
+  // (May 2026 pattern sweep) PUT needs EDIT_PROGRAMME like DELETE.
+  // Pre-fix any auth'd user with site access could rename / re-describe
+  // any plot.
+  if (
+    !sessionHasPermission(
+      session.user as { role?: string; permissions?: string[] },
+      "EDIT_PROGRAMME",
+    )
+  ) {
+    return NextResponse.json(
+      { error: "You do not have permission to edit plots" },
+      { status: 403 },
+    );
+  }
 
   try {
     const plot = await prisma.plot.update({

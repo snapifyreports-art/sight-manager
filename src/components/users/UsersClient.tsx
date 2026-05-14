@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect, useCallback } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import {
   UserCog,
@@ -125,13 +125,23 @@ function PermissionsDialog({
 
   const isAdmin = user?.role === "CEO" || user?.role === "DIRECTOR";
 
+  // (May 2026 pattern sweep — CRITICAL) Generation counter for the
+  // permissions fetch. Pre-fix rapidly switching the active user in
+  // the manage-permissions dialog could land an OLDER user's
+  // permission list AND siteIds in the form — a careless Save would
+  // then persist them against the WRONG user.
+  const fetchGen = useRef(0);
+
   const fetchPermissions = useCallback(async () => {
     if (!user) return;
+    const myGen = ++fetchGen.current;
     setLoading(true);
     try {
       const res = await fetch(`/api/users/${user.id}/permissions`);
+      if (myGen !== fetchGen.current) return; // stale — newer user selected
       if (res.ok) {
         const data = await res.json();
+        if (myGen !== fetchGen.current) return;
         // API returns { permissions: string[], siteIds: string[] }
         if (Array.isArray(data.permissions)) {
           setPermissions(data.permissions);
@@ -145,7 +155,7 @@ function PermissionsDialog({
     } catch (err) {
       console.error("Failed to fetch permissions:", err);
     } finally {
-      setLoading(false);
+      if (myGen === fetchGen.current) setLoading(false);
     }
   }, [user]);
 
@@ -345,6 +355,11 @@ export function UsersClient({
   const [search, setSearch] = useState("");
   // (May 2026 audit S-P0) Toggle for showing archived (ex-)staff.
   const [showArchived, setShowArchived] = useState(false);
+
+  // (May 2026 pattern sweep) Sync to prop changes after router.refresh().
+  useEffect(() => {
+    setUsers(initialUsers);
+  }, [initialUsers]);
 
   // Dialog state
   const [dialogOpen, setDialogOpen] = useState(false);

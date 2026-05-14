@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Plus,
@@ -126,6 +126,15 @@ export function PlotTemplatesSection({
   );
   const [loadingVariant, setLoadingVariant] = useState(false);
 
+  // (May 2026 pattern sweep) Generation counter for variant fetches.
+  // The URL-restore effect + openVariant() both fetch /full and race —
+  // pre-fix, navigating ?v=A then quickly ?v=B left whichever fetch
+  // resolved LAST as the editor's state. If A's fetch took 2s and B's
+  // took 200ms, the user looked at variant B for 1.8s then suddenly
+  // got bumped back to A. Now each fetch tags itself with a gen id;
+  // only the most recent gen is allowed to write state.
+  const variantFetchGen = useRef(0);
+
   // Restore from URL on mount (and on subsequent ?tpl/?v changes from
   // browser nav). When `?tpl=X` is set, look it up in the list and
   // open it. When `?tpl=X&v=Y`, also fetch the variant and open it.
@@ -160,15 +169,25 @@ export function PlotTemplatesSection({
     // compare against `editingVariant.id` (or templateId for sanity).
     if (varId) {
       if (!editingVariant || editingVariant.id !== varId) {
+        const myGen = ++variantFetchGen.current;
         setLoadingVariant(true);
         fetch(`/api/plot-templates/${tplId}/variants/${varId}/full`, {
           cache: "no-store",
         })
           .then((r) => (r.ok ? r.json() : null))
           .then((v) => {
+            // (May 2026 pattern sweep) Drop stale responses. If
+            // another variant fetch started after us, this one's
+            // result must be discarded — otherwise the older fetch
+            // overwrites the newer state.
+            if (myGen !== variantFetchGen.current) return;
             if (v) setEditingVariant(v);
           })
-          .finally(() => setLoadingVariant(false));
+          .finally(() => {
+            if (myGen === variantFetchGen.current) {
+              setLoadingVariant(false);
+            }
+          });
       }
     } else if (editingVariant) {
       // ?v= dropped — leave the variant editor.
@@ -366,21 +385,31 @@ export function PlotTemplatesSection({
 
   async function openVariant(variantId: string) {
     if (!editingTemplate) return;
+    // (May 2026 pattern sweep) Same generation-counter protection as
+    // the URL-restore effect — both call this same /full endpoint and
+    // both used to race. Tag ourselves with the latest gen; if the
+    // user clicks another variant before our response arrives, our
+    // result is discarded.
+    const myGen = ++variantFetchGen.current;
     setLoadingVariant(true);
     try {
       const res = await fetch(
         `/api/plot-templates/${editingTemplate.id}/variants/${variantId}/full`,
         { cache: "no-store" },
       );
+      if (myGen !== variantFetchGen.current) return;
       if (!res.ok) {
         toast.error(await fetchErrorMessage(res, "Failed to load variant"));
         return;
       }
       const variant = await res.json();
+      if (myGen !== variantFetchGen.current) return;
       setEditingVariant(variant);
       setUrlScope(editingTemplate.id, variantId);
     } finally {
-      setLoadingVariant(false);
+      if (myGen === variantFetchGen.current) {
+        setLoadingVariant(false);
+      }
     }
   }
 

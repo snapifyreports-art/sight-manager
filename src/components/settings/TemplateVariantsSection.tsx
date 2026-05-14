@@ -88,8 +88,34 @@ export function TemplateVariantsSection({
     }
   };
 
+  // (May 2026 pattern sweep) Cancellation flag — switching between
+  // templates quickly could land the previous template's variants in
+  // the new template's view.
   useEffect(() => {
-    void reload();
+    let cancelled = false;
+    setLoading(true);
+    (async () => {
+      try {
+        const res = await fetch(
+          `/api/plot-templates/${template.id}/variants`,
+          { cache: "no-store" },
+        );
+        if (cancelled || !res.ok) return;
+        const data: TemplateVariantData[] = await res.json();
+        if (cancelled) return;
+        setVariants(data);
+        const byId: Record<string, VariantSummary> = {};
+        await Promise.all(
+          data.map(async (v) => {
+            byId[v.id] = await fetchSummary(template.id, v.id);
+          }),
+        );
+        if (!cancelled) setCounts(byId);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [template.id]);
 

@@ -19,11 +19,14 @@ export function TemplateAuditLog({ templateId }: { templateId: string }) {
 
   useEffect(() => {
     if (!open || events !== null) return;
+    // (May 2026 pattern sweep) Guard with .ok + cancellation flag.
+    let cancelled = false;
     setLoading(true);
     fetch(`/api/plot-templates/${templateId}/audit`, { cache: "no-store" })
-      .then((r) => r.json())
-      .then((d) => setEvents(Array.isArray(d) ? d : []))
-      .finally(() => setLoading(false));
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (!cancelled) setEvents(Array.isArray(d) ? d : []); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, [open, events, templateId]);
 
   return (

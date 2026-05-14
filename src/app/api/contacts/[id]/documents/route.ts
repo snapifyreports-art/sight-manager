@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getSupabase, PHOTOS_BUCKET } from "@/lib/supabase";
 import { apiError } from "@/lib/api-errors";
+import { sessionHasPermission } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -50,6 +51,20 @@ export async function POST(
     const session = await auth();
     if (!session) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    // (May 2026 pattern sweep) Contact-scoped doc upload is the same
+    // class of write as editing a contact — gate on MANAGE_ORDERS so
+    // contractors can't dump RAMS rows against arbitrary contacts.
+    if (
+      !sessionHasPermission(
+        session.user as { role?: string; permissions?: string[] },
+        "MANAGE_ORDERS",
+      )
+    ) {
+      return NextResponse.json(
+        { error: "You do not have permission to manage contact documents" },
+        { status: 403 },
+      );
     }
     const { id } = await params;
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import Link from "next/link";
 import { format, formatDistanceToNow } from "date-fns";
 import {
@@ -291,6 +291,12 @@ export function EventsClient({
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
+  // (May 2026 pattern sweep) Sync to prop changes after router.refresh().
+  useEffect(() => {
+    setEvents(initialEvents);
+    setPagination(initialPagination);
+  }, [initialEvents, initialPagination]);
+
   // Filters
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [siteFilter, setSiteFilter] = useState<string>("all");
@@ -300,8 +306,14 @@ export function EventsClient({
   // Determine if server filters are active (type/site require refetch)
   const hasServerFilters = typeFilter !== "all" || siteFilter !== "all";
 
+  // (May 2026 pattern sweep) Generation counter — rapid Type/Site
+  // toggles let a slower earlier response overwrite the latest filter
+  // results.
+  const fetchGen = useRef(0);
+
   const fetchEvents = useCallback(
     async (page: number, type: string, siteId: string) => {
+      const myGen = ++fetchGen.current;
       setLoading(true);
       setLoadError(null);
       try {
@@ -312,12 +324,14 @@ export function EventsClient({
         if (siteId !== "all") params.set("siteId", siteId);
 
         const res = await fetch(`/api/events?${params.toString()}`);
+        if (myGen !== fetchGen.current) return;
         if (!res.ok) {
           setLoadError(await fetchErrorMessage(res, "Failed to load events"));
           return;
         }
 
         const data = await res.json();
+        if (myGen !== fetchGen.current) return;
         setEvents(data.events);
         setPagination({
           total: data.total,
@@ -325,9 +339,10 @@ export function EventsClient({
           totalPages: data.totalPages,
         });
       } catch (error) {
+        if (myGen !== fetchGen.current) return;
         setLoadError(error instanceof Error ? error.message : "Network error loading events");
       } finally {
-        setLoading(false);
+        if (myGen === fetchGen.current) setLoading(false);
       }
     },
     []

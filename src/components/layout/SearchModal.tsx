@@ -70,15 +70,25 @@ export function SearchModal({
     }
   }, [open]);
 
+  // (May 2026 pattern sweep) Generation counter for in-flight searches.
+  // Pre-fix typing past 2 chars + more chars let a slower response from
+  // an earlier (shorter) query overwrite a fresher (longer) one's
+  // results — the user saw stale matches under their latest input.
+  const searchGen = useRef(0);
+
   // Debounced search
   const doSearch = useCallback(async (q: string) => {
     if (q.length < 2) { setResults(null); return; }
+    const myGen = ++searchGen.current;
     setLoading(true);
     try {
       const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+      if (myGen !== searchGen.current) return; // newer query already in flight
       if (res.ok) setResults(await res.json());
     } catch { /* non-critical */ }
-    finally { setLoading(false); }
+    finally {
+      if (myGen === searchGen.current) setLoading(false);
+    }
   }, []);
 
   useEffect(() => {

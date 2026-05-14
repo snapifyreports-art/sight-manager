@@ -5,6 +5,7 @@ import { calculateCascade } from "@/lib/cascade";
 import { canAccessSite } from "@/lib/site-access";
 import { apiError } from "@/lib/api-errors";
 import { enforceOrderInvariants } from "@/lib/order-invariants";
+import { sessionHasPermission } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -123,6 +124,19 @@ export async function PUT(
   const session = await auth();
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  // (May 2026 pattern sweep) Cascade-apply rewrites many job dates +
+  // orders — requires EDIT_PROGRAMME like every other programme write.
+  if (
+    !sessionHasPermission(
+      session.user as { role?: string; permissions?: string[] },
+      "EDIT_PROGRAMME",
+    )
+  ) {
+    return NextResponse.json(
+      { error: "You do not have permission to apply cascade" },
+      { status: 403 },
+    );
   }
 
   const { id } = await params;

@@ -136,9 +136,17 @@ function ChecksSection({ plotId }: { plotId: string }) {
     }
   };
 
+  // (May 2026 pattern sweep) Cancellation flag for plot-switch race —
+  // switching plots quickly let an older plot's checks land in the
+  // new plot's view. Inline fetch with .ok guard + cancelled check.
   useEffect(() => {
-    void refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    let cancelled = false;
+    setLoading(true);
+    fetch(`/api/plots/${plotId}/pre-start-checks`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (d && !cancelled) setChecks(d); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, [plotId]);
 
   async function add() {
@@ -155,12 +163,15 @@ function ChecksSection({ plotId }: { plotId: string }) {
   }
 
   async function toggle(c: Check) {
+    // (May 2026 pattern sweep) Pre-fix non-ok silently no-op'd — toggle
+    // animation finished, but the row stayed in its original state.
     const res = await fetch(`/api/plots/${plotId}/pre-start-checks/${c.id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ checked: !c.checked }),
     });
     if (res.ok) void refresh();
+    else toast.error(await fetchErrorMessage(res, "Failed to update check"));
   }
 
   async function remove(c: Check) {
@@ -173,6 +184,7 @@ function ChecksSection({ plotId }: { plotId: string }) {
       method: "DELETE",
     });
     if (res.ok) void refresh();
+    else toast.error(await fetchErrorMessage(res, "Failed to remove check"));
   }
 
   const done = checks.filter((c) => c.checked).length;
@@ -270,8 +282,15 @@ function VariationsSection({ plotId }: { plotId: string }) {
     }
   };
 
+  // (May 2026 pattern sweep) Cancellation flag for plot-switch race.
   useEffect(() => {
-    void refresh();
+    let cancelled = false;
+    setLoading(true);
+    fetch(`/api/plots/${plotId}/variations`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (d && !cancelled) setVars(d); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [plotId]);
 
@@ -302,12 +321,22 @@ function VariationsSection({ plotId }: { plotId: string }) {
   }
 
   async function updateStatus(v: Variation, status: Variation["status"]) {
-    await fetch(`/api/plots/${plotId}/variations/${v.id}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status }),
-    });
-    void refresh();
+    // (May 2026 pattern sweep) Pre-fix this was bare fetch + always
+    // refresh; the UI silently snapped back to old state on failure.
+    try {
+      const res = await fetch(`/api/plots/${plotId}/variations/${v.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+      if (!res.ok) {
+        toast.error(await fetchErrorMessage(res, "Failed to update variation"));
+        return;
+      }
+      void refresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Network error updating variation");
+    }
   }
 
   const totalCost = vars
@@ -472,8 +501,15 @@ function DefectsSection({ plotId }: { plotId: string }) {
     }
   };
 
+  // (May 2026 pattern sweep) Cancellation flag for plot-switch race.
   useEffect(() => {
-    void refresh();
+    let cancelled = false;
+    setLoading(true);
+    fetch(`/api/plots/${plotId}/defects`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (d && !cancelled) setDefects(d); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [plotId]);
 
@@ -498,12 +534,21 @@ function DefectsSection({ plotId }: { plotId: string }) {
   }
 
   async function updateStatus(d: Defect, status: Defect["status"]) {
-    await fetch(`/api/plots/${plotId}/defects/${d.id}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status }),
-    });
-    void refresh();
+    // (May 2026 pattern sweep) Same as variations — surface failures.
+    try {
+      const res = await fetch(`/api/plots/${plotId}/defects/${d.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+      if (!res.ok) {
+        toast.error(await fetchErrorMessage(res, "Failed to update defect"));
+        return;
+      }
+      void refresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Network error updating defect");
+    }
   }
 
   return (
@@ -635,8 +680,15 @@ function DrawScheduleSection({ plotId }: { plotId: string }) {
     }
   };
 
+  // (May 2026 pattern sweep) Cancellation flag for plot-switch race.
   useEffect(() => {
-    void refresh();
+    let cancelled = false;
+    setLoading(true);
+    fetch(`/api/plots/${plotId}/draw-schedule`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (d && !cancelled) setDraws(d); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [plotId]);
 
@@ -665,12 +717,24 @@ function DrawScheduleSection({ plotId }: { plotId: string }) {
   }
 
   async function updateStatus(d: Draw, status: Draw["status"]) {
-    await fetch(`/api/plots/${plotId}/draw-schedule/${d.id}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status }),
-    });
-    void refresh();
+    // (May 2026 pattern sweep) Pre-fix this PUT silently swallowed any
+    // 500 / 403. The UI re-fetched and re-rendered the OLD status,
+    // leaving the user clicking again wondering if it worked. Now:
+    // toast on failure, only refresh on success.
+    try {
+      const res = await fetch(`/api/plots/${plotId}/draw-schedule/${d.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+      if (!res.ok) {
+        toast.error(await fetchErrorMessage(res, "Failed to update milestone"));
+        return;
+      }
+      void refresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Network error updating milestone");
+    }
   }
 
   const totalScheduled = draws.reduce((s, d) => s + d.amount, 0);

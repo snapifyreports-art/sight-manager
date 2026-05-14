@@ -103,7 +103,15 @@ export function CustomerNotifyToggle({ token }: { token: string }) {
         applicationServerKey: b64ToUint8(VAPID_PUBLIC_KEY) as unknown as BufferSource,
       });
       const sj = sub.toJSON();
-      await fetch(`/api/progress/${token}/push-subscribe`, {
+      // (May 2026 pattern sweep) Pre-fix the POST result was ignored.
+      // A 4xx / 5xx left the browser subscribed (the push registration
+      // happened locally) while the server had no record — so the
+      // toggle flipped to "Notifications on" but no push notifications
+      // ever arrived. Now: if the server rejects, unsubscribe locally
+      // so the next attempt starts from a clean slate, and surface a
+      // browser alert (this is the public buyer page — no in-app
+      // toast system available here).
+      const res = await fetch(`/api/progress/${token}/push-subscribe`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -115,6 +123,12 @@ export function CustomerNotifyToggle({ token }: { token: string }) {
           userAgent: navigator.userAgent,
         }),
       });
+      if (!res.ok) {
+        await sub.unsubscribe().catch(() => {});
+        setState("prompt");
+        alert("Couldn't enable notifications — please try again.");
+        return;
+      }
       setState("subscribed");
     } finally {
       setBusy(false);
@@ -128,11 +142,19 @@ export function CustomerNotifyToggle({ token }: { token: string }) {
       const reg = await navigator.serviceWorker.ready;
       const sub = await reg.pushManager.getSubscription();
       if (sub) {
-        await fetch(`/api/progress/${token}/push-subscribe`, {
+        // (May 2026 pattern sweep) Best-effort tell the server, but
+        // even if the server is down we still unsubscribe locally —
+        // the buyer's intent was to turn off push, and a stranded
+        // server row will be GC'd on the next failed delivery.
+        const res = await fetch(`/api/progress/${token}/push-subscribe`, {
           method: "DELETE",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ endpoint: sub.endpoint }),
-        });
+        }).catch(() => null);
+        if (res && !res.ok) {
+          // Log + carry on — local unsubscribe still happens below.
+          console.warn("Server push-unsubscribe rejected", res.status);
+        }
         await sub.unsubscribe();
       }
       setState("prompt");

@@ -410,6 +410,14 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
       return;
     }
 
+    // (May 2026 pattern sweep — CRITICAL) Cancellation flag. Pre-fix
+    // opening a different job before the first fetch resolved meant
+    // the older job's photos / orders / actions / contractors landed
+    // in the panel under the NEW job's title. The user saw mismatched
+    // data and the localStatus badge was wrong. Now we tag each effect
+    // run with a flag; later resolutions check it before setState.
+    let cancelled = false;
+
     const synthetic = context.job.id.startsWith("synth-");
 
     // For synthetic parent rows, fetch aggregated data from all child jobs
@@ -439,6 +447,7 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
         )
       )
         .then((results) => {
+          if (cancelled) return;
           const allPhotos: JobPhoto[] = [];
           const allActions: JobAction[] = [];
           const allOrders: PanelOrder[] = [];
@@ -490,10 +499,13 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
           setChildJobContractors(childContractorMap);
         })
         .catch((e: unknown) => {
+          if (cancelled) return;
           toast.error(e instanceof Error ? e.message : "Failed to load job data");
         })
-        .finally(() => setLoading(false));
-      return;
+        .finally(() => {
+          if (!cancelled) setLoading(false);
+        });
+      return () => { cancelled = true; };
     }
 
     setLoading(true);
@@ -508,6 +520,7 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
       }),
     ])
       .then(([photosData, jobData]) => {
+        if (cancelled) return;
         setPhotos(Array.isArray(photosData) ? photosData : []);
         setActions(Array.isArray(jobData.actions) ? jobData.actions : []);
         setOrders(Array.isArray(jobData.orders) ? jobData.orders : []);
@@ -523,9 +536,13 @@ export function JobWeekPanel({ open, onOpenChange, context, onOrderUpdated, onJo
         }
       })
       .catch((e: unknown) => {
+        if (cancelled) return;
         toast.error(e instanceof Error ? e.message : "Failed to load job data");
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
   }, [open, context, toast]);
 
   // Keyboard nav for lightbox

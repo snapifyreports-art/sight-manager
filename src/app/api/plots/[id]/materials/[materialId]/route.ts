@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canAccessSite } from "@/lib/site-access";
 import { apiError } from "@/lib/api-errors";
+import { sessionHasPermission } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +23,17 @@ export async function PUT(
 ) {
   const session = await auth();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (
+    !sessionHasPermission(
+      session.user as { role?: string; permissions?: string[] },
+      "EDIT_PROGRAMME",
+    )
+  ) {
+    return NextResponse.json(
+      { error: "You do not have permission to edit materials" },
+      { status: 403 },
+    );
+  }
 
   const { id: plotId, materialId } = await params;
   const g = await guard(plotId, session.user.id, (session.user as { role: string }).role);
@@ -60,6 +72,17 @@ export async function DELETE(
 ) {
   const session = await auth();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (
+    !sessionHasPermission(
+      session.user as { role?: string; permissions?: string[] },
+      "DELETE_ITEMS",
+    )
+  ) {
+    return NextResponse.json(
+      { error: "You do not have permission to delete materials" },
+      { status: 403 },
+    );
+  }
 
   const { id: plotId, materialId } = await params;
   const g = await guard(plotId, session.user.id, (session.user as { role: string }).role);

@@ -94,7 +94,21 @@ export function TemplateExtras({
     setLoading(false);
   }, [templateId, variantQ]);
 
-  useEffect(() => { load(); }, [load]);
+  // (May 2026 pattern sweep) Cancellation flag for template-switch race.
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    Promise.all([
+      fetch(`/api/plot-templates/${templateId}/materials${variantQ}`),
+      fetch(`/api/plot-templates/${templateId}/documents${variantQ}`),
+    ]).then(async ([mRes, dRes]) => {
+      if (cancelled) return;
+      if (mRes.ok) setMaterials(await mRes.json());
+      if (cancelled) return;
+      if (dRes.ok) setDocuments(await dRes.json());
+    }).finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [templateId, variantQ]);
 
   // Quick-fix listener — the validation panel emits `template-action`
   // events with `kind: "add-material"` or `"upload-drawing"`. We open

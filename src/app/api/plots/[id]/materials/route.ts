@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canAccessSite } from "@/lib/site-access";
 import { apiError } from "@/lib/api-errors";
+import { sessionHasPermission } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -44,6 +45,19 @@ export async function POST(
 ) {
   const session = await auth();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // (May 2026 pattern sweep) Plot quants are programme content; gate
+  // on EDIT_PROGRAMME so contractors can't seed arbitrary material rows.
+  if (
+    !sessionHasPermission(
+      session.user as { role?: string; permissions?: string[] },
+      "EDIT_PROGRAMME",
+    )
+  ) {
+    return NextResponse.json(
+      { error: "You do not have permission to add materials" },
+      { status: 403 },
+    );
+  }
 
   const { id: plotId } = await params;
   const guard = await guardPlot(plotId, session.user.id, (session.user as { role: string }).role);

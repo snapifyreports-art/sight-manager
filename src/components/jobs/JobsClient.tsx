@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { format } from "date-fns";
 import {
@@ -175,6 +175,11 @@ export function JobsClient({ initialJobs, workflows, users }: JobsClientProps) {
   const [jobs, setJobs] = useState(initialJobs);
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [workflowFilter, setWorkflowFilter] = useState<string>("all");
+
+  // (May 2026 pattern sweep) Sync to prop changes after router.refresh().
+  useEffect(() => {
+    setJobs(initialJobs);
+  }, [initialJobs]);
   const [createOpen, setCreateOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [editingJob, setEditingJob] = useState<JobRow | null>(null);

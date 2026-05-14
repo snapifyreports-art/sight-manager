@@ -862,12 +862,16 @@ function StageBenchmarkWidget() {
   const [items, setItems] = useState<StageStat[]>([]);
   const [loading, setLoading] = useState(true);
   useEffect(() => {
+    // (May 2026 pattern sweep) Cancellation flag — avoids a setState
+    // after unmount if the widget is torn down mid-fetch.
+    let cancelled = false;
     fetch("/api/analytics/stage-benchmark")
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
-        if (d?.items) setItems(d.items);
+        if (d?.items && !cancelled) setItems(d.items);
       })
-      .finally(() => setLoading(false));
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, []);
   if (loading) return null;
   if (items.length === 0) return null;
@@ -922,9 +926,12 @@ function DelayTrendsWidget() {
     topReasons: Array<{ reason: string; count: number }>;
   } | null>(null);
   useEffect(() => {
+    // (May 2026 pattern sweep) Cancellation flag — avoid setState after unmount.
+    let cancelled = false;
     fetch("/api/analytics/delay-trends")
       .then((r) => (r.ok ? r.json() : null))
-      .then(setData);
+      .then((d) => { if (!cancelled) setData(d); });
+    return () => { cancelled = true; };
   }, []);
   if (!data) return null;
   const max = Math.max(1, ...data.series.map((s) => s.total));
@@ -974,9 +981,12 @@ interface WeatherLoss {
 function WeatherLossWidget() {
   const [data, setData] = useState<WeatherLoss | null>(null);
   useEffect(() => {
+    // (May 2026 pattern sweep) Cancellation flag — avoid setState after unmount.
+    let cancelled = false;
     fetch("/api/analytics/weather-loss")
       .then((r) => (r.ok ? r.json() : null))
-      .then(setData);
+      .then((d) => { if (!cancelled) setData(d); });
+    return () => { cancelled = true; };
   }, []);
   if (!data || data.totalDays === 0) return null;
   // (May 2026 audit D-P1) Compute sparkline scale once for the byMonth
@@ -1067,14 +1077,17 @@ function ProfitabilityWidget() {
   const [rows, setRows] = useState<ProfRow[]>([]);
   const [totals, setTotals] = useState<{ revenue: number; cost: number; profit: number } | null>(null);
   useEffect(() => {
+    // (May 2026 pattern sweep) Cancellation flag — avoid setState after unmount.
+    let cancelled = false;
     fetch("/api/analytics/profitability")
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
-        if (d) {
+        if (d && !cancelled) {
           setRows(d.rows);
           setTotals(d.totals);
         }
       });
+    return () => { cancelled = true; };
   }, []);
   if (rows.length === 0) return null;
   return (
@@ -1151,11 +1164,14 @@ interface ContractorRow {
 function ContractorCalendarWidget() {
   const [data, setData] = useState<ContractorRow[]>([]);
   useEffect(() => {
+    // (May 2026 pattern sweep) Cancellation flag — avoid setState after unmount.
+    let cancelled = false;
     fetch("/api/analytics/contractor-calendar")
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
-        if (d?.contractors) setData(d.contractors);
+        if (d?.contractors && !cancelled) setData(d.contractors);
       });
+    return () => { cancelled = true; };
   }, []);
   if (data.length === 0) return null;
   return (

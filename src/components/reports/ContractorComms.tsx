@@ -154,13 +154,19 @@ function ShareDialog({
 
   // Auto-generate permanent link on open
   useEffect(() => {
+    // (May 2026 pattern sweep) Guard with .ok + cancellation flag —
+    // rapidly opening/closing dialogs for different contractors (or
+    // React StrictMode re-mounts) let a slower request overwrite the
+    // URL/email body for the wrong contractor.
+    let cancelled = false;
     fetch(`/api/sites/${siteId}/contractor-comms/share`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ contactId: contractor.id }),
     })
-      .then((r) => r.json())
+      .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
+        if (!data?.url || cancelled) return;
         setUrl(data.url);
         onLinkGeneratedRef.current?.();
         const name = contractor.company || contractor.name;
@@ -168,7 +174,8 @@ function ShareDialog({
           `Hi ${contractor.name},\n\nHere is your permanent link to view your live jobs, upcoming work, orders and any open snags for ${name}:\n\n${data.url}\n\nThis link stays up to date automatically — no need to request a new one. Please do not hesitate to get in touch if you have any queries.\n\nKind regards`
         );
       })
-      .finally(() => setLoading(false));
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, [siteId, contractor.id, contractor.name, contractor.company]);
 
   const copy = async () => {
@@ -249,6 +256,13 @@ function SnagCard({ snag, siteId }: { snag: Snag; siteId: string }) {
   const [photos, setPhotos] = useState<File[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [requested, setRequested] = useState(snag.status === "IN_PROGRESS");
+
+  // (May 2026 pattern sweep) Sync requested toggle to prop changes —
+  // if another tab marks the snag requested, the local toggle would
+  // otherwise stay stale.
+  useEffect(() => {
+    setRequested(snag.status === "IN_PROGRESS");
+  }, [snag.status]);
   const [snagPhotos, setSnagPhotos] = useState<Array<{ id: string; url: string; tag: string | null }>>([]);
   const [snagNotes, setSnagNotes] = useState<string | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
@@ -556,8 +570,18 @@ function ContractorCard({
   const handleRequestSignOff = async (jobId: string) => {
     setRequestingSignOff((prev) => new Set(prev).add(jobId));
     try {
-      await fetch(`/api/jobs/${jobId}/request-signoff`, { method: "POST" });
+      // (May 2026 pattern sweep) Pre-fix this fetch swallowed failures.
+      // The UI flipped to "Sign Off Requested" badge even on 500 / 403,
+      // and the contractor never received the notification — the badge
+      // lied.
+      const res = await fetch(`/api/jobs/${jobId}/request-signoff`, { method: "POST" });
+      if (!res.ok) {
+        toast.error(await fetchErrorMessage(res, "Failed to request sign-off"));
+        return;
+      }
       setRequestedSignOff((prev) => new Set(prev).add(jobId));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Network error requesting sign-off");
     } finally {
       setRequestingSignOff((prev) => { const n = new Set(prev); n.delete(jobId); return n; });
     }

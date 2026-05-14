@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { apiError } from "@/lib/api-errors";
+import { sessionHasPermission } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -78,6 +79,19 @@ export async function POST(req: NextRequest) {
   const session = await auth();
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  // (May 2026 pattern sweep) Suppliers are an order-management concern;
+  // gate on MANAGE_ORDERS so contractors can't spam supplier rows.
+  if (
+    !sessionHasPermission(
+      session.user as { role?: string; permissions?: string[] },
+      "MANAGE_ORDERS",
+    )
+  ) {
+    return NextResponse.json(
+      { error: "You do not have permission to manage suppliers" },
+      { status: 403 },
+    );
   }
 
   const body = await req.json();

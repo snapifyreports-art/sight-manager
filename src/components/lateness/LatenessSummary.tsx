@@ -113,9 +113,24 @@ export function LatenessSummary(props: Props) {
     }
   }, [props.siteId, props.plotId, props.jobId, props.orderId, props.contactId, status]);
 
+  // (May 2026 pattern sweep) Cancellation flag — rapid filter changes
+  // (site/plot/job/order/contact) let a slower earlier response
+  // overwrite the newer filter's results.
   useEffect(() => {
-    refresh();
-  }, [refresh]);
+    let cancelled = false;
+    setLoading(true);
+    const params = new URLSearchParams({ status });
+    if (props.siteId) params.set("siteId", props.siteId);
+    if (props.plotId) params.set("plotId", props.plotId);
+    if (props.jobId) params.set("jobId", props.jobId);
+    if (props.orderId) params.set("orderId", props.orderId);
+    if (props.contactId) params.set("contactId", props.contactId);
+    fetch(`/api/lateness?${params}`, { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (d && !cancelled) setEvents(d); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [props.siteId, props.plotId, props.jobId, props.orderId, props.contactId, status]);
 
   // (May 2026 audit SM-P0-3 / FC-P0) Fetch contractors once for the
   // inline attribution picker. Pre-fix the picker rendered reason +

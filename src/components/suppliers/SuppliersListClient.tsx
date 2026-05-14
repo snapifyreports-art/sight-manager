@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -46,6 +46,11 @@ export function SuppliersListClient({ suppliers: initial }: { suppliers: Supplie
   const [createOpen, setCreateOpen] = useState(false);
   const [form, setForm] = useState({ name: "", contactName: "", contactEmail: "", contactNumber: "", type: "", accountNumber: "" });
   const [saving, setSaving] = useState(false);
+
+  // (May 2026 pattern sweep) Sync to prop changes after router.refresh().
+  useEffect(() => {
+    setSuppliers(initial);
+  }, [initial]);
 
   const filtered = suppliers.filter((s) =>
     s.name.toLowerCase().includes(search.toLowerCase()) ||

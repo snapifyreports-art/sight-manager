@@ -309,9 +309,11 @@ export function TemplateEditor({
   // Load suppliers once
   useEffect(() => {
     if (!suppliersLoaded) {
+      // (May 2026 pattern sweep) Guard with .ok.
       fetch("/api/suppliers")
-        .then((r) => r.json())
+        .then((r) => (r.ok ? r.json() : null))
         .then((data) => {
+          if (!Array.isArray(data)) return;
           setSuppliers(data);
           setSuppliersLoaded(true);
         })
@@ -322,9 +324,11 @@ export function TemplateEditor({
   // Load contractors once
   useEffect(() => {
     if (!contractorsLoaded) {
+      // (May 2026 pattern sweep) Guard with .ok.
       fetch("/api/contacts?type=CONTRACTOR")
-        .then((r) => r.json())
+        .then((r) => (r.ok ? r.json() : null))
         .then((data) => {
+          if (!Array.isArray(data)) return;
           setContractors(data);
           setContractorsLoaded(true);
         })
@@ -338,14 +342,20 @@ export function TemplateEditor({
       setMaterialSuggestions([]);
       return;
     }
+    // (May 2026 pattern sweep) Guard with .ok + cancellation flag —
+    // rapid supplier changes could land an older supplier's catalog
+    // in the autocomplete.
+    let cancelled = false;
     setLoadingMaterials(true);
     fetch(`/api/suppliers/${orderSupplierId}/materials`)
-      .then((r) => r.json())
+      .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
+        if (!data || cancelled) return;
         setMaterialSuggestions(data);
       })
       .catch(console.error)
-      .finally(() => setLoadingMaterials(false));
+      .finally(() => { if (!cancelled) setLoadingMaterials(false); });
+    return () => { cancelled = true; };
   }, [orderSupplierId]);
 
   function toggleJobExpand(jobId: string) {
@@ -368,7 +378,11 @@ export function TemplateEditor({
     if (updates.length === 0) return;
 
     try {
-      await Promise.all(
+      // (May 2026 pattern sweep) Pre-fix Promise.all of bare fetches —
+      // any 403/500 was silently swallowed and the UI assumed success.
+      // Now: collect responses, surface any failure, only swap state
+      // in if all succeeded.
+      const results = await Promise.all(
         updates.map(({ job, newIdx }) =>
           fetch(apiUrl(`/jobs/${job.id}`), {
             method: "PUT",
@@ -377,12 +391,24 @@ export function TemplateEditor({
           })
         )
       );
+      const failures = results.filter((r) => !r.ok);
+      if (failures.length > 0) {
+        toast.error(
+          await fetchErrorMessage(
+            failures[0],
+            `${failures.length} of ${results.length} order updates failed`,
+          ),
+        );
+        return;
+      }
       // Re-fetch template to get normalised state.
       const tplRes = await fetch(apiUrl(""), { cache: "no-store" });
-      if (tplRes.ok) {
-        const updated = await tplRes.json();
-        onUpdate(updated);
+      if (!tplRes.ok) {
+        toast.error(await fetchErrorMessage(tplRes, "Failed to refresh template"));
+        return;
       }
+      const updated = await tplRes.json();
+      onUpdate(updated);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to save new order");
     }
@@ -458,7 +484,10 @@ export function TemplateEditor({
 
   async function persistSubJobOrder(parentId: string, orderedChildren: TemplateJobData[]) {
     try {
-      await Promise.all(
+      // (May 2026 pattern sweep) Pre-fix the parallel PUTs and the
+      // follow-up recalculate POST were all bare fetches — failures
+      // left the UI optimistic state out of sync with the server.
+      const results = await Promise.all(
         orderedChildren.map((c, idx) =>
           fetch(apiUrl(`/jobs/${c.id}`), {
             method: "PUT",
@@ -467,11 +496,29 @@ export function TemplateEditor({
           })
         )
       );
+      const failures = results.filter((r) => !r.ok);
+      if (failures.length > 0) {
+        toast.error(
+          await fetchErrorMessage(
+            failures[0],
+            `${failures.length} of ${results.length} child updates failed`,
+          ),
+        );
+        return;
+      }
       // Re-run the parent's recalculate to re-derive parent span from new
       // child order.
-      await fetch(apiUrl(`/jobs/${parentId}/recalculate`), { method: "POST" });
+      const recalcRes = await fetch(apiUrl(`/jobs/${parentId}/recalculate`), { method: "POST" });
+      if (!recalcRes.ok) {
+        toast.error(await fetchErrorMessage(recalcRes, "Failed to recalculate parent"));
+        return;
+      }
       const tplRes = await fetch(apiUrl(""), { cache: "no-store" });
-      if (tplRes.ok) onUpdate(await tplRes.json());
+      if (!tplRes.ok) {
+        toast.error(await fetchErrorMessage(tplRes, "Failed to refresh template"));
+        return;
+      }
+      onUpdate(await tplRes.json());
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to save new sub-job order");
     }
@@ -602,23 +649,31 @@ export function TemplateEditor({
         );
         if (!res.ok) throw new Error("Failed to update job");
 
+        // (May 2026 pattern sweep) Treat each recalculate + the
+        // re-fetch as fallible. Pre-fix any failure left the cached
+        // startWeek/endWeek silently out of sync with the just-applied
+        // duration change.
+
         // If the job has children (parent stage moved), recalculate children
         if (job && job.children && job.children.length > 0) {
-          await fetch(
+          const r = await fetch(
             apiUrl(`/jobs/${jobId}/recalculate`),
             { method: "POST" }
           );
+          if (!r.ok) throw new Error(await fetchErrorMessage(r, "Recalculate failed"));
         }
 
         // If the job is a sub-job, recalculate the parent to update its span
         if (subJob && subJob.parentId) {
-          await fetch(
+          const r = await fetch(
             apiUrl(`/jobs/${subJob.parentId}/recalculate`),
             { method: "POST" }
           );
+          if (!r.ok) throw new Error(await fetchErrorMessage(r, "Parent recalculate failed"));
         }
 
         const tplRes = await fetch(apiUrl(""), { cache: "no-store" });
+        if (!tplRes.ok) throw new Error(await fetchErrorMessage(tplRes, "Template refresh failed"));
         const updated = await tplRes.json();
         onUpdate(updated);
       } catch (error) {
@@ -844,6 +899,10 @@ export function TemplateEditor({
       }
 
       const tplRes = await fetch(apiUrl(""), { cache: "no-store" });
+      if (!tplRes.ok) {
+        toast.error(await fetchErrorMessage(tplRes, "Failed to refresh template"));
+        return;
+      }
       const updated = await tplRes.json();
       onUpdate(updated);
       setStageDialogOpen(false);
@@ -923,18 +982,26 @@ export function TemplateEditor({
 
         // If the edited job has children, recalculate their weeks
         if (editingJob.children && editingJob.children.length > 0) {
-          await fetch(
+          const r = await fetch(
             apiUrl(`/jobs/${editingJob.id}/recalculate`),
             { method: "POST" }
           );
+          if (!r.ok) {
+            toast.error(await fetchErrorMessage(r, "Recalculate failed"));
+            return;
+          }
         }
 
         // If the edited job is a sub-job, recalculate the parent to update its span
         if (isSubJob && editingJob.parentId) {
-          await fetch(
+          const r = await fetch(
             apiUrl(`/jobs/${editingJob.parentId}/recalculate`),
             { method: "POST" }
           );
+          if (!r.ok) {
+            toast.error(await fetchErrorMessage(r, "Parent recalculate failed"));
+            return;
+          }
         }
 
         // If the edited job is a TOP-LEVEL ATOMIC stage (no children, no
@@ -944,14 +1011,22 @@ export function TemplateEditor({
         // Wk 2-2 when the user picked 15 working days. Smoke test found
         // this in Apr 2026.
         if (!hasChildren && !isSubJob && jobIsAtomic) {
-          await fetch(
+          const r = await fetch(
             apiUrl(`/recalculate-stages`),
             { method: "POST" }
           );
+          if (!r.ok) {
+            toast.error(await fetchErrorMessage(r, "Stage recalculate failed"));
+            return;
+          }
         }
       }
 
       const tplRes = await fetch(apiUrl(""), { cache: "no-store" });
+      if (!tplRes.ok) {
+        toast.error(await fetchErrorMessage(tplRes, "Failed to refresh template"));
+        return;
+      }
       const updated = await tplRes.json();
       onUpdate(updated);
       setJobDialogOpen(false);
@@ -975,6 +1050,10 @@ export function TemplateEditor({
       }
 
       const tplRes = await fetch(apiUrl(""), { cache: "no-store" });
+      if (!tplRes.ok) {
+        toast.error(await fetchErrorMessage(tplRes, "Failed to refresh template"));
+        return;
+      }
       const updated = await tplRes.json();
       onUpdate(updated);
       setDeleteJobDialogOpen(false);
@@ -1035,12 +1114,20 @@ export function TemplateEditor({
       }
 
       // Recalculate parent stage
-      await fetch(
+      const recalcRes = await fetch(
         apiUrl(`/jobs/${subJobParentId}/recalculate`),
         { method: "POST" }
       );
+      if (!recalcRes.ok) {
+        toast.error(await fetchErrorMessage(recalcRes, "Recalculate failed"));
+        return;
+      }
 
       const tplRes = await fetch(apiUrl(""), { cache: "no-store" });
+      if (!tplRes.ok) {
+        toast.error(await fetchErrorMessage(tplRes, "Failed to refresh template"));
+        return;
+      }
       const updated = await tplRes.json();
       onUpdate(updated);
       // (May 2026 Keith bug report) Auto-expand the parent stage so
@@ -1296,6 +1383,10 @@ export function TemplateEditor({
       }
 
       const tplRes = await fetch(apiUrl(""), { cache: "no-store" });
+      if (!tplRes.ok) {
+        toast.error(await fetchErrorMessage(tplRes, "Failed to refresh template"));
+        return;
+      }
       const updated = await tplRes.json();
       onUpdate(updated);
       setOrderDialogOpen(false);
@@ -1341,6 +1432,10 @@ export function TemplateEditor({
       }
 
       const tplRes = await fetch(apiUrl(""), { cache: "no-store" });
+      if (!tplRes.ok) {
+        toast.error(await fetchErrorMessage(tplRes, "Failed to refresh template"));
+        return;
+      }
       const updated = await tplRes.json();
       onUpdate(updated);
       setDeleteOrderDialogOpen(false);

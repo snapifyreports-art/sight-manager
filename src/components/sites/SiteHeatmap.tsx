@@ -34,14 +34,21 @@ export function SiteHeatmap({ siteId }: { siteId: string }) {
   const [scheduleStatuses, setScheduleStatuses] = useState<Record<string, { status: string; daysDeviation: number; awaitingRestart: boolean }>>({});
 
   useEffect(() => {
+    // (May 2026 pattern sweep) Pre-fix the chained .then(.json) accepted
+    // error payloads as data — heatmap rendered with the error shape
+    // and `plot.id` access crashed. Now: guard with .ok and skip on fail.
     Promise.all([
-      fetch(`/api/sites/${siteId}/heatmap`).then((r) => r.json()),
-      fetch(`/api/sites/${siteId}/plot-schedules`).then((r) => r.json()),
-    ]).then(([heatmap, schedules]: [HeatmapPlot[], Array<{ plotId: string; status: string; daysDeviation: number; awaitingRestart: boolean }>]) => {
-      setPlots(heatmap);
-      const map: Record<string, { status: string; daysDeviation: number; awaitingRestart: boolean }> = {};
-      for (const item of schedules) map[item.plotId] = item;
-      setScheduleStatuses(map);
+      fetch(`/api/sites/${siteId}/heatmap`).then((r) => (r.ok ? r.json() : null)),
+      fetch(`/api/sites/${siteId}/plot-schedules`).then((r) => (r.ok ? r.json() : null)),
+    ]).then(([heatmap, schedules]) => {
+      if (Array.isArray(heatmap)) setPlots(heatmap as HeatmapPlot[]);
+      if (Array.isArray(schedules)) {
+        const map: Record<string, { status: string; daysDeviation: number; awaitingRestart: boolean }> = {};
+        for (const item of schedules as Array<{ plotId: string; status: string; daysDeviation: number; awaitingRestart: boolean }>) {
+          map[item.plotId] = item;
+        }
+        setScheduleStatuses(map);
+      }
     }).finally(() => setLoading(false));
   }, [siteId, devDate]);
 

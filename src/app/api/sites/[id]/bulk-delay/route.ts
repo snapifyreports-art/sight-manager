@@ -6,6 +6,7 @@ import { getTodayWeatherSummary } from "@/lib/weather";
 import { addWorkingDays } from "@/lib/working-days";
 import { canAccessSite } from "@/lib/site-access";
 import { apiError } from "@/lib/api-errors";
+import { sessionHasPermission } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -25,6 +26,17 @@ export async function POST(
 
   if (!(await canAccessSite(session.user.id, (session.user as { role: string }).role, siteId))) {
     return NextResponse.json({ error: "You do not have access to this site" }, { status: 403 });
+  }
+  if (
+    !sessionHasPermission(
+      session.user as { role?: string; permissions?: string[] },
+      "EDIT_PROGRAMME",
+    )
+  ) {
+    return NextResponse.json(
+      { error: "You do not have permission to delay jobs" },
+      { status: 403 },
+    );
   }
   const body = await req.json();
   const { plotIds, days, reason, delayReasonType = "OTHER" } = body as {

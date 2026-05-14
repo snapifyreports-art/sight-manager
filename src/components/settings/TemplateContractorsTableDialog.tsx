@@ -77,10 +77,14 @@ export function TemplateContractorsTableDialog({
   // rows).
   useEffect(() => {
     if (!open) return;
+    // (May 2026 pattern sweep) Cancellation flag — close+reopen rapidly
+    // could land an earlier response on a newer dialog state.
+    let cancelled = false;
     fetch("/api/contacts", { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : []))
-      .then((d: ContactRow[]) => setContacts(Array.isArray(d) ? d : []))
-      .catch(() => setContacts([]));
+      .then((d: ContactRow[]) => { if (!cancelled) setContacts(Array.isArray(d) ? d : []); })
+      .catch(() => { if (!cancelled) setContacts([]); });
+    return () => { cancelled = true; };
   }, [open]);
 
   const dirtyIds = useMemo(

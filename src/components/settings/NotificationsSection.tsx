@@ -138,13 +138,16 @@ export function NotificationsSection() {
 
   // Fetch preferences on mount
   useEffect(() => {
+    // (May 2026 pattern sweep) Guard with .ok + cancellation flag.
+    let cancelled = false;
     fetch("/api/notifications/preferences")
-      .then((r) => r.json())
+      .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
-        if (Array.isArray(data)) setPreferences(data);
+        if (Array.isArray(data) && !cancelled) setPreferences(data);
       })
       .catch(console.error)
-      .finally(() => setLoading(false));
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, []);
 
   // Toggle a preference and save immediately.

@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { auth } from "@/lib/auth";
 import { getUserSiteIds } from "@/lib/site-access";
 import { apiError } from "@/lib/api-errors";
+import { sessionHasPermission } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -49,6 +50,19 @@ export async function POST(req: NextRequest) {
   const session = await auth();
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  // (May 2026 pattern sweep) Gate on MANAGE_ORDERS. Pre-fix any auth'd
+  // user with site access could create orders, including CONTRACTORs.
+  if (
+    !sessionHasPermission(
+      session.user as { role?: string; permissions?: string[] },
+      "MANAGE_ORDERS",
+    )
+  ) {
+    return NextResponse.json(
+      { error: "You do not have permission to create orders" },
+      { status: 403 },
+    );
   }
 
   const body = await req.json();

@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { templateJobsInclude, normaliseTemplateParentDates } from "@/lib/template-includes";
 import { apiError } from "@/lib/api-errors";
+import { sessionHasPermission } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -45,6 +46,23 @@ export async function POST(request: NextRequest) {
   const session = await auth();
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  // (May 2026 pattern sweep) Templates are programme building blocks —
+  // gate all mutations behind EDIT_PROGRAMME so contractors / contract
+  // managers can't create / rename / delete them. Pre-fix every
+  // /api/plot-templates/* mutation endpoint was only behind `auth()`,
+  // so a CONTRACTOR could POST here and spam new templates.
+  if (
+    !sessionHasPermission(
+      session.user as { role?: string; permissions?: string[] },
+      "EDIT_PROGRAMME",
+    )
+  ) {
+    return NextResponse.json(
+      { error: "You do not have permission to manage templates" },
+      { status: 403 },
+    );
   }
 
   const body = await request.json();

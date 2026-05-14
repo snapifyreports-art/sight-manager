@@ -73,6 +73,13 @@ export async function POST(
 
   const { id } = await params;
 
+  // (May 2026 pattern sweep) Pre-fix POST had no canAccessSite check
+  // even though GET did. A CONTRACTOR with auth could upload arbitrary
+  // documents to ANY site by guessing the siteId.
+  if (!(await canAccessSite(session.user.id, (session.user as { role: string }).role, id))) {
+    return NextResponse.json({ error: "You do not have access to this site" }, { status: 403 });
+  }
+
   const formData = await req.formData();
   const file = formData.get("file") as File;
   const name = (formData.get("name") as string) || file?.name;

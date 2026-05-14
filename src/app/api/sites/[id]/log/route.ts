@@ -105,6 +105,14 @@ export async function POST(
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { id } = await params;
+
+  // (May 2026 pattern sweep) Pre-fix POST skipped canAccessSite (GET
+  // had it). Any auth'd user could inject EventLog rows attributed to
+  // any site / plot / job they don't own.
+  if (!(await canAccessSite(session.user.id, (session.user as { role: string }).role, id))) {
+    return NextResponse.json({ error: "You do not have access to this site" }, { status: 403 });
+  }
+
   const body = await req.json();
   const { description, plotId } = body;
 

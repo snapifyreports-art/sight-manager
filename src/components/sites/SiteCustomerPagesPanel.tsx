@@ -62,9 +62,15 @@ export function SiteCustomerPagesPanel({ siteId }: { siteId: string }) {
     setLoading(false);
   }, [siteId]);
 
+  // (May 2026 pattern sweep) Cancellation flag for site-switch race.
   useEffect(() => {
-    refresh();
-  }, [refresh]);
+    let cancelled = false;
+    fetch(`/api/sites/${siteId}/customer-links`, { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (d && !cancelled) setRows(d); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [siteId]);
 
   const baseUrl = typeof window !== "undefined" ? window.location.origin : "";
   const urlFor = (token: string) => `${baseUrl}/progress/${token}`;

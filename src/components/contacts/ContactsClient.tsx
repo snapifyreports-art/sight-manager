@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import {
   HardHat,
@@ -85,6 +85,15 @@ export function ContactsClient({
   const toast = useToast();
   const [contacts, setContacts] = useState(initialContacts);
   const [search, setSearch] = useState("");
+
+  // (May 2026 pattern sweep) Sync local state to prop changes. Pre-fix
+  // `useState(initialContacts)` ignored future prop updates — after
+  // `router.refresh()` the server returned fresh contacts but local
+  // state retained the pre-refresh list, so newly created/edited
+  // contacts took a hard reload to surface.
+  useEffect(() => {
+    setContacts(initialContacts);
+  }, [initialContacts]);
 
   // Dialog state
   const [dialogOpen, setDialogOpen] = useState(false);

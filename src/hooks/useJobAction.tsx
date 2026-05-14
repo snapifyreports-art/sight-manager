@@ -1083,16 +1083,28 @@ export function useJobAction(
                             // so Daily Brief / Budget / Cash-flow downstream views
                             // see when the order was actually placed vs the template
                             // default date.
-                            await fetch(`/api/orders/${o.id}`, {
-                              method: "PUT",
-                              headers: { "Content-Type": "application/json" },
-                              body: JSON.stringify({
-                                status: "ORDERED",
-                                dateOfOrder: new Date().toISOString(),
-                              }),
-                            });
-                            o.status = "ORDERED";
-                            setPreStartChecks({ ...preStartChecks });
+                            // (May 2026 pattern sweep) Pre-fix this fetch
+                            // swallowed failures and flipped the UI state
+                            // regardless — toast on failure, only update
+                            // local state on success.
+                            try {
+                              const res = await fetch(`/api/orders/${o.id}`, {
+                                method: "PUT",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({
+                                  status: "ORDERED",
+                                  dateOfOrder: new Date().toISOString(),
+                                }),
+                              });
+                              if (!res.ok) {
+                                toast.error(await fetchErrorMessage(res, "Failed to mark order sent"));
+                                return;
+                              }
+                              o.status = "ORDERED";
+                              setPreStartChecks({ ...preStartChecks });
+                            } catch (err) {
+                              toast.error(err instanceof Error ? err.message : "Network error");
+                            }
                           }} className="rounded border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-700 hover:bg-blue-100">
                             Mark Sent
                           </button>
@@ -1363,15 +1375,27 @@ export function useJobAction(
                           {isPending && (
                             <button
                               onClick={async () => {
-                                await fetch(`/api/orders/${order.id}`, {
-                                  method: "PUT",
-                                  headers: { "Content-Type": "application/json" },
-                                  body: JSON.stringify({
-                                    status: "ORDERED",
-                                    dateOfOrder: new Date().toISOString(),
-                                  }),
-                                });
-                                setOrderResolution((prev) => prev ? { ...prev, resolved: new Set(prev.resolved).add(order.id) } : prev);
+                                // (May 2026 pattern sweep) Pre-fix this
+                                // fetch flipped the resolved state even on
+                                // 4xx/5xx, leaving the user clicking past
+                                // an order that hadn't actually been sent.
+                                try {
+                                  const res = await fetch(`/api/orders/${order.id}`, {
+                                    method: "PUT",
+                                    headers: { "Content-Type": "application/json" },
+                                    body: JSON.stringify({
+                                      status: "ORDERED",
+                                      dateOfOrder: new Date().toISOString(),
+                                    }),
+                                  });
+                                  if (!res.ok) {
+                                    toast.error(await fetchErrorMessage(res, "Failed to mark order sent"));
+                                    return;
+                                  }
+                                  setOrderResolution((prev) => prev ? { ...prev, resolved: new Set(prev.resolved).add(order.id) } : prev);
+                                } catch (err) {
+                                  toast.error(err instanceof Error ? err.message : "Network error");
+                                }
                               }}
                               className="rounded bg-blue-600 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-blue-700"
                             >
@@ -1455,8 +1479,19 @@ export function useJobAction(
                           )}
                           <button
                             onClick={async () => {
-                              await fetch(`/api/orders/${order.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: "DELIVERED" }) });
-                              setOrderResolution((prev) => prev ? { ...prev, resolved: new Set(prev.resolved).add(order.id) } : prev);
+                              // (May 2026 pattern sweep) Pre-fix this
+                              // flipped status optimistically and marked
+                              // resolved on any response, including 500s.
+                              try {
+                                const res = await fetch(`/api/orders/${order.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: "DELIVERED" }) });
+                                if (!res.ok) {
+                                  toast.error(await fetchErrorMessage(res, "Failed to mark delivered"));
+                                  return;
+                                }
+                                setOrderResolution((prev) => prev ? { ...prev, resolved: new Set(prev.resolved).add(order.id) } : prev);
+                              } catch (err) {
+                                toast.error(err instanceof Error ? err.message : "Network error");
+                              }
                             }}
                             className="rounded bg-green-600 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-green-700"
                           >

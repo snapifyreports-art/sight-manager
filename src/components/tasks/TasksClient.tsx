@@ -177,9 +177,11 @@ export function TasksClient() {
 
   useEffect(() => {
     setLoading(true);
+    // (May 2026 pattern sweep) Guard with .ok — pre-fix an error payload
+    // landed in `data` and crashed the downstream renderers.
     fetch("/api/tasks")
-      .then((r) => r.json())
-      .then(setData)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (d) setData(d); })
       .catch(console.error)
       .finally(() => setLoading(false));
   }, [devDate, refreshKey]);

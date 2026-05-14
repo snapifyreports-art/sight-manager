@@ -148,9 +148,15 @@ export function SiteStoryPanel({ siteId }: { siteId: string }) {
     setLoading(false);
   }, [siteId]);
 
+  // (May 2026 pattern sweep) Cancellation flag for site-switch race.
   useEffect(() => {
-    refresh();
-  }, [refresh]);
+    let cancelled = false;
+    fetch(`/api/sites/${siteId}/story?detail=full`, { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (d && !cancelled) setData(d); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [siteId]);
 
   if (loading || !data) {
     return (

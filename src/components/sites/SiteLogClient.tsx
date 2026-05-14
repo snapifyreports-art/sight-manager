@@ -50,6 +50,7 @@ import {
   DialogFooter,
   DialogClose,
 } from "@/components/ui/dialog";
+import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 
 // ---------- Types ----------
 
@@ -175,6 +176,7 @@ function groupByDay(events: LogEvent[]): Array<{ label: string; date: string; ev
 // ---------- Main Component ----------
 
 export function SiteLogClient({ siteId, plots }: SiteLogClientProps) {
+  const toast = useToast();
   const [events, setEvents] = useState<LogEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [plotFilter, setPlotFilter] = useState("all");
@@ -204,7 +206,25 @@ export function SiteLogClient({ siteId, plots }: SiteLogClientProps) {
     setLoading(false);
   }, [siteId, plotFilter, category, page]);
 
-  useEffect(() => { fetchEvents(); }, [fetchEvents]);
+  // (May 2026 pattern sweep) Cancellation flag — rapid filter clicks
+  // could leave the old filter's events rendered.
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    const params = new URLSearchParams({ page: String(page) });
+    if (plotFilter !== "all") params.set("plotId", plotFilter);
+    if (category !== "all") params.set("category", category);
+    fetch(`/api/sites/${siteId}/log?${params}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!data || cancelled) return;
+        setEvents(data.events);
+        setTotal(data.total);
+        setTotalPages(data.totalPages);
+      })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [siteId, plotFilter, category, page]);
 
   // Reset page when filters change
   useEffect(() => { setPage(1); }, [plotFilter, category]);
@@ -213,7 +233,10 @@ export function SiteLogClient({ siteId, plots }: SiteLogClientProps) {
     if (!noteText.trim()) return;
     setSubmitting(true);
     try {
-      await fetch(`/api/sites/${siteId}/log`, {
+      // (May 2026 pattern sweep) Pre-fix this fetch silently swallowed
+      // errors. The dialog closed + UI refreshed even on 403 / 500, so
+      // the user thought the note was logged when it wasn't.
+      const res = await fetch(`/api/sites/${siteId}/log`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -221,11 +244,17 @@ export function SiteLogClient({ siteId, plots }: SiteLogClientProps) {
           plotId: notePlot !== "none" ? notePlot : null,
         }),
       });
+      if (!res.ok) {
+        toast.error(await fetchErrorMessage(res, "Failed to save note"));
+        return;
+      }
       setNoteText("");
       setNotePlot("none");
       setNoteOpen(false);
       setPage(1);
       fetchEvents();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Network error saving note");
     } finally {
       setSubmitting(false);
     }

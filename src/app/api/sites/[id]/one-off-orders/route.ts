@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canAccessSite } from "@/lib/site-access";
 import { apiError } from "@/lib/api-errors";
+import { sessionHasPermission } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +23,19 @@ export async function POST(
   const { id: siteId } = await params;
   if (!(await canAccessSite(session.user.id, (session.user as { role: string }).role, siteId))) {
     return NextResponse.json({ error: "You do not have access to this site" }, { status: 403 });
+  }
+  // (May 2026 pattern sweep) One-off order creation needs MANAGE_ORDERS
+  // like every other order-creation path.
+  if (
+    !sessionHasPermission(
+      session.user as { role?: string; permissions?: string[] },
+      "MANAGE_ORDERS",
+    )
+  ) {
+    return NextResponse.json(
+      { error: "You do not have permission to create orders" },
+      { status: 403 },
+    );
   }
 
   const body = await req.json();

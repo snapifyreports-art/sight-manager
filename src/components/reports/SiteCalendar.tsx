@@ -15,6 +15,7 @@ import {
 } from "date-fns";
 import { getCurrentDate } from "@/lib/dev-date";
 import { useDevDate } from "@/lib/dev-date-context";
+import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 import {
   ChevronLeft,
   ChevronRight,
@@ -106,6 +107,7 @@ const STATUS_COLORS: Record<string, string> = {
 
 export function SiteCalendar({ siteId }: SiteCalendarProps) {
   const { devDate } = useDevDate();
+  const toast = useToast();
   const [data, setData] = useState<CalendarData | null>(null);
   const [loading, setLoading] = useState(true);
   const [currentMonth, setCurrentMonth] = useState(getCurrentDate());
@@ -114,10 +116,16 @@ export function SiteCalendar({ siteId }: SiteCalendarProps) {
   useEffect(() => {
     setLoading(true);
     const monthStr = format(currentMonth, "yyyy-MM");
+    // (May 2026 pattern sweep) Pre-fix chained .then(setData) accepted
+    // error payloads as calendar data and crashed downstream `.jobs`
+    // access. Guard with .ok AND a cancelled flag so rapid prev/next
+    // month clicks don't let an older month's events land on top.
+    let cancelled = false;
     fetch(`/api/sites/${siteId}/calendar?month=${monthStr}`)
-      .then((r) => r.json())
-      .then(setData)
-      .finally(() => setLoading(false));
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (d && !cancelled) setData(d); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, [siteId, currentMonth, devDate]);
 
   // Build day → events map
@@ -202,9 +210,11 @@ export function SiteCalendar({ siteId }: SiteCalendarProps) {
 
   const refreshData = useCallback(() => {
     const monthStr = format(currentMonth, "yyyy-MM");
+    // (May 2026 pattern sweep) Guard with .ok — error payload clobbered
+    // calendar state otherwise.
     fetch(`/api/sites/${siteId}/calendar?month=${monthStr}`)
-      .then((r) => r.json())
-      .then(setData);
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (d) setData(d); });
   }, [siteId, currentMonth]);
 
   // Centralised pre-start flow — wraps start with predecessor/order/early-late dialogs.
@@ -227,16 +237,25 @@ export function SiteCalendar({ siteId }: SiteCalendarProps) {
     }
     setPendingActions((prev) => new Set(prev).add(jobId));
     try {
+      // (May 2026 pattern sweep) Pre-fix any non-ok response was a
+      // silent no-op — no error toast meant the user saw the spinner
+      // disappear with no row update and no explanation.
       const res = await fetch(`/api/jobs/${jobId}/actions`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action }),
       });
-      if (res.ok) refreshData();
+      if (res.ok) {
+        refreshData();
+      } else {
+        toast.error(await fetchErrorMessage(res, `Failed to ${action}`));
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : `Network error during ${action}`);
     } finally {
       setPendingActions((prev) => { const n = new Set(prev); n.delete(jobId); return n; });
     }
-  }, [refreshData, triggerJobAction, data]);
+  }, [refreshData, triggerJobAction, data, toast]);
 
   const { setOrderStatus, isPending: isOrderPending } = useOrderStatus({
     onChange: () => refreshData(),
