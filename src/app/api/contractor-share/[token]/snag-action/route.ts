@@ -4,6 +4,7 @@ import { verifyContractorToken } from "@/lib/share-token";
 import { getSupabase, PHOTOS_BUCKET } from "@/lib/supabase";
 import { sendPushToSiteAudience } from "@/lib/push";
 import { apiError } from "@/lib/api-errors";
+import { logEvent } from "@/lib/event-log";
 
 export const dynamic = "force-dynamic";
 
@@ -140,16 +141,17 @@ export async function POST(
     await prisma.snag.update({ where: { id: snagId }, data: updateData });
 
     const plotLabel = snag.plot.plotNumber ? `Plot ${snag.plot.plotNumber}` : snag.plot.name;
-    await prisma.eventLog
-      .create({
-        data: {
-          type: "USER_ACTION",
-          description: `Snag sign-off requested by contractor (share link): "${snag.description}" on ${plotLabel}`,
-          siteId: snag.plot.site.id,
-          plotId: snag.plotId,
-        },
-      })
-      .catch(() => {});
+    await logEvent(prisma, {
+      type: "USER_ACTION",
+      description: `Snag sign-off requested by contractor (share link): "${snag.description}" on ${plotLabel}`,
+      siteId: snag.plot.site.id,
+      plotId: snag.plotId,
+      detail: {
+        snagId: snagId,
+        action: "signoff-requested",
+        viaShareLink: true,
+      },
+    }).catch(() => {});
 
     // (May 2026 audit F-P1-23) Notify the site audience so the manager
     // can come and verify the fix. Pre-fix sendPushToAll spammed every

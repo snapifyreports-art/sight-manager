@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canAccessSite } from "@/lib/site-access";
 import { buildHandoverArchive } from "@/lib/handover-zip";
+import { logEvent } from "@/lib/event-log";
 
 export const dynamic = "force-dynamic";
 
@@ -58,18 +59,15 @@ export async function POST(
 
   // Audit: log the generation BEFORE we start streaming so the event
   // is captured even if the download is cancelled mid-flight.
-  await prisma.eventLog
-    .create({
-      data: {
-        type: "USER_ACTION",
-        siteId: id,
-        userId: session.user.id,
-        description: `Generated handover ZIP for "${site.name}" (status: ${site.status})`,
-      },
-    })
-    .catch((err) => {
-      console.warn("[handover-zip] failed to write audit event:", err);
-    });
+  await logEvent(prisma, {
+    type: "USER_ACTION",
+    siteId: id,
+    userId: session.user.id,
+    description: `Generated handover ZIP for "${site.name}" (status: ${site.status})`,
+    detail: { action: "handover-zip-generated", siteStatus: site.status },
+  }).catch((err) => {
+    console.warn("[handover-zip] failed to write audit event:", err);
+  });
 
   const archive = await buildHandoverArchive({
     prisma,

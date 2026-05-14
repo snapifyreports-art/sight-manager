@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getSupabase, PHOTOS_BUCKET } from "@/lib/supabase";
 import { canAccessSite } from "@/lib/site-access";
+import { logEvent } from "@/lib/event-log";
 
 export const dynamic = "force-dynamic";
 
@@ -147,15 +148,13 @@ export async function POST(
     },
   });
 
-  await prisma.eventLog.create({
-    data: {
-      type: "USER_ACTION",
-      description: `Document "${doc.name}" uploaded${doc.plot ? ` to ${doc.plot.plotNumber ? `Plot ${doc.plot.plotNumber}` : doc.plot.name}` : ""}`,
-      siteId: id,
-      plotId: plotId || null,
-      jobId: jobId || null,
-      userId: session.user.id,
-    },
+  await logEvent(prisma, {
+    type: "USER_ACTION",
+    description: `Document "${doc.name}" uploaded${doc.plot ? ` to ${doc.plot.plotNumber ? `Plot ${doc.plot.plotNumber}` : doc.plot.name}` : ""}`,
+    siteId: id,
+    plotId: plotId || null,
+    jobId: jobId || null,
+    userId: session.user.id,
   });
 
   return NextResponse.json(doc, { status: 201 });

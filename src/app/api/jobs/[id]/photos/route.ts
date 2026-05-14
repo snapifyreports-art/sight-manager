@@ -5,6 +5,7 @@ import { getSupabase, PHOTOS_BUCKET } from "@/lib/supabase";
 import { canAccessSite } from "@/lib/site-access";
 import { apiError } from "@/lib/api-errors";
 import { sessionHasPermission } from "@/lib/permissions";
+import { logEvent } from "@/lib/event-log";
 
 export const dynamic = "force-dynamic";
 
@@ -132,14 +133,17 @@ export async function POST(
       const noteText = `📷 ${createdPhotos.length} photo${createdPhotos.length > 1 ? "s" : ""} uploaded${captionSuffix}`;
 
       await Promise.all([
-        prisma.eventLog.create({
-          data: {
-            type: "PHOTO_UPLOADED",
-            description: `${createdPhotos.length} photo(s) uploaded for "${job.name}"`,
-            siteId: job.plot.siteId,
-            plotId: job.plotId,
-            jobId: id,
-            userId: session.user.id,
+        logEvent(prisma, {
+          type: "PHOTO_UPLOADED",
+          description: `${createdPhotos.length} photo(s) uploaded for "${job.name}"`,
+          siteId: job.plot.siteId,
+          plotId: job.plotId,
+          jobId: id,
+          userId: session.user.id,
+          detail: {
+            count: createdPhotos.length,
+            tag: tag || null,
+            jobName: job.name,
           },
         }),
         prisma.jobAction.create({

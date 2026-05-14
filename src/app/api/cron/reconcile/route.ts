@@ -4,6 +4,7 @@ import { recomputePlotPercent } from "@/lib/plot-percent";
 import { recomputeParentFromChildren } from "@/lib/parent-job";
 import { calculateCascade } from "@/lib/cascade";
 import { getServerCurrentDate } from "@/lib/dev-date";
+import { logEvent } from "@/lib/event-log";
 
 export const dynamic = "force-dynamic";
 
@@ -285,17 +286,20 @@ export async function GET(req: NextRequest) {
     // One EventLog row per overlap that was auto-resolved so the
     // manager can see WHAT happened overnight.
     for (const ev of overlapEvents.slice(0, 20)) {
-      await prisma.eventLog
-        .create({
-          data: {
-            type: "SCHEDULE_CASCADED",
-            description: `Auto-reconcile: "${ev.triggerJobName}" [${ev.reason}] → shifted ${ev.jobsShifted} downstream by ${ev.deltaDays} WD`,
-            siteId: overlapPlots.find((p) => p.id === ev.plotId)?.siteId ?? null,
-            plotId: ev.plotId,
-            delayReasonType: "OTHER",
-          },
-        })
-        .catch(() => {});
+      await logEvent(prisma, {
+        type: "SCHEDULE_CASCADED",
+        description: `Auto-reconcile: "${ev.triggerJobName}" [${ev.reason}] → shifted ${ev.jobsShifted} downstream by ${ev.deltaDays} WD`,
+        siteId: overlapPlots.find((p) => p.id === ev.plotId)?.siteId ?? null,
+        plotId: ev.plotId,
+        delayReasonType: "OTHER",
+        detail: {
+          jobName: ev.triggerJobName,
+          reason: ev.reason,
+          jobsShifted: ev.jobsShifted,
+          deltaDays: ev.deltaDays,
+          trigger: "auto-reconcile",
+        },
+      }).catch(() => {});
     }
   } catch (err) {
     console.error("[RECONCILE] Overlap pass failed:", err);
@@ -313,14 +317,12 @@ export async function GET(req: NextRequest) {
       ...driftedPlots.slice(0, 5).map((d) => `plot:${d.plotId.slice(-6)}`),
       ...driftedParents.slice(0, 5).map((id) => `job:${id.slice(-6)}`),
     ].join(", ");
-    await prisma.eventLog.create({
-      data: {
-        type: "USER_ACTION",
-        description:
-          `Nightly reconcile: adjusted ${plotsAdjusted}/${plotsScanned} plot percents` +
-          ` and ${parentsAdjusted}/${parentsScanned} parent rollups in ${durationMs}ms` +
-          (sampleIds ? ` (sample: ${sampleIds})` : ""),
-      },
+    await logEvent(prisma, {
+      type: "USER_ACTION",
+      description:
+        `Nightly reconcile: adjusted ${plotsAdjusted}/${plotsScanned} plot percents` +
+        ` and ${parentsAdjusted}/${parentsScanned} parent rollups in ${durationMs}ms` +
+        (sampleIds ? ` (sample: ${sampleIds})` : ""),
     });
   }
 

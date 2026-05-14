@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { calculateCascade } from "@/lib/cascade";
 import { canAccessSite } from "@/lib/site-access";
 import { apiError } from "@/lib/api-errors";
+import { logEvent } from "@/lib/event-log";
 import { enforceOrderInvariants } from "@/lib/order-invariants";
 import { sessionHasPermission } from "@/lib/permissions";
 
@@ -300,15 +301,13 @@ export async function PUT(
       await recomputePlotPercent(prisma, job.plotId);
     }
 
-    await prisma.eventLog.create({
-      data: {
-        type: "SCHEDULE_CASCADED",
-        description: `Schedule cascaded from "${job.name}" — ${result.deltaDays > 0 ? "+" : ""}${result.deltaDays} working days, ${result.jobUpdates.length} jobs shifted`,
-        siteId: job.plot.siteId,
-        plotId: job.plotId,
-        jobId: id,
-        userId: session.user.id,
-      },
+    await logEvent(prisma, {
+      type: "SCHEDULE_CASCADED",
+      description: `Schedule cascaded from "${job.name}" — ${result.deltaDays > 0 ? "+" : ""}${result.deltaDays} working days, ${result.jobUpdates.length} jobs shifted`,
+      siteId: job.plot.siteId,
+      plotId: job.plotId,
+      jobId: id,
+      userId: session.user.id,
     });
 
     return NextResponse.json({

@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { getUserSiteIds } from "@/lib/site-access";
 import { sessionHasPermission } from "@/lib/permissions";
 import { apiError } from "@/lib/api-errors";
+import { logEvent } from "@/lib/event-log";
 
 export const dynamic = "force-dynamic";
 
@@ -125,13 +126,11 @@ export async function POST(request: NextRequest) {
         skipDuplicates: true,
       });
 
-      await tx.eventLog.create({
-        data: {
-          type: "SITE_CREATED",
-          description: `Site "${created.name}" was created`,
-          siteId: created.id,
-          userId: session.user.id,
-        },
+      await logEvent(tx, {
+        type: "SITE_CREATED",
+        description: `Site "${created.name}" was created`,
+        siteId: created.id,
+        userId: session.user.id,
       });
 
       return created;

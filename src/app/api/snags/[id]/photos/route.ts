@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { getSupabase, PHOTOS_BUCKET } from "@/lib/supabase";
 import { canAccessSite } from "@/lib/site-access";
 import { apiError } from "@/lib/api-errors";
+import { logEvent } from "@/lib/event-log";
 
 export const dynamic = "force-dynamic";
 
@@ -217,14 +218,17 @@ export async function POST(
     // Log event for snag photo uploads
     if (createdPhotos.length > 0 && snag.plot) {
       const plotLabel = snag.plot.plotNumber ? `Plot ${snag.plot.plotNumber}` : snag.plot.name;
-      await prisma.eventLog.create({
-        data: {
-          type: "PHOTO_UPLOADED" as import("@prisma/client").EventType,
-          description: `${createdPhotos.length} snag photo${createdPhotos.length !== 1 ? "s" : ""} uploaded — ${plotLabel}: "${snag.description?.substring(0, 60) || "Snag"}"`,
-          siteId: snag.plot.siteId,
-          plotId: snag.plotId,
-          jobId: snag.jobId,
-          userId: session.user.id,
+      await logEvent(prisma, {
+        type: "PHOTO_UPLOADED",
+        description: `${createdPhotos.length} snag photo${createdPhotos.length !== 1 ? "s" : ""} uploaded — ${plotLabel}: "${snag.description?.substring(0, 60) || "Snag"}"`,
+        siteId: snag.plot.siteId,
+        plotId: snag.plotId,
+        jobId: snag.jobId,
+        userId: session.user.id,
+        detail: {
+          snagId: snag.id,
+          count: createdPhotos.length,
+          tag: tag || null,
         },
       });
     }

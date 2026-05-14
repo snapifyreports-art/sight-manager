@@ -6,6 +6,7 @@ import { canAccessSite } from "@/lib/site-access";
 import { apiError } from "@/lib/api-errors";
 import { addWorkingDays, snapToWorkingDay } from "@/lib/working-days";
 import { getServerCurrentDate } from "@/lib/dev-date";
+import { logEvent } from "@/lib/event-log";
 
 export const dynamic = "force-dynamic";
 
@@ -127,6 +128,23 @@ export async function POST(
           notes: noteText,
         },
       });
+      // (May 2026 Story pass) Per-job WEATHER_IMPACT EventLog so the
+      // plot timeline actually shows weather days — pre-fix only a
+      // JobAction note was written, which the Site Story never reads.
+      // logEvent backfills plotId/siteId from the job id.
+      await logEvent(prisma, {
+        type: "WEATHER_IMPACT",
+        description: noteText,
+        jobId: job.id,
+        userId: session.user.id,
+        delayReasonType:
+          type === "TEMPERATURE" ? "WEATHER_TEMPERATURE" : "WEATHER_RAIN",
+        detail: {
+          weatherType: type,
+          date: dateObj.toISOString(),
+          delayed: !!delayJobs,
+        },
+      });
     }
 
     // (May 2026 critical bug) Honour the `delayJobs` flag. Pre-fix
@@ -204,24 +222,31 @@ export async function POST(
         );
       }
 
-      await prisma.eventLog.create({
-        data: {
-          type: "SCHEDULE_CASCADED",
-          description: `${impactIcon} ${impactLabel} on ${format(dateObj, "dd MMM yyyy")} delayed ${totalShifted} job${totalShifted !== 1 ? "s" : ""} by 1 working day`,
-          siteId,
-          userId: session.user.id,
-          delayReasonType,
+      await logEvent(prisma, {
+        type: "SCHEDULE_CASCADED",
+        description: `${impactIcon} ${impactLabel} on ${format(dateObj, "dd MMM yyyy")} delayed ${totalShifted} job${totalShifted !== 1 ? "s" : ""} by 1 working day`,
+        siteId,
+        userId: session.user.id,
+        delayReasonType,
+        detail: {
+          weatherType: type,
+          date: dateObj.toISOString(),
+          jobsShifted: totalShifted,
         },
       });
       void now;
     }
 
-    await prisma.eventLog.create({
-      data: {
-        type: "SYSTEM",
-        description: `${impactIcon} Weather impact logged: ${impactLabel} on ${format(dateObj, "dd MMM yyyy")}${note ? ` — ${note}` : ""} (${affectedJobs.length} job${affectedJobs.length !== 1 ? "s" : ""} affected${delayJobs ? `, ${totalShifted} shifted by 1 WD` : ""})`,
-        siteId: siteId,
-        userId: session.user.id,
+    await logEvent(prisma, {
+      type: "WEATHER_IMPACT",
+      description: `${impactIcon} Weather impact logged: ${impactLabel} on ${format(dateObj, "dd MMM yyyy")}${note ? ` — ${note}` : ""} (${affectedJobs.length} job${affectedJobs.length !== 1 ? "s" : ""} affected${delayJobs ? `, ${totalShifted} shifted by 1 WD` : ""})`,
+      siteId: siteId,
+      userId: session.user.id,
+      detail: {
+        weatherType: type,
+        date: dateObj.toISOString(),
+        jobsAffected: affectedJobs.length,
+        jobsShifted: delayJobs ? totalShifted : 0,
       },
     });
 
@@ -274,12 +299,15 @@ export async function DELETE(
       });
     }
 
-    await prisma.eventLog.create({
-      data: {
-        type: "SYSTEM",
-        description: `Weather impact removed for ${format(dateObj, "dd MMM yyyy")}${type ? ` (${type})` : ""}`,
-        siteId: id,
-        userId: session.user.id,
+    await logEvent(prisma, {
+      type: "SYSTEM",
+      description: `Weather impact removed for ${format(dateObj, "dd MMM yyyy")}${type ? ` (${type})` : ""}`,
+      siteId: id,
+      userId: session.user.id,
+      detail: {
+        weatherImpactRemoved: true,
+        date: dateObj.toISOString(),
+        weatherType: type ?? null,
       },
     });
 

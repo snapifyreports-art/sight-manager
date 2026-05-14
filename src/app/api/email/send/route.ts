@@ -8,6 +8,7 @@ import {
   snagRaisedEmail,
 } from "@/lib/email";
 import { sessionHasPermission } from "@/lib/permissions";
+import { logEvent } from "@/lib/event-log";
 
 export const dynamic = "force-dynamic";
 
@@ -148,12 +149,10 @@ export async function POST(req: NextRequest) {
 
     // Log the notification event — record both the recipient ID and the
     // canonical email so the audit log survives a contact rename later.
-    await prisma.eventLog.create({
-      data: {
-        type: "NOTIFICATION",
-        description: `Email sent to ${recipientName} (${canonicalTo}): ${subject}`,
-        userId: session.user.id,
-      },
+    await logEvent(prisma, {
+      type: "NOTIFICATION",
+      description: `Email sent to ${recipientName} (${canonicalTo}): ${subject}`,
+      userId: session.user.id,
     });
 
     return NextResponse.json({ success: true });

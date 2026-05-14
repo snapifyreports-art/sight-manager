@@ -9,6 +9,7 @@ import { recomputePlotPercent } from "@/lib/plot-percent";
 import { canAccessSite } from "@/lib/site-access";
 import { snapToWorkingDay } from "@/lib/working-days";
 import { apiError } from "@/lib/api-errors";
+import { logEvent } from "@/lib/event-log";
 import type { EventType, JobStatus } from "@prisma/client";
 
 export const dynamic = "force-dynamic";
@@ -260,14 +261,17 @@ export async function POST(
   // For note action with notes text, include it in the event description
   const notesSuffix = action === "note" && notes ? `: "${notes.substring(0, 100)}"` : "";
 
-  await prisma.eventLog.create({
-    data: {
-      type: eventType,
-      description: `Job "${existing.name}" was ${actionVerb}${notesSuffix}`,
-      siteId: existing.plot.siteId,
-      plotId: existing.plotId,
-      jobId: id,
-      userId: session.user.id,
+  await logEvent(prisma, {
+    type: eventType,
+    description: `Job "${existing.name}" was ${actionVerb}${notesSuffix}`,
+    siteId: existing.plot.siteId,
+    plotId: existing.plotId,
+    jobId: id,
+    userId: session.user.id,
+    detail: {
+      jobName: existing.name,
+      action,
+      ...(action === "note" && notes ? { note: notes.substring(0, 200) } : {}),
     },
   });
 
@@ -576,15 +580,19 @@ export async function POST(
           Array.from(parentIds).map((pid) => recomputeParentFromChildren(prisma, pid)),
         );
         // EventLog so this auto-cascade is visible in audit.
-        await prisma.eventLog.create({
-          data: {
-            type: "SCHEDULE_CASCADED",
-            description: `Auto-cascaded ${result.jobUpdates.length - 1} downstream job(s) — "${existing.name}" finished ${result.deltaDays} working day(s) late`,
-            siteId: existing.plot.siteId,
-            plotId: existing.plotId,
-            jobId: id,
-            userId: session.user.id,
-            delayReasonType: "OTHER",
+        await logEvent(prisma, {
+          type: "SCHEDULE_CASCADED",
+          description: `Auto-cascaded ${result.jobUpdates.length - 1} downstream job(s) — "${existing.name}" finished ${result.deltaDays} working day(s) late`,
+          siteId: existing.plot.siteId,
+          plotId: existing.plotId,
+          jobId: id,
+          userId: session.user.id,
+          delayReasonType: "OTHER",
+          detail: {
+            jobName: existing.name,
+            jobsShifted: result.jobUpdates.length - 1,
+            deltaDays: result.deltaDays,
+            trigger: "late-complete",
           },
         });
       } catch (cascadeErr) {
@@ -602,6 +610,34 @@ export async function POST(
   // "note", "photo") are filtered out before the call.
   if (action === "complete" || action === "start" || action === "signoff" || action === "uncomplete") {
     await recomputePlotPercent(prisma, existing.plotId);
+  }
+
+  // (May 2026 Story pass) PLOT_COMPLETED milestone. There's no
+  // Plot.status field to hook — plot status is derived — so the
+  // trigger is "the percent just hit 100 off the back of this
+  // complete/signoff". The findFirst guard makes it idempotent: the
+  // event is logged exactly once even if more sign-offs follow.
+  if (action === "complete" || action === "signoff") {
+    const plotNow = await prisma.plot.findUnique({
+      where: { id: existing.plotId },
+      select: { buildCompletePercent: true, plotNumber: true, name: true },
+    });
+    if (plotNow && plotNow.buildCompletePercent >= 100) {
+      const alreadyLogged = await prisma.eventLog.findFirst({
+        where: { plotId: existing.plotId, type: "PLOT_COMPLETED" },
+        select: { id: true },
+      });
+      if (!alreadyLogged) {
+        await logEvent(prisma, {
+          type: "PLOT_COMPLETED",
+          description: `Plot ${plotNow.plotNumber || plotNow.name} reached 100% — all jobs complete`,
+          siteId: existing.plot.siteId,
+          plotId: existing.plotId,
+          userId: session.user.id,
+          detail: { plotId: existing.plotId, completedVia: "job-action" },
+        });
+      }
+    }
   }
 
   // Fire-and-forget push notification for relevant actions

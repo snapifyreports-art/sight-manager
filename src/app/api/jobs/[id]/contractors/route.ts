@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { apiError } from "@/lib/api-errors";
 import { canAccessSite } from "@/lib/site-access";
 import { sessionHasPermission } from "@/lib/permissions";
+import { logEvent } from "@/lib/event-log";
 
 export const dynamic = "force-dynamic";
 
@@ -130,15 +131,13 @@ export async function PUT(
       const desc = contactIds.length === 0
         ? `All contractors removed from "${job.name}"`
         : `Contractor${contacts.length > 1 ? "s" : ""} assigned to "${job.name}": ${contractorNames}`;
-      await tx.eventLog.create({
-        data: {
-          type: "JOB_EDITED",
-          description: desc,
-          siteId: job.plot.siteId,
-          plotId: job.plotId,
-          jobId: id,
-          userId: session.user.id,
-        },
+      await logEvent(tx, {
+        type: "JOB_EDITED",
+        description: desc,
+        siteId: job.plot.siteId,
+        plotId: job.plotId,
+        jobId: id,
+        userId: session.user.id,
       });
 
       return tx.jobContractor.findMany({

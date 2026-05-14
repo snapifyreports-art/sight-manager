@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { EventType, Prisma } from "@prisma/client";
 import { canAccessSite } from "@/lib/site-access";
+import { logEvent } from "@/lib/event-log";
 
 export const dynamic = "force-dynamic";
 
@@ -120,14 +121,12 @@ export async function POST(
     return NextResponse.json({ error: "Description is required" }, { status: 400 });
   }
 
-  const event = await prisma.eventLog.create({
-    data: {
-      type: "USER_ACTION",
-      description: description.trim(),
-      siteId: id,
-      plotId: plotId || null,
-      userId: session.user.id,
-    },
+  const event = await logEvent(prisma, {
+    type: "USER_ACTION",
+    description: description.trim(),
+    siteId: id,
+    plotId: plotId || null,
+    userId: session.user.id,
   });
 
   return NextResponse.json({ ...event, createdAt: event.createdAt.toISOString() }, { status: 201 });

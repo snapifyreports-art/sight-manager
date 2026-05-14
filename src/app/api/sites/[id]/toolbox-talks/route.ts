@@ -5,6 +5,7 @@ import { canAccessSite } from "@/lib/site-access";
 import { apiError } from "@/lib/api-errors";
 import { getSupabase, PHOTOS_BUCKET } from "@/lib/supabase";
 import { sessionHasPermission } from "@/lib/permissions";
+import { logEvent } from "@/lib/event-log";
 
 export const dynamic = "force-dynamic";
 
@@ -168,13 +169,11 @@ export async function POST(
         documentMimeType,
       },
     });
-    await prisma.eventLog.create({
-      data: {
-        type: "USER_ACTION",
-        siteId: id,
-        userId: a.session.user.id,
-        description: `Toolbox talk logged: "${talk.topic}"${documentUrl ? ` (with attached doc)` : ""}`,
-      },
+    await logEvent(prisma, {
+      type: "USER_ACTION",
+      siteId: id,
+      userId: a.session.user.id,
+      description: `Toolbox talk logged: "${talk.topic}"${documentUrl ? ` (with attached doc)` : ""}`,
     });
     return NextResponse.json(talk, { status: 201 });
   } catch (err) {

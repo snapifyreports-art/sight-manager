@@ -9,6 +9,7 @@ import { enforceOrderInvariants } from "@/lib/order-invariants";
 import { addWorkingDays, differenceInWorkingDays } from "@/lib/working-days";
 import { applyJobPushCascade } from "@/lib/order-push-cascade";
 import { openOrUpdateLateness, resolveLateness } from "@/lib/lateness-event";
+import { logEvent } from "@/lib/event-log";
 
 export const dynamic = "force-dynamic";
 
@@ -337,24 +338,65 @@ export async function PUT(
   Object.assign(data, invariantPatch);
 
   try {
-    // Create event log for status changes
+    // Create event log for status changes.
+    // (May 2026 Story pass) Distinct event types — pre-fix everything
+    // that wasn't DELIVERED/CANCELLED logged as ORDER_PLACED, so the
+    // per-plot Site Story couldn't tell "sent" from "delivered late"
+    // from "created". `detail` carries the structured specifics.
     if (body.status !== undefined && body.status !== existing.status) {
+      const newDeliveredDate =
+        data.deliveredDate instanceof Date ? data.deliveredDate : today;
+      const expectedDelivery = existing.expectedDeliveryDate
+        ? new Date(existing.expectedDeliveryDate)
+        : null;
+      const deliveredLate =
+        body.status === "DELIVERED" &&
+        expectedDelivery !== null &&
+        newDeliveredDate > expectedDelivery;
+      const deliveryDaysLate =
+        deliveredLate && expectedDelivery
+          ? differenceInWorkingDays(newDeliveredDate, expectedDelivery)
+          : 0;
+      const sentLate = body.status === "ORDERED" && isLateSend;
+
       const eventType =
         body.status === "DELIVERED"
-          ? "DELIVERY_CONFIRMED"
+          ? deliveredLate
+            ? "DELIVERY_LATE"
+            : "DELIVERY_CONFIRMED"
           : body.status === "CANCELLED"
             ? "ORDER_CANCELLED"
-            : "ORDER_PLACED";
+            : body.status === "ORDERED"
+              ? "ORDER_SENT"
+              : "ORDER_PLACED";
 
       const orderLabel = existing.job?.name ?? "one-off order";
-      await prisma.eventLog.create({
-        data: {
-          type: eventType,
-          description: `[${existing.supplier.name}] Order for ${orderLabel} ${body.status === "DELIVERED" ? "delivery confirmed" : `status changed to ${body.status}`}`,
-          siteId: existing.job?.plot.siteId ?? existing.siteId ?? null,
-          plotId: existing.job?.plotId ?? existing.plotId ?? null,
-          jobId: existing.jobId,
-          userId: session.user?.id || null,
+      const action =
+        body.status === "DELIVERED"
+          ? deliveredLate
+            ? `delivery confirmed — ${deliveryDaysLate} working day${deliveryDaysLate === 1 ? "" : "s"} late`
+            : "delivery confirmed"
+          : body.status === "ORDERED"
+            ? sentLate
+              ? `sent to supplier (late — ${lateSend?.choice ?? "no decision"})`
+              : "sent to supplier"
+            : `status changed to ${body.status}`;
+
+      await logEvent(prisma, {
+        type: eventType,
+        description: `[${existing.supplier.name}] Order for ${orderLabel} ${action}`,
+        siteId: existing.job?.plot.siteId ?? existing.siteId ?? null,
+        plotId: existing.job?.plotId ?? existing.plotId ?? null,
+        jobId: existing.jobId,
+        userId: session.user?.id || null,
+        detail: {
+          orderId: existing.id,
+          supplier: existing.supplier.name,
+          status: body.status,
+          ...(deliveredLate ? { daysLate: deliveryDaysLate } : {}),
+          ...(sentLate
+            ? { sentLate: true, lateSendChoice: lateSend?.choice ?? null }
+            : {}),
         },
       });
     }
@@ -655,18 +697,19 @@ export async function PUT(
                   ),
                 );
 
-                await prisma.eventLog
-                  .create({
-                    data: {
-                      type: "SCHEDULE_CASCADED",
-                      description: `Delivery push → expand job: end +${deltaWD} WD, ${successors.length} successors shifted`,
-                      siteId,
-                      plotId: existing.job.plotId,
-                      jobId: existing.jobId,
-                      userId: session.user?.id ?? null,
-                    },
-                  })
-                  .catch(() => {});
+                await logEvent(prisma, {
+                  type: "SCHEDULE_CASCADED",
+                  description: `Delivery push → expand job: end +${deltaWD} WD, ${successors.length} successors shifted`,
+                  siteId,
+                  plotId: existing.job.plotId,
+                  jobId: existing.jobId,
+                  userId: session.user?.id ?? null,
+                  detail: {
+                    deltaDays: deltaWD,
+                    jobsShifted: successors.length,
+                    trigger: "delivery-push",
+                  },
+                }).catch(() => {});
               }
             }
           }
@@ -674,19 +717,24 @@ export async function PUT(
           // Audit row for the delivery push so the timeline shows
           // "manager pushed delivery and chose X" (or just "pushed
           // delivery") alongside the LATENESS_OPENED row above.
-          await prisma.eventLog
-            .create({
-              data: {
-                type: "ORDER_PLACED",
-                description: `Delivery date changed to ${newDelivery.toISOString().slice(0, 10)} (+${deltaWD} WD)${latenessImpact ? `. Impact: ${latenessImpact.choice}.` : "."}`,
-                siteId,
-                plotId: existing.job?.plotId ?? existing.plotId ?? null,
-                jobId: existing.jobId,
-                userId: session.user?.id ?? null,
-                delayReasonType: "MATERIAL_LATE",
-              },
-            })
-            .catch(() => {});
+          await logEvent(prisma, {
+            type: "ORDER_PLACED",
+            description: `Delivery date changed to ${newDelivery.toISOString().slice(0, 10)} (+${deltaWD} WD)${latenessImpact ? `. Impact: ${latenessImpact.choice}.` : "."}`,
+            siteId,
+            plotId: existing.job?.plotId ?? existing.plotId ?? null,
+            jobId: existing.jobId,
+            userId: session.user?.id ?? null,
+            delayReasonType: "MATERIAL_LATE",
+            detail: {
+              orderId: existing.id,
+              action: "delivery-date-changed",
+              newDeliveryDate: newDelivery.toISOString(),
+              deltaDays: deltaWD,
+              ...(latenessImpact
+                ? { lateImpactChoice: latenessImpact.choice }
+                : {}),
+            },
+          }).catch(() => {});
         }
       }
     }
@@ -801,18 +849,20 @@ export async function PUT(
               : lateSend.choice === "NO_IMPACT"
                 ? "no programme impact"
                 : "original delivery date kept";
-        await prisma.eventLog
-          .create({
-            data: {
-              type: "ORDER_PLACED",
-              description: `Order sent ${lateSendWorkingDays} working day${lateSendWorkingDays === 1 ? "" : "s"} late — ${choiceLabel}`,
-              siteId: lateSiteId,
-              plotId: existing.job?.plotId ?? existing.plotId ?? null,
-              jobId: existing.jobId,
-              userId: session.user?.id ?? null,
-            },
-          })
-          .catch(() => {});
+        await logEvent(prisma, {
+          type: "ORDER_SENT",
+          description: `Order sent ${lateSendWorkingDays} working day${lateSendWorkingDays === 1 ? "" : "s"} late — ${choiceLabel}`,
+          siteId: lateSiteId,
+          plotId: existing.job?.plotId ?? existing.plotId ?? null,
+          jobId: existing.jobId,
+          userId: session.user?.id ?? null,
+          detail: {
+            orderId: existing.id,
+            sentLate: true,
+            daysLate: lateSendWorkingDays,
+            lateSendChoice: lateSend.choice,
+          },
+        }).catch(() => {});
       }
     }
 
@@ -873,14 +923,17 @@ export async function DELETE(
   }
 
   try {
-    await prisma.eventLog.create({
-      data: {
-        type: "ORDER_CANCELLED",
-        description: `[${existing.supplier.name}] Order for ${existing.job?.name ?? "one-off order"} was deleted`,
-        siteId: existing.job?.plot.siteId ?? existing.siteId ?? null,
-        plotId: existing.job?.plotId ?? existing.plotId ?? null,
-        jobId: existing.jobId,
-        userId: session.user?.id || null,
+    await logEvent(prisma, {
+      type: "ORDER_CANCELLED",
+      description: `[${existing.supplier.name}] Order for ${existing.job?.name ?? "one-off order"} was deleted`,
+      siteId: existing.job?.plot.siteId ?? existing.siteId ?? null,
+      plotId: existing.job?.plotId ?? existing.plotId ?? null,
+      jobId: existing.jobId,
+      userId: session.user?.id || null,
+      detail: {
+        orderId: existing.id,
+        supplier: existing.supplier.name,
+        status: "DELETED",
       },
     });
 

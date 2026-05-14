@@ -6,6 +6,7 @@ import { recomputeParentOf } from "@/lib/parent-job";
 import { recomputePlotPercent } from "@/lib/plot-percent";
 import { canAccessSite } from "@/lib/site-access";
 import { apiError } from "@/lib/api-errors";
+import { logEvent } from "@/lib/event-log";
 
 export const dynamic = "force-dynamic";
 
@@ -153,15 +154,13 @@ export async function PUT(
     // percent so the cached value never drifts from leaf statuses.
     await recomputePlotPercent(prisma, job.plotId);
 
-    await prisma.eventLog.create({
-      data: {
-        type: "JOB_EDITED",
-        description: `Job "${job.name}" was updated`,
-        siteId: job.plot.siteId,
-        plotId: job.plotId,
-        jobId: job.id,
-        userId: session.user.id,
-      },
+    await logEvent(prisma, {
+      type: "JOB_EDITED",
+      description: `Job "${job.name}" was updated`,
+      siteId: job.plot.siteId,
+      plotId: job.plotId,
+      jobId: job.id,
+      userId: session.user.id,
     });
 
     return NextResponse.json(job);
@@ -201,15 +200,13 @@ export async function DELETE(
   try {
     // Write event log BEFORE deletion so siteId is captured; the event survives
     // the job delete because of onDelete: SetNull on EventLog.jobId
-    await prisma.eventLog.create({
-      data: {
-        type: "USER_ACTION",
-        description: `Job "${existing.name}" was deleted from plot ${existing.plot.plotNumber || existing.plot.name}`,
-        siteId: existing.plot.siteId,
-        plotId: existing.plotId,
-        jobId: existing.id,
-        userId: session.user.id,
-      },
+    await logEvent(prisma, {
+      type: "USER_ACTION",
+      description: `Job "${existing.name}" was deleted from plot ${existing.plot.plotNumber || existing.plot.name}`,
+      siteId: existing.plot.siteId,
+      plotId: existing.plotId,
+      jobId: existing.id,
+      userId: session.user.id,
     });
 
     const parentIdToRecompute = existing.parentId;

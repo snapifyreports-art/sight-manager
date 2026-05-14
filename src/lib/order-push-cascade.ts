@@ -25,6 +25,7 @@
 import type { PrismaClient } from "@prisma/client";
 import { calculateCascade } from "@/lib/cascade";
 import { recomputeParentFromChildren } from "@/lib/parent-job";
+import { logEvent } from "@/lib/event-log";
 
 export interface JobPushCascadeArgs {
   /** The job whose end date is moving — cascade flows from here. */
@@ -149,18 +150,20 @@ export async function applyJobPushCascade(
     Array.from(parentIds).map((pid) => recomputeParentFromChildren(db, pid)),
   );
 
-  await db.eventLog
-    .create({
-      data: {
-        type: "SCHEDULE_CASCADED",
-        description: `${args.logLabel}: ${cascade.deltaDays > 0 ? "+" : ""}${cascade.deltaDays} WD, ${cascade.jobUpdates.length} job${cascade.jobUpdates.length === 1 ? "" : "s"} shifted`,
-        siteId: args.siteId,
-        plotId: args.plotId,
-        jobId: args.triggerJobId,
-        userId: args.userId,
-      },
-    })
-    .catch(() => {});
+  await logEvent(db, {
+    type: "SCHEDULE_CASCADED",
+    description: `${args.logLabel}: ${cascade.deltaDays > 0 ? "+" : ""}${cascade.deltaDays} WD, ${cascade.jobUpdates.length} job${cascade.jobUpdates.length === 1 ? "" : "s"} shifted`,
+    siteId: args.siteId,
+    plotId: args.plotId,
+    jobId: args.triggerJobId,
+    userId: args.userId,
+    detail: {
+      deltaDays: cascade.deltaDays,
+      jobsShifted: cascade.jobUpdates.length,
+      label: args.logLabel,
+      trigger: "order-push",
+    },
+  }).catch(() => {});
 
   return {
     applied: true,

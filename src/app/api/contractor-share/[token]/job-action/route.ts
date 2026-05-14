@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { verifyContractorToken } from "@/lib/share-token";
 import { apiError } from "@/lib/api-errors";
+import { logEvent } from "@/lib/event-log";
 
 export const dynamic = "force-dynamic";
 
@@ -109,17 +110,13 @@ export async function POST(
       },
     });
 
-    await prisma.eventLog
-      .create({
-        data: {
-          type: "USER_ACTION",
-          description: `Contractor ${contractorLabel} ${verb}${notes ? `: "${notes.slice(0, 80)}"` : ""}`,
-          siteId: payload.siteId,
-          jobId,
-          plotId: assignment.job.plotId,
-        },
-      })
-      .catch(() => {});
+    await logEvent(prisma, {
+      type: "USER_ACTION",
+      description: `Contractor ${contractorLabel} ${verb}${notes ? `: "${notes.slice(0, 80)}"` : ""}`,
+      siteId: payload.siteId,
+      jobId,
+      plotId: assignment.job.plotId,
+    }).catch(() => {});
 
     return NextResponse.json({ ok: true });
   } catch (err) {

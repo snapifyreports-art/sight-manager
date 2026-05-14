@@ -5,6 +5,7 @@ import { getSupabase, PHOTOS_BUCKET } from "@/lib/supabase";
 import { canAccessSite } from "@/lib/site-access";
 import { apiError } from "@/lib/api-errors";
 import { sessionHasPermission } from "@/lib/permissions";
+import { logEvent } from "@/lib/event-log";
 
 export const dynamic = "force-dynamic";
 
@@ -69,15 +70,13 @@ export async function DELETE(
 
     await prisma.siteDocument.delete({ where: { id } });
 
-    await prisma.eventLog.create({
-      data: {
-        type: "USER_ACTION",
-        description: `Document "${doc.name}" deleted`,
-        siteId: doc.siteId,
-        plotId: doc.plotId,
-        jobId: doc.jobId,
-        userId: session.user.id,
-      },
+    await logEvent(prisma, {
+      type: "USER_ACTION",
+      description: `Document "${doc.name}" deleted`,
+      siteId: doc.siteId,
+      plotId: doc.plotId,
+      jobId: doc.jobId,
+      userId: session.user.id,
     });
 
     return NextResponse.json({ success: true });

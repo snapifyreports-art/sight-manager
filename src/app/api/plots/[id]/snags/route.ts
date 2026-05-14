@@ -5,6 +5,7 @@ import { getServerCurrentDate } from "@/lib/dev-date";
 import { canAccessSite } from "@/lib/site-access";
 import { apiError } from "@/lib/api-errors";
 import { sendPushToSiteAudience } from "@/lib/push";
+import { logEvent } from "@/lib/event-log";
 
 export const dynamic = "force-dynamic";
 
@@ -171,13 +172,17 @@ export async function POST(
     });
 
     // Log event
-    const eventLogPromise = prisma.eventLog.create({
-      data: {
-        type: "SNAG_CREATED",
-        description: `Snag raised on Plot ${plot.plotNumber || plot.name}: "${description.trim().slice(0, 60)}"`,
-        siteId: plot.siteId,
-        plotId: id,
-        userId: session.user.id,
+    const eventLogPromise = logEvent(prisma, {
+      type: "SNAG_CREATED",
+      description: `Snag raised on Plot ${plot.plotNumber || plot.name}: "${description.trim().slice(0, 60)}"`,
+      siteId: plot.siteId,
+      plotId: id,
+      jobId: jobId || null,
+      userId: session.user.id,
+      detail: {
+        snagId: snag.id,
+        priority: snag.priority,
+        location: snag.location ?? null,
       },
     });
 

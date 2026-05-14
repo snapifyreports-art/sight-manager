@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { signResetToken } from "@/lib/share-token";
 import { sendEmail } from "@/lib/email";
+import { logEvent } from "@/lib/event-log";
 
 export const dynamic = "force-dynamic";
 
@@ -87,17 +88,13 @@ export async function POST(req: NextRequest) {
     // was missing. Same pattern as the daily-email cron's failure
     // logging.
     const msg = err instanceof Error ? err.message : String(err);
-    await prisma.eventLog
-      .create({
-        data: {
-          type: "NOTIFICATION",
-          description: `Password reset / invite email FAILED for ${user.email}: ${msg.slice(0, 200)}`,
-          userId: user.id,
-        },
-      })
-      .catch(() => {
-        /* don't compound the failure */
-      });
+    await logEvent(prisma, {
+      type: "NOTIFICATION",
+      description: `Password reset / invite email FAILED for ${user.email}: ${msg.slice(0, 200)}`,
+      userId: user.id,
+    }).catch(() => {
+      /* don't compound the failure */
+    });
     // Still return generic — don't leak whether the send succeeded.
   }
 

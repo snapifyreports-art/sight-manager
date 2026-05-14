@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { verifyResetToken } from "@/lib/share-token";
 import { hash } from "bcryptjs";
 import { apiError } from "@/lib/api-errors";
+import { logEvent } from "@/lib/event-log";
 
 export const dynamic = "force-dynamic";
 
@@ -72,12 +73,10 @@ export async function POST(req: NextRequest) {
       where: { id: user.id },
       data: { password: hashed },
     });
-    await prisma.eventLog.create({
-      data: {
-        type: "USER_ACTION",
-        userId: user.id,
-        description: `Password reset accepted for ${user.email}`,
-      },
+    await logEvent(prisma, {
+      type: "USER_ACTION",
+      userId: user.id,
+      description: `Password reset accepted for ${user.email}`,
     });
     return NextResponse.json({ ok: true });
   } catch (err) {

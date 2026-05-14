@@ -7,6 +7,7 @@ import { canAccessSite } from "@/lib/site-access";
 import { addDays, format } from "date-fns";
 import { apiError } from "@/lib/api-errors";
 import { sessionHasPermission } from "@/lib/permissions";
+import { logEvent } from "@/lib/event-log";
 
 export const dynamic = "force-dynamic";
 
@@ -141,14 +142,14 @@ export async function PATCH(
       data: { notes: updatedNotes },
     });
 
-    await prisma.eventLog.create({
-      data: {
-        type: "SNAG_RESOLVED",
-        description: `Snag resolved on Plot ${existing.plot.plotNumber || existing.plot.name}: "${existing.description.slice(0, 60)}". ${reinspectNote}`,
-        siteId: existing.plot.siteId,
-        plotId: existing.plotId,
-        userId: session.user.id,
-      },
+    await logEvent(prisma, {
+      type: "SNAG_RESOLVED",
+      description: `Snag resolved on Plot ${existing.plot.plotNumber || existing.plot.name}: "${existing.description.slice(0, 60)}". ${reinspectNote}`,
+      siteId: existing.plot.siteId,
+      plotId: existing.plotId,
+      jobId: existing.jobId || null,
+      userId: session.user.id,
+      detail: { snagId: id, status: "RESOLVED" },
     });
 
     // Log to the linked job
@@ -171,15 +172,14 @@ export async function PATCH(
       ? `Snag closed on Plot ${existing.plot.plotNumber || existing.plot.name}: "${existing.description.slice(0, 60)}" — ${notes}`
       : `Snag closed on Plot ${existing.plot.plotNumber || existing.plot.name}: "${existing.description.slice(0, 60)}"`;
 
-    await prisma.eventLog.create({
-      data: {
-        type: "USER_ACTION",
-        description: closeDesc,
-        siteId: existing.plot.siteId,
-        plotId: existing.plotId,
-        jobId: existing.jobId || undefined,
-        userId: session.user.id,
-      },
+    await logEvent(prisma, {
+      type: "USER_ACTION",
+      description: closeDesc,
+      siteId: existing.plot.siteId,
+      plotId: existing.plotId,
+      jobId: existing.jobId || undefined,
+      userId: session.user.id,
+      detail: { snagId: id, status: "CLOSED" },
     });
 
     if (existing.jobId) {
@@ -198,15 +198,14 @@ export async function PATCH(
   const isStatusChange = status && status !== existing.status && status !== "RESOLVED" && status !== "CLOSED";
   if (isStatusChange) {
     const statusLabel = status === "IN_PROGRESS" ? "In Progress" : status.charAt(0) + status.slice(1).toLowerCase();
-    await prisma.eventLog.create({
-      data: {
-        type: "USER_ACTION",
-        description: `Snag status updated to ${statusLabel} on Plot ${existing.plot.plotNumber || existing.plot.name}: "${existing.description.slice(0, 60)}"`,
-        siteId: existing.plot.siteId,
-        plotId: existing.plotId,
-        jobId: existing.jobId || undefined,
-        userId: session.user.id,
-      },
+    await logEvent(prisma, {
+      type: "USER_ACTION",
+      description: `Snag status updated to ${statusLabel} on Plot ${existing.plot.plotNumber || existing.plot.name}: "${existing.description.slice(0, 60)}"`,
+      siteId: existing.plot.siteId,
+      plotId: existing.plotId,
+      jobId: existing.jobId || undefined,
+      userId: session.user.id,
+      detail: { snagId: id, status },
     });
   }
 

@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { sessionHasPermission } from "@/lib/permissions";
 import { canAccessSite } from "@/lib/site-access";
 import { apiError } from "@/lib/api-errors";
+import { logEvent } from "@/lib/event-log";
 
 export const dynamic = "force-dynamic";
 
@@ -202,13 +203,11 @@ export async function PUT(
       }
     }
 
-    await prisma.eventLog.create({
-      data: {
-        type: "SITE_UPDATED",
-        description: `Site "${site.name}" was updated`,
-        siteId: site.id,
-        userId: session.user.id,
-      },
+    await logEvent(prisma, {
+      type: "SITE_UPDATED",
+      description: `Site "${site.name}" was updated`,
+      siteId: site.id,
+      userId: session.user.id,
     });
 
     return NextResponse.json(site);
@@ -259,12 +258,10 @@ export async function DELETE(
       // Audit trail — EventLog.siteId cascade-deletes with the site, so
       // record to a site-less audit entry instead (plotId/jobId/userId
       // SetNull survive).
-      await tx.eventLog.create({
-        data: {
-          type: "USER_ACTION",
-          description: `Site "${existing.name}" was deleted`,
-          userId: session.user.id,
-        },
+      await logEvent(tx, {
+        type: "USER_ACTION",
+        description: `Site "${existing.name}" was deleted`,
+        userId: session.user.id,
       });
 
       // (May 2026) Hard-delete the site's MaterialOrders *before* the

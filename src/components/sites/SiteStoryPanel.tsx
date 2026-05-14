@@ -17,6 +17,8 @@ import {
   ChevronRight,
   HardHat,
   Package,
+  Camera,
+  Flag,
 } from "lucide-react";
 import { format } from "date-fns";
 import { LatenessSummary } from "@/components/lateness/LatenessSummary";
@@ -850,21 +852,29 @@ function HighlightRow({
 }: {
   highlight: { date: string; type: string; description: string; reason?: string };
 }) {
-  const Icon =
-    highlight.type === "JOB_STARTED"
-      ? Hammer
-      : highlight.type === "JOB_COMPLETED" || highlight.type === "JOB_SIGNED_OFF"
-        ? CheckCircle2
-        : highlight.type === "DELAY"
-          ? Clock
-          : highlight.type === "JOURNAL"
-            ? QuoteIcon
-            : highlight.type === "SNAG"
-              ? Wrench
-              : Clock;
+  // (May 2026 Story-completeness pass) Widened from 6 to 11 types —
+  // orders, lateness, weather and plot/handover milestones now appear
+  // in plot timelines, each with its own icon + tint.
+  const STYLE: Record<string, { Icon: typeof Hammer; color: string }> = {
+    JOB_STARTED: { Icon: Hammer, color: "text-blue-500" },
+    JOB_COMPLETED: { Icon: CheckCircle2, color: "text-emerald-500" },
+    JOB_SIGNED_OFF: { Icon: CheckCircle2, color: "text-emerald-500" },
+    DELAY: { Icon: Clock, color: "text-amber-500" },
+    JOURNAL: { Icon: QuoteIcon, color: "text-slate-400" },
+    SNAG: { Icon: Wrench, color: "text-red-500" },
+    PHOTO: { Icon: Camera, color: "text-slate-500" },
+    ORDER: { Icon: Package, color: "text-indigo-500" },
+    LATENESS: { Icon: AlertCircle, color: "text-amber-600" },
+    WEATHER: { Icon: CloudRain, color: "text-sky-500" },
+    MILESTONE: { Icon: Flag, color: "text-emerald-600" },
+  };
+  const { Icon, color } = STYLE[highlight.type] ?? {
+    Icon: Clock,
+    color: "text-slate-400",
+  };
   return (
     <li className="flex items-start gap-2 text-xs">
-      <Icon className="mt-0.5 size-3.5 shrink-0 text-slate-400" />
+      <Icon className={`mt-0.5 size-3.5 shrink-0 ${color}`} />
       <div className="min-w-0 flex-1">
         <p className="text-slate-700">{highlight.description}</p>
         <p className="text-[10px] text-slate-400">

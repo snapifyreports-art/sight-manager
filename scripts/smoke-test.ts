@@ -54,6 +54,7 @@ const EXPECTED_COLUMNS: Array<[table: string, column: string]> = [
   ["TemplateVariant", "salePrice"],
   ["Plot", "buildBudget"],
   ["Plot", "salePrice"],
+  ["EventLog", "detail"],
 ];
 
 async function checkSchemaColumns() {
@@ -316,6 +317,65 @@ async function checkCompletionCacheSanity() {
   );
 }
 
+/**
+ * (May 2026 Story-completeness pass) The EventLog SSOT guard. Every
+ * write to EventLog must go through `logEvent()` in
+ * src/lib/event-log.ts — a direct `eventLog.create` anywhere else is
+ * the exact drift that made the Site Story miss orders/snags/photos
+ * for months (a writer that forgets `plotId`, or invents an
+ * inconsistent `type`). This is a SOURCE scan, not a DB check.
+ *
+ * Multiline-aware on purpose: `prisma.eventLog` and `.create` split
+ * across two lines hid 10 call sites from the first single-line grep
+ * during the very migration that added this guard.
+ */
+async function checkEventLogHelperUsage() {
+  const { readdirSync, readFileSync, statSync } = await import("node:fs");
+  const { join } = await import("node:path");
+
+  const SRC = join(process.cwd(), "src");
+  const HELPER_SUFFIX = join("lib", "event-log.ts");
+  const offenders: string[] = [];
+  const DIRECT_WRITE = /eventLog\s*\.\s*create(Many)?\s*\(/;
+
+  function walk(dir: string) {
+    for (const entry of readdirSync(dir)) {
+      const full = join(dir, entry);
+      if (statSync(full).isDirectory()) {
+        walk(full);
+        continue;
+      }
+      if (!/\.(ts|tsx)$/.test(entry)) continue;
+      if (full.endsWith(HELPER_SUFFIX)) continue; // the one allowed file
+      if (DIRECT_WRITE.test(readFileSync(full, "utf8"))) {
+        offenders.push(
+          full.replace(process.cwd(), "").replace(/\\/g, "/"),
+        );
+      }
+    }
+  }
+
+  try {
+    walk(SRC);
+  } catch (err) {
+    // The checker itself stumbling must not block a deploy.
+    record(
+      "EventLog writes routed through logEvent()",
+      "warn",
+      `Couldn't scan src/ — ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return;
+  }
+
+  record(
+    "EventLog writes routed through logEvent()",
+    offenders.length > 0 ? "fail" : "pass",
+    offenders.length > 0
+      ? `Direct eventLog.create outside the helper in: ${offenders.join(", ")} — call logEvent() from src/lib/event-log.ts instead.`
+      : "Every EventLog write goes through the logEvent() SSOT.",
+  );
+}
+
 async function main() {
   const checks = [
     checkSchemaColumns,
@@ -331,6 +391,7 @@ async function main() {
     checkResolvedSnagsHaveDate,
     checkPlotProvenance,
     checkCompletionCacheSanity,
+    checkEventLogHelperUsage,
   ];
 
   try {

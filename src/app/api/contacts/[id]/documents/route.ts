@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { getSupabase, PHOTOS_BUCKET } from "@/lib/supabase";
 import { apiError } from "@/lib/api-errors";
 import { sessionHasPermission } from "@/lib/permissions";
+import { logEvent } from "@/lib/event-log";
 
 export const dynamic = "force-dynamic";
 
@@ -128,12 +129,10 @@ export async function POST(
       },
     });
 
-    await prisma.eventLog.create({
-      data: {
-        type: "USER_ACTION",
-        description: `RAMS / method statement "${doc.name}" uploaded for ${contact.name}`,
-        userId: session.user.id,
-      },
+    await logEvent(prisma, {
+      type: "USER_ACTION",
+      description: `RAMS / method statement "${doc.name}" uploaded for ${contact.name}`,
+      userId: session.user.id,
     }).catch(() => { /* non-fatal */ });
 
     return NextResponse.json(doc, { status: 201 });

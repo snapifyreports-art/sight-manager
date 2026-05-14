@@ -109,6 +109,15 @@ enum EventType {
   SNAG_RESOLVED
   LATENESS_OPENED
   LATENESS_RESOLVED
+  // (May 2026) Story-completeness pass — distinct types so the per-plot
+  // Site Story can show order timing, weather, handover and plot
+  // milestones rather than burying everything under ORDER_PLACED / SYSTEM.
+  ORDER_SENT // order sent to the supplier (status → ORDERED)
+  DELIVERY_LATE // a delivery landed (or went) overdue
+  PLOT_COMPLETED // every leaf job on the plot is done
+  HANDOVER_COMPLETED // handover checklist finished / pack generated
+  PHOTO_SHARED // a photo was published to the customer
+  WEATHER_IMPACT // weather affected a job/plot (rained-off, temperature)
   USER_ACTION
   NOTIFICATION
   SYSTEM
@@ -1494,6 +1503,13 @@ model EventLog {
   jobId           String?
   userId          String?
   delayReasonType String? // WEATHER_RAIN | WEATHER_TEMPERATURE | OTHER — set when type=SCHEDULE_CASCADED
+  // (May 2026 Story-completeness pass) Structured payload so the Site
+  // Story reads typed fields instead of regex-parsing `description`.
+  // Shape varies by `type` — e.g. orders carry { orderId, supplier,
+  // daysLate, reason }, deliveries { daysLate }. Optional + additive:
+  // every existing reader still works off `description`; `detail` is
+  // the richer path for new consumers.
+  detail          Json?
   createdAt       DateTime  @default(now())
 
   // (May 2026 Keith bug report) Site FK is SetNull, not Cascade. Pre-

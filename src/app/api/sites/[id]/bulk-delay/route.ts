@@ -6,6 +6,7 @@ import { getTodayWeatherSummary } from "@/lib/weather";
 import { addWorkingDays } from "@/lib/working-days";
 import { canAccessSite } from "@/lib/site-access";
 import { apiError } from "@/lib/api-errors";
+import { logEvent } from "@/lib/event-log";
 import { sessionHasPermission } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
@@ -179,16 +180,14 @@ export async function POST(
         },
       });
 
-      await tx.eventLog.create({
-        data: {
-          type: "SCHEDULE_CASCADED",
-          description: `Bulk delay: "${currentJob.name}" on plot ${currentJob.plot.plotNumber || plotId} delayed ${days} day(s) — ${reasonLabel}${weatherStamp}`,
-          siteId,
-          plotId,
-          jobId: currentJob.id,
-          userId: session.user.id,
-          delayReasonType,
-        },
+      await logEvent(tx, {
+        type: "SCHEDULE_CASCADED",
+        description: `Bulk delay: "${currentJob.name}" on plot ${currentJob.plot.plotNumber || plotId} delayed ${days} day(s) — ${reasonLabel}${weatherStamp}`,
+        siteId,
+        plotId,
+        jobId: currentJob.id,
+        userId: session.user.id,
+        delayReasonType,
       });
 
       // Recompute parents of any shifted child jobs on this plot.

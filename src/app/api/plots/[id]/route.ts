@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { sessionHasPermission } from "@/lib/permissions";
 import { canAccessSite } from "@/lib/site-access";
 import { apiError } from "@/lib/api-errors";
+import { logEvent } from "@/lib/event-log";
 
 export const dynamic = "force-dynamic";
 
@@ -147,14 +148,12 @@ export async function PUT(
       },
     });
 
-    await prisma.eventLog.create({
-      data: {
-        type: "PLOT_UPDATED",
-        description: `Plot "${plot.name}" was updated in site "${existing.site.name}"`,
-        siteId: existing.site.id,
-        plotId: plot.id,
-        userId: session.user.id,
-      },
+    await logEvent(prisma, {
+      type: "PLOT_UPDATED",
+      description: `Plot "${plot.name}" was updated in site "${existing.site.name}"`,
+      siteId: existing.site.id,
+      plotId: plot.id,
+      userId: session.user.id,
     });
 
     return NextResponse.json(plot);
@@ -196,14 +195,12 @@ export async function DELETE(
     await prisma.$transaction(async (tx) => {
       // Audit event BEFORE delete so siteId is captured
       // (EventLog.plotId SetNull survives).
-      await tx.eventLog.create({
-        data: {
-          type: "USER_ACTION",
-          description: `Plot "${existing.plotNumber || existing.name}" was deleted from site "${existing.site.name}"`,
-          siteId: existing.site.id,
-          plotId: existing.id,
-          userId: session.user.id,
-        },
+      await logEvent(tx, {
+        type: "USER_ACTION",
+        description: `Plot "${existing.plotNumber || existing.name}" was deleted from site "${existing.site.name}"`,
+        siteId: existing.site.id,
+        plotId: existing.id,
+        userId: session.user.id,
       });
 
       // (May 2026) Hard-delete the plot's MaterialOrders before the

@@ -4,6 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { getServerCurrentDate } from "@/lib/dev-date";
 import { canAccessSite } from "@/lib/site-access";
 import { sessionHasPermission } from "@/lib/permissions";
+import { differenceInWorkingDays } from "@/lib/working-days";
+import { logEvent } from "@/lib/event-log";
 
 export const dynamic = "force-dynamic";
 
@@ -96,23 +98,55 @@ export async function POST(req: NextRequest) {
         data,
       });
 
-      // Create event log
+      // Create event log.
+      // (May 2026 Story pass) Distinct types so the per-plot Story
+      // reads "sent" / "delivered late" / "delivered" / "cancelled"
+      // correctly — pre-fix anything not DELIVERED/CANCELLED logged as
+      // ORDER_PLACED.
       if (status !== existing.status) {
+        const deliveredLate =
+          status === "DELIVERED" &&
+          !!existing.expectedDeliveryDate &&
+          now > new Date(existing.expectedDeliveryDate);
+        const deliveryDaysLate =
+          deliveredLate && existing.expectedDeliveryDate
+            ? differenceInWorkingDays(
+                now,
+                new Date(existing.expectedDeliveryDate),
+              )
+            : 0;
         const eventType =
           status === "DELIVERED"
-            ? "DELIVERY_CONFIRMED"
+            ? deliveredLate
+              ? "DELIVERY_LATE"
+              : "DELIVERY_CONFIRMED"
             : status === "CANCELLED"
               ? "ORDER_CANCELLED"
-              : "ORDER_PLACED";
+              : status === "ORDERED"
+                ? "ORDER_SENT"
+                : "ORDER_PLACED";
+        const action =
+          status === "ORDERED"
+            ? "sent to supplier"
+            : status === "DELIVERED"
+              ? deliveredLate
+                ? `delivery confirmed — ${deliveryDaysLate} working day${deliveryDaysLate === 1 ? "" : "s"} late`
+                : "delivery confirmed"
+              : `status changed to ${status}`;
 
-        await prisma.eventLog.create({
-          data: {
-            type: eventType,
-            description: `[${existing.supplier.name}] Order for ${existing.job?.name ?? "one-off order"} status changed to ${status} (bulk)`,
-            siteId: existing.job?.plot.siteId ?? existing.siteId ?? null,
-            plotId: existing.job?.plotId ?? existing.plotId ?? null,
-            jobId: existing.jobId,
-            userId: session.user?.id || null,
+        await logEvent(prisma, {
+          type: eventType,
+          description: `[${existing.supplier.name}] Order for ${existing.job?.name ?? "one-off order"} ${action} (bulk)`,
+          siteId: existing.job?.plot.siteId ?? existing.siteId ?? null,
+          plotId: existing.job?.plotId ?? existing.plotId ?? null,
+          jobId: existing.jobId,
+          userId: session.user?.id || null,
+          detail: {
+            orderId: existing.id,
+            supplier: existing.supplier.name,
+            status,
+            bulk: true,
+            ...(deliveredLate ? { daysLate: deliveryDaysLate } : {}),
           },
         });
       }

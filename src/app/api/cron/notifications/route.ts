@@ -6,6 +6,7 @@ import { getServerCurrentDate, getServerStartOfDay } from "@/lib/dev-date";
 import { checkCronAuth } from "@/lib/cron-auth";
 import { whereJobEndOverdue, whereJobStartOverdue } from "@/lib/lateness";
 import { whereOrderNotOrphaned } from "@/lib/order-invariants";
+import { logEvent } from "@/lib/event-log";
 
 export const dynamic = "force-dynamic";
 
@@ -240,11 +241,9 @@ export async function GET(req: NextRequest) {
   await Promise.allSettled(notifications);
 
   // Log the notification event
-  await prisma.eventLog.create({
-    data: {
-      type: "NOTIFICATION",
-      description: `Daily notification cron: ${notifications.length} notification type${notifications.length !== 1 ? "s" : ""} sent`,
-    },
+  await logEvent(prisma, {
+    type: "NOTIFICATION",
+    description: `Daily notification cron: ${notifications.length} notification type${notifications.length !== 1 ? "s" : ""} sent`,
   });
 
   return NextResponse.json({

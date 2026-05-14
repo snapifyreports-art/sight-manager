@@ -5,6 +5,7 @@ import { getUserSiteIds } from "@/lib/site-access";
 import { apiError } from "@/lib/api-errors";
 import { sessionHasPermission } from "@/lib/permissions";
 import { whereOrderNotOrphaned } from "@/lib/order-invariants";
+import { logEvent } from "@/lib/event-log";
 
 export const dynamic = "force-dynamic";
 
@@ -178,14 +179,17 @@ export async function POST(req: NextRequest) {
       },
     });
 
-      await tx.eventLog.create({
-        data: {
-          type: "ORDER_PLACED",
-          description: `[${created.supplier.name}] Order created for ${created.job?.name ?? "one-off order"}`,
-          siteId: created.job?.plot.siteId ?? created.siteId ?? null,
-          plotId: created.job?.plotId ?? created.plotId ?? null,
-          jobId: created.jobId,
-          userId: session.user?.id || null,
+      await logEvent(tx, {
+        type: "ORDER_PLACED",
+        description: `[${created.supplier.name}] Order created for ${created.job?.name ?? "one-off order"}`,
+        siteId: created.job?.plot.siteId ?? created.siteId ?? null,
+        plotId: created.job?.plotId ?? created.plotId ?? null,
+        jobId: created.jobId,
+        userId: session.user?.id || null,
+        detail: {
+          orderId: created.id,
+          supplier: created.supplier.name,
+          status: created.status,
         },
       });
 

@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { canAccessSite } from "@/lib/site-access";
 import { isWorkingDay, differenceInWorkingDays, addWorkingDays, snapToWorkingDay } from "@/lib/working-days";
 import { apiError } from "@/lib/api-errors";
+import { logEvent } from "@/lib/event-log";
 import { getServerCurrentDate } from "@/lib/dev-date";
 import { sessionHasPermission } from "@/lib/permissions";
 
@@ -402,15 +403,13 @@ export async function POST(
         },
       });
 
-      await tx.eventLog.create({
-        data: {
-          type: "SCHEDULE_CASCADED",
-          description: `"${job.name}" pulled forward ${wdAbs} working day(s) — new start ${newStart.toISOString().slice(0, 10)}`,
-          siteId: job.plot.siteId,
-          plotId: job.plotId,
-          jobId: id,
-          userId: session.user.id,
-        },
+      await logEvent(tx, {
+        type: "SCHEDULE_CASCADED",
+        description: `"${job.name}" pulled forward ${wdAbs} working day(s) — new start ${newStart.toISOString().slice(0, 10)}`,
+        siteId: job.plot.siteId,
+        plotId: job.plotId,
+        jobId: id,
+        userId: session.user.id,
       });
 
       // (#3) Parent rollup must follow the child shift — without this

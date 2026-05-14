@@ -6,6 +6,7 @@ import { getTodayWeatherSummary } from "@/lib/weather";
 import { addWorkingDays } from "@/lib/working-days";
 import { canAccessSite } from "@/lib/site-access";
 import { apiError } from "@/lib/api-errors";
+import { logEvent } from "@/lib/event-log";
 import { sessionHasPermission } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
@@ -256,16 +257,14 @@ export async function POST(
       },
     });
 
-    await tx.eventLog.create({
-      data: {
-        type: "SCHEDULE_CASCADED",
-        description: `"${job.name}" delayed ${days} day(s) — ${reasonLabel}${weatherSummary ? ` · ${weatherSummary}` : ""}`,
-        siteId: job.plot.siteId,
-        plotId: job.plotId,
-        jobId: id,
-        userId: session.user.id,
-        delayReasonType,
-      },
+    await logEvent(tx, {
+      type: "SCHEDULE_CASCADED",
+      description: `"${job.name}" delayed ${days} day(s) — ${reasonLabel}${weatherSummary ? ` · ${weatherSummary}` : ""}`,
+      siteId: job.plot.siteId,
+      plotId: job.plotId,
+      jobId: id,
+      userId: session.user.id,
+      delayReasonType,
     });
   },
     // Default 5s tx timeout was tripping on big delays (50 days

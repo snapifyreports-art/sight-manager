@@ -4,6 +4,7 @@ import { sendEmail } from "@/lib/email";
 import { format, subDays } from "date-fns";
 import { checkCronAuth } from "@/lib/cron-auth";
 import { getServerCurrentDate, getServerStartOfDay } from "@/lib/dev-date";
+import { logEvent } from "@/lib/event-log";
 
 export const dynamic = "force-dynamic";
 
@@ -323,11 +324,9 @@ export async function GET(req: NextRequest) {
   }
 
   if (sent > 0 || failed.length > 0) {
-    await prisma.eventLog.create({
-      data: {
-        type: "NOTIFICATION",
-        description: `Weekly digest sent to ${sent} user${sent !== 1 ? "s" : ""}${failed.length > 0 ? ` (${failed.length} failed)` : ""}${skippedQuiet > 0 ? ` (${skippedQuiet} skipped — quiet week)` : ""}`,
-      },
+    await logEvent(prisma, {
+      type: "NOTIFICATION",
+      description: `Weekly digest sent to ${sent} user${sent !== 1 ? "s" : ""}${failed.length > 0 ? ` (${failed.length} failed)` : ""}${skippedQuiet > 0 ? ` (${skippedQuiet} skipped — quiet week)` : ""}`,
     });
   }
 

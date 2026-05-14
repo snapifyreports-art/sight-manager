@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { canAccessSite } from "@/lib/site-access";
 import { apiError } from "@/lib/api-errors";
 import { sessionHasPermission } from "@/lib/permissions";
+import { logEvent } from "@/lib/event-log";
 
 export const dynamic = "force-dynamic";
 
@@ -108,13 +109,17 @@ export async function POST(
       },
     });
 
-    await prisma.eventLog.create({
-      data: {
-        type: "ORDER_PLACED",
-        description: `[${order.supplier.name}] One-off order created${plotId ? ` for plot ${order.plot?.plotNumber ?? plotId}` : " at site level"}`,
-        siteId,
-        plotId: plotId || null,
-        userId: session.user.id,
+    await logEvent(prisma, {
+      type: "ORDER_PLACED",
+      description: `[${order.supplier.name}] One-off order created${plotId ? ` for plot ${order.plot?.plotNumber ?? plotId}` : " at site level"}`,
+      siteId,
+      plotId: plotId || null,
+      userId: session.user.id,
+      detail: {
+        orderId: order.id,
+        supplier: order.supplier.name,
+        status: order.status,
+        oneOff: true,
       },
     });
 

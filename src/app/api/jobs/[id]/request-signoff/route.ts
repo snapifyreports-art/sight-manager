@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { sendPushToSiteAudience } from "@/lib/push";
 import { canAccessSite } from "@/lib/site-access";
 import { apiError } from "@/lib/api-errors";
+import { logEvent } from "@/lib/event-log";
 
 export const dynamic = "force-dynamic";
 
@@ -67,15 +68,13 @@ export async function POST(
 
     // Log event
     const plotLabel = job.plot.plotNumber ? `Plot ${job.plot.plotNumber}` : job.plot.name;
-    await prisma.eventLog.create({
-      data: {
-        type: "USER_ACTION",
-        description: `Sign-off requested for "${job.name}" on ${plotLabel}`,
-        siteId: job.plot.site.id,
-        plotId: job.plotId,
-        jobId: id,
-        userId: session.user.id,
-      },
+    await logEvent(prisma, {
+      type: "USER_ACTION",
+      description: `Sign-off requested for "${job.name}" on ${plotLabel}`,
+      siteId: job.plot.site.id,
+      plotId: job.plotId,
+      jobId: id,
+      userId: session.user.id,
     });
 
     // (May 2026 audit F-P1-23 follow-up) Per-site scope. Sibling

@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { ContactType } from "@prisma/client";
 import { apiError } from "@/lib/api-errors";
 import { sessionHasPermission } from "@/lib/permissions";
+import { logEvent } from "@/lib/event-log";
 
 export const dynamic = "force-dynamic";
 
@@ -142,12 +143,10 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    await prisma.eventLog.create({
-      data: {
-        type: "USER_ACTION",
-        description: `${type === "CONTRACTOR" ? "Contractor" : "Supplier"} "${name}"${company ? ` (${company})` : ""} added`,
-        userId: session.user.id,
-      },
+    await logEvent(prisma, {
+      type: "USER_ACTION",
+      description: `${type === "CONTRACTOR" ? "Contractor" : "Supplier"} "${name}"${company ? ` (${company})` : ""} added`,
+      userId: session.user.id,
     });
 
     return NextResponse.json(contact, { status: 201 });

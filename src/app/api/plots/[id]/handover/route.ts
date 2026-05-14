@@ -5,6 +5,7 @@ import { getServerCurrentDate } from "@/lib/dev-date";
 import { canAccessSite } from "@/lib/site-access";
 import { apiError } from "@/lib/api-errors";
 import { loadJsPdf, pdfResponse } from "@/lib/pdf-builder";
+import { logEvent } from "@/lib/event-log";
 
 async function guardPlotAccess(plotId: string, userId: string, role: string) {
   const plot = await prisma.plot.findUnique({ where: { id: plotId }, select: { siteId: true } });
@@ -157,6 +158,31 @@ export async function PATCH(
       where: { id: itemId },
       data: updateData,
     });
+
+    // (May 2026 Story pass) HANDOVER_COMPLETED milestone — when ticking
+    // this item leaves no unchecked items on the plot, log it once
+    // (findFirst guard keeps it idempotent if items are re-ticked).
+    if (checked === true) {
+      const remaining = await prisma.handoverChecklist.count({
+        where: { plotId: updated.plotId, checkedAt: null },
+      });
+      if (remaining === 0) {
+        const already = await prisma.eventLog.findFirst({
+          where: { plotId: updated.plotId, type: "HANDOVER_COMPLETED" },
+          select: { id: true },
+        });
+        if (!already) {
+          await logEvent(prisma, {
+            type: "HANDOVER_COMPLETED",
+            description:
+              "Handover checklist completed — every item signed off",
+            plotId: updated.plotId,
+            userId: session.user.id,
+            detail: { plotId: updated.plotId },
+          });
+        }
+      }
+    }
 
     return NextResponse.json(updated);
   } catch (err) {

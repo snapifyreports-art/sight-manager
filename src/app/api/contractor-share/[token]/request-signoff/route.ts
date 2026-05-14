@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { verifyContractorToken } from "@/lib/share-token";
 import { apiError } from "@/lib/api-errors";
+import { logEvent } from "@/lib/event-log";
 
 export const dynamic = "force-dynamic";
 
@@ -82,14 +83,12 @@ export async function POST(
     }
 
     // Log event so the site manager can see who requested it + when.
-    await prisma.eventLog.create({
-      data: {
-        type: "USER_ACTION",
-        description: `Sign-off requested by contractor (via share link)`,
-        siteId: payload.siteId,
-        jobId,
-        plotId: assignment.job.plotId,
-      },
+    await logEvent(prisma, {
+      type: "USER_ACTION",
+      description: `Sign-off requested by contractor (via share link)`,
+      siteId: payload.siteId,
+      jobId,
+      plotId: assignment.job.plotId,
     }).catch(() => { /* non-fatal */ });
 
     return NextResponse.json({ ok: true });

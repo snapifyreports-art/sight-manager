@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { sendPushToSiteAudience } from "@/lib/push";
 import { canAccessSite } from "@/lib/site-access";
 import { apiError } from "@/lib/api-errors";
+import { logEvent } from "@/lib/event-log";
 
 export const dynamic = "force-dynamic";
 
@@ -62,14 +63,12 @@ export async function POST(
 
     // Log the request
     const plotLabel = snag.plot.plotNumber ? `Plot ${snag.plot.plotNumber}` : snag.plot.name;
-    await prisma.eventLog.create({
-      data: {
-        type: "USER_ACTION",
-        description: `Snag sign-off requested: "${snag.description}" on ${plotLabel}`,
-        siteId: snag.plot.site.id,
-        plotId: snag.plotId,
-        userId: session.user.id,
-      },
+    await logEvent(prisma, {
+      type: "USER_ACTION",
+      description: `Snag sign-off requested: "${snag.description}" on ${plotLabel}`,
+      siteId: snag.plot.site.id,
+      plotId: snag.plotId,
+      userId: session.user.id,
     });
 
     // (May 2026 audit F-P1-23) Per-site scope. Pre-fix sendPushToAll

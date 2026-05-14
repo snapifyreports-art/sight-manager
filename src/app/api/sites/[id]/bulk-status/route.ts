@@ -7,6 +7,7 @@ import { sessionHasPermission } from "@/lib/permissions";
 import type { JobStatus } from "@prisma/client";
 import { canAccessSite } from "@/lib/site-access";
 import { snapToWorkingDay } from "@/lib/working-days";
+import { logEvent } from "@/lib/event-log";
 
 export const dynamic = "force-dynamic";
 
@@ -241,15 +242,14 @@ export async function POST(
 
       // Create event log
       const eventType = action === "complete" ? "JOB_SIGNED_OFF" : "JOB_STARTED";
-      await prisma.eventLog.create({
-        data: {
-          type: eventType,
-          description: `Job "${job.name}" was ${action === "start" ? "started" : "signed off"} (bulk)`,
-          siteId,
-          plotId: job.plotId,
-          jobId,
-          userId: session.user.id,
-        },
+      await logEvent(prisma, {
+        type: eventType,
+        description: `Job "${job.name}" was ${action === "start" ? "started" : "signed off"} (bulk)`,
+        siteId,
+        plotId: job.plotId,
+        jobId,
+        userId: session.user.id,
+        detail: { jobName: job.name, action, bulk: true },
       });
 
       // If this job has a parent, let the parent's dates/status follow
@@ -339,15 +339,19 @@ export async function POST(
                 recomputeParentFromChildren(prisma, pid),
               ),
             );
-            await prisma.eventLog.create({
-              data: {
-                type: "SCHEDULE_CASCADED",
-                description: `Auto-cascaded ${cascadeResult.jobUpdates.length - 1} downstream job(s) — "${job.name}" finished ${cascadeResult.deltaDays} working day(s) late (bulk complete)`,
-                siteId,
-                plotId: job.plotId,
-                jobId,
-                userId: session.user.id,
-                delayReasonType: "OTHER",
+            await logEvent(prisma, {
+              type: "SCHEDULE_CASCADED",
+              description: `Auto-cascaded ${cascadeResult.jobUpdates.length - 1} downstream job(s) — "${job.name}" finished ${cascadeResult.deltaDays} working day(s) late (bulk complete)`,
+              siteId,
+              plotId: job.plotId,
+              jobId,
+              userId: session.user.id,
+              delayReasonType: "OTHER",
+              detail: {
+                jobName: job.name,
+                jobsShifted: cascadeResult.jobUpdates.length - 1,
+                deltaDays: cascadeResult.deltaDays,
+                trigger: "bulk-late-complete",
               },
             });
           } catch (cascadeErr) {
@@ -362,6 +366,32 @@ export async function POST(
       {
         const { recomputePlotPercent } = await import("@/lib/plot-percent");
         await recomputePlotPercent(prisma, job.plotId);
+      }
+
+      // (May 2026 Story pass) PLOT_COMPLETED milestone — same idempotent
+      // pattern as /api/jobs/[id]/actions: when a bulk complete takes the
+      // plot to 100%, log it once (findFirst guard).
+      if (action === "complete") {
+        const plotNow = await prisma.plot.findUnique({
+          where: { id: job.plotId },
+          select: { buildCompletePercent: true, plotNumber: true, name: true },
+        });
+        if (plotNow && plotNow.buildCompletePercent >= 100) {
+          const alreadyLogged = await prisma.eventLog.findFirst({
+            where: { plotId: job.plotId, type: "PLOT_COMPLETED" },
+            select: { id: true },
+          });
+          if (!alreadyLogged) {
+            await logEvent(prisma, {
+              type: "PLOT_COMPLETED",
+              description: `Plot ${plotNow.plotNumber || plotNow.name} reached 100% — all jobs complete`,
+              siteId,
+              plotId: job.plotId,
+              userId: session.user.id,
+              detail: { plotId: job.plotId, completedVia: "bulk-status" },
+            });
+          }
+        }
       }
 
       // Fire-and-forget push notifications — mirrors /api/jobs/[id]/actions

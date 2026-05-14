@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { canAccessSite } from "@/lib/site-access";
 import { apiError } from "@/lib/api-errors";
 import { sessionHasPermission } from "@/lib/permissions";
+import { logEvent } from "@/lib/event-log";
 
 export const dynamic = "force-dynamic";
 
@@ -97,15 +98,13 @@ export async function POST(
         raisedById: a.session.user.id,
       },
     });
-    await prisma.eventLog.create({
-      data: {
-        type: "USER_ACTION",
-        siteId: id,
-        plotId: body.plotId || null,
-        jobId: body.jobId || null,
-        userId: a.session.user.id,
-        description: `${ref} raised: "${ncr.title}"`,
-      },
+    await logEvent(prisma, {
+      type: "USER_ACTION",
+      siteId: id,
+      plotId: body.plotId || null,
+      jobId: body.jobId || null,
+      userId: a.session.user.id,
+      description: `${ref} raised: "${ncr.title}"`,
     });
     return NextResponse.json(ncr, { status: 201 });
   } catch (err) {

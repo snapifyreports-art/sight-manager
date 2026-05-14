@@ -5,6 +5,7 @@ import { format } from "date-fns";
 import { getServerCurrentDate, getServerStartOfDay } from "@/lib/dev-date";
 import { getUserSiteIds } from "@/lib/site-access";
 import { whereJobEndOverdue, whereJobStartOverdue } from "@/lib/lateness";
+import { logEvent } from "@/lib/event-log";
 
 export const dynamic = "force-dynamic";
 
@@ -137,11 +138,9 @@ export async function GET(req: NextRequest) {
   // throws the same "RESEND_API_KEY is not set" error and we log a misleading
   // "N failed" with no explanation.
   if (!process.env.RESEND_API_KEY) {
-    await prisma.eventLog.create({
-      data: {
-        type: "NOTIFICATION",
-        description: `Daily brief email SKIPPED — RESEND_API_KEY not configured (${managers.length} manager${managers.length !== 1 ? "s" : ""} would have been notified)`,
-      },
+    await logEvent(prisma, {
+      type: "NOTIFICATION",
+      description: `Daily brief email SKIPPED — RESEND_API_KEY not configured (${managers.length} manager${managers.length !== 1 ? "s" : ""} would have been notified)`,
     });
     return NextResponse.json({
       sent: 0,
@@ -365,11 +364,9 @@ export async function GET(req: NextRequest) {
   }
 
   // Log to event log
-  await prisma.eventLog.create({
-    data: {
-      type: "NOTIFICATION",
-      description: `Daily brief email sent to ${sent} manager${sent !== 1 ? "s" : ""}${failed > 0 ? ` (${failed} failed${failureHint})` : ""}${skippedNoAccess > 0 ? ` (${skippedNoAccess} skipped — no accessible sites)` : ""}`,
-    },
+  await logEvent(prisma, {
+    type: "NOTIFICATION",
+    description: `Daily brief email sent to ${sent} manager${sent !== 1 ? "s" : ""}${failed > 0 ? ` (${failed} failed${failureHint})` : ""}${skippedNoAccess > 0 ? ` (${skippedNoAccess} skipped — no accessible sites)` : ""}`,
   });
 
   return NextResponse.json({

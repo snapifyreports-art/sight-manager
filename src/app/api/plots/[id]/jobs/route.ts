@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { apiError } from "@/lib/api-errors";
 import { canAccessSite } from "@/lib/site-access";
 import { sessionHasPermission } from "@/lib/permissions";
+import { logEvent } from "@/lib/event-log";
 
 export const dynamic = "force-dynamic";
 
@@ -137,16 +138,18 @@ export async function POST(
       },
     });
 
-    // Log the event
-    await prisma.eventLog.create({
-      data: {
-        type: "JOB_STARTED",
-        description: `Job "${job.name}" was created in plot "${plot.name}" on site "${plot.site.name}"`,
-        siteId: plot.site.id,
-        plotId: plot.id,
-        jobId: job.id,
-        userId: session.user.id,
-      },
+    // Log the event.
+    // (May 2026 Story pass) Was mis-typed JOB_STARTED — this is a job
+    // *creation*, not a start. USER_ACTION matches POST /api/jobs so
+    // the Story doesn't show a phantom "started" the job never had.
+    await logEvent(prisma, {
+      type: "USER_ACTION",
+      description: `Job "${job.name}" was created in plot "${plot.name}" on site "${plot.site.name}"`,
+      siteId: plot.site.id,
+      plotId: plot.id,
+      jobId: job.id,
+      userId: session.user.id,
+      detail: { jobName: job.name, action: "created" },
     });
 
     return NextResponse.json(job, { status: 201 });

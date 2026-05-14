@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { sessionHasPermission, ALL_PERMISSIONS } from "@/lib/permissions";
 import { apiError } from "@/lib/api-errors";
+import { logEvent } from "@/lib/event-log";
 
 export const dynamic = "force-dynamic";
 
@@ -113,12 +114,10 @@ export async function PUT(
       where: { id },
       select: { name: true },
     });
-    await prisma.eventLog.create({
-      data: {
-        type: "USER_ACTION",
-        description: `Permissions updated for ${user?.name || "user"} (${permissions.length} permission${permissions.length !== 1 ? "s" : ""}${Array.isArray(siteIds) ? `, ${siteIds.length} site${siteIds.length !== 1 ? "s" : ""}` : ""})`,
-        userId: session.user.id,
-      },
+    await logEvent(prisma, {
+      type: "USER_ACTION",
+      description: `Permissions updated for ${user?.name || "user"} (${permissions.length} permission${permissions.length !== 1 ? "s" : ""}${Array.isArray(siteIds) ? `, ${siteIds.length} site${siteIds.length !== 1 ? "s" : ""}` : ""})`,
+      userId: session.user.id,
     });
 
     return NextResponse.json({ success: true });

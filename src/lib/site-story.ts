@@ -1,4 +1,4 @@
-import type { Prisma, PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient, EventType } from "@prisma/client";
 import { differenceInWorkingDays } from "./working-days";
 
 /**
@@ -122,6 +122,10 @@ export interface PlotStory {
 export interface PlotHighlight {
   // ISO date — kept as string for serialization
   date: string;
+  // (May 2026 Story-completeness pass) Widened from 7 to 11 categories —
+  // ORDER / LATENESS / WEATHER / MILESTONE were added so a plot's
+  // timeline shows order timing, late events, weather days and the
+  // plot/handover milestones, not just job + delay events.
   type:
     | "JOB_STARTED"
     | "JOB_COMPLETED"
@@ -129,12 +133,68 @@ export interface PlotHighlight {
     | "DELAY"
     | "JOURNAL"
     | "SNAG"
-    | "PHOTO";
+    | "PHOTO"
+    | "ORDER"
+    | "LATENESS"
+    | "WEATHER"
+    | "MILESTONE";
   description: string;
   jobName?: string;
   reason?: string;
   imageUrl?: string;
   caption?: string;
+}
+
+/**
+ * (May 2026 Story-completeness pass) Maps an EventLog `type` onto the
+ * coarser `PlotHighlight.type` the timeline UI renders. Returns null
+ * for events that shouldn't appear in a per-plot timeline — e.g. a
+ * USER_ACTION that isn't snag-related (document upload, toolbox talk).
+ */
+function highlightTypeForEvent(
+  eventType: EventType,
+  detail: unknown,
+): PlotHighlight["type"] | null {
+  switch (eventType) {
+    case "JOB_STARTED":
+      return "JOB_STARTED";
+    case "JOB_COMPLETED":
+      return "JOB_COMPLETED";
+    case "JOB_SIGNED_OFF":
+      return "JOB_SIGNED_OFF";
+    case "SCHEDULE_CASCADED":
+      return "DELAY";
+    case "ORDER_PLACED":
+    case "ORDER_SENT":
+    case "DELIVERY_CONFIRMED":
+    case "DELIVERY_LATE":
+    case "ORDER_CANCELLED":
+      return "ORDER";
+    case "SNAG_CREATED":
+    case "SNAG_RESOLVED":
+      return "SNAG";
+    case "PHOTO_UPLOADED":
+    case "PHOTO_SHARED":
+      return "PHOTO";
+    case "LATENESS_OPENED":
+    case "LATENESS_RESOLVED":
+      return "LATENESS";
+    case "WEATHER_IMPACT":
+      return "WEATHER";
+    case "PLOT_COMPLETED":
+    case "HANDOVER_COMPLETED":
+      return "MILESTONE";
+    case "USER_ACTION":
+      // Only snag-related user-actions (close / status change /
+      // contractor sign-off carry detail.snagId) earn a timeline row.
+      return detail &&
+        typeof detail === "object" &&
+        "snagId" in (detail as Record<string, unknown>)
+        ? "SNAG"
+        : null;
+    default:
+      return null;
+  }
 }
 
 export interface ContractorPerf {
@@ -688,12 +748,33 @@ export async function buildSiteStory(
     const events = await tx.eventLog.findMany({
       where: {
         plotId: { in: plotIds },
+        // (May 2026 Story-completeness pass) Pre-fix this whitelist was
+        // 4 types — JOB_STARTED/COMPLETED/SIGNED_OFF + SCHEDULE_CASCADED
+        // — so orders, snags, photos, lateness and weather were being
+        // logged but never surfaced in a plot's timeline. Now every
+        // event type with a per-plot meaning is pulled; the
+        // highlightTypeForEvent() mapper decides what's noise.
         type: {
           in: [
             "JOB_STARTED",
             "JOB_COMPLETED",
             "JOB_SIGNED_OFF",
             "SCHEDULE_CASCADED",
+            "ORDER_PLACED",
+            "ORDER_SENT",
+            "DELIVERY_CONFIRMED",
+            "DELIVERY_LATE",
+            "ORDER_CANCELLED",
+            "SNAG_CREATED",
+            "SNAG_RESOLVED",
+            "PHOTO_UPLOADED",
+            "PHOTO_SHARED",
+            "LATENESS_OPENED",
+            "LATENESS_RESOLVED",
+            "WEATHER_IMPACT",
+            "PLOT_COMPLETED",
+            "HANDOVER_COMPLETED",
+            "USER_ACTION",
           ],
         },
       },
@@ -707,6 +788,7 @@ export async function buildSiteStory(
         createdAt: true,
         plotId: true,
         delayReasonType: true,
+        detail: true,
       },
     });
     const journals = await tx.plotJournalEntry.findMany({
@@ -718,13 +800,15 @@ export async function buildSiteStory(
     const eventsByPlot = new Map<string, PlotHighlight[]>();
     for (const ev of events) {
       if (!ev.plotId) continue;
+      const hlType = highlightTypeForEvent(ev.type, ev.detail);
+      // null = an event with no per-plot timeline meaning (e.g. a
+      // USER_ACTION that isn't snag-related) — skip so the timeline
+      // stays signal, not noise.
+      if (!hlType) continue;
       const list = eventsByPlot.get(ev.plotId) ?? [];
       list.push({
         date: ev.createdAt.toISOString(),
-        type:
-          ev.type === "SCHEDULE_CASCADED"
-            ? "DELAY"
-            : (ev.type as PlotHighlight["type"]),
+        type: hlType,
         description: ev.description,
         reason: ev.delayReasonType ?? undefined,
       });

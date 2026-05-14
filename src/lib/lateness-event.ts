@@ -15,6 +15,7 @@
  */
 
 import type { Prisma, PrismaClient, LatenessKind, LatenessReason } from "@prisma/client";
+import { logEvent } from "./event-log";
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
 
@@ -130,18 +131,20 @@ export async function openOrUpdateLateness(
     // back open. Emit a LATENESS_OPENED breadcrumb so the timeline
     // shows the re-open moment.
     if (isReopening) {
-      await db.eventLog
-        .create({
-          data: {
-            type: "LATENESS_OPENED",
-            description: `Lateness re-opened: ${args.kind} on ${args.targetType} ${args.targetId.slice(0, 8)}`,
-            siteId: args.siteId,
-            plotId: args.plotId ?? null,
-            jobId: args.jobId ?? null,
-            delayReasonType: args.reasonCode ?? null,
-          },
-        })
-        .catch(() => {});
+      await logEvent(db, {
+        type: "LATENESS_OPENED",
+        description: `Lateness re-opened: ${args.kind} on ${args.targetType} ${args.targetId.slice(0, 8)}`,
+        siteId: args.siteId,
+        plotId: args.plotId ?? null,
+        jobId: args.jobId ?? null,
+        delayReasonType: args.reasonCode ?? null,
+        detail: {
+          kind: args.kind,
+          targetType: args.targetType,
+          targetId: args.targetId,
+          reopened: true,
+        },
+      }).catch(() => {});
     }
     return { id: existing.id, created: false };
   }
@@ -169,20 +172,22 @@ export async function openOrUpdateLateness(
   });
 
   // Audit breadcrumb in EventLog so timeline-style views see it.
-  await db.eventLog
-    .create({
-      data: {
-        type: "LATENESS_OPENED",
-        description: `Lateness opened: ${args.kind} on ${args.targetType} ${args.targetId.slice(0, 8)}`,
-        siteId: args.siteId,
-        plotId: args.plotId ?? null,
-        jobId: args.jobId ?? null,
-        delayReasonType: args.reasonCode ?? null,
-      },
-    })
-    .catch(() => {
-      /* breadcrumb only; never fail the lateness write on EventLog hiccup */
-    });
+  await logEvent(db, {
+    type: "LATENESS_OPENED",
+    description: `Lateness opened: ${args.kind} on ${args.targetType} ${args.targetId.slice(0, 8)}`,
+    siteId: args.siteId,
+    plotId: args.plotId ?? null,
+    jobId: args.jobId ?? null,
+    delayReasonType: args.reasonCode ?? null,
+    detail: {
+      kind: args.kind,
+      targetType: args.targetType,
+      targetId: args.targetId,
+      daysLate: args.daysLate,
+    },
+  }).catch(() => {
+    /* breadcrumb only; never fail the lateness write on EventLog hiccup */
+  });
 
   return { id: created.id, created: true };
 }
@@ -209,17 +214,14 @@ export async function resolveLateness(
   // One audit row per resolved event so the timeline is preserved.
   await Promise.all(
     open.map((e) =>
-      db.eventLog
-        .create({
-          data: {
-            type: "LATENESS_RESOLVED",
-            description: `Lateness resolved: ${e.kind} on ${targetType} ${targetId.slice(0, 8)}`,
-            siteId: e.siteId,
-            plotId: e.plotId ?? null,
-            jobId: e.jobId ?? null,
-          },
-        })
-        .catch(() => {}),
+      logEvent(db, {
+        type: "LATENESS_RESOLVED",
+        description: `Lateness resolved: ${e.kind} on ${targetType} ${targetId.slice(0, 8)}`,
+        siteId: e.siteId,
+        plotId: e.plotId ?? null,
+        jobId: e.jobId ?? null,
+        detail: { kind: e.kind, targetType, targetId },
+      }).catch(() => {}),
     ),
   );
   return { resolved: open.length };

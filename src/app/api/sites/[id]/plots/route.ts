@@ -4,6 +4,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canAccessSite } from "@/lib/site-access";
 import { apiError } from "@/lib/api-errors";
+import { logEvent } from "@/lib/event-log";
 import { sessionHasPermission } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
@@ -95,14 +96,12 @@ export async function POST(
     });
 
     // Log the event
-    await prisma.eventLog.create({
-      data: {
-        type: "PLOT_CREATED",
-        description: `Plot "${plot.name}" was created in site "${site.name}"`,
-        siteId,
-        plotId: plot.id,
-        userId: session.user.id,
-      },
+    await logEvent(prisma, {
+      type: "PLOT_CREATED",
+      description: `Plot "${plot.name}" was created in site "${site.name}"`,
+      siteId,
+      plotId: plot.id,
+      userId: session.user.id,
     });
 
     return NextResponse.json(plot, { status: 201 });

@@ -95,6 +95,22 @@ Path use this.
 The retrospective synthesizer. Both the Site Story tab API and the
 Handover ZIP generator call this so they can never drift apart.
 
+### Event log
+
+**`event-log.ts` — `logEvent(db, args)`**
+The single mutation point for the `EventLog` table. **Never call
+`prisma.eventLog.create` directly** — `scripts/smoke-test.ts` fails the
+build if you do. `logEvent` backfills plot/site scope from a job id
+(jobId → plotId → siteId) so every event reaches the per-plot Site
+Story timeline even when the caller only had the job to hand — the
+exact drift that made the Story look empty in May 2026. Carries the
+structured `detail` payload so readers get typed fields instead of
+regex-parsing `description`. Errors propagate by default (so a write
+inside a transaction rolls it back); best-effort breadcrumb callers
+append `.catch(() => {})` themselves. Coverage is guarded by the smoke
+suite rather than a unit test — the helper is a thin DB-write wrapper,
+so "is every writer routed through it" is the meaningful invariant.
+
 ### Apply-template + cascade
 
 **`apply-template-helpers.ts`**, **`template-pack-children.ts`**,

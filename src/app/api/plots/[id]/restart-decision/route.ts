@@ -8,6 +8,7 @@ import { getNextMonday } from "@/lib/schedule";
 import { apiError } from "@/lib/api-errors";
 import { canAccessSite } from "@/lib/site-access";
 import { sessionHasPermission } from "@/lib/permissions";
+import { logEvent } from "@/lib/event-log";
 
 export const dynamic = "force-dynamic";
 
@@ -92,16 +93,14 @@ export async function POST(
         },
       });
 
-      await prisma.eventLog.create({
-        data: {
-          type: "USER_ACTION",
-          description: awaitingContractor
-            ? `Plot ${plot.plotNumber || plotId}: awaiting contractor confirmation`
-            : `Plot ${plot.plotNumber || plotId}: next job deferred — awaiting restart decision`,
-          siteId: plot.siteId,
-          plotId,
-          userId: session.user.id,
-        },
+      await logEvent(prisma, {
+        type: "USER_ACTION",
+        description: awaitingContractor
+          ? `Plot ${plot.plotNumber || plotId}: awaiting contractor confirmation`
+          : `Plot ${plot.plotNumber || plotId}: next job deferred — awaiting restart decision`,
+        siteId: plot.siteId,
+        plotId,
+        userId: session.user.id,
       });
 
       return NextResponse.json({ success: true, decision });
@@ -233,15 +232,13 @@ export async function POST(
       start_next_monday: "scheduled for next Monday",
       push_weeks: `pushed forward ${pushWeeks ?? 1} week(s)`,
     };
-    await tx.eventLog.create({
-      data: {
-        type: decision === "start_today" ? "JOB_STARTED" : "SCHEDULE_CASCADED",
-        description: `Plot ${plot.plotNumber || plotId}: "${nextJob.name}" ${descMap[decision]}${delta !== 0 ? `, ${Math.abs(delta)}d ${delta < 0 ? "pulled forward" : "pushed back"}` : ""}`,
-        siteId: plot.siteId,
-        plotId,
-        jobId: nextJobId,
-        userId: session.user.id,
-      },
+    await logEvent(tx, {
+      type: decision === "start_today" ? "JOB_STARTED" : "SCHEDULE_CASCADED",
+      description: `Plot ${plot.plotNumber || plotId}: "${nextJob.name}" ${descMap[decision]}${delta !== 0 ? `, ${Math.abs(delta)}d ${delta < 0 ? "pulled forward" : "pushed back"}` : ""}`,
+      siteId: plot.siteId,
+      plotId,
+      jobId: nextJobId,
+      userId: session.user.id,
     });
 
     // Clear awaitingRestart and contractor confirmation

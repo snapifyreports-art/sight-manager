@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { differenceInWorkingDays } from "@/lib/working-days";
 import { openOrUpdateLateness, resolveLateness } from "@/lib/lateness-event";
 import { getServerCurrentDate } from "@/lib/dev-date";
+import { logEvent } from "@/lib/event-log";
 
 export const dynamic = "force-dynamic";
 
@@ -274,21 +275,24 @@ export async function GET(req: NextRequest) {
   // helper's output so timeline consumers see the same shape.
   if (eventsToResolve.length > 0) {
     try {
-      await prisma.$transaction([
-        prisma.latenessEvent.updateMany({
+      // Callback-form transaction so the LATENESS_RESOLVED rows go
+      // through logEvent (the EventLog SSOT) instead of a raw
+      // createMany — same atomicity as the prior array-form $transaction.
+      await prisma.$transaction(async (tx) => {
+        await tx.latenessEvent.updateMany({
           where: { id: { in: eventsToResolve.map((e) => e.id) } },
           data: { resolvedAt: today },
-        }),
-        prisma.eventLog.createMany({
-          data: eventsToResolve.map((e) => ({
-            type: "LATENESS_RESOLVED" as const,
+        });
+        for (const e of eventsToResolve) {
+          await logEvent(tx, {
+            type: "LATENESS_RESOLVED",
             description: `Lateness resolved: ${e.kind} on ${e.targetType} ${e.targetId.slice(0, 8)}`,
             siteId: e.siteId,
             plotId: e.plotId,
             jobId: e.jobId,
-          })),
-        }),
-      ]);
+          });
+        }
+      });
       resolved = eventsToResolve.length;
     } catch (e) {
       errors.push({
@@ -308,14 +312,10 @@ export async function GET(req: NextRequest) {
   // so an operator scanning the events log can tell when the cron
   // last ran. Matches the pattern used by the reconcile cron.
   if (opened > 0 || updated > 0 || resolved > 0 || errors.length > 0) {
-    await prisma.eventLog
-      .create({
-        data: {
-          type: "NOTIFICATION",
-          description: `Lateness cron: ${opened} opened, ${updated} updated, ${resolved} resolved${errors.length > 0 ? ` (${errors.length} errors)` : ""} — ${jobsScanned} jobs + ${ordersScanned} orders scanned in ${durationMs}ms`,
-        },
-      })
-      .catch((err) => console.warn("[lateness cron] summary log failed:", err));
+    await logEvent(prisma, {
+      type: "NOTIFICATION",
+      description: `Lateness cron: ${opened} opened, ${updated} updated, ${resolved} resolved${errors.length > 0 ? ` (${errors.length} errors)` : ""} — ${jobsScanned} jobs + ${ordersScanned} orders scanned in ${durationMs}ms`,
+    }).catch((err) => console.warn("[lateness cron] summary log failed:", err));
   }
 
   return NextResponse.json({

@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canAccessSite, getUserSiteIds } from "@/lib/site-access";
 import { sessionHasPermission } from "@/lib/permissions";
+import { logEvent } from "@/lib/event-log";
 
 export const dynamic = "force-dynamic";
 
@@ -113,15 +114,14 @@ export async function POST(req: NextRequest) {
     },
   });
 
-  await prisma.eventLog.create({
-    data: {
-      type: "USER_ACTION",
-      description: `Job "${job.name}" was created`,
-      siteId: job.plot.siteId,
-      plotId: job.plotId,
-      jobId: job.id,
-      userId: session.user.id,
-    },
+  await logEvent(prisma, {
+    type: "USER_ACTION",
+    description: `Job "${job.name}" was created`,
+    siteId: job.plot.siteId,
+    plotId: job.plotId,
+    jobId: job.id,
+    userId: session.user.id,
+    detail: { jobName: job.name, action: "created" },
   });
 
   return NextResponse.json(job, { status: 201 });

@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { verifyContractorToken } from "@/lib/share-token";
 import { getSupabase, PHOTOS_BUCKET } from "@/lib/supabase";
 import { apiError } from "@/lib/api-errors";
+import { logEvent } from "@/lib/event-log";
 
 export const dynamic = "force-dynamic";
 
@@ -128,17 +129,19 @@ export async function POST(
       const plotLabel = assignment.job.plot.plotNumber
         ? `Plot ${assignment.job.plot.plotNumber}`
         : assignment.job.plot.name;
-      await prisma.eventLog
-        .create({
-          data: {
-            type: "PHOTO_UPLOADED",
-            description: `${created.length} progress photo${created.length !== 1 ? "s" : ""} uploaded by ${contractorLabel} (via share link) — ${plotLabel} · ${assignment.job.name}`,
-            siteId: payload.siteId,
-            plotId: assignment.job.plotId,
-            jobId,
-          },
-        })
-        .catch(() => {});
+      await logEvent(prisma, {
+        type: "PHOTO_UPLOADED",
+        description: `${created.length} progress photo${created.length !== 1 ? "s" : ""} uploaded by ${contractorLabel} (via share link) — ${plotLabel} · ${assignment.job.name}`,
+        siteId: payload.siteId,
+        plotId: assignment.job.plotId,
+        jobId,
+        detail: {
+          count: created.length,
+          contractor: contractorLabel,
+          viaShareLink: true,
+          jobName: assignment.job.name,
+        },
+      }).catch(() => {});
     }
 
     return NextResponse.json({ ok: true, count: created.length, photos: created });

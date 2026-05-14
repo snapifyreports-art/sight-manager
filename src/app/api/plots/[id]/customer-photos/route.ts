@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { canAccessSite } from "@/lib/site-access";
 import { apiError } from "@/lib/api-errors";
 import { sessionHasPermission } from "@/lib/permissions";
+import { logEvent } from "@/lib/event-log";
 
 export const dynamic = "force-dynamic";
 
@@ -44,7 +45,7 @@ async function authoriseAdmin(plotId: string, requiredPermission?: string) {
       ),
     };
   }
-  return { plot };
+  return { plot, userId: session.user.id };
 }
 
 // GET — list photos for the plot
@@ -112,6 +113,20 @@ export async function PATCH(
     // bulk-sharing 12 photos at once shouldn't buzz the buyer 12
     // times. Best-effort, fire-and-forget.
     const sharedCount = updates.filter((u) => u.shared).length;
+
+    // (May 2026 Story pass) Log the share so the plot timeline shows
+    // "photos published to the buyer" — pre-fix this left no audit
+    // trail at all. Best-effort: the share itself already committed.
+    if (sharedCount > 0) {
+      await logEvent(prisma, {
+        type: "PHOTO_SHARED",
+        description: `${sharedCount} photo${sharedCount === 1 ? "" : "s"} shared with the customer`,
+        plotId: id,
+        userId: result.userId,
+        detail: { count: sharedCount },
+      }).catch(() => {});
+    }
+
     if (sharedCount > 0) {
       void (async () => {
         try {

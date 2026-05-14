@@ -6,6 +6,7 @@ import { createJobsFromTemplate } from "@/lib/apply-template-helpers";
 import { canAccessSite } from "@/lib/site-access";
 import { sessionHasPermission } from "@/lib/permissions";
 import { apiError } from "@/lib/api-errors";
+import { logEvent } from "@/lib/event-log";
 
 export const dynamic = "force-dynamic";
 
@@ -252,14 +253,12 @@ export async function POST(request: NextRequest) {
     }
 
     // 3. Log event
-    await tx.eventLog.create({
-      data: {
-        type: "PLOT_CREATED",
-        description: `Plot "${plot.name}" created from template "${template.name}"`,
-        siteId,
-        plotId: plot.id,
-        userId: session.user.id,
-      },
+    await logEvent(tx, {
+      type: "PLOT_CREATED",
+      description: `Plot "${plot.name}" created from template "${template.name}"`,
+      siteId,
+      plotId: plot.id,
+      userId: session.user.id,
     });
 
     // Return the created plot with all its data

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { fetchWeatherForPostcode } from "@/lib/weather";
 import { sendPushToSiteAudience } from "@/lib/push";
+import { logEvent } from "@/lib/event-log";
 import { endOfDay, addDays } from "date-fns";
 import { getServerCurrentDate, getServerStartOfDay } from "@/lib/dev-date";
 import type { NotificationType } from "@prisma/client";
@@ -92,9 +93,7 @@ export async function GET(req: NextRequest) {
       const today = forecast[0];
       const desc = `${WEATHER_DESC_PREFIX} ${CATEGORY_LABELS[today.category] ?? today.category}, ${today.tempMin}°C–${today.tempMax}°C`;
 
-      await prisma.eventLog.create({
-        data: { type: "SYSTEM", description: desc, siteId: site.id },
-      });
+      await logEvent(prisma, { type: "SYSTEM", description: desc, siteId: site.id });
 
       logged++;
 

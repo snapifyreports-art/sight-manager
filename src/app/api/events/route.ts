@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { EventType } from "@prisma/client";
 import { getUserSiteIds } from "@/lib/site-access";
+import { logEvent } from "@/lib/event-log";
 
 export const dynamic = "force-dynamic";
 
@@ -132,15 +133,13 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const event = await prisma.eventLog.create({
-    data: {
-      type: type as EventType,
-      description,
-      siteId: siteId || null,
-      plotId: plotId || null,
-      jobId: jobId || null,
-      userId: session.user.id,
-    },
+  const event = await logEvent(prisma, {
+    type: type as EventType,
+    description,
+    siteId: siteId || null,
+    plotId: plotId || null,
+    jobId: jobId || null,
+    userId: session.user.id,
   });
 
   return NextResponse.json(event, { status: 201 });
