@@ -4,6 +4,7 @@ import { auth } from "@/lib/auth";
 import { getUserSiteIds } from "@/lib/site-access";
 import { apiError } from "@/lib/api-errors";
 import { sessionHasPermission } from "@/lib/permissions";
+import { whereOrderNotOrphaned } from "@/lib/order-invariants";
 
 export const dynamic = "force-dynamic";
 
@@ -25,7 +26,14 @@ export async function GET(req: NextRequest) {
   // Filter by user's site access
   const siteIds = await getUserSiteIds(session.user.id, session.user.role);
   if (siteIds !== null) {
+    // Non-admin: the job.plot.siteId filter already requires a live
+    // job, so orphans drop out.
     where.job = { plot: { siteId: { in: siteIds } } };
+  } else {
+    // (May 2026) Admin: no site filter — but still exclude contextless
+    // orphan orders (job/site/plot all deleted) so they don't pollute
+    // the Orders page. Caught by Keith — test-site wipes left 160.
+    where.OR = whereOrderNotOrphaned.OR;
   }
 
   const orders = await prisma.materialOrder.findMany({

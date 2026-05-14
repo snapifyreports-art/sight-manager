@@ -155,3 +155,36 @@ export function recomputeExpectedDeliveryOnSend(
   if (!leadTimeDays || leadTimeDays <= 0) return today;
   return addDays(today, leadTimeDays);
 }
+
+/**
+ * (May 2026) Orphaned-order guard.
+ *
+ * MaterialOrder.jobId / siteId / plotId are all `onDelete: SetNull`
+ * (the schema's "preserve financial history" decision). Side effect:
+ * deleting a site/plot/job leaves the order alive with every context
+ * link nulled — a contextless orphan that still carries its
+ * PENDING/ORDERED status and delivery dates.
+ *
+ * Keith caught this when his daily notifications kept counting
+ * "orders to send" / "overdue deliveries" for sites he'd wiped during
+ * testing (160 orphans, all from test-site deletes).
+ *
+ * An order is "live" if it still has ANY context — a job, a site or a
+ * plot. Spread this fragment into the `where` of any OPERATIONAL query
+ * (notifications cron, /api/tasks, /api/orders list) so contextless
+ * orphans drop out. Financial/historical views can still query them
+ * directly if a use-case ever needs to.
+ */
+export const whereOrderNotOrphaned: {
+  OR: Array<
+    | { jobId: { not: null } }
+    | { siteId: { not: null } }
+    | { plotId: { not: null } }
+  >;
+} = {
+  OR: [
+    { jobId: { not: null } },
+    { siteId: { not: null } },
+    { plotId: { not: null } },
+  ],
+};

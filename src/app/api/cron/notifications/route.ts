@@ -5,6 +5,7 @@ import { addDays } from "date-fns";
 import { getServerCurrentDate, getServerStartOfDay } from "@/lib/dev-date";
 import { checkCronAuth } from "@/lib/cron-auth";
 import { whereJobEndOverdue, whereJobStartOverdue } from "@/lib/lateness";
+import { whereOrderNotOrphaned } from "@/lib/order-invariants";
 
 export const dynamic = "force-dynamic";
 
@@ -57,6 +58,10 @@ export async function GET(req: NextRequest) {
     }),
     prisma.materialOrder.count({
       where: {
+        // (May 2026) Exclude contextless orphans — orders whose
+        // job/site/plot were all deleted. They keep their status +
+        // dates but shouldn't nag anyone.
+        ...whereOrderNotOrphaned,
         status: "ORDERED",
         expectedDeliveryDate: { lt: todayStart },
       },
@@ -70,6 +75,7 @@ export async function GET(req: NextRequest) {
     }),
     prisma.materialOrder.count({
       where: {
+        ...whereOrderNotOrphaned,
         status: "ORDERED",
         expectedDeliveryDate: { gte: todayStart, lt: todayEnd },
       },
@@ -82,7 +88,7 @@ export async function GET(req: NextRequest) {
       },
     }),
     prisma.materialOrder.count({
-      where: { status: "PENDING", dateOfOrder: { lte: todayEnd } },
+      where: { ...whereOrderNotOrphaned, status: "PENDING", dateOfOrder: { lte: todayEnd } },
     }),
     // Late starts: NOT_STARTED leaf jobs whose start date has already
     // passed. Use the Lateness SSOT helper.

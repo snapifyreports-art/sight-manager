@@ -183,18 +183,33 @@ export async function DELETE(
   }
 
   try {
-    // Audit event BEFORE delete so siteId is captured (EventLog.plotId SetNull survives)
-    await prisma.eventLog.create({
-      data: {
-        type: "USER_ACTION",
-        description: `Plot "${existing.plotNumber || existing.name}" was deleted from site "${existing.site.name}"`,
-        siteId: existing.site.id,
-        plotId: existing.id,
-        userId: session.user.id,
-      },
-    });
+    await prisma.$transaction(async (tx) => {
+      // Audit event BEFORE delete so siteId is captured
+      // (EventLog.plotId SetNull survives).
+      await tx.eventLog.create({
+        data: {
+          type: "USER_ACTION",
+          description: `Plot "${existing.plotNumber || existing.name}" was deleted from site "${existing.site.name}"`,
+          siteId: existing.site.id,
+          plotId: existing.id,
+          userId: session.user.id,
+        },
+      });
 
-    await prisma.plot.delete({ where: { id } });
+      // (May 2026) Hard-delete the plot's MaterialOrders before the
+      // plot goes — same orphan trap as the site DELETE route.
+      // MaterialOrder.jobId/plotId are `onDelete: SetNull`, so without
+      // this the plot's orders survive as contextless orphans. Plot
+      // orders are reachable as one-off plot orders (plotId) or as
+      // template orders on the plot's jobs (job.plotId).
+      await tx.materialOrder.deleteMany({
+        where: {
+          OR: [{ plotId: id }, { job: { plotId: id } }],
+        },
+      });
+
+      await tx.plot.delete({ where: { id } });
+    });
 
     return NextResponse.json({ success: true });
   } catch (err) {

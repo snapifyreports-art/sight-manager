@@ -9,6 +9,7 @@ import {
   whereJobStartOverdue,
   whereOrderOverdue,
 } from "@/lib/lateness";
+import { whereOrderNotOrphaned } from "@/lib/order-invariants";
 
 export const dynamic = "force-dynamic";
 
@@ -21,7 +22,14 @@ export async function GET(req: NextRequest) {
   // Site-access filter — non-admins only see tasks on sites they've been granted access to
   const accessibleSiteIds = await getUserSiteIds(session.user.id, (session.user as { role: string }).role);
   const siteAccess = accessibleSiteIds === null ? {} : { plot: { siteId: { in: accessibleSiteIds } } };
-  const siteAccessForOrder = accessibleSiteIds === null ? {} : { job: { plot: { siteId: { in: accessibleSiteIds } } } };
+  // (May 2026) For non-admins the `job.plot.siteId` filter already
+  // requires a live job, so orphans drop out. For admins the filter
+  // is empty — so fall back to the explicit orphan guard, otherwise
+  // contextless orders (job/site/plot all deleted) still surface as
+  // ghost tasks. Caught by Keith — wiped test sites left 160 orphans.
+  const siteAccessForOrder = accessibleSiteIds === null
+    ? whereOrderNotOrphaned
+    : { job: { plot: { siteId: { in: accessibleSiteIds } } } };
   const leafOnly = { children: { none: {} } };
 
   const now = getServerCurrentDate(req);

@@ -255,17 +255,38 @@ export async function DELETE(
   }
 
   try {
-    // Audit trail — EventLog.siteId cascade-deletes with the site, so record to a
-    // site-less audit entry instead (plotId/jobId/userId SetNull survive)
-    await prisma.eventLog.create({
-      data: {
-        type: "USER_ACTION",
-        description: `Site "${existing.name}" was deleted`,
-        userId: session.user.id,
-      },
-    });
+    await prisma.$transaction(async (tx) => {
+      // Audit trail — EventLog.siteId cascade-deletes with the site, so
+      // record to a site-less audit entry instead (plotId/jobId/userId
+      // SetNull survive).
+      await tx.eventLog.create({
+        data: {
+          type: "USER_ACTION",
+          description: `Site "${existing.name}" was deleted`,
+          userId: session.user.id,
+        },
+      });
 
-    await prisma.site.delete({ where: { id } });
+      // (May 2026) Hard-delete the site's MaterialOrders *before* the
+      // site goes. MaterialOrder.jobId/siteId/plotId are all
+      // `onDelete: SetNull`, so without this every order on the site
+      // would survive as a contextless orphan — still PENDING/ORDERED,
+      // still carrying delivery dates, still nagging the notifications
+      // cron / Tasks / Orders page. Keith caught this: wiped test
+      // sites had left 160 orphan orders behind. Reachable three ways:
+      // one-off site orders, one-off plot orders, template job orders.
+      await tx.materialOrder.deleteMany({
+        where: {
+          OR: [
+            { siteId: id },
+            { plot: { siteId: id } },
+            { job: { plot: { siteId: id } } },
+          ],
+        },
+      });
+
+      await tx.site.delete({ where: { id } });
+    });
 
     return NextResponse.json({ success: true });
   } catch (err) {
