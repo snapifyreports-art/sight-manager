@@ -106,6 +106,10 @@ export async function GET(req: NextRequest) {
       // contractor + supplier options.
       attributedSupplier: { select: { id: true, name: true } },
       recordedBy: { select: { id: true, name: true } },
+      // (May 2026) Specific manager-picked reason — order-send /
+      // order-delivery lateness carries this for granular reporting.
+      // `excused` is a scalar so it comes through automatically.
+      delayReason: { select: { id: true, label: true } },
     },
   });
 

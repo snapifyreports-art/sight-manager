@@ -36,6 +36,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { cn } from "@/lib/utils";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
@@ -508,6 +509,40 @@ function InlineOrderEditor({
     return true;
   })();
 
+  // (May 2026) Reason for the late delivery — required whenever the
+  // manager is pushing delivery later, so the Delay Report can show
+  // *why* deliveries slip. Scoped ORDER_DELIVERY chips, self-growing
+  // via "Other" (the server upserts custom ones into the scoped list).
+  const [deliveryReasonChips, setDeliveryReasonChips] = useState<
+    Array<{ id: string; label: string }>
+  >([]);
+  const [selectedDeliveryReasonId, setSelectedDeliveryReasonId] = useState<
+    string | null
+  >(null);
+  const [customDeliveryReason, setCustomDeliveryReason] = useState("");
+  const hasDeliveryReason =
+    !!selectedDeliveryReasonId || customDeliveryReason.trim().length > 0;
+
+  useEffect(() => {
+    if (!showLatenessImpact || deliveryReasonChips.length > 0) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/delay-reasons?scope=ORDER_DELIVERY", {
+          cache: "no-store",
+        });
+        if (!res.ok) return;
+        const data = (await res.json()) as Array<{ id: string; label: string }>;
+        if (!cancelled) setDeliveryReasonChips(data);
+      } catch {
+        /* non-critical — manager can still type a custom reason */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [showLatenessImpact, deliveryReasonChips.length]);
+
   const visibleItems = items.filter((i) => !i._deleted);
 
   const grandTotal = visibleItems.reduce(
@@ -569,7 +604,17 @@ function InlineOrderEditor({
           // impact choice when this edit is pushing delivery later.
           // Server validates the date-direction itself.
           latenessImpact: showLatenessImpact
-            ? { choice: latenessImpact }
+            ? {
+                choice: latenessImpact,
+                // (May 2026) Manager's reason for the late delivery —
+                // an existing chip id, or custom "Other" text the
+                // server upserts into the ORDER_DELIVERY list.
+                delayReasonId: selectedDeliveryReasonId ?? undefined,
+                delayReasonLabel:
+                  !selectedDeliveryReasonId && customDeliveryReason.trim()
+                    ? customDeliveryReason.trim()
+                    : undefined,
+              }
             : undefined,
         }),
       });
@@ -738,6 +783,59 @@ function InlineOrderEditor({
                   </div>
                 </label>
               </div>
+
+              {/* (May 2026) Reason for the late delivery — required, so
+                  the Delay Report can show *why* deliveries slip. Chips
+                  are the ORDER_DELIVERY list; a custom "Other" is saved
+                  for next time. */}
+              <div className="mt-3 space-y-1.5 border-t border-amber-200 pt-2.5 dark:border-amber-800">
+                <Label className="text-xs font-medium text-amber-900 dark:text-amber-200">
+                  Why is it late?{" "}
+                  <span className="font-normal opacity-70">
+                    (required — shows on the Delay Report)
+                  </span>
+                </Label>
+                <div className="flex flex-wrap gap-1.5">
+                  {deliveryReasonChips.map((c) => {
+                    const selected = selectedDeliveryReasonId === c.id;
+                    return (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedDeliveryReasonId(selected ? null : c.id);
+                          if (!selected) setCustomDeliveryReason("");
+                        }}
+                        className={cn(
+                          "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
+                          selected
+                            ? "border-amber-500 bg-amber-100 text-amber-900"
+                            : "border-amber-200 bg-white text-amber-800 hover:bg-amber-50",
+                        )}
+                      >
+                        {c.label}
+                      </button>
+                    );
+                  })}
+                  {deliveryReasonChips.length === 0 && (
+                    <span className="text-xs italic text-amber-700">
+                      Loading reasons…
+                    </span>
+                  )}
+                </div>
+                <Input
+                  value={customDeliveryReason}
+                  onChange={(e) => {
+                    setCustomDeliveryReason(e.target.value);
+                    if (e.target.value && selectedDeliveryReasonId)
+                      setSelectedDeliveryReasonId(null);
+                  }}
+                  placeholder="Or type your own — saved for next time"
+                  maxLength={80}
+                  className="h-8 bg-white text-xs dark:bg-background"
+                />
+              </div>
+
               <p className="mt-2 text-[11px] text-amber-800 dark:text-amber-300">
                 A lateness event will be recorded and attributed to {order.supplier?.name ?? "the supplier"}.
               </p>
@@ -848,7 +946,11 @@ function InlineOrderEditor({
             <Button variant="outline" size="sm" onClick={onCancel} disabled={saving}>
               Cancel
             </Button>
-            <Button size="sm" onClick={handleSave} disabled={saving}>
+            <Button
+              size="sm"
+              onClick={handleSave}
+              disabled={saving || (showLatenessImpact && !hasDeliveryReason)}
+            >
               {saving ? "Saving..." : "Save Changes"}
             </Button>
           </div>

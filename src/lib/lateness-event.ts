@@ -48,6 +48,16 @@ export interface OpenLatenessArgs {
    *  the supplier directly. */
   attributedSupplierId?: string | null;
   recordedById?: string | null;
+  /** (May 2026) Specific, manager-picked reason from the self-growing
+   *  DelayReason table. Order-send / order-delivery lateness uses this
+   *  for granular reporting — `reasonCode` stays the broad enum bucket,
+   *  `delayReasonId` is the precise cause. */
+  delayReasonId?: string | null;
+  /** (May 2026) Manager flagged this lateness "no programme impact"
+   *  (e.g. order sent late but the material wasn't needed early).
+   *  Recorded for the audit trail, excluded from headline delay
+   *  counts in the Delay Report. */
+  excused?: boolean;
 }
 
 /**
@@ -102,6 +112,15 @@ export async function openOrUpdateLateness(
         ? { connect: { id: args.attributedSupplierId } }
         : { disconnect: true };
     }
+    // (May 2026) Manager-picked reason + excused flag. Unlike reasonCode
+    // these always apply when provided — they're a deliberate manager
+    // decision, not an inference, so they override whatever was there.
+    if (args.delayReasonId !== undefined) {
+      data.delayReason = args.delayReasonId
+        ? { connect: { id: args.delayReasonId } }
+        : { disconnect: true };
+    }
+    if (args.excused !== undefined) data.excused = args.excused;
     if (Object.keys(data).length > 0) {
       await db.latenessEvent.update({ where: { id: existing.id }, data });
     }
@@ -143,6 +162,8 @@ export async function openOrUpdateLateness(
       attributedContactId: args.attributedContactId ?? null,
       attributedSupplierId: args.attributedSupplierId ?? null,
       recordedById: args.recordedById ?? null,
+      delayReasonId: args.delayReasonId ?? null,
+      excused: args.excused ?? false,
     },
     select: { id: true },
   });

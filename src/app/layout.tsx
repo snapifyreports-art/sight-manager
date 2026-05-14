@@ -8,6 +8,7 @@ import { FetchPatchProvider } from "@/components/providers/FetchPatchProvider";
 import { GlobalLoadingBar } from "@/components/layout/GlobalLoadingBar";
 import { ToastProvider } from "@/components/ui/toast";
 import { BusyOverlayProvider } from "@/components/ui/busy-overlay";
+import { LateSendPromptProvider } from "@/components/orders/LateSendPromptProvider";
 
 export const metadata: Metadata = {
   title: "Sight Manager",
@@ -54,7 +55,9 @@ export default function RootLayout({
             <TooltipProvider>
               <ToastProvider>
                 <BusyOverlayProvider>
-                  {children}
+                  <LateSendPromptProvider>
+                    {children}
+                  </LateSendPromptProvider>
                 </BusyOverlayProvider>
               </ToastProvider>
             </TooltipProvider>

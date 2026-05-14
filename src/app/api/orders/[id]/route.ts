@@ -7,8 +7,8 @@ import { canAccessSite, getUserSiteIds } from "@/lib/site-access";
 import { apiError } from "@/lib/api-errors";
 import { enforceOrderInvariants } from "@/lib/order-invariants";
 import { addWorkingDays, differenceInWorkingDays } from "@/lib/working-days";
-import { calculateCascade } from "@/lib/cascade";
-import { openOrUpdateLateness } from "@/lib/lateness-event";
+import { applyJobPushCascade } from "@/lib/order-push-cascade";
+import { openOrUpdateLateness, resolveLateness } from "@/lib/lateness-event";
 
 export const dynamic = "force-dynamic";
 
@@ -148,6 +148,51 @@ export async function PUT(
     }
   }
 
+  const today = getServerCurrentDate(req);
+
+  // (May 2026) ── Order-sent-late guard ──────────────────────────────
+  // When an order crosses PENDING → ORDERED *after* its planned send
+  // date (`dateOfOrder`), the manager must decide what that does to the
+  // schedule. If the caller didn't include a `lateSend` decision we
+  // write NOTHING and return `needsLateSendDecision` — the client shows
+  // the popup, then re-PUTs with the chosen impact. `dateOfOrder` is
+  // non-nullable in the schema so there's always a planned date to
+  // compare against; the cron uses the same comparison for the
+  // ORDER_SEND_OVERDUE lateness kind.
+  const lateSend = body.lateSend as
+    | {
+        choice: "CHANGE_DELIVERY" | "PUSH_PLOT" | "KEEP" | "NO_IMPACT";
+        newDeliveryDate?: string;
+        delayReasonId?: string;
+        delayReasonLabel?: string;
+        note?: string;
+      }
+    | undefined;
+  const isPendingToOrdered =
+    body.status === "ORDERED" && existing.status === "PENDING";
+  let lateSendWorkingDays = 0;
+  if (isPendingToOrdered) {
+    const planned = new Date(existing.dateOfOrder);
+    planned.setHours(0, 0, 0, 0);
+    lateSendWorkingDays = differenceInWorkingDays(today, planned);
+  }
+  const isLateSend = isPendingToOrdered && lateSendWorkingDays > 0;
+  if (isLateSend && !lateSend) {
+    return NextResponse.json({
+      needsLateSendDecision: true,
+      orderId: id,
+      plannedSendDate: existing.dateOfOrder,
+      lateWorkingDays: lateSendWorkingDays,
+      currentDeliveryDate: existing.expectedDeliveryDate,
+      leadTimeDays: existing.leadTimeDays,
+      jobName: existing.job?.name ?? null,
+      plotName: existing.job?.plot?.name ?? null,
+      plotNumber: existing.job?.plot?.plotNumber ?? null,
+      supplierName: existing.supplier.name,
+      itemsDescription: existing.itemsDescription,
+    });
+  }
+
   const data: Record<string, unknown> = {};
 
   if (body.supplierId !== undefined) data.supplierId = body.supplierId;
@@ -237,13 +282,42 @@ export async function PUT(
     }
   }
 
+  // (May 2026) Apply the order-sent-late decision's date impact. The
+  // status block above already set data.status=ORDERED + data.dateOfOrder
+  // =today; here we layer on what the manager chose for the delivery
+  // date. PUSH_PLOT's downstream cascade runs *after* the order write
+  // (it needs the committed row) — see the lateSend block lower down.
+  if (lateSend && isLateSend) {
+    if (lateSend.choice === "CHANGE_DELIVERY") {
+      // Single-order sends pass an explicit newDeliveryDate (the manager
+      // picked it). Bulk sends omit it — fall back to "old delivery +
+      // the working-day lateness", the same slip PUSH_PLOT applies, just
+      // without the plot cascade.
+      if (lateSend.newDeliveryDate) {
+        data.expectedDeliveryDate = new Date(lateSend.newDeliveryDate);
+      } else if (existing.expectedDeliveryDate) {
+        data.expectedDeliveryDate = addWorkingDays(
+          new Date(existing.expectedDeliveryDate),
+          lateSendWorkingDays,
+        );
+      }
+    } else if (lateSend.choice === "PUSH_PLOT") {
+      // Delivery slips by exactly the working-day lateness of the send;
+      // the dependent job + successors cascade by the same delta below.
+      const base = existing.expectedDeliveryDate
+        ? new Date(existing.expectedDeliveryDate)
+        : new Date(today);
+      data.expectedDeliveryDate = addWorkingDays(base, lateSendWorkingDays);
+    }
+    // KEEP / NO_IMPACT: delivery date untouched.
+  }
+
   // (#179) Enforce date invariants — the math should be the math.
   // Before this, the PENDING→DELIVERED bridge could leave the order
   // with deliveredDate=today but expectedDeliveryDate weeks in the
   // future (set previously by cascade), producing "delivered 8 months
   // early" artifacts in reports. The helper clamps so the date
   // ordering is always consistent.
-  const today = getServerCurrentDate(req);
   const invariantPatch = enforceOrderInvariants(
     {
       dateOfOrder: existing.dateOfOrder,
@@ -288,11 +362,18 @@ export async function PUT(
     // (#191) Resolve any open lateness for this order when it reaches
     // a non-late terminal state. PENDING → anything-else resolves the
     // SEND_OVERDUE bucket; ORDERED → DELIVERED resolves DELIVERY_OVERDUE.
-    if (body.status !== undefined && body.status !== existing.status) {
+    // (May 2026) Skipped for a late-send decision — the lateSend block
+    // below opens the SEND_OVERDUE event WITH the manager's reason +
+    // excused flag, then resolves it, so this generic resolve must not
+    // close the cron's event before we've tagged it.
+    if (
+      body.status !== undefined &&
+      body.status !== existing.status &&
+      !lateSend
+    ) {
       const movedFromPending = existing.status === "PENDING" && body.status !== "PENDING";
       const movedToDelivered = body.status === "DELIVERED";
       if (movedFromPending || movedToDelivered) {
-        const { resolveLateness } = await import("@/lib/lateness-event");
         await resolveLateness(prisma, "order", id, today).catch((err) =>
           console.error("[orders PUT] resolveLateness failed:", err),
         );
@@ -343,10 +424,19 @@ export async function PUT(
       | {
           choice: "PUSH_JOB" | "EXPAND_JOB" | "LEAVE_AS_IS";
           reasonNote?: string;
+          // (May 2026) Manager's reason for the late delivery — an
+          // existing ORDER_DELIVERY DelayReason id, or custom "Other"
+          // text the server upserts into that scoped list.
+          delayReasonId?: string;
+          delayReasonLabel?: string;
         }
       | undefined;
 
-    if (data.expectedDeliveryDate && existing.expectedDeliveryDate) {
+    // (May 2026) `!lateSend` — when the manager came through the
+    // order-sent-late popup, the lateSend block below owns the delivery
+    // push + cascade + lateness. This generic delivery-change handler
+    // must not also fire, or the impact would be applied twice.
+    if (data.expectedDeliveryDate && existing.expectedDeliveryDate && !lateSend) {
       const oldDelivery = new Date(existing.expectedDeliveryDate);
       oldDelivery.setHours(0, 0, 0, 0);
       const newDelivery = new Date(data.expectedDeliveryDate as Date);
@@ -369,6 +459,38 @@ export async function PUT(
       if (shouldRecordLateness) {
         const siteId = existing.job?.plot.siteId ?? existing.siteId ?? null;
         if (siteId) {
+          // (May 2026) Resolve the manager's late-delivery reason → a
+          // DelayReason id. A custom "Other" reason is upserted into the
+          // ORDER_DELIVERY scoped list so it's reusable next time.
+          let deliveryDelayReasonId: string | null = null;
+          if (latenessImpact?.delayReasonId) {
+            deliveryDelayReasonId = latenessImpact.delayReasonId;
+            await prisma.delayReason
+              .update({
+                where: { id: latenessImpact.delayReasonId },
+                data: { usageCount: { increment: 1 }, lastUsedAt: today },
+              })
+              .catch(() => {});
+          } else if (latenessImpact?.delayReasonLabel?.trim()) {
+            const raw = latenessImpact.delayReasonLabel.trim().slice(0, 80);
+            const label = raw[0].toUpperCase() + raw.slice(1);
+            const dr = await prisma.delayReason
+              .upsert({
+                where: { label },
+                update: { usageCount: { increment: 1 }, lastUsedAt: today },
+                create: {
+                  label,
+                  category: "OTHER",
+                  scope: "ORDER_DELIVERY",
+                  usageCount: 1,
+                  lastUsedAt: today,
+                  isSystem: false,
+                },
+              })
+              .catch(() => null);
+            deliveryDelayReasonId = dr?.id ?? null;
+          }
+
           // 1. Open or update the LatenessEvent on this order. Attributed
           //    to supplier if there's a contact mapping (order.contactId);
           //    note records the manager's reason if provided.
@@ -393,6 +515,7 @@ export async function PUT(
             daysLate: deltaWD,
             reasonCode: "MATERIAL_LATE",
             reasonNote: latenessImpact?.reasonNote ?? null,
+            delayReasonId: deliveryDelayReasonId,
             attributedContactId: existing.contactId ?? null,
             recordedById: session.user?.id ?? null,
           }).catch((err) =>
@@ -426,105 +549,21 @@ export async function PUT(
               );
               if (startDelta !== 0) {
                 const newJobEnd = addWorkingDays(jobEnd, startDelta);
-
-                // Reuse the existing cascade engine — passes the new end
-                // date for the trigger job; engine computes the WD delta
-                // and shifts trigger + successors uniformly.
-                const allPlotJobs = await prisma.job.findMany({
-                  where: { plotId: existing.job.plotId, status: { not: "ON_HOLD" } },
-                  orderBy: { sortOrder: "asc" },
+                // Shared cascade apply — shifts the trigger job to the
+                // new end date and cascades successors + their PENDING
+                // orders. Conflict-safe: writes nothing if anything
+                // would land in the past (the lateness event recorded
+                // above still stands; the manager can re-trigger via
+                // the normal cascade UI). See src/lib/order-push-cascade.ts.
+                await applyJobPushCascade(prisma, {
+                  triggerJobId: existing.jobId,
+                  triggerJobNewEnd: newJobEnd,
+                  plotId: existing.job.plotId,
+                  siteId,
+                  userId: session.user?.id ?? null,
+                  excludeOrderId: id,
+                  logLabel: "Delivery push → cascade",
                 });
-                const allOrders = await prisma.materialOrder.findMany({
-                  where: { jobId: { in: allPlotJobs.map((j) => j.id) } },
-                });
-                const cascade = calculateCascade(
-                  existing.jobId,
-                  newJobEnd,
-                  allPlotJobs.map((j) => ({
-                    id: j.id,
-                    name: j.name,
-                    startDate: j.startDate,
-                    endDate: j.endDate,
-                    sortOrder: j.sortOrder,
-                    status: j.status,
-                    parentId: j.parentId ?? null,
-                  })),
-                  allOrders.map((o) => ({
-                    id: o.id,
-                    jobId: o.jobId,
-                    dateOfOrder: o.dateOfOrder,
-                    expectedDeliveryDate: o.expectedDeliveryDate,
-                    status: o.status,
-                  })),
-                );
-
-                // Apply only the job + order updates that don't conflict
-                // — if any successor would land in the past we skip the
-                // cascade and log a warning; the lateness event is still
-                // recorded and the manager can re-trigger via the
-                // standard cascade UI.
-                if (cascade.conflicts.length === 0) {
-                  const jobMap = new Map(allPlotJobs.map((j) => [j.id, j]));
-                  await Promise.all([
-                    ...cascade.jobUpdates.map((u) => {
-                      const cur = jobMap.get(u.jobId);
-                      return prisma.job.update({
-                        where: { id: u.jobId },
-                        data: {
-                          startDate: u.newStart,
-                          endDate: u.newEnd,
-                          ...(!cur?.originalStartDate && cur?.startDate
-                            ? { originalStartDate: cur.startDate }
-                            : {}),
-                          ...(!cur?.originalEndDate && cur?.endDate
-                            ? { originalEndDate: cur.endDate }
-                            : {}),
-                        },
-                      });
-                    }),
-                    ...cascade.orderUpdates
-                      // Don't shift the order we just updated — it has
-                      // its new delivery date already.
-                      .filter((u) => u.orderId !== id)
-                      .map((u) =>
-                        prisma.materialOrder.update({
-                          where: { id: u.orderId },
-                          data: {
-                            dateOfOrder: u.newOrderDate,
-                            expectedDeliveryDate: u.newDeliveryDate,
-                          },
-                        }),
-                      ),
-                  ]);
-
-                  // Parent rollups
-                  const { recomputeParentFromChildren } = await import(
-                    "@/lib/parent-job"
-                  );
-                  const parentIds = new Set<string>();
-                  for (const u of cascade.jobUpdates) {
-                    const j = jobMap.get(u.jobId);
-                    if (j?.parentId) parentIds.add(j.parentId);
-                  }
-                  await Promise.all(
-                    Array.from(parentIds).map((pid) =>
-                      recomputeParentFromChildren(prisma, pid),
-                    ),
-                  );
-
-                  await prisma.eventLog
-                    .create({
-                      data: {
-                        type: "SCHEDULE_CASCADED",
-                        description: `Delivery push → cascade: ${cascade.deltaDays > 0 ? "+" : ""}${cascade.deltaDays} WD, ${cascade.jobUpdates.length} jobs shifted`,
-                        siteId,
-                        plotId: existing.job.plotId,
-                        jobId: existing.jobId,
-                        userId: session.user?.id ?? null,
-                      },
-                    })
-                    .catch(() => {});
-                }
               }
             } else if (latenessImpact.choice === "EXPAND_JOB") {
               // Keep trigger start, extend trigger end by deltaWD.
@@ -649,6 +688,131 @@ export async function PUT(
             })
             .catch(() => {});
         }
+      }
+    }
+
+    // (May 2026) ── Order-sent-late: record + cascade ─────────────────
+    // Runs only when the manager came through the popup. The order row
+    // is already committed (status ORDERED, dateOfOrder=today, and the
+    // chosen delivery date via the `data` patch above). Here we:
+    //   1. Resolve the picked reason → a DelayReason id. A custom
+    //      "Other" reason is upserted into the scoped list so it's
+    //      reusable next time (Keith's "add it to the base list").
+    //   2. PUSH_PLOT only — cascade the dependent job + successors.
+    //   3. Record the ORDER_SEND_OVERDUE lateness with the reason +
+    //      excused flag, then resolve it. Attributed internally — a
+    //      late *send* is on us, not the supplier.
+    if (lateSend && isLateSend) {
+      const lateSiteId = existing.job?.plot.siteId ?? existing.siteId ?? null;
+
+      // 1. Reason → DelayReason id (bump usage, or upsert a custom one).
+      let lateDelayReasonId: string | null = null;
+      if (lateSend.delayReasonId) {
+        lateDelayReasonId = lateSend.delayReasonId;
+        await prisma.delayReason
+          .update({
+            where: { id: lateSend.delayReasonId },
+            data: { usageCount: { increment: 1 }, lastUsedAt: today },
+          })
+          .catch(() => {});
+      } else if (lateSend.delayReasonLabel?.trim()) {
+        const raw = lateSend.delayReasonLabel.trim().slice(0, 80);
+        const label = raw[0].toUpperCase() + raw.slice(1);
+        const dr = await prisma.delayReason
+          .upsert({
+            where: { label },
+            update: { usageCount: { increment: 1 }, lastUsedAt: today },
+            create: {
+              label,
+              category: "OTHER",
+              scope: "ORDER_SEND",
+              usageCount: 1,
+              lastUsedAt: today,
+              isSystem: false,
+            },
+          })
+          .catch(() => null);
+        lateDelayReasonId = dr?.id ?? null;
+      }
+
+      // 2. PUSH_PLOT — cascade the dependent job + successors by the
+      //    working-day lateness. The order's own delivery date is
+      //    already set on the committed row (data.expectedDeliveryDate).
+      if (
+        lateSend.choice === "PUSH_PLOT" &&
+        existing.jobId &&
+        existing.job?.endDate &&
+        existing.job?.plotId &&
+        lateSiteId
+      ) {
+        const jobEnd = new Date(existing.job.endDate);
+        jobEnd.setHours(0, 0, 0, 0);
+        const newJobEnd = addWorkingDays(jobEnd, lateSendWorkingDays);
+        await applyJobPushCascade(prisma, {
+          triggerJobId: existing.jobId,
+          triggerJobNewEnd: newJobEnd,
+          plotId: existing.job.plotId,
+          siteId: lateSiteId,
+          userId: session.user?.id ?? null,
+          excludeOrderId: id,
+          logLabel: "Late send → plot pushed",
+        });
+      }
+
+      // 3. Record the send-lateness + resolve it. Match the lateness
+      //    cron's wentLateOn convention (dateOfOrder + 1 day) so we
+      //    UPDATE the cron's open event if it created one rather than
+      //    duplicating. The generic resolveLateness above was skipped
+      //    for lateSend, so the event is still open when we tag it.
+      if (lateSiteId) {
+        const wentLateOn = new Date(existing.dateOfOrder);
+        wentLateOn.setHours(0, 0, 0, 0);
+        wentLateOn.setDate(wentLateOn.getDate() + 1);
+        await openOrUpdateLateness(prisma, {
+          kind: "ORDER_SEND_OVERDUE",
+          targetType: "order",
+          targetId: id,
+          siteId: lateSiteId,
+          plotId: existing.job?.plotId ?? existing.plotId ?? null,
+          jobId: existing.jobId,
+          orderId: id,
+          wentLateOn,
+          daysLate: lateSendWorkingDays,
+          reasonNote: lateSend.note?.trim() || null,
+          delayReasonId: lateDelayReasonId,
+          excused: lateSend.choice === "NO_IMPACT",
+          recordedById: session.user?.id ?? null,
+        }).catch((err) =>
+          console.error(
+            "[orders PUT] late-send openOrUpdateLateness failed:",
+            err,
+          ),
+        );
+        await resolveLateness(prisma, "order", id, today).catch((err) =>
+          console.error("[orders PUT] late-send resolveLateness failed:", err),
+        );
+
+        // Audit breadcrumb describing the manager's choice.
+        const choiceLabel =
+          lateSend.choice === "CHANGE_DELIVERY"
+            ? "delivery date changed"
+            : lateSend.choice === "PUSH_PLOT"
+              ? "delivery + plot pushed back"
+              : lateSend.choice === "NO_IMPACT"
+                ? "no programme impact"
+                : "original delivery date kept";
+        await prisma.eventLog
+          .create({
+            data: {
+              type: "ORDER_PLACED",
+              description: `Order sent ${lateSendWorkingDays} working day${lateSendWorkingDays === 1 ? "" : "s"} late — ${choiceLabel}`,
+              siteId: lateSiteId,
+              plotId: existing.job?.plotId ?? existing.plotId ?? null,
+              jobId: existing.jobId,
+              userId: session.user?.id ?? null,
+            },
+          })
+          .catch(() => {});
       }
     }
 

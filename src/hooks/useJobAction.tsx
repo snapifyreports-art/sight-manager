@@ -7,6 +7,7 @@ import { addWorkingDays, differenceInWorkingDays, isWorkingDay, snapToWorkingDay
 import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 import { OrderDeliveryFollowUpDialog } from "@/components/orders/OrderDeliveryFollowUpDialog";
 import { useOrderEmail, type SendOrderGroupInput } from "@/hooks/useOrderEmail";
+import { useOrderStatus } from "@/hooks/useOrderStatus";
 import { fetchUrgentOrderEmailGroups } from "@/lib/urgent-order-email";
 import {
   Dialog,
@@ -51,6 +52,12 @@ export function useJobAction(
 ) {
   const toast = useToast();
   const [isLoading, setIsLoading] = useState(false);
+
+  // (May 2026) Mark-sent transitions route through the shared order-
+  // status flow so a late send triggers the order-sent-late popup here
+  // too, not just on the Orders page. `silent` — this hook does its own
+  // toasts; setOrderStatus returns { ok, error } so we branch on it.
+  const { setOrderStatus: sendOrderStatus } = useOrderStatus({ silent: true });
 
   // The job currently being processed (kept in state so dialogs can reference it)
   const [activeJob, setActiveJob] = useState<JobForAction | null>(null);
@@ -1079,32 +1086,21 @@ export function useJobAction(
                       {o.status === "PENDING" && (
                         <div className="flex gap-1">
                           <button onClick={async () => {
-                            // Mark Sent records the actual placement date (today)
-                            // so Daily Brief / Budget / Cash-flow downstream views
-                            // see when the order was actually placed vs the template
-                            // default date.
-                            // (May 2026 pattern sweep) Pre-fix this fetch
-                            // swallowed failures and flipped the UI state
-                            // regardless — toast on failure, only update
-                            // local state on success.
-                            try {
-                              const res = await fetch(`/api/orders/${o.id}`, {
-                                method: "PUT",
-                                headers: { "Content-Type": "application/json" },
-                                body: JSON.stringify({
-                                  status: "ORDERED",
-                                  dateOfOrder: new Date().toISOString(),
-                                }),
-                              });
-                              if (!res.ok) {
-                                toast.error(await fetchErrorMessage(res, "Failed to mark order sent"));
-                                return;
+                            // Mark Sent routes through the shared order-
+                            // status flow — the server stamps the real
+                            // (dev-date-aware) placement date, and a late
+                            // send triggers the order-sent-late popup.
+                            // Only flip local UI state on a confirmed OK;
+                            // a cancelled popup leaves the order PENDING.
+                            const r = await sendOrderStatus(o.id, "ORDERED");
+                            if (!r.ok) {
+                              if (r.error && r.error !== "cancelled") {
+                                toast.error(r.error);
                               }
-                              o.status = "ORDERED";
-                              setPreStartChecks({ ...preStartChecks });
-                            } catch (err) {
-                              toast.error(err instanceof Error ? err.message : "Network error");
+                              return;
                             }
+                            o.status = "ORDERED";
+                            setPreStartChecks({ ...preStartChecks });
                           }} className="rounded border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-700 hover:bg-blue-100">
                             Mark Sent
                           </button>
@@ -1375,27 +1371,19 @@ export function useJobAction(
                           {isPending && (
                             <button
                               onClick={async () => {
-                                // (May 2026 pattern sweep) Pre-fix this
-                                // fetch flipped the resolved state even on
-                                // 4xx/5xx, leaving the user clicking past
-                                // an order that hadn't actually been sent.
-                                try {
-                                  const res = await fetch(`/api/orders/${order.id}`, {
-                                    method: "PUT",
-                                    headers: { "Content-Type": "application/json" },
-                                    body: JSON.stringify({
-                                      status: "ORDERED",
-                                      dateOfOrder: new Date().toISOString(),
-                                    }),
-                                  });
-                                  if (!res.ok) {
-                                    toast.error(await fetchErrorMessage(res, "Failed to mark order sent"));
-                                    return;
+                                // Routes through the shared order-status
+                                // flow: server-stamped placement date +
+                                // the order-sent-late popup. Only mark
+                                // resolved on a confirmed OK — a cancelled
+                                // popup leaves the order PENDING.
+                                const r = await sendOrderStatus(order.id, "ORDERED");
+                                if (!r.ok) {
+                                  if (r.error && r.error !== "cancelled") {
+                                    toast.error(r.error);
                                   }
-                                  setOrderResolution((prev) => prev ? { ...prev, resolved: new Set(prev.resolved).add(order.id) } : prev);
-                                } catch (err) {
-                                  toast.error(err instanceof Error ? err.message : "Network error");
+                                  return;
                                 }
+                                setOrderResolution((prev) => prev ? { ...prev, resolved: new Set(prev.resolved).add(order.id) } : prev);
                               }}
                               className="rounded bg-blue-600 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-blue-700"
                             >
@@ -1457,17 +1445,16 @@ export function useJobAction(
                                   },
                                 );
                                 window.open(mailto, "_blank");
-                                // Mark as ORDERED. Server stamps
-                                // dateOfOrder using dev-date-aware
-                                // getServerCurrentDate — don't send
-                                // client-side wall-clock time.
-                                const putRes = await fetch(`/api/orders/${order.id}`, {
-                                  method: "PUT",
-                                  headers: { "Content-Type": "application/json" },
-                                  body: JSON.stringify({ status: "ORDERED" }),
-                                });
-                                if (!putRes.ok) {
-                                  toast.error("Email opened but failed to mark order sent");
+                                // Mark as ORDERED via the shared flow —
+                                // server-stamped (dev-date-aware) date
+                                // plus the order-sent-late popup. The
+                                // email's already open; only mark resolved
+                                // on a confirmed OK.
+                                const r = await sendOrderStatus(order.id, "ORDERED");
+                                if (!r.ok) {
+                                  if (r.error && r.error !== "cancelled") {
+                                    toast.error("Email opened but failed to mark order sent");
+                                  }
                                   return;
                                 }
                                 setOrderResolution((prev) => prev ? { ...prev, resolved: new Set(prev.resolved).add(order.id) } : prev);

@@ -34,6 +34,13 @@ export interface LatenessEventDTO {
   job: { id: string; name: string } | null;
   plot: { id: string; plotNumber: string | null; name: string } | null;
   order: { id: string; itemsDescription: string | null; supplier: { id: string; name: string } } | null;
+  // (May 2026) Specific manager-picked reason (order-send / order-
+  // delivery lateness). More granular than `reasonCode` — when present,
+  // it's what the UI shows. `excused` = manager marked "no programme
+  // impact"; recorded for the audit trail, kept out of the headline
+  // working-days-lost figure.
+  delayReason: { id: string; label: string } | null;
+  excused: boolean;
 }
 
 const KIND_LABEL: Record<string, string> = {
@@ -188,20 +195,34 @@ export function LatenessSummary(props: Props) {
 
   const open = events.filter((e) => !e.resolvedAt);
   const resolved = events.filter((e) => e.resolvedAt);
+  // (May 2026) Excused lateness — manager marked "no programme impact"
+  // (e.g. an order sent late but the material wasn't needed early). It's
+  // recorded for the audit trail but must NOT inflate the working-days-
+  // lost headline, the same way weather-excused delays are kept apart.
+  const counted = (e: LatenessEventDTO) => !e.excused;
+  const excusedCount = events.filter((e) => e.excused).length;
   // (May 2026 audit D-P0-3) Split open vs resolved working-days. Pre-fix
   // the headline conflated them when status=all so the Delay Report tab
   // said "47 WD lost" (= open + historical resolved) while the weekly
   // digest email said "12 WD lost" (= open only). Director couldn't
   // reconcile. Now: always two numbers, never one blended figure.
-  const openDays = open.reduce((sum, e) => sum + e.daysLate, 0);
-  const resolvedDays = resolved.reduce((sum, e) => sum + e.daysLate, 0);
+  const openDays = open.filter(counted).reduce((sum, e) => sum + e.daysLate, 0);
+  const resolvedDays = resolved
+    .filter(counted)
+    .reduce((sum, e) => sum + e.daysLate, 0);
 
-  // Reason breakdown — keep summing all events so the breakdown shows
-  // every reason that ever contributed (this is a "where did the time
-  // go" lens, not a "what's open right now" lens).
+  // Reason breakdown — keep summing all (non-excused) events so the
+  // breakdown shows every reason that ever contributed (this is a "where
+  // did the time go" lens, not a "what's open right now" lens). Prefer
+  // the specific DelayReason label over the broad reasonCode enum.
   const reasonCounts = new Map<string, number>();
   for (const e of events) {
-    reasonCounts.set(e.reasonCode, (reasonCounts.get(e.reasonCode) ?? 0) + e.daysLate);
+    if (e.excused) continue;
+    const label =
+      e.delayReason?.label ??
+      REASON_OPTIONS.find((r) => r.value === e.reasonCode)?.label ??
+      e.reasonCode;
+    reasonCounts.set(label, (reasonCounts.get(label) ?? 0) + e.daysLate);
   }
   const topReasons = Array.from(reasonCounts.entries())
     .sort((a, b) => b[1] - a[1])
@@ -210,13 +231,16 @@ export function LatenessSummary(props: Props) {
   // Headline — always lead with the open figure when there is one; the
   // resolved figure tags onto the right when both exist. If only resolved
   // events exist (rare — usually means the user filtered to status=resolved
-  // explicitly), show the historical figure.
+  // explicitly), show the historical figure. Excused events tag on at the
+  // end so the count is visible without distorting the WD-lost number.
+  const excusedTag = excusedCount > 0 ? ` · ${excusedCount} excused` : "";
   const headline =
-    open.length > 0
+    (open.length > 0
       ? resolved.length > 0
         ? `${open.length} open · ${openDays} WD lost (+${resolvedDays} WD historic)`
         : `${open.length} open · ${openDays} working day${openDays === 1 ? "" : "s"} lost`
-      : `${resolved.length} resolved · ${resolvedDays} working day${resolvedDays === 1 ? "" : "s"} historically`;
+      : `${resolved.length} resolved · ${resolvedDays} working day${resolvedDays === 1 ? "" : "s"} historically`) +
+    excusedTag;
 
   return (
     <div className="rounded-lg border bg-white">
@@ -244,18 +268,15 @@ export function LatenessSummary(props: Props) {
                 Top reasons
               </p>
               <div className="flex flex-wrap gap-1.5">
-                {topReasons.map(([code, days]) => {
-                  const label = REASON_OPTIONS.find((r) => r.value === code)?.label ?? code;
-                  return (
-                    <span
-                      key={code}
-                      className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs"
-                    >
-                      <span className="font-medium">{label}</span>
-                      <span className="text-slate-500">·{days}d</span>
-                    </span>
-                  );
-                })}
+                {topReasons.map(([label, days]) => (
+                  <span
+                    key={label}
+                    className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs"
+                  >
+                    <span className="font-medium">{label}</span>
+                    <span className="text-slate-500">·{days}d</span>
+                  </span>
+                ))}
               </div>
             </div>
           )}
@@ -365,9 +386,21 @@ function LatenessRow({
 
       {!editing ? (
         <div className="mt-1.5 flex flex-wrap items-center gap-2">
+          {/* (May 2026) Prefer the specific manager-picked reason over
+              the broad reasonCode enum when one was captured. */}
           <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs">
-            {REASON_OPTIONS.find((r) => r.value === event.reasonCode)?.label ?? event.reasonCode}
+            {event.delayReason?.label ??
+              REASON_OPTIONS.find((r) => r.value === event.reasonCode)?.label ??
+              event.reasonCode}
           </span>
+          {/* (May 2026) "No programme impact" — recorded but excluded
+              from the working-days-lost headline. */}
+          {event.excused && (
+            <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs text-emerald-700">
+              <CheckCircle2 className="size-3" aria-hidden />
+              No programme impact
+            </span>
+          )}
           {event.attributedContact && (
             <span className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs text-blue-700">
               <User className="size-3" aria-hidden />

@@ -1287,6 +1287,20 @@ model LatenessEvent {
   reasonCode          LatenessReason @default(OTHER)
   reasonNote          String?
 
+  /// (May 2026) Specific, manager-picked reason from the self-growing
+  /// DelayReason table — used by order-send + order-delivery lateness
+  /// where the broad `reasonCode` enum isn't granular enough and the
+  /// reason list needs to grow over time. `reasonCode` stays the broad
+  /// reporting bucket; `delayReason` is the specific cause.
+  delayReasonId       String?
+
+  /// (May 2026) Manager marked this lateness as "no programme impact"
+  /// — e.g. an order sent late but the material wasn't needed early.
+  /// Still recorded for the audit trail, but excluded from the Delay
+  /// Report's headline delay counts (surfaced in a separate excused
+  /// bucket — the same treatment weather-excused lateness gets).
+  excused             Boolean        @default(false)
+
   /// Which contractor or supplier carried the slip, if attributable.
   /// (May 2026 audit S-P1 / FC-P0) Pre-fix only `attributedContactId`
   /// existed — pointed at the Contact table. Material suppliers live
@@ -1310,6 +1324,7 @@ model LatenessEvent {
   attributedContact  Contact?       @relation(fields: [attributedContactId], references: [id], onDelete: SetNull)
   attributedSupplier Supplier?      @relation(fields: [attributedSupplierId], references: [id], onDelete: SetNull)
   recordedBy         User?          @relation("LatenessEventRecorder", fields: [recordedById], references: [id], onDelete: SetNull)
+  delayReason        DelayReason?   @relation(fields: [delayReasonId], references: [id], onDelete: SetNull)
 
   /// One open event per (target, kind, day-it-went-late). The cron's
   /// upsert relies on this so it never creates duplicates.
@@ -1319,6 +1334,7 @@ model LatenessEvent {
   @@index([attributedContactId])
   @@index([attributedSupplierId])
   @@index([reasonCode])
+  @@index([delayReasonId])
   @@index([plotId])
   @@index([jobId])
   @@index([orderId])
@@ -1406,7 +1422,19 @@ model DelayReason {
   createdAt   DateTime  @default(now())
   lastUsedAt  DateTime?
 
+  // (May 2026) Which picker shows this reason. null = the original
+  // general/job-delay list (existing behaviour). "ORDER_SEND" =
+  // why-an-order-went-out-late picker; "ORDER_DELIVERY" = why-a-
+  // delivery-was-late picker. Keeps the three contexts from polluting
+  // each other while still sharing one self-growing table — a custom
+  // "Other" reason typed in any picker is upserted here and reappears
+  // next time, scoped to where it was added.
+  scope       String?
+
+  latenessEvents LatenessEvent[]
+
   @@index([usageCount])
+  @@index([scope])
 }
 
 // ---------- Event Log ----------
