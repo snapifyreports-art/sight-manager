@@ -30,7 +30,11 @@ import {
   TrendingDown,
   Minus,
   PauseCircle,
+  PlayCircle,
+  Clock,
+  Truck,
 } from "lucide-react";
+import { getCurrentDate } from "@/lib/dev-date";
 import { Button } from "@/components/ui/button";
 import { Breadcrumbs } from "@/components/ui/breadcrumbs";
 import { WatchToggle } from "@/components/sites/WatchToggle";
@@ -113,6 +117,16 @@ interface PlotItem {
   createdAt: string;
   _count: { jobs: number };
   jobStatusSummary: JobStatusSummary;
+  // (May 2026 Keith request) At-a-glance plot-card extras — computed
+  // server-side; the dev-date-relative display ("ends in 3d") is done
+  // client-side from these values.
+  currentStage: { label: string; endDate: string | null } | null;
+  nextStage: { label: string; startDate: string | null } | null;
+  allComplete: boolean;
+  pendingOrderCount: number;
+  nextOrderDate: string | null;
+  awaitingDeliveryCount: number;
+  openSnagCount: number;
 }
 
 interface SiteDetail {
@@ -171,6 +185,24 @@ function flattenTemplateJobs(jobs: TemplateJob[]): TemplateJob[] {
     }
   }
   return out;
+}
+
+/**
+ * (May 2026 Keith request) Compact dev-date-relative label for the plot
+ * cards — "today", "in 3d", "2d ago". `today` is passed in (dev-date
+ * aware via getCurrentDate) so simulation runs read correctly.
+ */
+function relativeDayLabel(iso: string | null, today: Date): { days: number; label: string } | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  d.setHours(0, 0, 0, 0);
+  const t = new Date(today);
+  t.setHours(0, 0, 0, 0);
+  const days = Math.round((d.getTime() - t.getTime()) / 86_400_000);
+  if (days === 0) return { days, label: "today" };
+  if (days === 1) return { days, label: "tomorrow" };
+  if (days === -1) return { days, label: "yesterday" };
+  return { days, label: days > 0 ? `in ${days}d` : `${Math.abs(days)}d ago` };
 }
 
 interface TemplateVariantOption {
@@ -2110,6 +2142,19 @@ export function SiteDetailClient({
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {filteredSitePlots.map((plot) => {
               const totalJobs = plot._count.jobs;
+              // (May 2026 Keith request) Dev-date-relative labels for the
+              // plot card extras — computed client-side so simulation
+              // runs read correctly.
+              const today = getCurrentDate();
+              const stageEndRel = relativeDayLabel(
+                plot.currentStage?.endDate ?? null,
+                today,
+              );
+              const nextStartRel = relativeDayLabel(
+                plot.nextStage?.startDate ?? null,
+                today,
+              );
+              const nextOrderRel = relativeDayLabel(plot.nextOrderDate, today);
 
               return (
                 <Card
@@ -2237,6 +2282,96 @@ export function SiteDetailClient({
                       <p className="text-xs text-muted-foreground">
                         No jobs assigned yet
                       </p>
+                    )}
+
+                    {/* (May 2026 Keith request) At-a-glance: current
+                        stage / next up + the order & snag counts, so the
+                        card carries useful info from face value. */}
+                    {totalJobs > 0 && (
+                      <>
+                        {plot.currentStage ? (
+                          <p className="mt-2 flex items-center gap-1.5 text-xs">
+                            <PlayCircle className="size-3 shrink-0 text-blue-600" />
+                            <span className="truncate font-medium">
+                              {plot.currentStage.label}
+                            </span>
+                            {stageEndRel && (
+                              <span
+                                className={`shrink-0 ${stageEndRel.days < 0 ? "text-red-600" : "text-muted-foreground"}`}
+                              >
+                                ·{" "}
+                                {stageEndRel.days < 0
+                                  ? `${Math.abs(stageEndRel.days)}d over`
+                                  : stageEndRel.days === 0
+                                    ? "ends today"
+                                    : `ends ${stageEndRel.label}`}
+                              </span>
+                            )}
+                          </p>
+                        ) : plot.allComplete ? (
+                          <p className="mt-2 flex items-center gap-1.5 text-xs text-emerald-600">
+                            <CheckCircle2 className="size-3 shrink-0" />
+                            All stages complete
+                          </p>
+                        ) : plot.nextStage ? (
+                          <p className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
+                            <Clock className="size-3 shrink-0" />
+                            <span className="truncate">
+                              Next:{" "}
+                              <span className="font-medium text-foreground">
+                                {plot.nextStage.label}
+                              </span>
+                            </span>
+                            {nextStartRel && (
+                              <span className="shrink-0">
+                                · starts {nextStartRel.label}
+                              </span>
+                            )}
+                          </p>
+                        ) : null}
+
+                        {(plot.pendingOrderCount > 0 ||
+                          plot.awaitingDeliveryCount > 0 ||
+                          plot.openSnagCount > 0) && (
+                          <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
+                            {plot.pendingOrderCount > 0 && (
+                              <span
+                                className="flex items-center gap-1 text-muted-foreground"
+                                title="Orders still to send"
+                              >
+                                <Package className="size-3" />
+                                {plot.pendingOrderCount} to order
+                                {nextOrderRel
+                                  ? ` · next ${nextOrderRel.label}`
+                                  : ""}
+                              </span>
+                            )}
+                            {plot.awaitingDeliveryCount > 0 && (
+                              <span
+                                className="flex items-center gap-1 text-amber-600"
+                                title="Deliveries awaited"
+                              >
+                                <Truck className="size-3" />
+                                {plot.awaitingDeliveryCount} delivery
+                                {plot.awaitingDeliveryCount === 1
+                                  ? ""
+                                  : "ies"}{" "}
+                                due
+                              </span>
+                            )}
+                            {plot.openSnagCount > 0 && (
+                              <span
+                                className="flex items-center gap-1 text-red-600"
+                                title="Open snags"
+                              >
+                                <AlertTriangle className="size-3" />
+                                {plot.openSnagCount} snag
+                                {plot.openSnagCount === 1 ? "" : "s"}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </>
                     )}
                   </CardContent>
                 </Card>
