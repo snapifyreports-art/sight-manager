@@ -21,7 +21,22 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
       // strictly hidden until that UI ships.
       where: { archivedAt: null },
       orderBy: { createdAt: "desc" },
-      include: { jobs: templateJobsInclude },
+      include: {
+        jobs: templateJobsInclude,
+        // (May 2026 Keith request) Variant rows feed the "N variants: …"
+        // chip line on each template card. Pre-fix the query omitted
+        // them, so `template.variants` was always undefined and the
+        // chip line silently never rendered.
+        variants: {
+          orderBy: { sortOrder: "asc" },
+          select: {
+            id: true,
+            name: true,
+            description: true,
+            sortOrder: true,
+          },
+        },
+      },
     }),
     prisma.user.findMany({
       // (May 2026 audit S-P0) Active users only by default; the
