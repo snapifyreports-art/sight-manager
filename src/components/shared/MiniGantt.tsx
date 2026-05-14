@@ -53,12 +53,32 @@ export function MiniGantt({
 }) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  const startMonday = new Date(today);
+  const CELL_W = 44;
+  const DAY_MS = 86400000;
+
+  // (May 2026 Keith bug report) The window used to be a fixed 12 weeks
+  // from today — so a contractor's jobs further out simply didn't render,
+  // and the Mini Programme looked like they were only on a handful of
+  // plots. Now the window spans the actual jobs it's given: from the
+  // Monday on/before the earliest job (or today, whichever is sooner) to
+  // the latest job end, with a 12-week minimum so a single-job
+  // contractor isn't cramped.
+  const datedJobs = jobs.filter((j) => j.startDate && j.endDate);
+  const jobStartMs = datedJobs.map((j) => new Date(j.startDate!).getTime());
+  const jobEndMs = datedJobs.map((j) => new Date(j.endDate!).getTime());
+  const earliest = jobStartMs.length ? Math.min(...jobStartMs) : today.getTime();
+  const latest = jobEndMs.length ? Math.max(...jobEndMs) : today.getTime();
+
+  const startMonday = new Date(Math.min(today.getTime(), earliest));
+  startMonday.setHours(0, 0, 0, 0);
   const day = startMonday.getDay();
   const diffToMon = day === 0 ? -6 : 1 - day;
   startMonday.setDate(startMonday.getDate() + diffToMon);
-  const WEEKS_TO_SHOW = 12;
-  const CELL_W = 44;
+
+  const spanWeeks = Math.ceil(
+    (Math.max(latest, today.getTime()) - startMonday.getTime()) / DAY_MS / 7,
+  );
+  const WEEKS_TO_SHOW = Math.max(12, spanWeeks + 1);
 
   const weekCols: Date[] = [];
   for (let i = 0; i < WEEKS_TO_SHOW; i++) {
@@ -88,7 +108,7 @@ export function MiniGantt({
   if (plotRows.length === 0) {
     return (
       <p className="text-xs text-muted-foreground">
-        No jobs scheduled in the next {WEEKS_TO_SHOW} weeks.
+        No scheduled jobs to show.
       </p>
     );
   }

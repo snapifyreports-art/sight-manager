@@ -222,6 +222,18 @@ export async function GET(
         endDate: j.endDate?.toISOString() ?? null,
         plot: j.plot,
       })),
+      // (May 2026 Keith bug report) Full job list — the Mini Programme
+      // shows EVERY plot the contractor is on, not just live + next-3.
+      // `nextJobs` stays capped at 3 for the "Coming up" list; the Mini
+      // Programme reads `allJobs` instead.
+      allJobs: c.allJobs.map((j) => ({
+        id: j.id,
+        name: j.name,
+        status: j.status,
+        startDate: j.startDate?.toISOString() ?? null,
+        endDate: j.endDate?.toISOString() ?? null,
+        plot: j.plot,
+      })),
       openSnags: c.openSnags.map((s) => ({
         id: s.id,
         description: s.description,

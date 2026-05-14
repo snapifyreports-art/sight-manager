@@ -89,6 +89,10 @@ interface Contractor {
   activePlotCount: number;
   liveJobs: Job[];
   nextJobs: Job[];
+  // (May 2026 Keith bug report) Every job the contractor is on, across
+  // all plots — the Mini Programme renders this so it shows all plots,
+  // not just live + the first 3 upcoming.
+  allJobs: Job[];
   openSnags: Snag[];
   orders?: ContractorOrder[];
   drawings?: ContractorDrawing[];
@@ -500,6 +504,41 @@ function ContractorCard({
     new Set(contractor.liveJobs.filter((j) => j.signOffRequested).map((j) => j.id))
   );
 
+  // (May 2026 Keith request) "View" — open the contractor's own comms
+  // page (the same /contractor/[token] page they get via Send Link) in
+  // a new tab, so the manager can see exactly what the contractor sees
+  // without having to send themselves the link first. The share route
+  // is idempotent — it returns the contractor's permanent token.
+  const [viewLoading, setViewLoading] = useState(false);
+  const handleView = useCallback(async () => {
+    setViewLoading(true);
+    try {
+      const res = await fetch(`/api/sites/${siteId}/contractor-comms/share`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contactId: contractor.id }),
+      });
+      if (!res.ok) {
+        toast.error(
+          await fetchErrorMessage(res, "Couldn't open the contractor view"),
+        );
+        return;
+      }
+      const data = await res.json();
+      if (data?.url) {
+        window.open(data.url, "_blank", "noopener,noreferrer");
+      } else {
+        toast.error("Couldn't open the contractor view");
+      }
+    } catch (e) {
+      toast.error(
+        e instanceof Error ? e.message : "Couldn't open the contractor view",
+      );
+    } finally {
+      setViewLoading(false);
+    }
+  }, [siteId, contractor.id, toast]);
+
   // RAMS / method-statement documents — lazy-loaded per-contractor.
   // Keith Apr 2026 Q3: reuse Document model with contactId scope.
   const [ramsDocs, setRamsDocs] = useState<ContactDoc[] | null>(null);
@@ -620,10 +659,26 @@ function ContractorCard({
                   <Mail className="size-3 shrink-0" /> <span className="truncate">{contractor.email}</span>
                 </a>
               )}
-              <div className="flex items-center gap-2 print:hidden">
+              <div className="flex flex-wrap items-center gap-2 print:hidden">
                 <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setShareOpen(true)}>
                   <Link2 className="mr-1 size-3" />
                   Send Link
+                </Button>
+                {/* (May 2026 Keith request) View the contractor's comms
+                    page yourself — no need to send a link first. */}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 text-xs"
+                  onClick={handleView}
+                  disabled={viewLoading}
+                >
+                  {viewLoading ? (
+                    <Loader2 className="mr-1 size-3 animate-spin" />
+                  ) : (
+                    <ExternalLink className="mr-1 size-3" />
+                  )}
+                  View
                 </Button>
                 {lastSent && (
                   <span className="text-[10px] text-muted-foreground">
@@ -641,7 +696,7 @@ function ContractorCard({
             Collapsed by default (Apr 2026 follow-up: Keith "mini programmes
             can be collapsed on page open"). Click the section header to
             expand. */}
-        {(contractor.liveJobs.length > 0 || contractor.nextJobs.length > 0) && (
+        {contractor.allJobs.length > 0 && (
           <details className="group">
             <summary className="flex cursor-pointer items-center gap-2 px-4 py-3 sm:px-5 [&::-webkit-details-marker]:hidden">
               <Briefcase className="size-4 text-blue-600" />
@@ -651,28 +706,20 @@ function ContractorCard({
               <ChevronRight className="ml-auto size-3.5 text-muted-foreground transition-transform group-open:rotate-90" />
             </summary>
             <div className="px-4 pb-3 sm:px-5">
+              {/* (May 2026 Keith bug report) Feed the FULL job list so the
+                  Mini Programme shows every plot the contractor is on —
+                  not just live + the first 3 upcoming. */}
               <MiniGantt
                 siteId={siteId}
-                jobs={[
-                  ...contractor.liveJobs.map((j) => ({
-                    id: j.id,
-                    name: j.name,
-                    status: j.status,
-                    startDate: j.startDate,
-                    endDate: j.endDate,
-                    plot: j.plot,
-                    live: true,
-                  })),
-                  ...contractor.nextJobs.map((j) => ({
-                    id: j.id,
-                    name: j.name,
-                    status: j.status,
-                    startDate: j.startDate,
-                    endDate: j.endDate,
-                    plot: j.plot,
-                    live: false,
-                  })),
-                ]}
+                jobs={contractor.allJobs.map((j) => ({
+                  id: j.id,
+                  name: j.name,
+                  status: j.status,
+                  startDate: j.startDate,
+                  endDate: j.endDate,
+                  plot: j.plot,
+                  live: j.status === "IN_PROGRESS",
+                }))}
               />
             </div>
           </details>

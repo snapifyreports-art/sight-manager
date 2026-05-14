@@ -326,38 +326,30 @@ export default async function ContractorSharePage({
         {/* Mini Programme — 12-week rows=plots Gantt. Same visual Keith
             uses on the internal Contractor Comms page. Apr 2026 UX audit
             follow-up: "shareable links don't feature all the info". */}
-        {(liveJobs.length > 0 || nextJobs.length > 0) && (
+        {jobs.length > 0 && (
           <details className="group rounded-lg border bg-white shadow-sm">
             <summary className="flex cursor-pointer items-center gap-2 px-4 py-3 font-semibold text-blue-700 [&::-webkit-details-marker]:hidden">
               <Briefcase className="size-5 text-blue-600" />
-              Mini Programme (next 12 weeks)
+              Mini Programme
               <svg className="ml-auto size-4 shrink-0 transition-transform group-open:rotate-180" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clipRule="evenodd" /></svg>
             </summary>
             <div className="border-t px-4 py-3">
+              {/* (May 2026 Keith bug report) Feed every job the contractor
+                  is on so the Mini Programme shows all their plots —
+                  MiniGantt now sizes its window to the jobs it's given. */}
               <MiniGantt
                 siteId={siteId}
                 linkJobs={false}
                 linkPlots={false}
-                jobs={[
-                  ...liveJobs.map((j) => ({
-                    id: j.id,
-                    name: j.name,
-                    status: j.status,
-                    startDate: j.startDate?.toISOString() ?? null,
-                    endDate: j.endDate?.toISOString() ?? null,
-                    plot: j.plot,
-                    live: true,
-                  })),
-                  ...nextJobs.map((j) => ({
-                    id: j.id,
-                    name: j.name,
-                    status: j.status,
-                    startDate: j.startDate?.toISOString() ?? null,
-                    endDate: j.endDate?.toISOString() ?? null,
-                    plot: j.plot,
-                    live: false,
-                  })),
-                ]}
+                jobs={jobs.map((j) => ({
+                  id: j.id,
+                  name: j.name,
+                  status: j.status,
+                  startDate: j.startDate?.toISOString() ?? null,
+                  endDate: j.endDate?.toISOString() ?? null,
+                  plot: j.plot,
+                  live: j.status === "IN_PROGRESS",
+                }))}
               />
             </div>
           </details>
