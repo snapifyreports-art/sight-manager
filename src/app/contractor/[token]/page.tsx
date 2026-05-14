@@ -113,6 +113,14 @@ export default async function ContractorSharePage({
   const nextJobs = jobs.filter((j) => j.status === "NOT_STARTED");
   const completedJobs = jobs.filter((j) => j.status === "COMPLETED");
 
+  // (May 2026 Keith request) Toolbox talks this contractor was linked
+  // to — surfaced on the shared page exactly as on the internal card.
+  const toolboxTalks = await prisma.toolboxTalk.findMany({
+    where: { siteId, contractorIds: { has: contactId } },
+    select: { id: true, topic: true, deliveredAt: true },
+    orderBy: { deliveredAt: "desc" },
+  });
+
   const openSnagsRaw = await prisma.snag.findMany({
     where: { contactId, plot: { siteId }, status: { in: ["OPEN", "IN_PROGRESS"] } },
     select: {
@@ -591,6 +599,37 @@ export default async function ContractorSharePage({
             <div className="border-t px-4 py-3 space-y-2">
               {openSnags.map((snag) => (
                 <SnagSignOffCard key={snag.id} snag={snag} token={token} />
+              ))}
+            </div>
+          </details>
+        )}
+
+        {/* (May 2026 Keith request) Toolbox talks this contractor was
+            linked to — same view as the manager's internal card. */}
+        {toolboxTalks.length > 0 && (
+          <details className="group rounded-lg border bg-white shadow-sm">
+            <summary className="flex cursor-pointer items-center gap-2 px-4 py-3 font-semibold text-amber-700 [&::-webkit-details-marker]:hidden">
+              <HardHat className="size-5 text-amber-500" />
+              Toolbox Talks ({toolboxTalks.length})
+              <svg className="ml-auto size-4 shrink-0 transition-transform group-open:rotate-180" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clipRule="evenodd" /></svg>
+            </summary>
+            <div className="space-y-1.5 border-t px-4 py-3">
+              {toolboxTalks.map((t) => (
+                <div
+                  key={t.id}
+                  className="flex items-center justify-between gap-2 rounded-md bg-amber-50/60 px-3 py-2 text-sm"
+                >
+                  <span className="truncate font-medium text-slate-700">
+                    {t.topic}
+                  </span>
+                  <span className="shrink-0 text-xs text-muted-foreground">
+                    {t.deliveredAt.toLocaleDateString("en-GB", {
+                      day: "numeric",
+                      month: "short",
+                      year: "2-digit",
+                    })}
+                  </span>
+                </div>
               ))}
             </div>
           </details>

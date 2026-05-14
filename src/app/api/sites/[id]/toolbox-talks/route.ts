@@ -71,6 +71,10 @@ export async function POST(
   let topic = "";
   let notes: string | null = null;
   let attendees: string | null = null;
+  // (May 2026 Keith request) Contact ids of linked contractors. Sent
+  // JSON-stringified in both the JSON and FormData paths so the parsing
+  // is uniform.
+  let contractorIds: string[] = [];
   let deliveredAt: Date = new Date();
   let documentUrl: string | null = null;
   let documentFileName: string | null = null;
@@ -82,6 +86,17 @@ export async function POST(
     topic = String(formData.get("topic") || "").trim();
     notes = String(formData.get("notes") || "") || null;
     attendees = String(formData.get("attendees") || "") || null;
+    const contractorIdsRaw = formData.get("contractorIds");
+    if (typeof contractorIdsRaw === "string" && contractorIdsRaw) {
+      try {
+        const parsed = JSON.parse(contractorIdsRaw);
+        if (Array.isArray(parsed)) {
+          contractorIds = parsed.filter((x): x is string => typeof x === "string");
+        }
+      } catch {
+        /* malformed — leave contractorIds empty */
+      }
+    }
     const deliveredAtStr = formData.get("deliveredAt");
     if (typeof deliveredAtStr === "string" && deliveredAtStr) {
       deliveredAt = new Date(deliveredAtStr);
@@ -125,6 +140,11 @@ export async function POST(
     topic = String(body?.topic || "").trim();
     notes = body?.notes || null;
     attendees = body?.attendees || null;
+    if (Array.isArray(body?.contractorIds)) {
+      contractorIds = body.contractorIds.filter(
+        (x: unknown): x is string => typeof x === "string",
+      );
+    }
     if (body?.deliveredAt) deliveredAt = new Date(body.deliveredAt);
   }
 
@@ -139,6 +159,7 @@ export async function POST(
         topic,
         notes,
         attendees,
+        contractorIds,
         deliveredAt,
         deliveredBy: a.session.user.id,
         documentUrl,

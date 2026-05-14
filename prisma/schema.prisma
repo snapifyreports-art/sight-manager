@@ -1054,7 +1054,13 @@ model ToolboxTalk {
   siteId       String
   topic        String
   notes        String?
-  attendees    String? // free-text comma list — supports contractor names + worker names
+  attendees    String? // free-text comma list — manually-typed worker names
+  // (May 2026 Keith request) Linked contractors — Contact ids of the
+  // contractors who attended. Stored as a text array (not a join table)
+  // because Contacts are soft-deleted, so an id here stays resolvable;
+  // the contractor-comms query filters with `contractorIds has <id>`.
+  // The free-text `attendees` field stays for ad-hoc worker names.
+  contractorIds String[] @default([])
   deliveredAt  DateTime @default(now())
   deliveredBy  String? // userId of the manager who ran it (nullable so future scripted entries are possible)
   // (#175) Optional attached document — e.g. signed register, briefing

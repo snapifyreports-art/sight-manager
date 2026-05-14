@@ -29,12 +29,21 @@ interface Talk {
   topic: string;
   notes: string | null;
   attendees: string | null;
+  // (May 2026 Keith request) Contact ids of linked contractors — the
+  // free-text `attendees` field stays for ad-hoc worker names.
+  contractorIds: string[];
   deliveredAt: string;
   // (#175) Optional attachment.
   documentUrl: string | null;
   documentFileName: string | null;
   documentSize: number | null;
   documentMimeType: string | null;
+}
+
+interface ContractorOption {
+  id: string;
+  name: string;
+  company: string | null;
 }
 
 function formatBytes(bytes: number | null): string {
@@ -55,6 +64,11 @@ export function SiteToolboxTalks({ siteId }: { siteId: string }) {
   const [deliveredAt, setDeliveredAt] = useState("");
   const [docFile, setDocFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  // (May 2026 Keith request) Contractor linking — fetched once so the
+  // create dialog can offer a picker AND the talk list can resolve
+  // linked ids → names.
+  const [contractors, setContractors] = useState<ContractorOption[]>([]);
+  const [selectedContractorIds, setSelectedContractorIds] = useState<string[]>([]);
   const toast = useToast();
 
   const refresh = async () => {
@@ -75,9 +89,30 @@ export function SiteToolboxTalks({ siteId }: { siteId: string }) {
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => { if (d && !cancelled) setTalks(d); })
       .finally(() => { if (!cancelled) setLoading(false); });
+    // (May 2026 Keith request) Contractors for the linking picker +
+    // resolving linked ids → names on the talk cards.
+    fetch(`/api/contacts?type=CONTRACTOR`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (cancelled || !Array.isArray(d)) return;
+        setContractors(
+          d.map((c: { id: string; name: string; company: string | null }) => ({
+            id: c.id,
+            name: c.name,
+            company: c.company,
+          })),
+        );
+      })
+      .catch(() => { /* non-critical — picker just stays empty */ });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [siteId]);
+
+  // id → label map for resolving a talk's linked contractors.
+  const contractorLabel = (cid: string): string => {
+    const c = contractors.find((x) => x.id === cid);
+    return c ? c.company || c.name : "Contractor";
+  };
 
   async function submit() {
     if (!topic.trim()) return;
@@ -93,6 +128,9 @@ export function SiteToolboxTalks({ siteId }: { siteId: string }) {
         if (notes) fd.append("notes", notes);
         if (attendees) fd.append("attendees", attendees);
         if (deliveredAt) fd.append("deliveredAt", deliveredAt);
+        // contractorIds sent JSON-stringified — the route parses it the
+        // same way in both the FormData and JSON paths.
+        fd.append("contractorIds", JSON.stringify(selectedContractorIds));
         fd.append("document", docFile);
         res = await fetch(`/api/sites/${siteId}/toolbox-talks`, {
           method: "POST",
@@ -106,6 +144,7 @@ export function SiteToolboxTalks({ siteId }: { siteId: string }) {
             topic: topic.trim(),
             notes: notes || null,
             attendees: attendees || null,
+            contractorIds: selectedContractorIds,
             deliveredAt: deliveredAt || undefined,
           }),
         });
@@ -119,6 +158,7 @@ export function SiteToolboxTalks({ siteId }: { siteId: string }) {
       setNotes("");
       setAttendees("");
       setDeliveredAt("");
+      setSelectedContractorIds([]);
       setDocFile(null);
       if (fileInputRef.current) fileInputRef.current.value = "";
       void refresh();
@@ -166,6 +206,19 @@ export function SiteToolboxTalks({ siteId }: { siteId: string }) {
                 <p className="mt-1 text-xs">
                   <span className="font-medium text-slate-700">Attendees:</span>{" "}
                   <span className="text-slate-600">{t.attendees}</span>
+                </p>
+              )}
+              {t.contractorIds.length > 0 && (
+                <p className="mt-1 flex flex-wrap items-center gap-1 text-xs">
+                  <span className="font-medium text-slate-700">Contractors:</span>
+                  {t.contractorIds.map((cid) => (
+                    <span
+                      key={cid}
+                      className="rounded-full bg-blue-50 px-1.5 py-0.5 text-[11px] text-blue-700"
+                    >
+                      {contractorLabel(cid)}
+                    </span>
+                  ))}
                 </p>
               )}
               {t.notes && (
@@ -218,6 +271,49 @@ export function SiteToolboxTalks({ siteId }: { siteId: string }) {
                 onChange={(e) => setAttendees(e.target.value)}
                 placeholder="Jim, Sarah, Mike's plumbers"
               />
+              <p className="mt-0.5 text-[11px] text-muted-foreground">
+                Free text — type any worker names.
+              </p>
+            </div>
+            {/* (May 2026 Keith request) Link contractors on record — the
+                talk then shows in their Contractor Comms. The free-text
+                field above stays for ad-hoc names. */}
+            <div>
+              <Label>Link contractors</Label>
+              <p className="mb-1.5 mt-0.5 text-[11px] text-muted-foreground">
+                Linked contractors see this talk in their Contractor Comms.
+              </p>
+              {contractors.length === 0 ? (
+                <p className="text-xs italic text-muted-foreground">
+                  No contractors on file yet.
+                </p>
+              ) : (
+                <div className="flex flex-wrap gap-1.5">
+                  {contractors.map((c) => {
+                    const selected = selectedContractorIds.includes(c.id);
+                    return (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onClick={() =>
+                          setSelectedContractorIds((prev) =>
+                            prev.includes(c.id)
+                              ? prev.filter((x) => x !== c.id)
+                              : [...prev, c.id],
+                          )
+                        }
+                        className={`rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
+                          selected
+                            ? "border-blue-400 bg-blue-50 text-blue-800"
+                            : "border-border bg-white text-muted-foreground hover:bg-slate-50"
+                        }`}
+                      >
+                        {c.company || c.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
             <div>
               <Label htmlFor="tb-when">When (defaults to now)</Label>

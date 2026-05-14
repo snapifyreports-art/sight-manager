@@ -191,6 +191,24 @@ export async function GET(
     (entry as Record<string, unknown>).orders = entry.allJobs.flatMap((j) => ordersByJob.get(j.id) ?? []);
   }
 
+  // (May 2026 Keith request) Toolbox talks linked to each contractor —
+  // when a manager links a contractor on a toolbox talk, it shows in
+  // their Contractor Comms (and on their shared page).
+  const toolboxTalks = await prisma.toolboxTalk.findMany({
+    where: { siteId, NOT: { contractorIds: { isEmpty: true } } },
+    select: { id: true, topic: true, deliveredAt: true, contractorIds: true },
+    orderBy: { deliveredAt: "desc" },
+  });
+  for (const entry of contactMap.values()) {
+    (entry as Record<string, unknown>).toolboxTalks = toolboxTalks
+      .filter((t) => t.contractorIds.includes(entry.id))
+      .map((t) => ({
+        id: t.id,
+        topic: t.topic,
+        deliveredAt: t.deliveredAt.toISOString(),
+      }));
+  }
+
   // Sort contractors: those with live jobs first, then by name
   const contractors = Array.from(contactMap.values())
     .sort((a, b) => {
@@ -252,6 +270,14 @@ export async function GET(
         supplier: o.supplier,
         items: o.orderItems,
       })),
+      // (May 2026 Keith request) Toolbox talks this contractor was
+      // linked to — already resolved to {id, topic, deliveredAt} above.
+      toolboxTalks:
+        ((c as Record<string, unknown>).toolboxTalks as Array<{
+          id: string;
+          topic: string;
+          deliveredAt: string;
+        }>) || [],
       // Drawings this contractor can see: site-wide + drawings on plots they have jobs on
       drawings: [
         ...siteWideDrawings.map((d) => ({

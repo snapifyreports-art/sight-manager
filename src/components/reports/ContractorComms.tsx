@@ -96,6 +96,9 @@ interface Contractor {
   openSnags: Snag[];
   orders?: ContractorOrder[];
   drawings?: ContractorDrawing[];
+  // (May 2026 Keith request) Toolbox talks this contractor was linked
+  // to — logged against them when the manager linked them on the talk.
+  toolboxTalks?: Array<{ id: string; topic: string; deliveredAt: string }>;
 }
 
 interface CommsData {
@@ -1054,6 +1057,35 @@ function ContractorCard({
             )}
           </div>
         </details>
+
+        {/* (May 2026 Keith request) Toolbox Talks — talks this
+            contractor was linked to on the site's toolbox-talk log. */}
+        {contractor.toolboxTalks && contractor.toolboxTalks.length > 0 && (
+          <details className="group">
+            <summary className="flex cursor-pointer items-center gap-2 px-4 py-3 sm:px-5 [&::-webkit-details-marker]:hidden">
+              <HardHat className="size-4 text-amber-600" />
+              <span className="text-xs font-semibold uppercase tracking-wider text-amber-700">
+                Toolbox Talks ({contractor.toolboxTalks.length})
+              </span>
+              <ChevronRight className="ml-auto size-3.5 text-muted-foreground transition-transform group-open:rotate-90" />
+            </summary>
+            <div className="space-y-1 px-4 pb-3 sm:px-5">
+              {contractor.toolboxTalks.map((t) => (
+                <div
+                  key={t.id}
+                  className="flex items-center justify-between gap-2 rounded-md bg-amber-50/60 px-3 py-1.5 text-xs"
+                >
+                  <span className="truncate font-medium text-slate-700">
+                    {t.topic}
+                  </span>
+                  <span className="shrink-0 text-[10px] text-muted-foreground">
+                    {format(parseISO(t.deliveredAt), "d MMM yy")}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </details>
+        )}
 
         {/* Drawings */}
         {contractor.drawings && contractor.drawings.length > 0 && (
