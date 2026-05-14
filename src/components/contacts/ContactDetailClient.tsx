@@ -208,7 +208,9 @@ export function ContactDetailClient({ contact, jobs, snags, documents, orders }:
           Back to Contacts
         </Link>
 
-        <div className="flex items-start justify-between gap-4">
+        {/* (May 2026 mobile sweep) Stack on mobile, row from sm: up —
+            matches the Site/Plot/Job detail headers (#182). */}
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
               <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-blue-100 text-blue-700">
@@ -243,7 +245,7 @@ export function ContactDetailClient({ contact, jobs, snags, documents, orders }:
               )}
             </div>
           </div>
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex items-center gap-2 sm:shrink-0">
             <Button
               variant="outline"
               size="sm"

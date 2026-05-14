@@ -1713,7 +1713,13 @@ export function TemplateEditor({
           </div>
         )}
 
-        <div className="flex items-start justify-between gap-4">
+        {/* (May 2026) Header stacks on mobile. Pre-fix it was always a
+            flex row with a `shrink-0` button group — on a phone the
+            buttons claimed their full width and crushed the title
+            column to near-zero, wrapping a long template name one word
+            per line down the whole screen. Now: column on mobile
+            (title full-width, buttons wrap below), row from sm: up. */}
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
           <div className="min-w-0 flex-1">
             {editingMeta ? (
               <div className="space-y-3">
@@ -1760,7 +1766,7 @@ export function TemplateEditor({
             ) : (
               <div>
                 <div className="flex flex-wrap items-center gap-3">
-                  <h2 className="text-2xl font-bold tracking-tight">
+                  <h2 className="text-2xl font-bold tracking-tight break-words min-w-0">
                     {template.name}
                   </h2>
                   {template.typeLabel && (
@@ -1793,7 +1799,7 @@ export function TemplateEditor({
             )}
           </div>
           {!editingMeta && (
-            <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+            <div className="flex flex-wrap items-center gap-1.5 sm:shrink-0">
               <Button
                 variant="outline"
                 size="sm"

@@ -336,12 +336,16 @@ export function SupplierDetailClient({ supplier: initial }: { supplier: Supplier
     <div className="space-y-4">
       {/* Header */}
       <div className="flex items-center gap-3">
-        <Button variant="ghost" size="icon" className="size-8" onClick={() => router.back()}>
+        <Button variant="ghost" size="icon" className="size-8 shrink-0" onClick={() => router.back()}>
           <ArrowLeft className="size-4" />
         </Button>
-        <div className="flex-1">
+        {/* (May 2026 mobile sweep) min-w-0 so this column can actually
+            shrink — without it the flex item floors at its content's
+            min-content width and a long supplier name pushes the Edit/
+            Archive buttons off-screen on a phone. */}
+        <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <h1 className="text-xl font-bold">{supplier.name}</h1>
+            <h1 className="text-xl font-bold break-words">{supplier.name}</h1>
             {supplier.type && (
               <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600">
                 {supplier.type}
