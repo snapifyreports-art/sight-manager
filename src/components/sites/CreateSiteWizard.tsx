@@ -59,6 +59,12 @@ interface TemplateOrder {
   orderWeekOffset: number;
   deliveryWeekOffset: number;
   items: TemplateOrderItem[];
+  // (May 2026 Keith bug report) Orders that already carry a supplier
+  // from the template don't need the wizard's supplier-mapping step —
+  // apply-template falls back to this id when no override is supplied
+  // (see apply-template-helpers.ts). The wizard previously ignored this
+  // field and prompted for EVERY order, even fully-configured ones.
+  supplierId: string | null;
 }
 
 interface TemplateJob {
@@ -110,6 +116,23 @@ interface Template {
    * from the initial fetch — they're already there.
    */
   variants?: TemplateVariant[];
+}
+
+/**
+ * True if a template has at least one material order with NO supplier
+ * assigned. Those are the only orders the wizard's supplier-mapping step
+ * needs to ask about — orders that already carry a `supplierId` are
+ * filled in automatically by apply-template-helpers.ts. If every order
+ * is already mapped, Step 3 is skipped entirely.
+ *
+ * (May 2026 Keith bug report) Pre-fix the gating checked only
+ * `orders.length > 0`, so a fully-configured template still forced the
+ * user through Step 3 with every dropdown blank.
+ */
+function templateHasUnmappedOrders(tpl: Template): boolean {
+  return flattenTemplateJobs(tpl.jobs).some((j) =>
+    j.orders.some((o) => !o.supplierId),
+  );
 }
 
 interface Supplier {
@@ -618,29 +641,30 @@ export function CreateSiteWizard({
   const totalPlots = plotBatches.reduce((sum, b) => sum + b.plots.length, 0);
 
   // (May 2026 Keith bug report) Check if any template batch has orders
-  // (needs supplier mapping). Walk children too — sub-jobs carry orders.
-  const templateBatchesWithOrders = plotBatches.filter((b) => {
+  // that still NEED a supplier. Templates whose every order already has
+  // a supplier set (e.g. configured in Settings → Templates) skip Step 3
+  // — apply-template uses the template's own supplierId. Pre-fix the
+  // wizard prompted for every order regardless of whether it was already
+  // configured. Walk children too — sub-jobs carry orders.
+  const templateBatchesNeedingSuppliers = plotBatches.filter((b) => {
     if (b.mode !== "template") return false;
     const tpl = templates.find((t) => t.id === b.templateId);
     if (!tpl) return false;
-    return flattenTemplateJobs(tpl.jobs).some((j) => j.orders.length > 0);
+    return templateHasUnmappedOrders(tpl);
   });
 
-  const hasTemplateOrders = templateBatchesWithOrders.length > 0;
+  const needsSupplierStep = templateBatchesNeedingSuppliers.length > 0;
 
-  // Get unique templates with orders for supplier mapping step.
+  // Get unique templates with un-mapped orders for the supplier step.
   // (May 2026 Keith bug report) Use flattenTemplateJobs so sub-job
-  // orders also gate inclusion.
-  const uniqueTemplatesWithOrders = (() => {
+  // orders also gate inclusion, and only count orders missing a supplier.
+  const uniqueTemplatesNeedingSuppliers = (() => {
     const seen = new Set<string>();
     const result: { template: Template; batchLabels: string[] }[] = [];
     for (const batch of plotBatches) {
       if (batch.mode !== "template" || seen.has(batch.templateId)) continue;
       const tpl = templates.find((t) => t.id === batch.templateId);
-      if (
-        !tpl ||
-        !flattenTemplateJobs(tpl.jobs).some((j) => j.orders.length > 0)
-      ) {
+      if (!tpl || !templateHasUnmappedOrders(tpl)) {
         continue;
       }
       seen.add(batch.templateId);
@@ -702,15 +726,15 @@ export function CreateSiteWizard({
       setPlotBatches(allBatches);
       resetBatchForm();
       setShowAddForm(false);
-      // Check if any template batch has orders needing supplier mapping
-      // (May 2026 Keith bug report) Walk top-level jobs AND their
-      // children. Pre-fix templates with orders on sub-jobs skipped
-      // mapping entirely and every order was silently dropped.
+      // Check if any template batch has orders that still need a
+      // supplier. (May 2026 Keith bug report) `templateHasUnmappedOrders`
+      // walks the full tree AND ignores orders that already carry a
+      // supplier — pre-fix this prompted for every order regardless.
       const needsSupplierMapping = allBatches.some((b) => {
         if (b.mode !== "template") return false;
         const tpl = templates.find((t) => t.id === b.templateId);
         if (!tpl) return false;
-        return flattenTemplateJobs(tpl.jobs).some((j) => j.orders.length > 0);
+        return templateHasUnmappedOrders(tpl);
       });
       if (needsSupplierMapping) {
         setStep("supplier-mapping");
@@ -724,7 +748,7 @@ export function CreateSiteWizard({
       setBatchError("Please complete the plot group or cancel the form.");
       return;
     }
-    if (hasTemplateOrders) {
+    if (needsSupplierStep) {
       setStep("supplier-mapping");
     } else {
       handleSubmit();
@@ -938,7 +962,7 @@ export function CreateSiteWizard({
             active={step === "plot-batches"}
             done={step === "supplier-mapping"}
           />
-          {hasTemplateOrders && (
+          {needsSupplierStep && (
             <>
               <div className="h-px flex-1 bg-border" />
               <StepDot
@@ -1481,7 +1505,7 @@ export function CreateSiteWizard({
                       "Create Site"
                     )}
                   </Button>
-                ) : hasTemplateOrders ? (
+                ) : needsSupplierStep ? (
                   <Button onClick={handleStep2Next} disabled={submitting}>
                     Next: Map Suppliers
                     <ChevronRight className="size-4" />
@@ -1525,13 +1549,15 @@ export function CreateSiteWizard({
             <DialogHeader>
               <DialogTitle>Map Suppliers</DialogTitle>
               <DialogDescription>
-                Assign suppliers to material orders. These apply to all plots
-                using each template.
+                These orders have no supplier set in their template. Assign one
+                here, or leave it blank to sort out later. Orders that already
+                have a supplier in the template aren&apos;t shown — they&apos;re
+                applied automatically.
               </DialogDescription>
             </DialogHeader>
 
             <div className="max-h-[50vh] space-y-4 overflow-y-auto py-2">
-              {uniqueTemplatesWithOrders.map(({ template, batchLabels }) => (
+              {uniqueTemplatesNeedingSuppliers.map(({ template, batchLabels }) => (
                 <div key={template.id} className="space-y-2">
                   <div>
                     <p className="text-sm font-medium">{template.name}</p>
@@ -1539,13 +1565,17 @@ export function CreateSiteWizard({
                       Used by {batchLabels.join(", ")}
                     </p>
                   </div>
-                  {/* (May 2026 Keith bug report) Walk the full tree.
-                      Pre-fix this was `template.jobs.filter(...)` which
-                      missed every sub-job order. */}
+                  {/* (May 2026 Keith bug report) Walk the full tree and
+                      show ONLY orders with no supplier. Orders already
+                      mapped in the template are applied automatically by
+                      apply-template — listing them here with a blank
+                      dropdown made it look like nothing was assigned. */}
                   {flattenTemplateJobs(template.jobs)
-                    .filter((j) => j.orders.length > 0)
+                    .filter((j) => j.orders.some((o) => !o.supplierId))
                     .flatMap((job) =>
-                      job.orders.map((order) => (
+                      job.orders
+                        .filter((order) => !order.supplierId)
+                        .map((order) => (
                         <div
                           key={order.id}
                           className="rounded-lg border bg-slate-50/50 p-3"
