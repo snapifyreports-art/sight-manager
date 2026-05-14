@@ -222,6 +222,100 @@ async function checkLiveTemplateHouseValues() {
   );
 }
 
+async function checkDeliveredOrdersHaveDate() {
+  // Supplier-performance + cash-flow + the Story tab all read
+  // deliveredDate — a DELIVERED order with none silently corrupts them.
+  const n = await prisma.materialOrder.count({
+    where: { status: "DELIVERED", deliveredDate: null },
+  });
+  record(
+    "Delivered orders carry a delivery date",
+    n > 0 ? "fail" : "pass",
+    n > 0
+      ? `${n} DELIVERED order(s) have no deliveredDate — reports that read it will be wrong.`
+      : "Every delivered order has a delivery date.",
+  );
+}
+
+async function checkNegativeOrderItems() {
+  const n = await prisma.orderItem.count({
+    where: { OR: [{ quantity: { lt: 0 } }, { unitCost: { lt: 0 } }] },
+  });
+  record(
+    "No negative order-item quantities / costs",
+    n > 0 ? "fail" : "pass",
+    n > 0
+      ? `${n} order item(s) have a negative quantity or unit cost — they'll poison budget + cash-flow totals.`
+      : "Every order item has a non-negative quantity and cost.",
+  );
+}
+
+async function checkSiteCompletedAt() {
+  // (Site.completedAt batch) status COMPLETED ⇔ completedAt set.
+  const completedNoDate = await prisma.site.count({
+    where: { status: "COMPLETED", completedAt: null },
+  });
+  const dateNotCompleted = await prisma.site.count({
+    where: { status: { not: "COMPLETED" }, completedAt: { not: null } },
+  });
+  const total = completedNoDate + dateNotCompleted;
+  record(
+    "Site completedAt matches status",
+    total > 0 ? "warn" : "pass",
+    total > 0
+      ? `${completedNoDate} COMPLETED site(s) with no completedAt, ${dateNotCompleted} non-COMPLETED with one set.`
+      : "Every site's completedAt agrees with its status.",
+  );
+}
+
+async function checkResolvedSnagsHaveDate() {
+  const n = await prisma.snag.count({
+    where: { status: { in: ["RESOLVED", "CLOSED"] }, resolvedAt: null },
+  });
+  record(
+    "Resolved snags carry a resolved date",
+    n > 0 ? "warn" : "pass",
+    n > 0
+      ? `${n} RESOLVED/CLOSED snag(s) have no resolvedAt — re-inspection timing + the Story tab read it.`
+      : "Every resolved snag has a resolved date.",
+  );
+}
+
+async function checkPlotProvenance() {
+  // A plot built from a variant must also point at the base template.
+  const n = await prisma.plot.count({
+    where: { sourceVariantId: { not: null }, sourceTemplateId: null },
+  });
+  record(
+    "Plot template provenance consistent",
+    n > 0 ? "warn" : "pass",
+    n > 0
+      ? `${n} plot(s) reference a variant but no base template.`
+      : "Every plot with a source variant also records its base template.",
+  );
+}
+
+async function checkCompletionCacheSanity() {
+  // buildCompletePercent is a cache the heatmap + plot cards trust. A
+  // plot pinned at 100% with a non-COMPLETE leaf job means the cache
+  // drifted — the reconcile cron fixes it, this just surfaces it.
+  const n = await prisma.plot.count({
+    where: {
+      buildCompletePercent: 100,
+      jobs: {
+        some: { children: { none: {} }, status: { not: "COMPLETED" } },
+      },
+    },
+  });
+  record(
+    "Plot completion cache not drifted",
+    n > 0 ? "warn" : "pass",
+    n > 0
+      ? `${n} plot(s) cached at 100% still have unfinished leaf jobs — reconcile drift.`
+      : "Every 100%-cached plot genuinely has all leaf jobs complete.",
+  );
+}
+
 async function main() {
   const checks = [
     checkSchemaColumns,
@@ -231,6 +325,12 @@ async function main() {
     checkBuildPercentRange,
     checkDelayReasonSeeds,
     checkLiveTemplateHouseValues,
+    checkDeliveredOrdersHaveDate,
+    checkNegativeOrderItems,
+    checkSiteCompletedAt,
+    checkResolvedSnagsHaveDate,
+    checkPlotProvenance,
+    checkCompletionCacheSanity,
   ];
 
   try {
