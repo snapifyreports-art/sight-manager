@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useDevDate } from "@/lib/dev-date-context";
-import { AlertTriangle, Bug, Loader2, TrendingUp, TrendingDown, Minus, PauseCircle } from "lucide-react";
+import { AlertTriangle, Bug, Loader2, Package, TrendingUp, TrendingDown, Minus, PauseCircle } from "lucide-react";
 
 interface HeatmapPlot {
   id: string;
@@ -15,6 +15,9 @@ interface HeatmapPlot {
   completedJobs: number;
   overdueJobCount: number;
   maxOverdueDays: number;
+  // (May 2026 Keith request) Overdue orders on this plot — late to send
+  // or ORDERED past expected delivery. Shown as a badge on the tile.
+  overdueOrderCount: number;
   openSnagCount: number;
   ragStatus: "green" | "amber" | "red" | "grey";
 }
@@ -104,6 +107,15 @@ export function SiteHeatmap({ siteId }: { siteId: string }) {
                     <span className="flex items-center gap-0.5 rounded-full bg-red-100 px-1 py-0.5 text-[9px] font-semibold text-red-600">
                       <AlertTriangle className="size-2.5" />
                       {plot.overdueJobCount}
+                    </span>
+                  )}
+                  {plot.overdueOrderCount > 0 && (
+                    <span
+                      className="flex items-center gap-0.5 rounded-full bg-blue-100 px-1 py-0.5 text-[9px] font-semibold text-blue-600"
+                      title="Overdue orders — late to send or past expected delivery"
+                    >
+                      <Package className="size-2.5" />
+                      {plot.overdueOrderCount}
                     </span>
                   )}
                   {plot.openSnagCount > 0 && (

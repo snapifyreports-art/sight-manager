@@ -16,6 +16,7 @@ import {
   ChevronDown,
   ChevronRight,
   HardHat,
+  Package,
 } from "lucide-react";
 import { format } from "date-fns";
 import { LatenessSummary } from "@/components/lateness/LatenessSummary";
@@ -127,6 +128,15 @@ interface StoryData {
     body: string;
     authorName?: string;
   }>;
+  // (May 2026 Keith request) Materials side of the build story.
+  orders: {
+    totalOrders: number;
+    delivered: number;
+    outstanding: number;
+    sentLate: number;
+    deliveredLate: number;
+    topSuppliers: Array<{ name: string; orderCount: number }>;
+  };
 }
 
 const REASON_LABELS: Record<string, { label: string; emoji: string }> = {
@@ -489,6 +499,76 @@ export function SiteStoryPanel({ siteId }: { siteId: string }) {
                   </li>
                 ))}
               </ul>
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* ─── Materials & orders ───────────────────────────── */}
+      {/* (May 2026 Keith request) The materials side of the build —
+          what was ordered, what arrived, how it performed. */}
+      {data.orders.totalOrders > 0 && (
+        <section className="rounded-xl border bg-white p-5">
+          <div className="mb-3 flex items-center gap-2">
+            <Package className="size-4 text-blue-600" aria-hidden />
+            <h3 className="text-sm font-semibold text-slate-700">
+              Materials &amp; orders
+            </h3>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                Orders total
+              </p>
+              <p className="mt-0.5 text-2xl font-bold text-slate-800">
+                {data.orders.totalOrders}
+              </p>
+              <p className="text-[11px] text-slate-500">
+                {data.orders.delivered} delivered · {data.orders.outstanding}{" "}
+                outstanding
+              </p>
+            </div>
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-amber-700">
+                Sent late
+              </p>
+              <p className="mt-0.5 text-2xl font-bold text-amber-800">
+                {data.orders.sentLate}
+              </p>
+              <p className="text-[11px] text-amber-700">
+                orders went out after their planned date
+              </p>
+            </div>
+            <div className="rounded-lg border border-red-200 bg-red-50 p-3">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-red-700">
+                Delivered late
+              </p>
+              <p className="mt-0.5 text-2xl font-bold text-red-800">
+                {data.orders.deliveredLate}
+              </p>
+              <p className="text-[11px] text-red-700">
+                arrived after the promised date
+              </p>
+            </div>
+          </div>
+
+          {data.orders.topSuppliers.length > 0 && (
+            <div className="mt-4">
+              <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                Busiest suppliers
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {data.orders.topSuppliers.map((s) => (
+                  <span
+                    key={s.name}
+                    className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs"
+                  >
+                    <span className="font-medium">{s.name}</span>
+                    <span className="text-slate-500">·{s.orderCount}</span>
+                  </span>
+                ))}
+              </div>
             </div>
           )}
         </section>

@@ -76,6 +76,12 @@ interface ReportData {
     job: string;
     plot: { plotNumber: string | null; name: string };
   }>;
+  // (May 2026 Keith request) Current order state — action-needed view.
+  orders: {
+    toSend: number;
+    overdueToSend: number;
+    overdueDelivery: number;
+  };
   activity: Array<{
     type: string;
     description: string;
@@ -439,6 +445,52 @@ export function WeeklySiteReport({ siteId }: WeeklySiteReportProps) {
       })()}
 
       <div className="grid gap-4 md:grid-cols-2">
+        {/* (May 2026 Keith request) Order state — what still needs
+            sending and what's already slipped, alongside the existing
+            "delivered/expected this week" list. */}
+        {(data.orders.toSend > 0 ||
+          data.orders.overdueToSend > 0 ||
+          data.orders.overdueDelivery > 0) && (
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="flex items-center gap-2 text-sm">
+                <Package className="size-4 text-blue-600" />
+                Orders — Needs Attention
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-1.5 text-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Still to send</span>
+                  <span className="font-semibold">{data.orders.toSend}</span>
+                </div>
+                {data.orders.overdueToSend > 0 && (
+                  <div className="flex items-center justify-between text-red-600">
+                    <span>Overdue to send</span>
+                    <span className="font-semibold">
+                      {data.orders.overdueToSend}
+                    </span>
+                  </div>
+                )}
+                {data.orders.overdueDelivery > 0 && (
+                  <div className="flex items-center justify-between text-amber-600">
+                    <span>Deliveries overdue</span>
+                    <span className="font-semibold">
+                      {data.orders.overdueDelivery}
+                    </span>
+                  </div>
+                )}
+                {data.orders.overdueToSend === 0 &&
+                  data.orders.overdueDelivery === 0 && (
+                    <p className="text-xs text-emerald-600">
+                      Nothing overdue — orders on track.
+                    </p>
+                  )}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Deliveries this week */}
         {data.deliveries.length > 0 && (
           <Card>

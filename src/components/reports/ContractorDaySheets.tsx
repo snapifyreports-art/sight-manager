@@ -64,6 +64,9 @@ interface JobItem {
     supplier: string;
     expectedDate: string | null;
   }>;
+  // (May 2026 Keith request) Material heads-up for this job — orders
+  // still to send + deliveries already overdue.
+  materialAlert: { toOrder: number; overdueDelivery: number };
 }
 
 interface DaySheetsData {
@@ -241,9 +244,37 @@ function JobRow({
               <Package className="size-3" />
               <span>
                 Delivery: {d.items || "Materials"} from {d.supplier}
+                {d.expectedDate && (
+                  <span className="text-muted-foreground">
+                    {" "}
+                    · {format(new Date(d.expectedDate), "d MMM")}
+                  </span>
+                )}
               </span>
             </div>
           ))}
+        </div>
+      )}
+      {/* (May 2026 Keith request) Material heads-up — orders still to
+          send / deliveries overdue for this job, so the day sheet
+          flags material risk and not just what lands today. */}
+      {(job.materialAlert.toOrder > 0 ||
+        job.materialAlert.overdueDelivery > 0) && (
+        <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+          {job.materialAlert.toOrder > 0 && (
+            <span className="flex items-center gap-1 text-amber-600">
+              <Package className="size-3" />
+              {job.materialAlert.toOrder} material
+              {job.materialAlert.toOrder === 1 ? "" : "s"} still to order
+            </span>
+          )}
+          {job.materialAlert.overdueDelivery > 0 && (
+            <span className="flex items-center gap-1 text-red-600">
+              <Clock className="size-3" />
+              {job.materialAlert.overdueDelivery} delivery
+              {job.materialAlert.overdueDelivery === 1 ? "" : "ies"} overdue
+            </span>
+          )}
         </div>
       )}
     </div>

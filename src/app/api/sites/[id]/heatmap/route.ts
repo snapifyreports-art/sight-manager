@@ -41,6 +41,17 @@ export async function GET(
           id: true,
           status: true,
           endDate: true,
+          // (May 2026 Keith request) Orders on the heatmap — pull each
+          // job's orders so we can flag plots with overdue orders
+          // (late to send, or ORDERED past expected delivery).
+          orders: {
+            select: {
+              status: true,
+              dateOfOrder: true,
+              expectedDeliveryDate: true,
+              deliveredDate: true,
+            },
+          },
         },
         // Leaf-only — parent stage rollups would double-count.
         where: { children: { none: {} } },
@@ -69,6 +80,20 @@ export async function GET(
       const days = workingDaysEndOverdue(j, today);
       return days > max ? days : max;
     }, 0);
+
+    // (May 2026 Keith request) Overdue-order count per plot — PENDING
+    // orders past their send date, or ORDERED orders past their
+    // expected delivery and not yet received. Surfaced as a badge on
+    // the heatmap tile (doesn't drive the RAG colour for now).
+    const overdueOrderCount = plot.jobs
+      .flatMap((j) => j.orders)
+      .filter((o) => {
+        if (o.status === "PENDING") return o.dateOfOrder < today;
+        if (o.status === "ORDERED" && !o.deliveredDate) {
+          return !!o.expectedDeliveryDate && o.expectedDeliveryDate < today;
+        }
+        return false;
+      }).length;
 
     const calcPercent = plot.buildCompletePercent;
     let ragStatus: "green" | "amber" | "red" | "grey" = "grey";
@@ -106,6 +131,7 @@ export async function GET(
       completedJobs,
       overdueJobCount,
       maxOverdueDays,
+      overdueOrderCount,
       openSnagCount: plot._count.snags,
       ragStatus,
     };

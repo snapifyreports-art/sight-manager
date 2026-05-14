@@ -167,6 +167,32 @@ export async function GET(
     }),
   ]);
 
+  // (May 2026 Keith request) Orders need a stronger showing in the
+  // weekly report — not just "placed this week" + deliveries, but the
+  // action-needed state: how many are still to send, and how many have
+  // already slipped (late to send, or ORDERED past expected delivery).
+  const [ordersToSend, ordersOverdueToSend, ordersOverdueDelivery] =
+    await Promise.all([
+      prisma.materialOrder.count({
+        where: { job: { plot: { siteId: id } }, status: "PENDING" },
+      }),
+      prisma.materialOrder.count({
+        where: {
+          job: { plot: { siteId: id } },
+          status: "PENDING",
+          dateOfOrder: { lt: today },
+        },
+      }),
+      prisma.materialOrder.count({
+        where: {
+          job: { plot: { siteId: id } },
+          status: "ORDERED",
+          deliveredDate: null,
+          expectedDeliveryDate: { lt: today },
+        },
+      }),
+    ]);
+
   if (!site) {
     return NextResponse.json({ error: "Site not found" }, { status: 404 });
   }
@@ -264,6 +290,14 @@ export async function GET(
       job: d.job?.name ?? "",
       plot: d.job?.plot ?? { plotNumber: null, name: "" },
     })),
+
+    // (May 2026 Keith request) Current order state — what still needs
+    // sending and what's already slipped.
+    orders: {
+      toSend: ordersToSend,
+      overdueToSend: ordersOverdueToSend,
+      overdueDelivery: ordersOverdueDelivery,
+    },
 
     activity: eventsThisWeek.map((e) => ({
       type: e.type,

@@ -75,6 +75,21 @@ export interface SiteStory {
   plotStories: PlotStory[];
   contractorPerformance: ContractorPerf[];
   quoteBoard: QuoteEntry[];
+  // (May 2026 Keith request) Orders belong in the Story too — what was
+  // ordered across the build, what arrived, and how the materials side
+  // performed (late sends, late deliveries, busiest suppliers).
+  orders: {
+    totalOrders: number;
+    delivered: number;
+    /** PENDING + ORDERED-but-not-delivered. */
+    outstanding: number;
+    /** Times an order went out after its planned send date — counted
+     *  from the ORDER_SEND_OVERDUE lateness events. */
+    sentLate: number;
+    /** Orders whose deliveredDate landed after the expected date. */
+    deliveredLate: number;
+    topSuppliers: { name: string; orderCount: number }[];
+  };
 }
 
 export interface SiteMilestone {
@@ -217,6 +232,49 @@ export async function buildSiteStory(
   });
 
   const plotIds = plots.map((p) => p.id);
+
+  // ─── Orders / materials ─────────────────────────────────────────────
+  // (May 2026 Keith request) The Story covers the materials side too:
+  // what was ordered, what arrived, how it performed. "Sent late" comes
+  // from the ORDER_SEND_OVERDUE lateness events (the order's own
+  // dateOfOrder is overwritten on send, so the lateness row is the SSOT
+  // for "this went out late").
+  const storyOrders =
+    plotIds.length === 0
+      ? []
+      : await tx.materialOrder.findMany({
+          where: { job: { plotId: { in: plotIds } } },
+          select: {
+            status: true,
+            expectedDeliveryDate: true,
+            deliveredDate: true,
+            supplier: { select: { name: true } },
+          },
+        });
+  const orderSentLateCount = await tx.latenessEvent.count({
+    where: { siteId, kind: "ORDER_SEND_OVERDUE" },
+  });
+  const ordersDelivered = storyOrders.filter(
+    (o) => o.status === "DELIVERED",
+  ).length;
+  const ordersOutstanding = storyOrders.filter(
+    (o) => o.status === "PENDING" || o.status === "ORDERED",
+  ).length;
+  const ordersDeliveredLate = storyOrders.filter(
+    (o) =>
+      !!o.deliveredDate &&
+      !!o.expectedDeliveryDate &&
+      o.deliveredDate > o.expectedDeliveryDate,
+  ).length;
+  const supplierOrderCounts = new Map<string, number>();
+  for (const o of storyOrders) {
+    const name = o.supplier?.name ?? "Unknown supplier";
+    supplierOrderCounts.set(name, (supplierOrderCounts.get(name) ?? 0) + 1);
+  }
+  const topStorySuppliers = Array.from(supplierOrderCounts.entries())
+    .map(([name, orderCount]) => ({ name, orderCount }))
+    .sort((a, b) => b.orderCount - a.orderCount)
+    .slice(0, 5);
 
   // ─── Site-level aggregates ──────────────────────────────────────────
   const allLeafJobs = plots.flatMap((p) => p.jobs);
@@ -803,5 +861,13 @@ export async function buildSiteStory(
     plotStories,
     contractorPerformance,
     quoteBoard,
+    orders: {
+      totalOrders: storyOrders.length,
+      delivered: ordersDelivered,
+      outstanding: ordersOutstanding,
+      sentLate: orderSentLateCount,
+      deliveredLate: ordersDeliveredLate,
+      topSuppliers: topStorySuppliers,
+    },
   };
 }

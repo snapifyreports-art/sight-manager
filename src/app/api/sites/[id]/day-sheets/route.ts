@@ -76,16 +76,19 @@ export async function GET(
           },
         },
       },
+      // (May 2026 Keith request) Pull ALL the job's orders, not just
+      // ORDERED-and-due-today. The day sheet still leads with deliveries
+      // expected today, but now also flags materials still to order /
+      // deliveries overdue so a contractor isn't blindsided on the day.
       orders: {
-        where: {
-          expectedDeliveryDate: { gte: dayStart, lte: dayEnd },
-          status: "ORDERED",
-        },
         select: {
           id: true,
           itemsDescription: true,
-          supplier: { select: { name: true } },
+          status: true,
+          dateOfOrder: true,
           expectedDeliveryDate: true,
+          deliveredDate: true,
+          supplier: { select: { name: true } },
         },
       },
     },
@@ -115,21 +118,43 @@ export async function GET(
 
   const unassigned: typeof formattedJobs = [];
 
-  const formattedJobs = jobs.map((j) => ({
-    id: j.id,
-    name: j.name,
-    status: j.status,
-    description: j.description,
-    startDate: j.startDate?.toISOString() ?? null,
-    endDate: j.endDate?.toISOString() ?? null,
-    plot: j.plot,
-    deliveries: j.orders.map((o) => ({
-      id: o.id,
-      items: o.itemsDescription,
-      supplier: o.supplier.name,
-      expectedDate: o.expectedDeliveryDate?.toISOString() ?? null,
-    })),
-  }));
+  const formattedJobs = jobs.map((j) => {
+    // Deliveries expected on this day — the day sheet's headline order info.
+    const deliveriesToday = j.orders.filter(
+      (o) =>
+        o.status === "ORDERED" &&
+        !!o.expectedDeliveryDate &&
+        o.expectedDeliveryDate >= dayStart &&
+        o.expectedDeliveryDate <= dayEnd,
+    );
+    // (May 2026 Keith request) Heads-up counts: materials still to send,
+    // and deliveries already overdue — so the day sheet flags material
+    // risk on the job, not just what happens to land today.
+    const toOrder = j.orders.filter((o) => o.status === "PENDING").length;
+    const overdueDelivery = j.orders.filter(
+      (o) =>
+        o.status === "ORDERED" &&
+        !o.deliveredDate &&
+        !!o.expectedDeliveryDate &&
+        o.expectedDeliveryDate < dayStart,
+    ).length;
+    return {
+      id: j.id,
+      name: j.name,
+      status: j.status,
+      description: j.description,
+      startDate: j.startDate?.toISOString() ?? null,
+      endDate: j.endDate?.toISOString() ?? null,
+      plot: j.plot,
+      deliveries: deliveriesToday.map((o) => ({
+        id: o.id,
+        items: o.itemsDescription,
+        supplier: o.supplier.name,
+        expectedDate: o.expectedDeliveryDate?.toISOString() ?? null,
+      })),
+      materialAlert: { toOrder, overdueDelivery },
+    };
+  });
 
   for (let i = 0; i < jobs.length; i++) {
     const job = jobs[i];
