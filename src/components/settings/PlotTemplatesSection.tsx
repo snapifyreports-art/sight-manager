@@ -14,6 +14,7 @@ import {
   Search,
   X,
   ArrowLeftRight,
+  Layers,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -732,6 +733,29 @@ export function PlotTemplatesSection({
                       </span>
                     )}
                   </div>
+
+                  {/* (May 2026 Keith request) List the variants the
+                      template actually contains — chips off the real
+                      TemplateVariant rows, so the card shows what's in
+                      it rather than relying on the name string. */}
+                  {template.variants && template.variants.length > 0 && (
+                    <div className="mt-2 flex flex-wrap items-center gap-1">
+                      <span className="flex items-center gap-1 text-[11px] font-medium text-muted-foreground">
+                        <Layers className="size-3.5" />
+                        {template.variants.length} variant
+                        {template.variants.length === 1 ? "" : "s"}:
+                      </span>
+                      {template.variants.map((v) => (
+                        <span
+                          key={v.id}
+                          className="rounded-full border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-700"
+                          title={v.description ?? undefined}
+                        >
+                          {v.name}
+                        </span>
+                      ))}
+                    </div>
+                  )}
 
                   {/* Mini timeline preview */}
                   {template.jobs.length > 0 && totalWeeks > 0 && (
