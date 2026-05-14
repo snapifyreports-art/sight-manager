@@ -30,6 +30,11 @@ export async function GET(
       plotNumber: true,
       name: true,
       houseType: true,
+      // (May 2026 Keith request) House value — the plot's target build
+      // cost + the sale price (GDV). The Budget report layers these on
+      // top of the existing materials-budget-vs-actual view.
+      buildBudget: true,
+      salePrice: true,
       materials: {
         select: {
           id: true,
@@ -233,6 +238,22 @@ export async function GET(
 
     const plotVariance = plotCommitted - plotBudget;
 
+    // (May 2026 Keith request) House-value layer — the plot's own
+    // target build cost + sale price, with the planned margin derived
+    // (salePrice − buildBudget). Kept separate from the materials
+    // budget-vs-actual above: `buildBudget` is the whole-house cost
+    // target, not just the materials line.
+    const buildBudget = plot.buildBudget ?? null;
+    const salePrice = plot.salePrice ?? null;
+    const expectedMargin =
+      buildBudget != null && salePrice != null
+        ? Math.round((salePrice - buildBudget) * 100) / 100
+        : null;
+    const expectedMarginPercent =
+      expectedMargin != null && salePrice
+        ? Math.round((expectedMargin / salePrice) * 100)
+        : null;
+
     return {
       plotId: plot.id,
       plotNumber: plot.plotNumber,
@@ -251,6 +272,10 @@ export async function GET(
           : plotCommitted > 0
             ? 100
             : 0,
+      buildBudget,
+      salePrice,
+      expectedMargin,
+      expectedMarginPercent,
       jobs: jobBreakdown,
       manualMaterials: manualBreakdown,
     };
@@ -263,6 +288,19 @@ export async function GET(
   const sitePending = plotReports.reduce((sum, p) => sum + p.pending, 0);
   const siteActual = siteCommitted; // backward compat alias
   const siteVariance = siteCommitted - siteBudget;
+
+  // (May 2026 Keith request) House-value site totals — total GDV across
+  // every plot that has a sale price, total target build cost, and the
+  // planned margin between them.
+  const siteBuildBudget = plotReports.reduce(
+    (sum, p) => sum + (p.buildBudget ?? 0),
+    0,
+  );
+  const siteSalePrice = plotReports.reduce(
+    (sum, p) => sum + (p.salePrice ?? 0),
+    0,
+  );
+  const siteExpectedMargin = siteSalePrice - siteBuildBudget;
 
   // Top cost overruns
   const allJobVariances = plotReports.flatMap((p) =>
@@ -294,6 +332,11 @@ export async function GET(
       plotsOverBudget: plotReports.filter((p) => p.variance > 0).length,
       plotsUnderBudget: plotReports.filter((p) => p.variance < 0).length,
       plotsOnBudget: plotReports.filter((p) => p.variance === 0).length,
+      // (May 2026 Keith request) House-value roll-up.
+      totalBuildBudget: Math.round(siteBuildBudget * 100) / 100,
+      totalSalePrice: Math.round(siteSalePrice * 100) / 100,
+      totalExpectedMargin: Math.round(siteExpectedMargin * 100) / 100,
+      plotsWithValue: plotReports.filter((p) => p.salePrice != null).length,
     },
     topOverruns: allJobVariances.slice(0, 10),
     plots: plotReports,

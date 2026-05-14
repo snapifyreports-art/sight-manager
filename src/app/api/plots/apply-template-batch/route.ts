@@ -99,6 +99,12 @@ export async function POST(request: NextRequest) {
   // Variant resolution (May 2026 full-fat variants rework). Same flow
   // as apply-template (single): variants own full data; null = base.
   let resolvedVariantId: string | null = null;
+  // (May 2026 Keith request) Variant house-value figures for the
+  // per-plot snapshot below.
+  let resolvedVariant: {
+    buildBudget: number | null;
+    salePrice: number | null;
+  } | null = null;
   if (variantId) {
     const variant = await prisma.templateVariant.findUnique({
       where: { id: variantId },
@@ -110,6 +116,10 @@ export async function POST(request: NextRequest) {
       );
     }
     resolvedVariantId = variant.id;
+    resolvedVariant = {
+      buildBudget: variant.buildBudget,
+      salePrice: variant.salePrice,
+    };
   }
 
   const [scopedJobs, scopedMaterials, scopedDocuments] = await Promise.all([
@@ -217,6 +227,12 @@ export async function POST(request: NextRequest) {
             houseType: template.typeLabel || null,
             sourceTemplateId: template.id,
             sourceVariantId: resolvedVariantId,
+            // (May 2026 Keith request) Snapshot house value — variant
+            // figures win, falling back to the base template.
+            buildBudget:
+              resolvedVariant?.buildBudget ?? template.buildBudget ?? null,
+            salePrice:
+              resolvedVariant?.salePrice ?? template.salePrice ?? null,
             // (#172) Auto-generate customer share link at create time.
             shareToken: randomBytes(24).toString("base64url"),
             shareEnabled: true,

@@ -68,6 +68,10 @@ export interface TemplateVariantData {
   name: string;
   description: string | null;
   sortOrder: number;
+  // (May 2026 Keith request) Per-variant house value — variants are
+  // different sizes, so each carries its own target build cost + GDV.
+  buildBudget?: number | null;
+  salePrice?: number | null;
   // Deprecated post-May-2026 rework — variants now own full data
   // (jobs/materials/documents with variantId set), not overrides.
   // Fields kept optional for any straggling consumer.
@@ -100,6 +104,11 @@ export interface TemplateData {
   typeLabel: string | null;
   /** Draft templates are hidden from the apply-to-plot picker. */
   isDraft: boolean;
+  // (May 2026 Keith request) Base/default house value. Variants
+  // override per size; a template can't go live until the base + every
+  // variant carry both figures.
+  buildBudget?: number | null;
+  salePrice?: number | null;
   createdAt: string;
   updatedAt: string;
   jobs: TemplateJobData[];

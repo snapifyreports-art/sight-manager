@@ -242,35 +242,48 @@ export function TemplateVariantsSection({
       ) : (
         <div className="grid gap-2 sm:grid-cols-2">
           {variants.map((v) => (
-            <button
+            <div
               key={v.id}
-              type="button"
-              onClick={() => onOpenVariant(v.id)}
-              className="group flex items-center gap-3 rounded-lg border bg-white p-3 text-left transition-all hover:-translate-y-0.5 hover:shadow-sm"
+              className="overflow-hidden rounded-lg border bg-white transition-all hover:shadow-sm"
             >
-              <Layers className="size-4 shrink-0 text-blue-600" />
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium">{v.name}</p>
-                {v.description && (
-                  <p className="line-clamp-1 text-[11px] text-muted-foreground">
-                    {v.description}
-                  </p>
-                )}
-                <SummaryLine summary={counts[v.id]} />
-              </div>
               <button
                 type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleDelete(v);
-                }}
-                className="rounded p-1 text-muted-foreground hover:bg-red-50 hover:text-red-600"
-                title="Delete variant"
+                onClick={() => onOpenVariant(v.id)}
+                className="group flex w-full items-center gap-3 p-3 text-left"
               >
-                <Trash2 className="size-3.5" />
+                <Layers className="size-4 shrink-0 text-blue-600" />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium">{v.name}</p>
+                  {v.description && (
+                    <p className="line-clamp-1 text-[11px] text-muted-foreground">
+                      {v.description}
+                    </p>
+                  )}
+                  <SummaryLine summary={counts[v.id]} />
+                </div>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleDelete(v);
+                  }}
+                  className="rounded p-1 text-muted-foreground hover:bg-red-50 hover:text-red-600"
+                  title="Delete variant"
+                >
+                  <Trash2 className="size-3.5" />
+                </button>
+                <ChevronRight className="size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
               </button>
-              <ChevronRight className="size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
-            </button>
+              {/* (May 2026 Keith request) Per-variant house value —
+                  variants are different sizes, so each carries its own
+                  build budget + sale price. Required before the
+                  template can be marked live. */}
+              <VariantValueRow
+                templateId={template.id}
+                variant={v}
+                onSaved={reload}
+              />
+            </div>
           ))}
         </div>
       )}
@@ -428,6 +441,99 @@ async function fetchSummary(
   } catch {
     return { jobs: 0, orders: 0, materials: 0, documents: 0, totalDays: 0 };
   }
+}
+
+/**
+ * (May 2026 Keith request) Inline house-value editor on each variant
+ * card. Saves on blur via the variant PATCH route. Both figures are
+ * required before the parent template can be marked live — the missing
+ * hint nudges the user; the server is the real gate.
+ */
+function VariantValueRow({
+  templateId,
+  variant,
+  onSaved,
+}: {
+  templateId: string;
+  variant: TemplateVariantData;
+  onSaved: () => void;
+}) {
+  const toast = useToast();
+  const initialBudget =
+    variant.buildBudget != null ? String(variant.buildBudget) : "";
+  const initialSale =
+    variant.salePrice != null ? String(variant.salePrice) : "";
+  const [budget, setBudget] = useState(initialBudget);
+  const [sale, setSale] = useState(initialSale);
+  const [saving, setSaving] = useState(false);
+
+  async function save() {
+    if (saving) return;
+    // Only write when something actually changed.
+    if (budget === initialBudget && sale === initialSale) return;
+    setSaving(true);
+    try {
+      const res = await fetch(
+        `/api/plot-templates/${templateId}/variants/${variant.id}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            buildBudget: budget === "" ? null : Number(budget),
+            salePrice: sale === "" ? null : Number(sale),
+          }),
+        },
+      );
+      if (!res.ok) {
+        toast.error(await fetchErrorMessage(res, "Failed to save house value"));
+        return;
+      }
+      onSaved();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const missing = budget === "" || sale === "";
+
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t bg-slate-50/60 px-3 py-2">
+      <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+        House value
+      </span>
+      <label className="flex items-center gap-1 text-xs">
+        <span className="text-muted-foreground">Budget £</span>
+        <Input
+          type="number"
+          value={budget}
+          onChange={(e) => setBudget(e.target.value)}
+          onBlur={save}
+          className="h-7 w-24 text-xs"
+          placeholder="—"
+        />
+      </label>
+      <label className="flex items-center gap-1 text-xs">
+        <span className="text-muted-foreground">Sale £</span>
+        <Input
+          type="number"
+          value={sale}
+          onChange={(e) => setSale(e.target.value)}
+          onBlur={save}
+          className="h-7 w-24 text-xs"
+          placeholder="—"
+        />
+      </label>
+      {saving ? (
+        <Loader2 className="size-3 animate-spin text-muted-foreground" />
+      ) : (
+        missing && (
+          <span className="text-[10px] text-amber-600">
+            both needed to go live
+          </span>
+        )
+      )}
+    </div>
+  );
 }
 
 function SummaryLine({ summary }: { summary?: VariantSummary }) {

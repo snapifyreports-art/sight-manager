@@ -73,7 +73,15 @@ export async function PUT(
 
   const { id } = await params;
   const body = await request.json();
-  const { name, description } = body;
+  const { name, description, buildBudget, salePrice } = body;
+
+  // (May 2026 Keith request) House value is editable per-plot — empty /
+  // null → null, anything else → a finite number or null.
+  const numOrNull = (v: unknown): number | null => {
+    if (v === null || v === undefined || v === "") return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
 
   const existing = await prisma.plot.findUnique({
     where: { id },
@@ -110,6 +118,8 @@ export async function PUT(
         ...(description !== undefined && {
           description: description?.trim() || null,
         }),
+        ...(buildBudget !== undefined && { buildBudget: numOrNull(buildBudget) }),
+        ...(salePrice !== undefined && { salePrice: numOrNull(salePrice) }),
       },
       include: {
         site: {

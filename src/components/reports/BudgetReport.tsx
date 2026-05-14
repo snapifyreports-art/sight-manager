@@ -39,6 +39,11 @@ interface BudgetData {
     plotsOverBudget: number;
     plotsUnderBudget: number;
     plotsOnBudget: number;
+    // (May 2026 Keith request) House-value roll-up.
+    totalBuildBudget: number;
+    totalSalePrice: number;
+    totalExpectedMargin: number;
+    plotsWithValue: number;
   };
   topOverruns: Array<{
     plotNumber: string | null;
@@ -64,6 +69,12 @@ interface BudgetData {
     pending: number;
     variance: number;
     variancePercent: number;
+    // (May 2026 Keith request) House value — target build cost, sale
+    // price (GDV), and the planned margin between them.
+    buildBudget: number | null;
+    salePrice: number | null;
+    expectedMargin: number | null;
+    expectedMarginPercent: number | null;
     jobs: Array<{
       jobId: string;
       jobName: string;
@@ -254,6 +265,55 @@ export function BudgetReport({ siteId }: BudgetReportProps) {
         </Card>
       </div>
 
+      {/* (May 2026 Keith request) House-value roll-up — total GDV,
+          target build cost, and the planned margin across the plots
+          that have a value set. */}
+      {s.plotsWithValue > 0 && (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <Card className="border-blue-200">
+            <CardContent className="p-3 text-center">
+              <p className="text-xs text-muted-foreground">
+                Total GDV (sale price)
+              </p>
+              <p className="text-xl font-bold text-blue-700">
+                {formatCurrency(s.totalSalePrice)}
+              </p>
+              <p className="text-[10px] text-muted-foreground">
+                {s.plotsWithValue} of {s.plotCount} plots valued
+              </p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-3 text-center">
+              <p className="text-xs text-muted-foreground">
+                Total build budget
+              </p>
+              <p className="text-xl font-bold">
+                {formatCurrency(s.totalBuildBudget)}
+              </p>
+            </CardContent>
+          </Card>
+          <Card
+            className={
+              s.totalExpectedMargin >= 0 ? "border-green-200" : "border-red-200"
+            }
+          >
+            <CardContent className="p-3 text-center">
+              <p className="text-xs text-muted-foreground">Expected margin</p>
+              <p
+                className={`text-xl font-bold ${s.totalExpectedMargin >= 0 ? "text-green-600" : "text-red-600"}`}
+              >
+                {s.totalExpectedMargin >= 0 ? "+" : ""}
+                {formatCurrency(s.totalExpectedMargin)}
+              </p>
+              <p className="text-[10px] text-muted-foreground">
+                sale price − build budget
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
       {/* Top overruns */}
       {data.topOverruns.length > 0 && (
         <Card className="border-red-200">
@@ -346,6 +406,20 @@ export function BudgetReport({ siteId }: BudgetReportProps) {
                   </div>
                 </div>
                 <div className="flex items-center gap-4 text-right">
+                  {/* (May 2026 Keith request) Planned margin per plot —
+                      sale price − build budget. Shown whenever the plot
+                      carries a house value, independent of order data. */}
+                  {plot.expectedMargin != null && (
+                    <div className="text-xs">
+                      <p className="text-muted-foreground">Margin</p>
+                      <p
+                        className={`font-medium ${plot.expectedMargin >= 0 ? "text-green-600" : "text-red-600"}`}
+                      >
+                        {plot.expectedMargin >= 0 ? "+" : ""}
+                        {formatCurrency(plot.expectedMargin)}
+                      </p>
+                    </div>
+                  )}
                   {hasData && (
                     <>
                       <div className="text-xs">

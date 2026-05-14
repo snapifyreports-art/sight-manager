@@ -99,6 +99,13 @@ export async function POST(request: NextRequest) {
   }
 
   let resolvedVariantId: string | null = null;
+  // (May 2026 Keith request) Capture the chosen variant's house-value
+  // figures so the new Plot can snapshot them (variant overrides the
+  // base template; either can be null and fall through).
+  let resolvedVariant: {
+    buildBudget: number | null;
+    salePrice: number | null;
+  } | null = null;
   if (variantId) {
     const variant = await prisma.templateVariant.findUnique({
       where: { id: variantId },
@@ -110,6 +117,10 @@ export async function POST(request: NextRequest) {
       );
     }
     resolvedVariantId = variant.id;
+    resolvedVariant = {
+      buildBudget: variant.buildBudget,
+      salePrice: variant.salePrice,
+    };
   }
 
   // Pull the rows scoped to whichever flavour we're applying — base
@@ -184,6 +195,11 @@ export async function POST(request: NextRequest) {
         // Snapshot link back to the template — informational, no auto-sync.
         sourceTemplateId: template.id,
         sourceVariantId: resolvedVariantId,
+        // (May 2026 Keith request) Snapshot house value at apply time —
+        // the variant's figures win, falling back to the base template.
+        // Editable per-plot afterwards (no auto-sync, same as the rest).
+        buildBudget: resolvedVariant?.buildBudget ?? template.buildBudget ?? null,
+        salePrice: resolvedVariant?.salePrice ?? template.salePrice ?? null,
         // (#172) Auto-generate customer share link at create time.
         shareToken: randomBytes(24).toString("base64url"),
         shareEnabled: true,

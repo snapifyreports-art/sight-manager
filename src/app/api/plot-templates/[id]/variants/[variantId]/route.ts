@@ -21,7 +21,7 @@ function requireEditProgramme(session: { user: unknown }) {
 
 export const dynamic = "force-dynamic";
 
-// PATCH — rename / re-describe a variant
+// PATCH — rename / re-describe a variant, or set its house value
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string; variantId: string }> },
@@ -34,7 +34,15 @@ export async function PATCH(
 
   const { id: templateId, variantId } = await params;
   const body = await req.json();
-  const { name, description } = body;
+  const { name, description, buildBudget, salePrice } = body;
+
+  // (May 2026 Keith request) House value is per-variant (variants are
+  // different sizes). Empty / null → null; anything else → finite num.
+  const numOrNull = (v: unknown): number | null => {
+    if (v === null || v === undefined || v === "") return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
 
   try {
     const updated = await prisma.templateVariant.update({
@@ -44,6 +52,10 @@ export async function PATCH(
         ...(description !== undefined && {
           description: description ? String(description).trim() : null,
         }),
+        ...(buildBudget !== undefined && {
+          buildBudget: numOrNull(buildBudget),
+        }),
+        ...(salePrice !== undefined && { salePrice: numOrNull(salePrice) }),
       },
     });
     return NextResponse.json(updated);

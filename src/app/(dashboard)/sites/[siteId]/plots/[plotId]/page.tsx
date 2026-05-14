@@ -91,6 +91,10 @@ export default async function PlotDetailPage({
     name: plot.name,
     description: plot.description,
     plotNumber: plot.plotNumber ?? null,
+    // (May 2026 Keith request) House value — snapshotted from the
+    // template/variant at apply time, editable per-plot.
+    buildBudget: plot.buildBudget ?? null,
+    salePrice: plot.salePrice ?? null,
     site: plot.site,
     jobs: plot.jobs.map((job) => ({
       id: job.id,

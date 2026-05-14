@@ -69,7 +69,8 @@ export async function PUT(
 
   const { id } = await params;
   const body = await request.json();
-  const { name, description, typeLabel, isDraft, archivedAt } = body;
+  const { name, description, typeLabel, isDraft, archivedAt, buildBudget, salePrice } =
+    body;
 
   const existing = await prisma.plotTemplate.findUnique({ where: { id } });
   if (!existing) {
@@ -77,6 +78,55 @@ export async function PUT(
       { error: "Template not found" },
       { status: 404 }
     );
+  }
+
+  // (May 2026 Keith request) Normalise the two house-value figures —
+  // empty string / null → null, anything else → a finite number or null.
+  const numOrNull = (v: unknown): number | null => {
+    if (v === null || v === undefined || v === "") return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
+
+  // (May 2026 Keith request) Go-live gate — a template can't be marked
+  // live until the base template AND every variant carry both house-
+  // value figures. Enforced here (the real gate); the editor also
+  // disables the button + explains, but the server is authoritative.
+  const goingLive = isDraft === false && existing.isDraft === true;
+  if (goingLive) {
+    const effBudget =
+      buildBudget !== undefined ? numOrNull(buildBudget) : existing.buildBudget;
+    const effSale =
+      salePrice !== undefined ? numOrNull(salePrice) : existing.salePrice;
+    const baseMissing = effBudget == null || effSale == null;
+
+    const variants = await prisma.templateVariant.findMany({
+      where: { templateId: id },
+      select: { id: true, name: true, buildBudget: true, salePrice: true },
+    });
+    const variantsMissing = variants.filter(
+      (v) => v.buildBudget == null || v.salePrice == null,
+    );
+
+    if (baseMissing || variantsMissing.length > 0) {
+      const parts: string[] = [];
+      if (baseMissing) parts.push("the base template");
+      if (variantsMissing.length > 0) {
+        parts.push(
+          `variant${variantsMissing.length === 1 ? "" : "s"} ${variantsMissing
+            .map((v) => `"${v.name}"`)
+            .join(", ")}`,
+        );
+      }
+      return NextResponse.json(
+        {
+          error: `Set a build budget and sale price on ${parts.join(
+            " and ",
+          )} before marking this template live.`,
+        },
+        { status: 400 },
+      );
+    }
   }
 
   try {
@@ -91,6 +141,8 @@ export async function PUT(
           typeLabel: typeLabel?.trim() || null,
         }),
         ...(typeof isDraft === "boolean" && { isDraft }),
+        ...(buildBudget !== undefined && { buildBudget: numOrNull(buildBudget) }),
+        ...(salePrice !== undefined && { salePrice: numOrNull(salePrice) }),
         // (May 2026 audit S-P0) Accept archivedAt for soft-delete /
         // restore via PUT. `null` restores; ISO string archives.
         ...(archivedAt === null ? { archivedAt: null } : {}),

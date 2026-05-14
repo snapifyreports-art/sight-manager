@@ -35,6 +35,7 @@ import {
   Check,
   HardHat,
   Heart,
+  PoundSterling,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Breadcrumbs } from "@/components/ui/breadcrumbs";
@@ -81,6 +82,9 @@ interface PlotData {
   name: string;
   description: string | null;
   plotNumber: string | null;
+  // (May 2026 Keith request) House value — target build cost + GDV.
+  buildBudget: number | null;
+  salePrice: number | null;
   site: { id: string; name: string };
   jobs: Array<{
     id: string;
@@ -914,6 +918,154 @@ function PlotOverview({
   );
 }
 
+// ---------- House Value Card ----------
+// (May 2026 Keith request) Shows + edits the plot's house value — the
+// target build cost and the sale price (GDV), snapshotted from the
+// template/variant at apply time. Margin is derived. Edits PUT to
+// /api/plots/[id].
+
+function HouseValueCard({
+  plot,
+  onSaved,
+}: {
+  plot: PlotData;
+  onSaved: () => void;
+}) {
+  const toast = useToast();
+  const initialBudget =
+    plot.buildBudget != null ? String(plot.buildBudget) : "";
+  const initialSale = plot.salePrice != null ? String(plot.salePrice) : "";
+  const [budget, setBudget] = useState(initialBudget);
+  const [sale, setSale] = useState(initialSale);
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  async function save() {
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/plots/${plot.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          buildBudget: budget === "" ? null : Number(budget),
+          salePrice: sale === "" ? null : Number(sale),
+        }),
+      });
+      if (!res.ok) {
+        toast.error(await fetchErrorMessage(res, "Failed to save house value"));
+        return;
+      }
+      setEditing(false);
+      onSaved();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const fmt = (n: number) => `£${n.toLocaleString()}`;
+  const margin =
+    plot.buildBudget != null && plot.salePrice != null
+      ? plot.salePrice - plot.buildBudget
+      : null;
+  const marginPct =
+    margin != null && plot.salePrice
+      ? Math.round((margin / plot.salePrice) * 100)
+      : null;
+
+  return (
+    <div className="rounded-lg border bg-white p-3">
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="flex items-center gap-2 text-sm font-semibold">
+          <PoundSterling className="size-4 text-emerald-600" />
+          House value
+        </h2>
+        {!editing && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 text-xs"
+            onClick={() => setEditing(true)}
+          >
+            Edit
+          </Button>
+        )}
+      </div>
+      {editing ? (
+        <div className="mt-2 flex flex-wrap items-end gap-2">
+          <label className="text-xs">
+            <span className="mb-0.5 block text-muted-foreground">
+              Build budget £
+            </span>
+            <Input
+              type="number"
+              value={budget}
+              onChange={(e) => setBudget(e.target.value)}
+              className="h-8 w-32 text-sm"
+            />
+          </label>
+          <label className="text-xs">
+            <span className="mb-0.5 block text-muted-foreground">
+              Sale price £
+            </span>
+            <Input
+              type="number"
+              value={sale}
+              onChange={(e) => setSale(e.target.value)}
+              className="h-8 w-32 text-sm"
+            />
+          </label>
+          <Button
+            size="sm"
+            className="h-8"
+            onClick={save}
+            disabled={saving}
+          >
+            {saving ? <Loader2 className="size-3.5 animate-spin" /> : "Save"}
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-8"
+            onClick={() => {
+              setEditing(false);
+              setBudget(initialBudget);
+              setSale(initialSale);
+            }}
+          >
+            Cancel
+          </Button>
+        </div>
+      ) : (
+        <div className="mt-2 flex flex-wrap items-baseline gap-x-5 gap-y-1 text-sm">
+          <span>
+            <span className="text-muted-foreground">Build budget </span>
+            <span className="font-semibold">
+              {plot.buildBudget != null ? fmt(plot.buildBudget) : "—"}
+            </span>
+          </span>
+          <span>
+            <span className="text-muted-foreground">Sale price </span>
+            <span className="font-semibold">
+              {plot.salePrice != null ? fmt(plot.salePrice) : "—"}
+            </span>
+          </span>
+          {margin != null && (
+            <span>
+              <span className="text-muted-foreground">Margin </span>
+              <span
+                className={`font-semibold ${margin >= 0 ? "text-emerald-600" : "text-red-600"}`}
+              >
+                {fmt(margin)}
+                {marginPct != null ? ` (${marginPct}%)` : ""}
+              </span>
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ---------- Main Component ----------
 
 export function PlotDetailClient({
@@ -1055,6 +1207,11 @@ export function PlotDetailClient({
           </div>
         </div>
       </div>
+
+      {/* (May 2026 Keith request) House value — target build cost +
+          sale price, with derived margin. Sits in the plot info up top
+          so it's visible on every tab. */}
+      <HouseValueCard plot={plot} onSaved={refreshPlot} />
 
       {/* Tabs — URL-backed via ?tab=X so refresh keeps the user where
           they are. Same pattern as Settings + Suppliers. */}

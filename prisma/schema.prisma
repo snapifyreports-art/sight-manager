@@ -255,6 +255,14 @@ model Plot {
   buildCompletePercent           Float     @default(0)
   awaitingRestart                Boolean   @default(false)
   awaitingContractorConfirmation Boolean   @default(false)
+  // (May 2026 Keith request) House value — both figures, per plot.
+  // `buildBudget` = the target build cost; `salePrice` = the GDV the
+  // finished home sells for. Snapshotted from the source variant (or
+  // base template) at apply time, then editable per-plot. The Budget
+  // report compares actual spend against buildBudget, and salePrice
+  // against both for the margin picture.
+  buildBudget                    Float?
+  salePrice                      Float?
   // Informational link to the PlotTemplate this plot was created from.
   // No auto-sync: plots snapshot the template at apply time. Nullable
   // so pre-existing and manually-created plots are unaffected.
@@ -579,6 +587,13 @@ model PlotTemplate {
   /// template (e.g. discontinued house type) without losing the link
   /// from historical Plots that were applied from it.
   archivedAt  DateTime?
+  // (May 2026 Keith request) House value — base/default figures for the
+  // template. `buildBudget` = target build cost, `salePrice` = GDV.
+  // Variants override these per size; plots snapshot whichever applied.
+  // Marking a template live requires these (and every variant's) to be
+  // filled — enforced in the go-live transition.
+  buildBudget Float?
+  salePrice   Float?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -602,6 +617,12 @@ model TemplateVariant {
   name        String   // e.g. "765", "Apple Tree"
   description String?
   sortOrder   Int      @default(0)
+  // (May 2026 Keith request) Per-variant house value — variants are
+  // different sizes (765 vs 1047 sq ft) so each carries its own
+  // buildBudget (target cost) + salePrice (GDV). A plot applied from
+  // this variant snapshots these onto the Plot row.
+  buildBudget Float?
+  salePrice   Float?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 

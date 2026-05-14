@@ -124,6 +124,15 @@ export function TemplateEditor({
     template.description ?? ""
   );
   const [metaTypeLabel, setMetaTypeLabel] = useState(template.typeLabel ?? "");
+  // (May 2026 Keith request) Base house value — target build cost + GDV.
+  // Variants override per size (edited on the variant cards); the base +
+  // every variant must carry both before the template can go live.
+  const [metaBuildBudget, setMetaBuildBudget] = useState(
+    template.buildBudget != null ? String(template.buildBudget) : "",
+  );
+  const [metaSalePrice, setMetaSalePrice] = useState(
+    template.salePrice != null ? String(template.salePrice) : "",
+  );
 
   // (May 2026 Keith bug report) Sync local meta state when the
   // template prop changes (e.g., navigating between variants, or
@@ -137,6 +146,12 @@ export function TemplateEditor({
       setMetaName(template.name);
       setMetaDescription(template.description ?? "");
       setMetaTypeLabel(template.typeLabel ?? "");
+      setMetaBuildBudget(
+        template.buildBudget != null ? String(template.buildBudget) : "",
+      );
+      setMetaSalePrice(
+        template.salePrice != null ? String(template.salePrice) : "",
+      );
     }
     // Only resync when the template ID changes — preserves in-flight
     // edits if the user has metaName open while the prop merely
@@ -696,6 +711,17 @@ export function TemplateEditor({
           name: metaName,
           description: metaDescription || null,
           typeLabel: metaTypeLabel || null,
+          // (May 2026 Keith request) Base house value — only for the
+          // base template (variants carry their own, edited on the
+          // variant cards; the /full route has no meta PUT anyway).
+          ...(template.isVariant
+            ? {}
+            : {
+                buildBudget:
+                  metaBuildBudget === "" ? null : Number(metaBuildBudget),
+                salePrice:
+                  metaSalePrice === "" ? null : Number(metaSalePrice),
+              }),
         }),
       });
       if (!res.ok) {
@@ -1734,6 +1760,37 @@ export function TemplateEditor({
                   placeholder="Type label (e.g. Detached 4-Bed)"
                   className="text-sm"
                 />
+                {/* (May 2026 Keith request) Base house value. Variants
+                    override per size on their own cards; both figures
+                    (base + every variant) are required to go live. */}
+                {!template.isVariant && (
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <span className="mb-1 block text-xs font-medium text-muted-foreground">
+                        Build budget £
+                      </span>
+                      <Input
+                        type="number"
+                        value={metaBuildBudget}
+                        onChange={(e) => setMetaBuildBudget(e.target.value)}
+                        placeholder="Target build cost"
+                        className="text-sm"
+                      />
+                    </div>
+                    <div>
+                      <span className="mb-1 block text-xs font-medium text-muted-foreground">
+                        Sale price £
+                      </span>
+                      <Input
+                        type="number"
+                        value={metaSalePrice}
+                        onChange={(e) => setMetaSalePrice(e.target.value)}
+                        placeholder="GDV / sale price"
+                        className="text-sm"
+                      />
+                    </div>
+                  </div>
+                )}
                 <Textarea
                   value={metaDescription}
                   onChange={(e) => setMetaDescription(e.target.value)}
@@ -1757,6 +1814,16 @@ export function TemplateEditor({
                       setMetaName(template.name);
                       setMetaDescription(template.description ?? "");
                       setMetaTypeLabel(template.typeLabel ?? "");
+                      setMetaBuildBudget(
+                        template.buildBudget != null
+                          ? String(template.buildBudget)
+                          : "",
+                      );
+                      setMetaSalePrice(
+                        template.salePrice != null
+                          ? String(template.salePrice)
+                          : "",
+                      );
                     }}
                   >
                     Cancel
