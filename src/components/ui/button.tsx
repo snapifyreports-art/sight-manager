@@ -60,12 +60,26 @@ function Button({
   className,
   variant = "default",
   size = "default",
+  render,
+  nativeButton,
   ...props
 }: ButtonPrimitive.Props & VariantProps<typeof buttonVariants>) {
   return (
     <ButtonPrimitive
       data-slot="button"
       className={cn(buttonVariants({ variant, size, className }))}
+      render={render}
+      // (May 2026) When a `render` prop is supplied the button is being
+      // rendered as a custom element — across this codebase that's
+      // always a Next.js <Link> (i.e. an <a>), never a real <button>.
+      // Base UI's `ButtonPrimitive` defaults `nativeButton` to true and
+      // logs a console error in that case ("expected a native <button>
+      // … set `nativeButton` to false"). Default it to false whenever
+      // `render` is present so the primitive applies the correct
+      // non-native-button a11y handling; a caller that genuinely
+      // renders a <button> via `render` can still pass `nativeButton`
+      // explicitly to override.
+      nativeButton={nativeButton ?? render === undefined}
       {...props}
     />
   )
