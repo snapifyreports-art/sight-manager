@@ -1862,6 +1862,46 @@ export function TemplateEditor({
                     {template.description}
                   </p>
                 )}
+                {/* (May 2026 Keith request) Show the BASE template's
+                    house value at a glance — it was settable in the
+                    edit form but invisible otherwise, which read as
+                    "only variants have it". The base figures apply when
+                    a plot is created straight from the template with no
+                    variant picked. */}
+                {!template.isVariant && (
+                  <p className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs">
+                    <span className="font-medium text-slate-600">
+                      House value (base):
+                    </span>
+                    <span
+                      className={
+                        template.buildBudget != null
+                          ? "text-foreground"
+                          : "text-amber-600"
+                      }
+                    >
+                      Build budget{" "}
+                      {template.buildBudget != null
+                        ? `£${template.buildBudget.toLocaleString()}`
+                        : "— not set"}
+                    </span>
+                    <span
+                      className={
+                        template.salePrice != null
+                          ? "text-foreground"
+                          : "text-amber-600"
+                      }
+                    >
+                      Sale price{" "}
+                      {template.salePrice != null
+                        ? `£${template.salePrice.toLocaleString()}`
+                        : "— not set"}
+                    </span>
+                    <span className="text-muted-foreground">
+                      · Edit to change · variants can override per size
+                    </span>
+                  </p>
+                )}
               </div>
             )}
           </div>
