@@ -514,6 +514,22 @@ function ContractorCard({
   // is idempotent — it returns the contractor's permanent token.
   const [viewLoading, setViewLoading] = useState(false);
   const handleView = useCallback(async () => {
+    // (May 2026 Keith bug report) Open the tab SYNCHRONOUSLY on click
+    // so the browser's popup-blocker sees it as user-gesture-driven.
+    // The previous version called `window.open` AFTER `await fetch`,
+    // which Chrome/Safari/etc. silently dropped because the gesture
+    // chain was already broken. We open a blank tab here and point
+    // it at the token URL once the share API responds. `noopener` is
+    // intentionally omitted — keeping the handle is what lets us set
+    // `.location.href` after the async work; the destination is our
+    // own /contractor/[token] page so the security trade-off is fine.
+    const popup = window.open("about:blank", "_blank");
+    if (!popup) {
+      toast.error(
+        "Popup blocked — allow popups for this site, then click View again.",
+      );
+      return;
+    }
     setViewLoading(true);
     try {
       const res = await fetch(`/api/sites/${siteId}/contractor-comms/share`, {
@@ -522,6 +538,7 @@ function ContractorCard({
         body: JSON.stringify({ contactId: contractor.id }),
       });
       if (!res.ok) {
+        popup.close();
         toast.error(
           await fetchErrorMessage(res, "Couldn't open the contractor view"),
         );
@@ -529,11 +546,13 @@ function ContractorCard({
       }
       const data = await res.json();
       if (data?.url) {
-        window.open(data.url, "_blank", "noopener,noreferrer");
+        popup.location.href = data.url;
       } else {
+        popup.close();
         toast.error("Couldn't open the contractor view");
       }
     } catch (e) {
+      popup.close();
       toast.error(
         e instanceof Error ? e.message : "Couldn't open the contractor view",
       );
