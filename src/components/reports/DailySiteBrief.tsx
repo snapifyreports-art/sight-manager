@@ -1439,6 +1439,79 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
             ))}
           </div>
         )}
+
+        {/* (May 2026 Keith request) Weather-at-risk panel — when the
+            next-3-day forecast intersects with weatherAffected jobs,
+            surface the at-risk count + day so a manager can chase
+            contractors before they leave home. Backed by
+            data.weatherAtRisk computed in the route handler. */}
+        {data.weatherAtRisk && data.weatherAtRisk.length > 0 && (
+          <div className="space-y-2 rounded-lg border border-orange-200 bg-orange-50/70 p-3">
+            <div className="flex items-center gap-2 text-sm font-semibold text-orange-900">
+              <WeatherIcon
+                category={data.weatherAtRisk[0]!.category}
+                className="size-4"
+              />
+              <span>
+                Weather risk —{" "}
+                {data.weatherAtRisk.reduce((s, d) => s + d.jobs.length, 0)}{" "}
+                weather-sensitive job
+                {data.weatherAtRisk.reduce((s, d) => s + d.jobs.length, 0) === 1
+                  ? ""
+                  : "s"}{" "}
+                at risk
+              </span>
+            </div>
+            <div className="space-y-2">
+              {data.weatherAtRisk.map((day) => {
+                const dayLabel = format(
+                  new Date(day.date + "T12:00:00"),
+                  "EEE d MMM",
+                );
+                const reason = day.tempMin <= 2
+                  ? `${day.tempMin}°C low`
+                  : (CATEGORY_LABELS[day.category] ?? day.category);
+                return (
+                  <div
+                    key={day.date}
+                    className="rounded border border-orange-200 bg-white p-2"
+                  >
+                    <div className="mb-1 flex items-center justify-between text-xs">
+                      <span className="font-semibold text-orange-900">
+                        {dayLabel} — {reason}
+                      </span>
+                      <span className="rounded-full bg-orange-100 px-1.5 py-0.5 text-[10px] font-semibold text-orange-900">
+                        {day.jobs.length} job{day.jobs.length === 1 ? "" : "s"}
+                      </span>
+                    </div>
+                    <ul className="flex flex-wrap gap-1">
+                      {day.jobs.slice(0, 8).map((j) => {
+                        const plotLbl = j.plot.plotNumber
+                          ? `Plot ${j.plot.plotNumber}`
+                          : j.plot.name;
+                        return (
+                          <li key={j.id}>
+                            <a
+                              href={`/jobs/${j.id}`}
+                              className="inline-block rounded border border-orange-200 bg-orange-50 px-1.5 py-0.5 text-[11px] text-orange-900 hover:bg-orange-100"
+                            >
+                              {j.name} · {plotLbl}
+                            </a>
+                          </li>
+                        );
+                      })}
+                      {day.jobs.length > 8 && (
+                        <li className="text-[11px] text-orange-900/70">
+                          +{day.jobs.length - 8} more
+                        </li>
+                      )}
+                    </ul>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Summary pills — Keith May 2026: hide zero-count pills so the

@@ -693,6 +693,88 @@ export async function GET(
     };
   }
 
+  // (May 2026 Keith request) Weather-at-risk jobs.
+  //
+  // The weather cron already pushes a "Rain tomorrow, N jobs at
+  // risk" alert at 05:00 UTC, but until now the Brief itself had
+  // no visible surface for the at-risk list — a manager opening
+  // the Brief in the afternoon couldn't see which jobs to chase.
+  //
+  // Cross-reference the next-3-day forecast with leaf jobs flagged
+  // weatherAffected whose [startDate, endDate] overlaps each
+  // risky day (rain / snow / thunder OR tempMin ≤ 2°C). Group by
+  // day so the UI can render "Thu — Rain · 6 jobs at risk".
+  type AtRiskJob = {
+    id: string;
+    name: string;
+    plotId: string;
+    plot: { plotNumber: string | null; name: string };
+    weatherAffectedType: string | null;
+    contractors: Array<{ contact: { name: string; company: string | null } }>;
+  };
+  const weatherAtRisk: Array<{
+    date: string;
+    category: string;
+    tempMin: number;
+    tempMax: number;
+    jobs: AtRiskJob[];
+  }> = [];
+  if (weatherForecast && weatherForecast.length > 0) {
+    const atRiskDays = weatherForecast.slice(0, 4).filter((d) => {
+      const isRainy = ["rain", "snow", "thunder"].includes(d.category);
+      const isCold = d.tempMin <= 2;
+      return isRainy || isCold;
+    });
+    if (atRiskDays.length > 0) {
+      const horizon = addDays(now, 3);
+      const sensitiveJobs = await prisma.job.findMany({
+        where: {
+          plot: { siteId: id },
+          weatherAffected: true,
+          status: { in: ["NOT_STARTED", "IN_PROGRESS"] },
+          startDate: { lte: horizon },
+          endDate: { gte: dayStart },
+          children: { none: {} },
+        },
+        select: {
+          id: true,
+          name: true,
+          plotId: true,
+          startDate: true,
+          endDate: true,
+          weatherAffectedType: true,
+          plot: { select: { plotNumber: true, name: true } },
+          contractors: {
+            select: { contact: { select: { name: true, company: true } } },
+          },
+        },
+      });
+      for (const day of atRiskDays) {
+        const dayDate = new Date(day.date);
+        const jobsForDay = sensitiveJobs.filter((j) => {
+          if (!j.startDate || !j.endDate) return false;
+          return dayDate >= j.startDate && dayDate <= j.endDate;
+        });
+        if (jobsForDay.length > 0) {
+          weatherAtRisk.push({
+            date: day.date,
+            category: day.category,
+            tempMin: day.tempMin,
+            tempMax: day.tempMax,
+            jobs: jobsForDay.map((j) => ({
+              id: j.id,
+              name: j.name,
+              plotId: j.plotId,
+              plot: j.plot,
+              weatherAffectedType: j.weatherAffectedType,
+              contractors: j.contractors,
+            })),
+          });
+        }
+      }
+    }
+  }
+
   return NextResponse.json({
     site,
     date: dayStart.toISOString(),
@@ -803,5 +885,6 @@ export async function GET(
       createdAt: e.createdAt.toISOString(),
     })),
     weather,
+    weatherAtRisk,
   });
 }

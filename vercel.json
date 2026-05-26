@@ -13,6 +13,10 @@
       "schedule": "0 5 * * *"
     },
     {
+      "path": "/api/cron/weather-evening",
+      "schedule": "0 17 * * *"
+    },
+    {
       "path": "/api/cron/reconcile",
       "schedule": "0 4 * * *"
     },

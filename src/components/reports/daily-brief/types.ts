@@ -306,6 +306,29 @@ export interface BriefData {
       tempMin: number;
     }>;
   } | null;
+  /**
+   * (May 2026 Keith request) Cross-reference of the next-3-day
+   * forecast against jobs flagged `weatherAffected`. One entry per
+   * risky day (rain / snow / thunder OR tempMin ≤ 2°C) with the
+   * list of leaf jobs whose [startDate, endDate] window spans that
+   * day. Empty array = no weather risk visible — render nothing.
+   */
+  weatherAtRisk?: Array<{
+    date: string;
+    category: string;
+    tempMin: number;
+    tempMax: number;
+    jobs: Array<{
+      id: string;
+      name: string;
+      plotId: string;
+      plot: { plotNumber: string | null; name: string };
+      weatherAffectedType: string | null;
+      contractors: Array<{
+        contact: { name: string; company: string | null };
+      }>;
+    }>;
+  }>;
   awaitingSignOff?: Array<{
     id: string;
     name: string;
