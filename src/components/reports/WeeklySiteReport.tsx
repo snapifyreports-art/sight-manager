@@ -240,6 +240,12 @@ export function WeeklySiteReport({ siteId }: WeeklySiteReportProps) {
       </div>
 
       {/* Overall progress */}
+      {/* (May 2026 Keith request) The numbers ARE the navigation —
+          every stat box is a link to the tab that owns that data, so
+          managers can drill in with a click instead of going to find
+          the matching tab from the sidebar. Each stat hover-highlights
+          to signal it's clickable; on print, the link wrapping is
+          stripped by the tailwind print: variants in globals.css. */}
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="text-sm">Site Progress</CardTitle>
@@ -260,42 +266,62 @@ export function WeeklySiteReport({ siteId }: WeeklySiteReportProps) {
             </div>
           </div>
           <div className="grid grid-cols-3 gap-2 text-center text-xs sm:grid-cols-5">
-            <div>
+            <Link href={`/sites/${siteId}?tab=plots`} className="rounded p-1 transition-colors hover:bg-slate-50">
               <p className="text-lg font-bold">{ov.totalPlots}</p>
               <p className="text-muted-foreground">Plots</p>
-            </div>
-            <div>
+            </Link>
+            <Link href={`/sites/${siteId}?tab=programme`} className="rounded p-1 transition-colors hover:bg-slate-50">
               <p className="text-lg font-bold">{ov.completedJobs}/{ov.totalJobs}</p>
               <p className="text-muted-foreground">Jobs Done</p>
-            </div>
-            <div>
+            </Link>
+            <Link href={`/sites/${siteId}?tab=programme`} className="rounded p-1 transition-colors hover:bg-slate-50">
               <p className="text-lg font-bold text-blue-600">{ov.activeJobs}</p>
               <p className="text-muted-foreground">Active</p>
-            </div>
-            <div>
+            </Link>
+            <Link href={`/sites/${siteId}?tab=programme`} className="rounded p-1 transition-colors hover:bg-slate-50">
               <p className={`text-lg font-bold ${ov.overdueJobs > 0 ? "text-red-600" : "text-green-600"}`}>
                 {ov.overdueJobs}
               </p>
               <p className="text-muted-foreground">Overdue</p>
-            </div>
-            <div>
+            </Link>
+            <Link href={`/sites/${siteId}?tab=snags`} className="rounded p-1 transition-colors hover:bg-slate-50">
               <p className={`text-lg font-bold ${tw.totalOpenSnags > 0 ? "text-orange-600" : "text-green-600"}`}>
                 {tw.totalOpenSnags}
               </p>
               <p className="text-muted-foreground">Open Snags</p>
-            </div>
+            </Link>
           </div>
         </CardContent>
       </Card>
 
       {/* Programme Schedule Summary */}
+      {/* (May 2026 SSoT pass) Pre-fix this only rendered chips for
+          ahead/on_track/behind/awaitingRestart — the four remaining
+          getPlotScheduleStatus states (not_started, complete, idle) were
+          silently dropped, so the chips never summed to the total plot
+          count. Now every status has its own chip; the sum always
+          matches the site's plot count. */}
       {scheduleStatuses.length > 0 && (() => {
-        const ahead = scheduleStatuses.filter((s) => s.status === "ahead").length;
-        const behind = scheduleStatuses.filter((s) => s.status === "behind").length;
-        const onTrack = scheduleStatuses.filter((s) => s.status === "on_track").length;
+        // (May 2026 SSoT pass) awaitingRestart is a flag on the plot, not
+        // a schedule-status enum value — handle it before the status
+        // bucketing so a deferred plot isn't double-counted under both
+        // "deferred" and whatever status its jobs happen to be in.
         const awaiting = scheduleStatuses.filter((s) => s.awaitingRestart).length;
-        const behinds = scheduleStatuses.filter((s) => s.status === "behind").sort((a, b) => a.daysDeviation - b.daysDeviation);
+        const active = scheduleStatuses.filter((s) => !s.awaitingRestart);
+        const ahead = active.filter((s) => s.status === "ahead").length;
+        const onTrack = active.filter((s) => s.status === "on_track").length;
+        const behind = active.filter((s) => s.status === "behind").length;
+        const notStarted = active.filter((s) => s.status === "not_started").length;
+        const idle = active.filter((s) => s.status === "idle").length;
+        const complete = active.filter((s) => s.status === "complete").length;
+        const behinds = active
+          .filter((s) => s.status === "behind")
+          .sort((a, b) => a.daysDeviation - b.daysDeviation);
         return (
+          <Link
+            href={`/sites/${siteId}?tab=programme`}
+            className="block transition-shadow hover:shadow-md"
+          >
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm">Programme Schedule</CardTitle>
@@ -315,6 +341,21 @@ export function WeeklySiteReport({ siteId }: WeeklySiteReportProps) {
                 {behind > 0 && (
                   <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2.5 py-1 text-xs font-medium text-red-700">
                     <TrendingDown className="size-3" /> {behind} plot{behind !== 1 ? "s" : ""} behind
+                  </span>
+                )}
+                {complete > 0 && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-800">
+                    <CheckCircle2 className="size-3" /> {complete} complete
+                  </span>
+                )}
+                {notStarted > 0 && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700">
+                    <CalendarDays className="size-3" /> {notStarted} not started
+                  </span>
+                )}
+                {idle > 0 && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-800">
+                    <PauseCircle className="size-3" /> {idle} idle
                   </span>
                 )}
                 {awaiting > 0 && (
@@ -337,71 +378,94 @@ export function WeeklySiteReport({ siteId }: WeeklySiteReportProps) {
               )}
             </CardContent>
           </Card>
+          </Link>
         );
       })()}
 
-      {/* This week's activity summary */}
+      {/* This week's activity summary — each card links to the tab
+          that owns its data (no extra "View" buttons; the whole card
+          is the affordance). */}
       <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-4">
-        <Card>
-          <CardContent className="p-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-2xl font-bold text-green-600">{tw.jobsCompleted}</p>
-                <p className="text-xs text-muted-foreground">Jobs Completed</p>
-              </div>
-              <TrendIcon trend={tw.completionTrend} />
-            </div>
-            <p className="mt-1 text-[10px] text-muted-foreground">
-              vs {tw.jobsCompletedLastWeek} last week
-            </p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-3">
-            <p className="text-2xl font-bold text-blue-600">{tw.jobsStarted}</p>
-            <p className="text-xs text-muted-foreground">Jobs Started</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-3">
-            <div className="flex items-center gap-2">
-              <div>
-                <p className="text-2xl font-bold text-orange-600">{tw.snagsOpened}</p>
-                <p className="text-xs text-muted-foreground">Snags Opened</p>
-              </div>
-              <div className="border-l pl-2">
-                <p className="text-2xl font-bold text-green-600">{tw.snagsResolved}</p>
-                <p className="text-xs text-muted-foreground">Resolved</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-3">
-            <div className="flex items-center gap-3">
-              <div>
-                <p className="text-2xl font-bold">{tw.ordersPlaced}</p>
-                <p className="text-xs text-muted-foreground">Orders</p>
-              </div>
-              <div>
-                <p className="text-2xl font-bold">{tw.photosUploaded}</p>
-                <p className="text-xs text-muted-foreground">Photos</p>
-              </div>
-              {tw.rainDays > 0 && (
+        <Link
+          href={`/sites/${siteId}?tab=programme`}
+          className="block transition-shadow hover:shadow-md"
+        >
+          <Card>
+            <CardContent className="p-3">
+              <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-2xl font-bold text-blue-600">{tw.rainDays}</p>
-                  <p className="text-xs text-muted-foreground">☔ Rain</p>
+                  <p className="text-2xl font-bold text-green-600">{tw.jobsCompleted}</p>
+                  <p className="text-xs text-muted-foreground">Jobs Completed</p>
                 </div>
-              )}
-              {tw.temperatureDays > 0 && (
+                <TrendIcon trend={tw.completionTrend} />
+              </div>
+              <p className="mt-1 text-[10px] text-muted-foreground">
+                vs {tw.jobsCompletedLastWeek} last week
+              </p>
+            </CardContent>
+          </Card>
+        </Link>
+        <Link
+          href={`/sites/${siteId}?tab=programme`}
+          className="block transition-shadow hover:shadow-md"
+        >
+          <Card>
+            <CardContent className="p-3">
+              <p className="text-2xl font-bold text-blue-600">{tw.jobsStarted}</p>
+              <p className="text-xs text-muted-foreground">Jobs Started</p>
+            </CardContent>
+          </Card>
+        </Link>
+        <Link
+          href={`/sites/${siteId}?tab=snags`}
+          className="block transition-shadow hover:shadow-md"
+        >
+          <Card>
+            <CardContent className="p-3">
+              <div className="flex items-center gap-2">
                 <div>
-                  <p className="text-2xl font-bold text-cyan-600">{tw.temperatureDays}</p>
-                  <p className="text-xs text-muted-foreground">🌡️ Temp</p>
+                  <p className="text-2xl font-bold text-orange-600">{tw.snagsOpened}</p>
+                  <p className="text-xs text-muted-foreground">Snags Opened</p>
                 </div>
-              )}
-            </div>
-          </CardContent>
-        </Card>
+                <div className="border-l pl-2">
+                  <p className="text-2xl font-bold text-green-600">{tw.snagsResolved}</p>
+                  <p className="text-xs text-muted-foreground">Resolved</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </Link>
+        <Link
+          href={`/sites/${siteId}?tab=orders`}
+          className="block transition-shadow hover:shadow-md"
+        >
+          <Card>
+            <CardContent className="p-3">
+              <div className="flex items-center gap-3">
+                <div>
+                  <p className="text-2xl font-bold">{tw.ordersPlaced}</p>
+                  <p className="text-xs text-muted-foreground">Orders</p>
+                </div>
+                <div>
+                  <p className="text-2xl font-bold">{tw.photosUploaded}</p>
+                  <p className="text-xs text-muted-foreground">Photos</p>
+                </div>
+                {tw.rainDays > 0 && (
+                  <div>
+                    <p className="text-2xl font-bold text-blue-600">{tw.rainDays}</p>
+                    <p className="text-xs text-muted-foreground">☔ Rain</p>
+                  </div>
+                )}
+                {tw.temperatureDays > 0 && (
+                  <div>
+                    <p className="text-2xl font-bold text-cyan-600">{tw.temperatureDays}</p>
+                    <p className="text-xs text-muted-foreground">🌡️ Temp</p>
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        </Link>
       </div>
 
       {/* Weather impact days detail */}
@@ -451,6 +515,10 @@ export function WeeklySiteReport({ siteId }: WeeklySiteReportProps) {
         {(data.orders.toSend > 0 ||
           data.orders.overdueToSend > 0 ||
           data.orders.overdueDelivery > 0) && (
+          <Link
+            href={`/sites/${siteId}?tab=orders`}
+            className="block transition-shadow hover:shadow-md"
+          >
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="flex items-center gap-2 text-sm">
@@ -489,10 +557,15 @@ export function WeeklySiteReport({ siteId }: WeeklySiteReportProps) {
               </div>
             </CardContent>
           </Card>
+          </Link>
         )}
 
         {/* Deliveries this week */}
         {data.deliveries.length > 0 && (
+          <Link
+            href={`/sites/${siteId}?tab=orders`}
+            className="block transition-shadow hover:shadow-md"
+          >
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="flex items-center gap-2 text-sm">
@@ -521,14 +594,23 @@ export function WeeklySiteReport({ siteId }: WeeklySiteReportProps) {
               </div>
             </CardContent>
           </Card>
+          </Link>
         )}
 
-        {/* Next week lookahead */}
+        {/* Next week lookahead — NOT wrapped in Link because the rows
+            below already contain <Link> elements for each job, and
+            nested anchors are invalid HTML. The card title is a link
+            instead so the header is still a navigation affordance. */}
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-2 text-sm">
               <CalendarDays className="size-4 text-slate-600" />
-              Next Week Lookahead
+              <Link
+                href={`/sites/${siteId}?tab=programme`}
+                className="hover:underline"
+              >
+                Next Week Lookahead
+              </Link>
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -579,8 +661,14 @@ export function WeeklySiteReport({ siteId }: WeeklySiteReportProps) {
         </Card>
       </div>
 
-      {/* Activity log */}
+      {/* Activity log — links to the full Events Log filtered to this
+          site so a manager can see the long tail beyond the 50 most
+          recent entries shown here. */}
       {data.activity.length > 0 && (
+        <Link
+          href={`/events-log?site=${siteId}`}
+          className="block transition-shadow hover:shadow-md"
+        >
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm">Activity Log</CardTitle>
@@ -605,6 +693,7 @@ export function WeeklySiteReport({ siteId }: WeeklySiteReportProps) {
             </div>
           </CardContent>
         </Card>
+        </Link>
       )}
     </div>
   );

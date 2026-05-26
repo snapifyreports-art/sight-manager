@@ -67,6 +67,9 @@ export async function GET(
           id: true,
           status: true,
           endDate: true,
+          // (May 2026 SSoT pass) Scorecard days-late uses the immutable
+          // baseline, not the current endDate — see comment below.
+          originalEndDate: true,
           actualEndDate: true,
           signedOffAt: true,
           plot: { select: { siteId: true } },
@@ -81,7 +84,7 @@ export async function GET(
   const notStarted = jobs.filter((j) => j.status === "NOT_STARTED");
   const signedOff = completed.filter((j) => j.signedOffAt);
 
-  // Days late: leaf jobs where actualEndDate > endDate (planned).
+  // Days late: leaf jobs where actualEndDate > originalEndDate (baseline).
   // (May 2026 audit F-P1-21) Route through differenceInWorkingDays
   // so the scorecard's "Avg days late" agrees with the Daily Brief +
   // Analytics + Lateness SSOT for the same contractor. Pre-fix this
@@ -89,15 +92,21 @@ export async function GET(
   // same plot's days-late could differ by 1-2 days between the
   // scorecard and the daily brief depending on whether the late
   // window crossed a weekend.
+  // (May 2026 SSoT pass) Compare actualEndDate against originalEndDate,
+  // not the current endDate. A contractor who shipped a job two days
+  // late but got cascade-bumped twice would otherwise look "on time"
+  // because the current endDate moved with them — silently rewarding
+  // upstream slip. The contractor-analysis report (route.ts:150) got
+  // this right; the scorecard was the outlier.
   const { differenceInWorkingDays } = await import("@/lib/working-days");
   let daysLateTotal = 0;
   let daysLateJobs = 0;
   for (const j of completed) {
-    if (!j.endDate || !j.actualEndDate) continue;
-    if (j.actualEndDate.getTime() > j.endDate.getTime()) {
+    if (!j.actualEndDate) continue;
+    if (j.actualEndDate.getTime() > j.originalEndDate.getTime()) {
       const days = Math.max(
         0,
-        differenceInWorkingDays(j.actualEndDate, j.endDate),
+        differenceInWorkingDays(j.actualEndDate, j.originalEndDate),
       );
       if (days > 0) {
         daysLateTotal += days;

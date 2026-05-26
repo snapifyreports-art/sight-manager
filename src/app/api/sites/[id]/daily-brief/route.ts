@@ -10,6 +10,7 @@ import {
   whereJobStartOverdue,
   whereOrderOverdue,
 } from "@/lib/lateness";
+import { whereOrdersForSite } from "@/lib/order-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -169,7 +170,7 @@ export async function GET(
     }),
     prisma.materialOrder.findMany({
       where: {
-        job: { plot: { siteId: id } },
+        ...whereOrdersForSite(id),
         expectedDeliveryDate: { gte: dayStart, lte: dayEnd },
         status: "ORDERED",
       },
@@ -243,7 +244,7 @@ export async function GET(
   const [overdueDeliveries, openSnags, openSnagsList, incompleteSnags, rainedOff, outstandingOrders, upcomingOrders, upcomingDeliveries, jobsStartingTomorrow, unassignedJobs, unassignedInternalJobs, unsignedCompletions, awaitingSignOff] = await Promise.all([
     prisma.materialOrder.findMany({
       where: {
-        job: { plot: { siteId: id } },
+        ...whereOrdersForSite(id),
         ...whereOrderOverdue(dayStart), // (#177) SSOT
       },
       select: {
@@ -298,7 +299,7 @@ export async function GET(
     // Orders to Place: PENDING where dateOfOrder is today or past (should have been sent by now)
     prisma.materialOrder.findMany({
       where: {
-        job: { plot: { siteId: id } },
+        ...whereOrdersForSite(id),
         status: "PENDING",
         dateOfOrder: { lte: dayEnd },
       },
@@ -314,7 +315,7 @@ export async function GET(
     // Upcoming Orders: PENDING where dateOfOrder is in the future (scheduled, not yet due)
     prisma.materialOrder.findMany({
       where: {
-        job: { plot: { siteId: id } },
+        ...whereOrdersForSite(id),
         status: "PENDING",
         dateOfOrder: { gt: dayEnd },
       },
@@ -330,7 +331,7 @@ export async function GET(
     // Upcoming Deliveries: orders already SENT (ORDERED), delivery date in the future
     prisma.materialOrder.findMany({
       where: {
-        job: { plot: { siteId: id } },
+        ...whereOrdersForSite(id),
         status: "ORDERED",
         expectedDeliveryDate: { gt: dayEnd },
         deliveredDate: null,

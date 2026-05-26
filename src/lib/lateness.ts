@@ -15,13 +15,22 @@ import { differenceInWorkingDays } from "@/lib/working-days";
  * thresholds from every other view.
  *
  * Rule, finalised with Keith May 2026:
- *   - "Overdue end" = end-date in the past AND status != COMPLETED.
+ *   - "Overdue end" = ORIGINAL planned end-date in the past AND status != COMPLETED.
  *     Past = strictly before today (today itself is not overdue).
- *   - "Overdue start" = start-date in the past AND status == NOT_STARTED.
+ *   - "Overdue start" = ORIGINAL planned start-date in the past AND status == NOT_STARTED.
  *     A job that's already IN_PROGRESS is by definition not late-starting.
  *   - Days overdue is ALWAYS measured in WORKING days. Calendar
  *     differenceInDays is wrong for this domain — weekends don't make
  *     a job more behind.
+ *
+ * (May 2026 SSoT pass) Switched from `endDate` to `originalEndDate` and
+ * from `startDate` to `originalStartDate`. The schema's documented baseline
+ * for variance reporting is the immutable `originalStartDate`/`originalEndDate`
+ * pair — using the current `endDate` silently reset lateness every time
+ * someone rescheduled a job, making "are we on plan?" unanswerable. With
+ * baselines, a job that's behind plan stays behind plan even after a
+ * cascade. If scope legitimately changes, `scripts/rebaseline-originals.ts`
+ * is the explicit rebaseline path.
  *
  * The Prisma `where` helpers return Prisma filter clauses so callers
  * pass them directly into findMany. The boolean / number helpers
@@ -31,8 +40,12 @@ import { differenceInWorkingDays } from "@/lib/working-days";
 
 interface LeafJobShape {
   status: string;
-  startDate?: Date | string | null;
-  endDate?: Date | string | null;
+  // (May 2026 SSoT pass) Lateness derivation uses the immutable baseline.
+  // originalStartDate / originalEndDate are NOT NULL on the schema, but
+  // older fetched shapes may not select them — `?` keeps the type loose
+  // and the helpers return false when missing (fail-safe, not fail-true).
+  originalStartDate?: Date | string | null;
+  originalEndDate?: Date | string | null;
 }
 
 function toDate(d: Date | string | null | undefined): Date | null {
@@ -41,14 +54,14 @@ function toDate(d: Date | string | null | undefined): Date | null {
 }
 
 /**
- * True when the job has missed its planned end date. Works for any
+ * True when the job has missed its ORIGINAL planned end date. Works for any
  * non-COMPLETED status — IN_PROGRESS, NOT_STARTED, ON_HOLD all count.
  * `today` is the caller's anchor (use `getServerCurrentDate(req)` on
  * the server, `getCurrentDateAtMidnight()` on the client).
  */
 export function isJobEndOverdue(job: LeafJobShape, today: Date): boolean {
   if (job.status === "COMPLETED") return false;
-  const end = toDate(job.endDate);
+  const end = toDate(job.originalEndDate);
   if (!end) return false;
   return end < today;
 }
@@ -60,28 +73,28 @@ export function isJobEndOverdue(job: LeafJobShape, today: Date): boolean {
  */
 export function isJobStartOverdue(job: LeafJobShape, today: Date): boolean {
   if (job.status !== "NOT_STARTED") return false;
-  const start = toDate(job.startDate);
+  const start = toDate(job.originalStartDate);
   if (!start) return false;
   return start < today;
 }
 
 /**
- * Working days the job is past its planned end. Returns 0 if not
+ * Working days the job is past its ORIGINAL planned end. Returns 0 if not
  * overdue. Always working days — never calendar.
  */
 export function workingDaysEndOverdue(job: LeafJobShape, today: Date): number {
   if (!isJobEndOverdue(job, today)) return 0;
-  const end = toDate(job.endDate)!;
+  const end = toDate(job.originalEndDate)!;
   return differenceInWorkingDays(today, end);
 }
 
 /**
- * Working days the job is past its planned start. Returns 0 if not
+ * Working days the job is past its ORIGINAL planned start. Returns 0 if not
  * late-starting.
  */
 export function workingDaysStartOverdue(job: LeafJobShape, today: Date): number {
   if (!isJobStartOverdue(job, today)) return 0;
-  const start = toDate(job.startDate)!;
+  const start = toDate(job.originalStartDate)!;
   return differenceInWorkingDays(today, start);
 }
 
@@ -93,7 +106,7 @@ export function workingDaysStartOverdue(job: LeafJobShape, today: Date): number 
  */
 export function whereJobEndOverdue(today: Date) {
   return {
-    endDate: { lt: today },
+    originalEndDate: { lt: today },
     status: { not: "COMPLETED" as const },
   };
 }
@@ -104,7 +117,7 @@ export function whereJobEndOverdue(today: Date) {
  */
 export function whereJobStartOverdue(today: Date) {
   return {
-    startDate: { lt: today },
+    originalStartDate: { lt: today },
     status: "NOT_STARTED" as const,
   };
 }

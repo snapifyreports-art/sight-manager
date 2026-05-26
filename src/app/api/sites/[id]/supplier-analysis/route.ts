@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { canAccessSite } from "@/lib/site-access";
 import { apiError } from "@/lib/api-errors";
 import { differenceInWorkingDays } from "@/lib/working-days";
+import { whereOrdersForSite } from "@/lib/order-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -68,15 +69,12 @@ export async function GET(
   }
 
   try {
-    // Orders that touched this site — either via job→plot→site or via
-    // direct `siteId` on one-off orders.
+    // Orders that touched this site — via job→plot→site, via plotId
+    // directly (plot-level one-offs), or via siteId (site-level one-offs).
+    // Canonical predicate so this report agrees with Weekly Report,
+    // Material Burndown, and the Orders page.
     const orders = await prisma.materialOrder.findMany({
-      where: {
-        OR: [
-          { job: { plot: { siteId: id } } },
-          { siteId: id },
-        ],
-      },
+      where: whereOrdersForSite(id),
       select: {
         id: true,
         itemsDescription: true,

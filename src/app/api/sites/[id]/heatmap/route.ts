@@ -41,6 +41,10 @@ export async function GET(
           id: true,
           status: true,
           endDate: true,
+          // (May 2026 SSoT pass) Lateness helpers (isJobEndOverdue,
+          // workingDaysEndOverdue) now read originalEndDate — the
+          // immutable baseline — so it must be selected here too.
+          originalEndDate: true,
           // (May 2026 Keith request) Orders on the heatmap — pull each
           // job's orders so we can flag plots with overdue orders
           // (late to send, or ORDERED past expected delivery).

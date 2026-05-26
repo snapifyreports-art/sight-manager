@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canAccessSite } from "@/lib/site-access";
 import { verifyCalendarToken } from "@/lib/share-token";
+import { whereOrdersForSite } from "@/lib/order-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -135,10 +136,7 @@ export async function GET(
 
   const orders = await prisma.materialOrder.findMany({
     where: {
-      OR: [
-        { job: { plot: { siteId } } },
-        { siteId },
-      ],
+      ...whereOrdersForSite(siteId),
       expectedDeliveryDate: { not: null },
       status: { in: ["ORDERED"] },
     },

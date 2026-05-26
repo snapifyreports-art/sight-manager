@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { startOfMonth, endOfMonth, subMonths, addMonths } from "date-fns";
 import { getServerCurrentDate } from "@/lib/dev-date";
 import { canAccessSite } from "@/lib/site-access";
+import { whereOrdersForSite } from "@/lib/order-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -68,10 +69,14 @@ export async function GET(
     // Deliveries in range (ORDERED with expected delivery date)
     prisma.materialOrder.findMany({
       where: {
-        job: { plot: { siteId: id } },
-        OR: [
-          { expectedDeliveryDate: { gte: rangeStart, lte: rangeEnd } },
-          { deliveredDate: { gte: rangeStart, lte: rangeEnd } },
+        AND: [
+          whereOrdersForSite(id),
+          {
+            OR: [
+              { expectedDeliveryDate: { gte: rangeStart, lte: rangeEnd } },
+              { deliveredDate: { gte: rangeStart, lte: rangeEnd } },
+            ],
+          },
         ],
       },
       select: {
@@ -102,7 +107,7 @@ export async function GET(
     // Orders to place (PENDING with dateOfOrder in range)
     prisma.materialOrder.findMany({
       where: {
-        job: { plot: { siteId: id } },
+        ...whereOrdersForSite(id),
         status: "PENDING",
         dateOfOrder: { gte: rangeStart, lte: rangeEnd },
       },

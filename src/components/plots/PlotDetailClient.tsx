@@ -1301,8 +1301,19 @@ export function PlotDetailClient({
         </TabsContent>
 
         {/* Jobs List Tab */}
+        {/* (May 2026 SSoT pass) Parent Jobs are rollup infrastructure
+            (see parent-job.ts), not actionable rows — listing them flat
+            next to their own children produced the Plot 33 confusion
+            where "Foundation" said Not Started while its Dig & pour /
+            Brickwork sub-jobs were Completed. Filter parents out so this
+            tab only shows the leaf jobs the user can actually action. */}
         <TabsContent value="jobs">
-          {plot.jobs.length === 0 ? (
+          {(() => {
+            const parentJobIds = new Set(
+              plot.jobs.filter((j) => j.parentId).map((j) => j.parentId!)
+            );
+            const leafJobs = plot.jobs.filter((j) => !parentJobIds.has(j.id));
+            return leafJobs.length === 0 ? (
             <Card>
               <CardContent className="flex flex-col items-center py-12 text-center">
                 <Briefcase className="size-10 text-muted-foreground/40" />
@@ -1320,7 +1331,7 @@ export function PlotDetailClient({
             </Card>
           ) : (
             <div className="space-y-3">
-              {plot.jobs.map((job) => (
+              {leafJobs.map((job) => (
                 <Link
                   key={job.id}
                   href={`/jobs/${job.id}`}
@@ -1386,7 +1397,8 @@ export function PlotDetailClient({
                 <AddJobDialog plotId={plot.id} onCreated={handleJobCreated} />
               </div>
             </div>
-          )}
+          );
+          })()}
         </TabsContent>
 
         {/* History Tab */}

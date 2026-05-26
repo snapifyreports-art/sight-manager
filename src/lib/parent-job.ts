@@ -83,10 +83,11 @@ export async function recomputeParentFromChildren(
   const statuses = children.map((c) => c.status);
 
   // Status derivation — mirrors Keith's model:
-  //   all COMPLETED → COMPLETED
-  //   any IN_PROGRESS → IN_PROGRESS
-  //   any ON_HOLD (with no IN_PROGRESS) → ON_HOLD
-  //   otherwise → NOT_STARTED
+  //   all COMPLETED                                  → COMPLETED
+  //   any IN_PROGRESS                                → IN_PROGRESS
+  //   any COMPLETED (but not all, no IN_PROGRESS)    → IN_PROGRESS (parent has started)
+  //   any ON_HOLD (no IN_PROGRESS, no COMPLETED)     → ON_HOLD
+  //   otherwise                                      → NOT_STARTED
   //
   // (May 2026 audit B-P1-23) Pre-fix the ON_HOLD branch required EVERY
   // non-ON_HOLD child to be COMPLETED. So a parent with 4 NOT_STARTED
@@ -94,10 +95,19 @@ export async function recomputeParentFromChildren(
   // branch — pausing a scheduled sub-job had no visible effect on the
   // parent. Now: any ON_HOLD child propagates ON_HOLD to the parent
   // (provided no child is actively in-progress, which still wins).
+  //
+  // (May 2026 SSoT pass) Added the "some-but-not-all COMPLETED" branch.
+  // Pre-fix, a parent with 2 COMPLETED + 3 NOT_STARTED children fell to
+  // NOT_STARTED — so Plot 33's "Foundation" claimed it hadn't started
+  // even though Dig & pour and Brickwork were signed off. A parent with
+  // at least one finished child has demonstrably started, so it rolls up
+  // to IN_PROGRESS until all children complete.
   let status: JobStatus = "NOT_STARTED";
   if (statuses.length > 0 && statuses.every((s) => s === "COMPLETED")) {
     status = "COMPLETED";
   } else if (statuses.some((s) => s === "IN_PROGRESS")) {
+    status = "IN_PROGRESS";
+  } else if (statuses.some((s) => s === "COMPLETED")) {
     status = "IN_PROGRESS";
   } else if (statuses.some((s) => s === "ON_HOLD")) {
     status = "ON_HOLD";

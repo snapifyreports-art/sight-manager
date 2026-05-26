@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canAccessSite } from "@/lib/site-access";
+import { whereOrdersForSite } from "@/lib/order-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -64,7 +65,7 @@ export async function GET(
     }),
     prisma.materialOrder.findMany({
       where: {
-        job: { plot: { siteId: id } },
+        ...whereOrdersForSite(id),
         status: { in: ["PENDING", "ORDERED", "DELIVERED"] },
       },
       select: {

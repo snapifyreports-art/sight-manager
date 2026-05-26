@@ -19,6 +19,64 @@ import { logEvent } from "./event-log";
 
 type DbClient = PrismaClient | Prisma.TransactionClient;
 
+// (May 2026 SSoT pass) EventLog descriptions used to be written as e.g.
+// `Lateness opened: JOB_END_OVERDUE on job cmp55zi5` — raw enum + truncated
+// id, both unreadable. The History tab renders the linked job name in the
+// metadata row already, so the description should carry the human story,
+// not the database identifiers. These helpers produce the strings every
+// LatenessEvent-related write uses; exporting them keeps the cron and the
+// helper in lock-step (no quiet drift if one is updated and not the other).
+
+export function formatLatenessKind(kind: LatenessKind): string {
+  switch (kind) {
+    case "JOB_END_OVERDUE":
+      return "finished after deadline";
+    case "JOB_START_OVERDUE":
+      return "not started by planned date";
+    case "ORDER_DELIVERY_OVERDUE":
+      return "delivery overdue";
+    case "ORDER_SEND_OVERDUE":
+      return "order not sent on time";
+  }
+}
+
+export async function resolveLatenessTargetLabel(
+  db: DbClient,
+  targetType: "job" | "order",
+  targetId: string,
+): Promise<string> {
+  if (targetType === "job") {
+    const j = await db.job.findUnique({
+      where: { id: targetId },
+      select: { name: true },
+    });
+    return j?.name ?? "job";
+  }
+  const o = await db.materialOrder.findUnique({
+    where: { id: targetId },
+    select: {
+      itemsDescription: true,
+      supplier: { select: { name: true } },
+    },
+  });
+  if (!o) return "order";
+  const items = o.itemsDescription?.trim();
+  const supplier = o.supplier?.name;
+  if (items && supplier) return `${items} (${supplier})`;
+  return items || supplier || "order";
+}
+
+export async function formatLatenessDescription(
+  db: DbClient,
+  verb: "opened" | "re-opened" | "resolved",
+  targetType: "job" | "order",
+  targetId: string,
+  kind: LatenessKind,
+): Promise<string> {
+  const label = await resolveLatenessTargetLabel(db, targetType, targetId);
+  return `Lateness ${verb}: ${label} — ${formatLatenessKind(kind)}`;
+}
+
 export interface OpenLatenessArgs {
   /** Why is this thing late — kind of target + kind of slip. */
   kind: LatenessKind;
@@ -131,9 +189,16 @@ export async function openOrUpdateLateness(
     // back open. Emit a LATENESS_OPENED breadcrumb so the timeline
     // shows the re-open moment.
     if (isReopening) {
+      const description = await formatLatenessDescription(
+        db,
+        "re-opened",
+        args.targetType,
+        args.targetId,
+        args.kind,
+      );
       await logEvent(db, {
         type: "LATENESS_OPENED",
-        description: `Lateness re-opened: ${args.kind} on ${args.targetType} ${args.targetId.slice(0, 8)}`,
+        description,
         siteId: args.siteId,
         plotId: args.plotId ?? null,
         jobId: args.jobId ?? null,
@@ -172,9 +237,16 @@ export async function openOrUpdateLateness(
   });
 
   // Audit breadcrumb in EventLog so timeline-style views see it.
+  const description = await formatLatenessDescription(
+    db,
+    "opened",
+    args.targetType,
+    args.targetId,
+    args.kind,
+  );
   await logEvent(db, {
     type: "LATENESS_OPENED",
-    description: `Lateness opened: ${args.kind} on ${args.targetType} ${args.targetId.slice(0, 8)}`,
+    description,
     siteId: args.siteId,
     plotId: args.plotId ?? null,
     jobId: args.jobId ?? null,
@@ -212,11 +284,14 @@ export async function resolveLateness(
     data: { resolvedAt },
   });
   // One audit row per resolved event so the timeline is preserved.
+  // Resolve the target label once — `targetType` and `targetId` are the
+  // same across every open event in this batch, so one lookup suffices.
+  const targetLabel = await resolveLatenessTargetLabel(db, targetType, targetId);
   await Promise.all(
     open.map((e) =>
       logEvent(db, {
         type: "LATENESS_RESOLVED",
-        description: `Lateness resolved: ${e.kind} on ${targetType} ${targetId.slice(0, 8)}`,
+        description: `Lateness resolved: ${targetLabel} — ${formatLatenessKind(e.kind)}`,
         siteId: e.siteId,
         plotId: e.plotId ?? null,
         jobId: e.jobId ?? null,

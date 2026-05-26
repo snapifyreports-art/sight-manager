@@ -74,7 +74,10 @@ export async function POST(
   // the later-iteration sees the already-shifted (= correct) state.
   const orderedJobs = await prisma.job.findMany({
     where: { id: { in: jobIds } },
-    select: { id: true, plotId: true, sortOrder: true },
+    // (May 2026 SSoT pass) `name` selected so per-job failures surface
+    // a human label in the failed-jobs toast — was previously falling
+    // back to `Job ${id.slice(0, 8)}` which leaked a raw cuid to UI.
+    select: { id: true, plotId: true, sortOrder: true, name: true },
   });
   const orderedJobMap = new Map(orderedJobs.map((j) => [j.id, j]));
   const sortedJobIds = [...jobIds].sort((a, b) => {
@@ -512,8 +515,7 @@ export async function POST(
       // (May 2026 user-journey audit Bug 8) Surface per-job failures
       // so the client can toast them. Pre-fix this was a silent
       // console.error with no response signal.
-      const jobName =
-        orderedJobMap.get(jobId)?.plotId ? `Job ${jobId.slice(0, 8)}` : jobId;
+      const jobName = orderedJobMap.get(jobId)?.name ?? "Unknown job";
       const msg = e instanceof Error ? e.message : "Unknown error";
       failed.push({ jobId, jobName, error: msg });
     }

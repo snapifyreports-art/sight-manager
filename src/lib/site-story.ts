@@ -1,5 +1,6 @@
 import type { Prisma, PrismaClient, EventType } from "@prisma/client";
 import { differenceInWorkingDays } from "./working-days";
+import { whereOrdersForSite } from "./order-scope";
 
 /**
  * Site Story synthesizer — single source of truth for "what actually
@@ -299,11 +300,15 @@ export async function buildSiteStory(
   // from the ORDER_SEND_OVERDUE lateness events (the order's own
   // dateOfOrder is overwritten on send, so the lateness row is the SSOT
   // for "this went out late").
+  // (May 2026 SSoT pass) whereOrdersForSite covers job-attached,
+  // plot-level one-off, and site-level one-off orders — Site Story used
+  // to count only job-attached orders, so one-offs were silently absent
+  // from the build's narrative.
   const storyOrders =
     plotIds.length === 0
       ? []
       : await tx.materialOrder.findMany({
-          where: { job: { plotId: { in: plotIds } } },
+          where: whereOrdersForSite(siteId),
           select: {
             status: true,
             expectedDeliveryDate: true,
@@ -549,8 +554,15 @@ export async function buildSiteStory(
     _count: true,
   });
   const snagsRaised = snagSummary.reduce((sum, s) => sum + s._count, 0);
-  const snagsResolved =
-    snagSummary.find((s) => s.status === "RESOLVED")?._count ?? 0;
+  // (May 2026 SSoT pass) "Resolved" = RESOLVED OR CLOSED. Pre-fix only
+  // RESOLVED was counted, so a snag dismissed straight to CLOSED stayed
+  // in the open tally forever. The contractor scorecard
+  // (scorecard/route.ts:120-125) and the per-contractor breakdown
+  // below (line 606) both already count CLOSED — this site-level total
+  // was the outlier producing a tally that didn't agree with itself.
+  const snagsResolved = snagSummary
+    .filter((s) => s.status === "RESOLVED" || s.status === "CLOSED")
+    .reduce((sum, s) => sum + s._count, 0);
   const snagsOpen = snagsRaised - snagsResolved;
 
   // (#174) Rich snag breakdown for the Story tab. Pull every snag for
@@ -684,6 +696,11 @@ export async function buildSiteStory(
   });
 
   const plotStories: PlotStory[] = plots.map((p) => {
+    // (May 2026 SSoT pass) Mirrors the parent-job.ts status derivation
+    // so the Site Story plot status agrees with the parent-stage rollup
+    // shown on the plot page. Pre-fix, a plot with 2 COMPLETED + 3
+    // NOT_STARTED leaf jobs fell to NOT_STARTED — same partial-done bug
+    // class as Plot 33 "Foundation."
     const status: PlotStory["status"] =
       p.jobs.length === 0
         ? "NOT_STARTED"
@@ -691,9 +708,11 @@ export async function buildSiteStory(
           ? "COMPLETED"
           : p.jobs.some((j) => j.status === "IN_PROGRESS")
             ? "IN_PROGRESS"
-            : p.jobs.some((j) => j.status === "ON_HOLD")
-              ? "ON_HOLD"
-              : "NOT_STARTED";
+            : p.jobs.some((j) => j.status === "COMPLETED")
+              ? "IN_PROGRESS"
+              : p.jobs.some((j) => j.status === "ON_HOLD")
+                ? "ON_HOLD"
+                : "NOT_STARTED";
 
     const plotEarliestActual = p.jobs
       .map((j) => j.actualStartDate)
@@ -716,8 +735,17 @@ export async function buildSiteStory(
     const plotSnagCount = snagCountsByPlot
       .filter((r) => r.plotId === p.id)
       .reduce((sum, r) => sum + r._count, 0);
+    // (May 2026 SSoT pass) Open = OPEN or IN_PROGRESS — symmetric with
+    // the site-level snagsOpen calc above (Raised - Resolved, where
+    // Resolved counts RESOLVED OR CLOSED). Pre-fix this used
+    // `status !== "RESOLVED"` which silently counted CLOSED snags as
+    // open, so the plot tally said 10 open while the site banner said 0.
     const plotSnagsOpen = snagCountsByPlot
-      .filter((r) => r.plotId === p.id && r.status !== "RESOLVED")
+      .filter(
+        (r) =>
+          r.plotId === p.id &&
+          (r.status === "OPEN" || r.status === "IN_PROGRESS"),
+      )
       .reduce((sum, r) => sum + r._count, 0);
 
     return {

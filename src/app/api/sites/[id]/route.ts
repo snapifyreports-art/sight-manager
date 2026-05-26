@@ -5,6 +5,7 @@ import { sessionHasPermission } from "@/lib/permissions";
 import { canAccessSite } from "@/lib/site-access";
 import { apiError } from "@/lib/api-errors";
 import { logEvent } from "@/lib/event-log";
+import { whereOrdersForSite } from "@/lib/order-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -273,13 +274,7 @@ export async function DELETE(
       // sites had left 160 orphan orders behind. Reachable three ways:
       // one-off site orders, one-off plot orders, template job orders.
       await tx.materialOrder.deleteMany({
-        where: {
-          OR: [
-            { siteId: id },
-            { plot: { siteId: id } },
-            { job: { plot: { siteId: id } } },
-          ],
-        },
+        where: whereOrdersForSite(id),
       });
 
       await tx.site.delete({ where: { id } });

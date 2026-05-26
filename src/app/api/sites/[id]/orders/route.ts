@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canAccessSite } from "@/lib/site-access";
+import { whereOrdersForSite } from "@/lib/order-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -28,11 +29,7 @@ export async function GET(
 
   const orders = await prisma.materialOrder.findMany({
     where: {
-      job: {
-        plot: {
-          siteId: id,
-        },
-      },
+      ...whereOrdersForSite(id),
     },
     include: {
       supplier: { select: { id: true, name: true, contactEmail: true, contactName: true, accountNumber: true } },

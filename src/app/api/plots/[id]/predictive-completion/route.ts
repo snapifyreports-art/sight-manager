@@ -49,11 +49,16 @@ export async function GET(
 
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
+  // (May 2026 SSoT pass) Variance ("predicted X days late") is measured
+  // against the immutable baseline originalEndDate, not the current
+  // endDate which moves with every cascade. Pre-fix, pulling jobs
+  // earlier produced "250 days late" even when the plot was actually
+  // ahead of its original plan — the comparison shifted with the plan.
   const jobs = await prisma.job.findMany({
     where: { plotId: id, children: { none: {} } },
     select: {
       status: true,
-      endDate: true,
+      originalEndDate: true,
       actualEndDate: true,
     },
   });
@@ -71,8 +76,7 @@ export async function GET(
 
   const velocity = completedRecently / 30;
   const plannedFinish = jobs
-    .map((j) => j.endDate?.getTime())
-    .filter((t): t is number => typeof t === "number")
+    .map((j) => j.originalEndDate.getTime())
     .reduce((m, t) => Math.max(m, t), 0);
 
   let predictedDate: string | null = null;

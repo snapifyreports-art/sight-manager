@@ -111,7 +111,11 @@ export async function POST(
 
     await logEvent(prisma, {
       type: "ORDER_PLACED",
-      description: `[${order.supplier.name}] One-off order created${plotId ? ` for plot ${order.plot?.plotNumber ?? plotId}` : " at site level"}`,
+      description: `[${order.supplier.name}] One-off order created${
+        plotId
+          ? ` for plot ${order.plot?.plotNumber ?? order.plot?.name ?? "(unnamed)"}`
+          : " at site level"
+      }`,
       siteId,
       plotId: plotId || null,
       userId: session.user.id,

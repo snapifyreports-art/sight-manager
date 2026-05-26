@@ -80,6 +80,9 @@ export async function GET(req: NextRequest) {
                 status: true,
                 startDate: true,
                 endDate: true,
+                // (May 2026 SSoT pass) delayedJobs uses isJobEndOverdue
+                // which now reads originalEndDate — select it explicitly.
+                originalEndDate: true,
                 actualStartDate: true,
                 actualEndDate: true,
                 name: true,

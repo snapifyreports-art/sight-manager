@@ -66,7 +66,10 @@
       "Bash(ls -la /c/Users/keith/OneDrive/Desktop/sight-manager/src/app/api/orders/[id]/)",
       "Bash(npx vercel:*)",
       "Bash(grep -r advance /c/Users/keith/OneDrive/Desktop/sight-manager/src --include=*.ts --include=*.tsx)",
-      "Bash(find /c/Users/keith/OneDrive/Desktop/sight-manager -name *.sql -o -name *seed* -o -name *template*migration*)"
+      "Bash(find /c/Users/keith/OneDrive/Desktop/sight-manager -name *.sql -o -name *seed* -o -name *template*migration*)",
+      "PowerShell(npx tsc --noEmit 2>&1)",
+      "PowerShell(Get-ChildItem \"$env:ProgramFiles\\\\nodejs\", \"$env:LOCALAPPDATA\\\\Programs\\\\nodejs\", \"$env:APPDATA\\\\npm\" -ErrorAction SilentlyContinue | Select-Object -First 5)",
+      "Bash(git show *)"
     ]
   }
 }

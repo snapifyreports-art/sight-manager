@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { format } from "date-fns";
 import { canAccessSite } from "@/lib/site-access";
 import { remapDateToOriginal } from "@/lib/job-timeline";
+import { whereOrdersForSite } from "@/lib/order-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -32,7 +33,7 @@ export async function GET(
   // Single query: all orders for this site with items + job dates for original mode
   const orders = await prisma.materialOrder.findMany({
     where: {
-      job: { plot: { siteId: id } },
+      ...whereOrdersForSite(id),
       status: { not: "CANCELLED" },
     },
     select: {

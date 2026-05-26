@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { differenceInWorkingDays } from "@/lib/working-days";
-import { openOrUpdateLateness, resolveLateness } from "@/lib/lateness-event";
+import {
+  openOrUpdateLateness,
+  resolveLateness,
+  formatLatenessKind,
+  resolveLatenessTargetLabel,
+} from "@/lib/lateness-event";
 import { getServerCurrentDate } from "@/lib/dev-date";
 import { logEvent } from "@/lib/event-log";
 
@@ -57,20 +62,25 @@ export async function GET(req: NextRequest) {
   }
 
   // ----- Open / refresh jobs lateness -----
+  // (May 2026 SSoT pass) Lateness is measured against the immutable
+  // baseline — originalStartDate / originalEndDate — never the current
+  // endDate, which would silently un-late a job every time it's
+  // rescheduled. Matches the SSoT rule in src/lib/lateness.ts and the
+  // schema comment on Job.originalEndDate.
   const lateJobs = await prisma.job.findMany({
     where: {
       plot: { siteId: { in: siteIds } },
       children: { none: {} },
       OR: [
-        { status: { not: "COMPLETED" }, endDate: { lt: today } },
-        { status: "NOT_STARTED", startDate: { lt: today } },
+        { status: { not: "COMPLETED" }, originalEndDate: { lt: today } },
+        { status: "NOT_STARTED", originalStartDate: { lt: today } },
       ],
     },
     select: {
       id: true,
       plotId: true,
-      startDate: true,
-      endDate: true,
+      originalStartDate: true,
+      originalEndDate: true,
       status: true,
       plot: { select: { siteId: true } },
     },
@@ -78,13 +88,13 @@ export async function GET(req: NextRequest) {
   jobsScanned = lateJobs.length;
   for (const j of lateJobs) {
     try {
-      // JOB_END_OVERDUE — any non-COMPLETED job past endDate.
-      if (j.status !== "COMPLETED" && j.endDate && j.endDate < today) {
-        const wentLateOn = new Date(j.endDate);
+      // JOB_END_OVERDUE — any non-COMPLETED job past originalEndDate.
+      if (j.status !== "COMPLETED" && j.originalEndDate && j.originalEndDate < today) {
+        const wentLateOn = new Date(j.originalEndDate);
         wentLateOn.setHours(0, 0, 0, 0);
-        // Skip the day the endDate falls on — only count strictly past.
+        // Skip the day the originalEndDate falls on — only count strictly past.
         wentLateOn.setDate(wentLateOn.getDate() + 1);
-        const daysLate = Math.max(1, differenceInWorkingDays(today, j.endDate));
+        const daysLate = Math.max(1, differenceInWorkingDays(today, j.originalEndDate));
         const r = await openOrUpdateLateness(prisma, {
           kind: "JOB_END_OVERDUE",
           targetType: "job",
@@ -98,12 +108,12 @@ export async function GET(req: NextRequest) {
         if (r.created) opened++;
         else updated++;
       }
-      // JOB_START_OVERDUE — NOT_STARTED past startDate.
-      if (j.status === "NOT_STARTED" && j.startDate && j.startDate < today) {
-        const wentLateOn = new Date(j.startDate);
+      // JOB_START_OVERDUE — NOT_STARTED past originalStartDate.
+      if (j.status === "NOT_STARTED" && j.originalStartDate && j.originalStartDate < today) {
+        const wentLateOn = new Date(j.originalStartDate);
         wentLateOn.setHours(0, 0, 0, 0);
         wentLateOn.setDate(wentLateOn.getDate() + 1);
-        const daysLate = Math.max(1, differenceInWorkingDays(today, j.startDate));
+        const daysLate = Math.max(1, differenceInWorkingDays(today, j.originalStartDate));
         const r = await openOrUpdateLateness(prisma, {
           kind: "JOB_START_OVERDUE",
           targetType: "job",
@@ -284,9 +294,14 @@ export async function GET(req: NextRequest) {
           data: { resolvedAt: today },
         });
         for (const e of eventsToResolve) {
+          const label = await resolveLatenessTargetLabel(
+            tx,
+            e.targetType as "job" | "order",
+            e.targetId,
+          );
           await logEvent(tx, {
             type: "LATENESS_RESOLVED",
-            description: `Lateness resolved: ${e.kind} on ${e.targetType} ${e.targetId.slice(0, 8)}`,
+            description: `Lateness resolved: ${label} — ${formatLatenessKind(e.kind)}`,
             siteId: e.siteId,
             plotId: e.plotId,
             jobId: e.jobId,

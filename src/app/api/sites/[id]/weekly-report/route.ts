@@ -11,6 +11,7 @@ import {
 import { getServerCurrentDate } from "@/lib/dev-date";
 import { canAccessSite } from "@/lib/site-access";
 import { isJobEndOverdue } from "@/lib/lateness";
+import { whereOrdersForSite } from "@/lib/order-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -49,7 +50,10 @@ export async function GET(
     prisma.plot.count({ where: { siteId: id } }),
     prisma.job.findMany({
       where: { plot: { siteId: id }, children: { none: {} } },
-      select: { status: true, endDate: true },
+      // (May 2026 SSoT pass) Overdue count uses isJobEndOverdue which
+      // now reads originalEndDate — keep endDate too for any caller
+      // still rendering the current plan date in the report body.
+      select: { status: true, endDate: true, originalEndDate: true },
     }),
   ]);
 
@@ -105,7 +109,7 @@ export async function GET(
     }),
     prisma.materialOrder.count({
       where: {
-        job: { plot: { siteId: id } },
+        ...whereOrdersForSite(id),
         dateOfOrder: { gte: weekStart, lte: weekEnd },
       },
     }),
@@ -113,13 +117,20 @@ export async function GET(
 
   const [deliveriesThisWeek, photosThisWeek, snagsOpenedThisWeek] = await Promise.all([
     prisma.materialOrder.findMany({
+      // (May 2026 SSoT pass) whereOrdersForSite contributes the
+      // attachment OR; nest the date OR under AND so they compose
+      // instead of one clobbering the other.
       where: {
-        job: { plot: { siteId: id } },
-        OR: [
-          { deliveredDate: { gte: weekStart, lte: weekEnd } },
+        AND: [
+          whereOrdersForSite(id),
           {
-            expectedDeliveryDate: { gte: weekStart, lte: weekEnd },
-            status: "ORDERED",
+            OR: [
+              { deliveredDate: { gte: weekStart, lte: weekEnd } },
+              {
+                expectedDeliveryDate: { gte: weekStart, lte: weekEnd },
+                status: "ORDERED",
+              },
+            ],
           },
         ],
       },
@@ -174,18 +185,18 @@ export async function GET(
   const [ordersToSend, ordersOverdueToSend, ordersOverdueDelivery] =
     await Promise.all([
       prisma.materialOrder.count({
-        where: { job: { plot: { siteId: id } }, status: "PENDING" },
+        where: { ...whereOrdersForSite(id), status: "PENDING" },
       }),
       prisma.materialOrder.count({
         where: {
-          job: { plot: { siteId: id } },
+          ...whereOrdersForSite(id),
           status: "PENDING",
           dateOfOrder: { lt: today },
         },
       }),
       prisma.materialOrder.count({
         where: {
-          job: { plot: { siteId: id } },
+          ...whereOrdersForSite(id),
           status: "ORDERED",
           deliveredDate: null,
           expectedDeliveryDate: { lt: today },
@@ -227,7 +238,7 @@ export async function GET(
 
   const deliveriesNextWeek = await prisma.materialOrder.findMany({
     where: {
-      job: { plot: { siteId: id } },
+      ...whereOrdersForSite(id),
       expectedDeliveryDate: { gte: nextWeekStart, lte: nextWeekEnd },
       status: "ORDERED",
     },

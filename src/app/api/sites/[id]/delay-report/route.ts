@@ -34,11 +34,15 @@ export async function GET(
 
   const [overdueJobs, weatherImpactDays, overdueDeliveries, completedLateJobs] =
     await Promise.all([
-      // Currently overdue jobs — leaf jobs only (parents are derived rollups)
+      // Overdue jobs — leaf jobs only (parents are derived rollups).
+      // (May 2026 SSoT pass) Variance is measured against the immutable
+      // baseline (originalEndDate). Pre-fix this filtered on current
+      // endDate, so jobs that had been rescheduled silently vanished
+      // from the Delay Report even though they'd slipped from plan.
       prisma.job.findMany({
         where: {
           plot: { siteId: id },
-          endDate: { lt: today },
+          originalEndDate: { lt: today },
           status: { not: "COMPLETED" },
           children: { none: {} },
         },
@@ -48,6 +52,10 @@ export async function GET(
           status: true,
           startDate: true,
           endDate: true,
+          // (May 2026 SSoT pass) daysOverdue is computed against the
+          // immutable baseline so it doesn't reset every cascade.
+          originalStartDate: true,
+          originalEndDate: true,
           weatherAffected: true,
           description: true,
           // (May 2026 audit D-P2) Include plot.id so the UI can filter
@@ -134,12 +142,15 @@ export async function GET(
         orderBy: { expectedDeliveryDate: "asc" },
       }),
 
-      // Jobs completed late (for trend) — leaves only, parents don't have actualEndDate anyway
+      // Jobs completed late (for trend) — leaves only, parents don't have actualEndDate anyway.
+      // (May 2026 SSoT pass) "Completed late" compares actualEndDate to
+      // the immutable baseline, not the current endDate (which the cascade
+      // may have moved forward right before the job completed, hiding the
+      // slip). originalEndDate is NOT NULL on the schema, so no filter.
       prisma.job.findMany({
         where: {
           plot: { siteId: id },
           status: "COMPLETED",
-          endDate: { not: null },
           actualEndDate: { not: null },
           children: { none: {} },
         },
@@ -147,6 +158,7 @@ export async function GET(
           id: true,
           name: true,
           endDate: true,
+          originalEndDate: true,
           actualEndDate: true,
           plot: { select: { plotNumber: true } },
         },
@@ -158,7 +170,9 @@ export async function GET(
 
   // Calculate delay details per job
   const delayedJobs = overdueJobs.map((job) => {
-    const daysOverdue = job.endDate ? differenceInWorkingDays(today, job.endDate) : 0;
+    // (May 2026 SSoT pass) daysOverdue is measured from the immutable
+    // baseline — cascades shouldn't reset the "how late from plan" number.
+    const daysOverdue = differenceInWorkingDays(today, job.originalEndDate);
 
     // Count weather impact days overlapping this job's scheduled period
     const jobRainDays = job.startDate && job.endDate
@@ -283,16 +297,21 @@ export async function GET(
     };
   });
 
-  // Completed-late trend
+  // Completed-late trend.
+  // (May 2026 SSoT pass) Compare actualEndDate to the BASELINE
+  // originalEndDate, not the current endDate. Pre-fix a job rescheduled
+  // forward right before it completed would show 0 days late even though
+  // it slipped 10 days from its original plan. `scheduledEnd` in the JSON
+  // response is the baseline; the UI labels it as such.
   const completedLateTrend = completedLateJobs
-    .filter((j) => j.actualEndDate! > j.endDate!)
+    .filter((j) => j.actualEndDate! > j.originalEndDate)
     .map((j) => ({
       id: j.id,
       name: j.name,
       plotNumber: j.plot.plotNumber,
-      scheduledEnd: j.endDate!.toISOString(),
+      scheduledEnd: j.originalEndDate.toISOString(),
       actualEnd: j.actualEndDate!.toISOString(),
-      daysLate: differenceInWorkingDays(j.actualEndDate!, j.endDate!),
+      daysLate: differenceInWorkingDays(j.actualEndDate!, j.originalEndDate),
     }));
 
   const weatherExcusedJobs = delayedJobs.filter((j) => j.isWeatherExcused);
