@@ -94,12 +94,57 @@ export default async function ContractorSharePage({
       job: {
         select: {
           id: true, name: true, status: true, startDate: true, endDate: true,
+          actualEndDate: true, originalEndDate: true,
           stageCode: true, signOffNotes: true,
           plot: { select: { id: true, plotNumber: true, name: true } },
         },
       },
     },
   });
+
+  // (May 2026 Keith strategic) On-time performance chip.
+  //
+  // Contractors don't usually see how they're being scored. Showing
+  // them their on-time rate next to the site average creates a soft
+  // accountability loop — once you know you're behind the rest, the
+  // next job tends to land closer to schedule. Reuses the canonical
+  // "completed by the agreed end date" rule: actualEndDate is on
+  // time iff it's ≤ originalEndDate (the immutable plan baseline,
+  // never the slipped endDate).
+  const siteCompletedRows = await prisma.jobContractor.findMany({
+    where: {
+      job: {
+        plot: { siteId },
+        status: "COMPLETED",
+        actualEndDate: { not: null },
+        originalEndDate: { not: null },
+        children: { none: {} },
+      },
+    },
+    select: {
+      contactId: true,
+      job: {
+        select: { actualEndDate: true, originalEndDate: true },
+      },
+    },
+  });
+  function onTimePct(rows: typeof siteCompletedRows): number | null {
+    if (rows.length === 0) return null;
+    const onTime = rows.filter((r) => {
+      const a = r.job.actualEndDate;
+      const o = r.job.originalEndDate;
+      if (!a || !o) return false;
+      return a.getTime() <= o.getTime();
+    }).length;
+    return Math.round((onTime / rows.length) * 100);
+  }
+  const contractorOnTime = onTimePct(
+    siteCompletedRows.filter((r) => r.contactId === contactId),
+  );
+  const siteOnTime = onTimePct(siteCompletedRows);
+  const contractorCompletedCount = siteCompletedRows.filter(
+    (r) => r.contactId === contactId,
+  ).length;
 
   // (#168) Chronological by startDate everywhere a job list appears.
   const byStartDate = (a: { startDate: Date | null }, b: { startDate: Date | null }) => {
@@ -335,6 +380,42 @@ export default async function ContractorSharePage({
             </div>
             <PrintButton />
           </div>
+          {/* (May 2026 Keith strategic) On-time performance chip.
+              Renders only once the contractor has ≥1 completed job
+              at this site — pre-completion there's no signal to
+              show. Site average shown alongside as the soft
+              comparator that drives behaviour. */}
+          {contractorOnTime !== null && contractorCompletedCount >= 1 && (
+            <div className="mt-3">
+              {(() => {
+                const aboveAvg =
+                  siteOnTime !== null && contractorOnTime >= siteOnTime;
+                return (
+                  <div
+                    className={`inline-flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2 text-xs font-medium ${
+                      aboveAvg
+                        ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+                        : "border-amber-200 bg-amber-50 text-amber-900"
+                    }`}
+                  >
+                    <span>
+                      Your on-time rate:{" "}
+                      <span className="text-sm font-bold">
+                        {contractorOnTime}%
+                      </span>{" "}
+                      ({contractorCompletedCount} job
+                      {contractorCompletedCount === 1 ? "" : "s"})
+                    </span>
+                    {siteOnTime !== null && (
+                      <span className="opacity-80">
+                        · site average {siteOnTime}%
+                      </span>
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
+          )}
           <div className="mt-3 flex flex-wrap items-center gap-4">
             <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
               <Building2 className="size-4" />
