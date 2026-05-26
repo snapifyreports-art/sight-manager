@@ -51,6 +51,7 @@ const SITE_TAB_GROUPS = [
       { label: "Orders",            tab: "orders" },
       { label: "Snags",             tab: "snags" },
       { label: "Contractor Comms",  tab: "contractor-comms" },
+      { label: "On Site Today",     tab: "on-site-today" },
     ],
   },
   {
