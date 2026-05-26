@@ -566,6 +566,63 @@ export async function renderPlotVariationLogPdf(
   return pdfBuffer(doc);
 }
 
+// (May 2026 Story-linkage audit) HandoverChecklist per plot — the
+// actual model behind the buyer-pack docs (EPC, gas-safe, electrical,
+// NHBC, warranty, building-regs etc.). Distinct from PreStartCheck
+// which is pre-construction. Renders one row per docType with
+// required/signed-off status + who-checked.
+export async function renderPlotHandoverChecklistPdf(
+  plotName: string,
+  items: Array<{
+    docType: string;
+    required: boolean;
+    checkedAt: Date | null;
+    notes: string | null;
+    checkedBy: { name: string } | null;
+    document: { name: string } | null;
+  }>,
+): Promise<Buffer> {
+  const { jsPDF, autoTable } = await loadJsPdf();
+  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+
+  doc.setFontSize(16);
+  doc.text(`Handover checklist — ${plotName}`, 14, 22);
+  doc.setFontSize(9);
+  doc.setTextColor(120);
+  const required = items.filter((i) => i.required).length;
+  const checked = items.filter((i) => i.required && i.checkedAt).length;
+  doc.text(
+    `${checked} of ${required} required documents signed off`,
+    14,
+    28,
+  );
+  doc.setTextColor(0);
+
+  if (items.length === 0) {
+    doc.setFontSize(10);
+    doc.text("No handover checklist defined for this plot.", 14, 40);
+  } else {
+    autoTable(doc, {
+      startY: 36,
+      head: [["Document", "Required", "Status", "Signed off", "By", "File", "Notes"]],
+      body: items.map((i) => [
+        i.docType.replace(/_/g, " "),
+        i.required ? "Yes" : "No",
+        i.checkedAt ? "✓ Signed" : "—",
+        i.checkedAt ? format(i.checkedAt, "dd MMM yy") : "—",
+        i.checkedBy?.name ?? "—",
+        i.document?.name ?? "—",
+        i.notes ?? "",
+      ]),
+      styles: { fontSize: 8, cellPadding: 1.2 },
+      columnStyles: { 6: { cellWidth: 40 } },
+      headStyles: { fillColor: [241, 245, 249], textColor: [51, 65, 85] },
+    });
+  }
+
+  return pdfBuffer(doc);
+}
+
 // (May 2026 Story-linkage audit) Pre-start check log per plot — pre-
 // handover readiness signal (do all the items on the plot checklist
 // have a tick + a date + who-checked?).
@@ -953,6 +1010,7 @@ export function renderReadmeTxt(
     lines.push("        variation-log.pdf      (when variations recorded)");
     lines.push("        pre-start-checks.pdf   (when pre-start checks defined)");
     lines.push("        draw-schedule.pdf      (when draw schedule defined)");
+    lines.push("        handover-checklist.pdf (EPC / gas-safe / electrical / NHBC etc.)");
     lines.push("        certificates/  drawings/  photos/");
     lines.push("        voice-notes/           (audio clips + _index.txt transcript summary)");
   }
@@ -971,6 +1029,10 @@ export function renderReadmeTxt(
   lines.push("");
   lines.push("06_Reports/");
   lines.push("    delay-report-final.pdf");
+  lines.push("");
+  lines.push("08_Toolbox_Talks/         (when toolbox talks logged on the site)");
+  lines.push("    _register.txt         (every talk: topic, status, notes, attendees)");
+  lines.push("    <yyyy-MM-dd>_<topic>/ (subfolder per talk with briefing docs)");
   lines.push("");
   lines.push("=".repeat(72));
   lines.push("");

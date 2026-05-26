@@ -1,6 +1,7 @@
 import type { Prisma, PrismaClient, EventType } from "@prisma/client";
 import { differenceInWorkingDays } from "./working-days";
 import { whereOrdersForSite } from "./order-scope";
+import { isJobEndOverdue, workingDaysEndOverdue } from "./lateness";
 
 /**
  * Site Story synthesizer — single source of truth for "what actually
@@ -147,6 +148,48 @@ export interface SiteStory {
     preStartChecks: { total: number; checked: number };
     voiceNotes: { total: number };
     photoAnnotations: { total: number };
+  };
+  /** (May 2026 Story-linkage audit) HandoverChecklist roll-up across
+   *  every plot — sum of required items and how many are signed off.
+   *  Closure flow uses this for the readiness panel. */
+  handoverReadiness: {
+    requiredTotal: number;
+    requiredChecked: number;
+  };
+  /** (May 2026 Story-linkage audit) ToolboxTalk rollup — pre-this
+   *  Story ignored TBT entirely. Surfaces request lifecycle + most
+   *  recent entries so a closure review sees which talks went
+   *  un-delivered. */
+  toolboxTalks: {
+    total: number;
+    requested: number;
+    completed: number;
+    cancelled: number;
+    attachmentTotal: number;
+    recent: {
+      id: string;
+      topic: string;
+      status: string;
+      requestedAt: string;
+      deliveredAt: string | null;
+      dueBy: string | null;
+      contractorCount: number;
+      attachmentCount: number;
+    }[];
+  };
+  /** (May 2026 Story-linkage audit) Jobs currently past their
+   *  ORIGINAL planned end date and not COMPLETED. Routes through
+   *  the lateness SSoT, sorted by days overdue desc. */
+  overdueNow: {
+    count: number;
+    jobs: {
+      id: string;
+      name: string;
+      plotLabel: string;
+      plotId: string;
+      originalEndDate: string | null;
+      daysOverdue: number;
+    }[];
   };
 }
 
@@ -344,6 +387,7 @@ export async function buildSiteStory(
         where: { children: { none: {} } },
         select: {
           id: true,
+          name: true,
           status: true,
           startDate: true,
           endDate: true,
@@ -919,6 +963,125 @@ export async function buildSiteStory(
     0,
   );
 
+  // ─── HandoverChecklist ──────────────────────────────────────────────
+  // (May 2026 Story-linkage audit) Per-plot tally of EPC / GAS_SAFE /
+  // ELECTRICAL / WARRANTY / NHBC / BUILDING_REGS / etc. — whether each
+  // required doc is checked off. The Closure flow uses this to flag
+  // plots that aren't handover-ready; Handover ZIP exports the
+  // checklist as a per-plot PDF.
+  const allHandoverItems = await tx.handoverChecklist.findMany({
+    where: { plotId: { in: plotIds } },
+    select: {
+      plotId: true,
+      docType: true,
+      required: true,
+      checkedAt: true,
+    },
+  });
+  const handoverByPlot = new Map<
+    string,
+    { requiredTotal: number; requiredChecked: number }
+  >();
+  for (const h of allHandoverItems) {
+    if (!h.required) continue;
+    const e = handoverByPlot.get(h.plotId) ?? {
+      requiredTotal: 0,
+      requiredChecked: 0,
+    };
+    e.requiredTotal++;
+    if (h.checkedAt) e.requiredChecked++;
+    handoverByPlot.set(h.plotId, e);
+  }
+  const handoverRequiredTotal = Array.from(handoverByPlot.values()).reduce(
+    (s, e) => s + e.requiredTotal,
+    0,
+  );
+  const handoverRequiredChecked = Array.from(handoverByPlot.values()).reduce(
+    (s, e) => s + e.requiredChecked,
+    0,
+  );
+
+  // ─── ToolboxTalks ────────────────────────────────────────────────────
+  // (May 2026 Story-linkage audit) TBT was previously absent from Story
+  // entirely — highlightTypeForEvent filtered USER_ACTION/toolbox-talk
+  // events out. Now: request lifecycle + attachment counts roll up.
+  const allToolboxTalks = await tx.toolboxTalk.findMany({
+    where: { siteId },
+    select: {
+      id: true,
+      topic: true,
+      status: true,
+      requestedAt: true,
+      deliveredAt: true,
+      dueBy: true,
+      contractorIds: true,
+      _count: { select: { attachments: true } },
+    },
+    orderBy: { requestedAt: "desc" },
+  });
+  const toolboxRequested = allToolboxTalks.filter(
+    (t) => t.status === "REQUESTED",
+  ).length;
+  const toolboxCompleted = allToolboxTalks.filter(
+    (t) => t.status === "COMPLETED",
+  ).length;
+  const toolboxCancelled = allToolboxTalks.filter(
+    (t) => t.status === "CANCELLED",
+  ).length;
+  const toolboxAttachmentTotal = allToolboxTalks.reduce(
+    (s, t) => s + (t._count?.attachments ?? 0),
+    0,
+  );
+  const recentToolboxTalks = allToolboxTalks.slice(0, 5).map((t) => ({
+    id: t.id,
+    topic: t.topic,
+    status: t.status,
+    requestedAt: t.requestedAt.toISOString(),
+    deliveredAt: t.deliveredAt?.toISOString() ?? null,
+    dueBy: t.dueBy?.toISOString() ?? null,
+    contractorCount: t.contractorIds.length,
+    attachmentCount: t._count?.attachments ?? 0,
+  }));
+
+  // ─── Currently-overdue jobs ─────────────────────────────────────────
+  // (May 2026 Story-linkage audit) Handover delay-report already pulls
+  // this set; the Story tab was missing it entirely, so a user looking
+  // at the live narrative couldn't see what was actually stuck. Filter
+  // via the lateness SSoT helper so the definition matches every other
+  // surface.
+  const overdueNow = (allLeafJobs ?? plots.flatMap((p) => p.jobs))
+    .map((j) => ({ ...j }));
+  // Build plot label lookups so the overdue list reads "Plot 33 —
+  // Foundation" rather than just a job id.
+  const plotLabelById = new Map<string, string>();
+  for (const p of plots) {
+    plotLabelById.set(
+      p.id,
+      p.plotNumber ? `Plot ${p.plotNumber}` : p.name,
+    );
+  }
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const jobPlotMap = new Map<string, string>();
+  for (const p of plots) {
+    for (const j of p.jobs) jobPlotMap.set(j.id, p.id);
+  }
+  const overdueList = overdueNow
+    .filter((j) => isJobEndOverdue(j as never, today))
+    .map((j) => {
+      const plotId = jobPlotMap.get(j.id) ?? "";
+      return {
+        id: j.id,
+        name: (j as { name: string }).name,
+        plotLabel: plotLabelById.get(plotId) ?? "",
+        plotId,
+        originalEndDate:
+          (j.originalEndDate as Date | null)?.toISOString() ?? null,
+        daysOverdue: workingDaysEndOverdue(j as never, today),
+      };
+    })
+    .sort((a, b) => b.daysOverdue - a.daysOverdue);
+
   // On-time completion = plots where every leaf job's actualEndDate
   // <= originalEndDate. Edge: plots not yet complete excluded.
   const onTimeCount = plots.filter((p) => {
@@ -1292,6 +1455,22 @@ export async function buildSiteStory(
       preStartChecks: { total: preStartTotal, checked: preStartChecked },
       voiceNotes: { total: voiceNoteTotal },
       photoAnnotations: { total: annotationTotal },
+    },
+    handoverReadiness: {
+      requiredTotal: handoverRequiredTotal,
+      requiredChecked: handoverRequiredChecked,
+    },
+    toolboxTalks: {
+      total: allToolboxTalks.length,
+      requested: toolboxRequested,
+      completed: toolboxCompleted,
+      cancelled: toolboxCancelled,
+      attachmentTotal: toolboxAttachmentTotal,
+      recent: recentToolboxTalks,
+    },
+    overdueNow: {
+      count: overdueList.length,
+      jobs: overdueList.slice(0, 20),
     },
   };
 }

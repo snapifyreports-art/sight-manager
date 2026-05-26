@@ -23,6 +23,7 @@ import {
   renderPlotVariationLogPdf,
   renderPlotPreStartChecksPdf,
   renderPlotDrawSchedulePdf,
+  renderPlotHandoverChecklistPdf,
   renderContractorSummaryPdf,
   renderContractorDetailPdf,
   renderSupplierSummaryPdf,
@@ -297,6 +298,32 @@ export async function buildHandoverArchive({
     if (drawSchedule.length > 0) {
       const dsPdf = await renderPlotDrawSchedulePdf(plotLabel, drawSchedule);
       archive.append(dsPdf, { name: `${folder}/draw-schedule.pdf` });
+    }
+
+    // (May 2026 Story-linkage audit) HandoverChecklist — distinct
+    // from the SiteDocument "HANDOVER" category folder above. This is
+    // the structured per-doc-type tracker (EPC / gas-safe / electrical
+    // / NHBC / warranty / etc.) with required + signed-off + checked-by
+    // metadata. Renders even when items exist but haven't been linked
+    // to a SiteDocument yet, so buyers see what's still outstanding.
+    const handoverItems = await prisma.handoverChecklist.findMany({
+      where: { plotId: plot.id },
+      orderBy: { docType: "asc" },
+      select: {
+        docType: true,
+        required: true,
+        checkedAt: true,
+        notes: true,
+        checkedBy: { select: { name: true } },
+        document: { select: { name: true } },
+      },
+    });
+    if (handoverItems.length > 0) {
+      const hcPdf = await renderPlotHandoverChecklistPdf(
+        plotLabel,
+        handoverItems,
+      );
+      archive.append(hcPdf, { name: `${folder}/handover-checklist.pdf` });
     }
 
     // VoiceNotes for this plot — copy the audio files into a
@@ -997,6 +1024,92 @@ export async function buildHandoverArchive({
     latenessSummary,
   });
   archive.append(delayPdf, { name: "06_Reports/delay-report-final.pdf" });
+
+  // ─── 08_Toolbox_Talks ────────────────────────────────────────────
+  // (May 2026 Story-linkage audit) Site-wide TBT register +
+  // attachments. Pre-this the ZIP didn't include any TBT data — the
+  // safety briefing audit trail was invisible at handover. Now:
+  // a register text file + per-talk subfolder for the briefing docs
+  // / RAMS / incident photos that managers attached when raising
+  // the request. Folder only created when there's at least one
+  // talk on the site.
+  const allTalks = await prisma.toolboxTalk.findMany({
+    where: { siteId: story.site.id },
+    orderBy: { requestedAt: "asc" },
+    select: {
+      id: true,
+      topic: true,
+      notes: true,
+      attendees: true,
+      contractorIds: true,
+      status: true,
+      requestedAt: true,
+      deliveredAt: true,
+      dueBy: true,
+      attachments: {
+        select: { id: true, url: true, fileName: true, size: true, mimeType: true },
+      },
+    },
+  });
+  if (allTalks.length > 0) {
+    const regLines: string[] = [];
+    regLines.push("Toolbox talks register");
+    regLines.push("─".repeat(64));
+    regLines.push("");
+    for (const t of allTalks) {
+      regLines.push(
+        `[${format(t.requestedAt, "dd MMM yy HH:mm")}] (${t.status}) ${t.topic}`,
+      );
+      if (t.deliveredAt) {
+        regLines.push(
+          `   delivered ${format(t.deliveredAt, "dd MMM yy HH:mm")}`,
+        );
+      }
+      if (t.dueBy) {
+        regLines.push(`   due by ${format(t.dueBy, "dd MMM yy HH:mm")}`);
+      }
+      if (t.contractorIds.length > 0) {
+        regLines.push(`   contractors: ${t.contractorIds.length} assigned`);
+      }
+      if (t.attendees) {
+        regLines.push(`   attendees: ${t.attendees}`);
+      }
+      if (t.notes) {
+        regLines.push(`   notes: ${t.notes.replace(/\n/g, "\n            ")}`);
+      }
+      if (t.attachments.length > 0) {
+        regLines.push(
+          `   attachments: ${t.attachments.length} file${t.attachments.length === 1 ? "" : "s"} in attachments/`,
+        );
+      }
+      regLines.push("");
+    }
+    archive.append(regLines.join("\n"), {
+      name: "08_Toolbox_Talks/_register.txt",
+    });
+
+    // Per-talk subfolder for the attachments. Folder named with the
+    // talk's date + a slug of the topic so files are findable in a
+    // file browser without consulting the register.
+    for (const t of allTalks) {
+      if (t.attachments.length === 0) continue;
+      const folderName = `${format(t.requestedAt, "yyyy-MM-dd")}_${safeName(t.topic).slice(0, 40)}`;
+      const TALK_BATCH = 5;
+      for (let j = 0; j < t.attachments.length; j += TALK_BATCH) {
+        const batch = t.attachments.slice(j, j + TALK_BATCH);
+        const streams = await Promise.all(
+          batch.map((a) => fetchAsStream(a.url)),
+        );
+        batch.forEach((a, idx) => {
+          const stream = streams[idx];
+          if (!stream) return;
+          archive.append(stream, {
+            name: `08_Toolbox_Talks/${folderName}/${safeName(a.fileName)}`,
+          });
+        });
+      }
+    }
+  }
 
   // Caller is expected to start streaming AFTER they've attached the
   // archive to a response, so we don't call finalize() here. Returning

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState, useCallback } from "react";
 import {
   Loader2,
@@ -198,6 +199,38 @@ interface StoryData {
     preStartChecks: { total: number; checked: number };
     voiceNotes: { total: number };
     photoAnnotations: { total: number };
+  };
+  handoverReadiness: {
+    requiredTotal: number;
+    requiredChecked: number;
+  };
+  toolboxTalks: {
+    total: number;
+    requested: number;
+    completed: number;
+    cancelled: number;
+    attachmentTotal: number;
+    recent: Array<{
+      id: string;
+      topic: string;
+      status: string;
+      requestedAt: string;
+      deliveredAt: string | null;
+      dueBy: string | null;
+      contractorCount: number;
+      attachmentCount: number;
+    }>;
+  };
+  overdueNow: {
+    count: number;
+    jobs: Array<{
+      id: string;
+      name: string;
+      plotLabel: string;
+      plotId: string;
+      originalEndDate: string | null;
+      daysOverdue: number;
+    }>;
   };
 }
 
@@ -641,6 +674,178 @@ export function SiteStoryPanel({ siteId }: { siteId: string }) {
               </div>
             </div>
           )}
+        </section>
+      )}
+
+      {/* (May 2026 Story-linkage audit) Currently overdue —
+          jobs past their ORIGINAL planned end and not COMPLETED.
+          The Handover ZIP delay-report already had this; the Story
+          tab was missing it entirely, so the live narrative didn't
+          show what was actually stuck. Renders only when there ARE
+          overdue jobs — no false positives on a healthy site. */}
+      {data.overdueNow.count > 0 && (
+        <section className="rounded-xl border border-red-200 bg-red-50/30 p-5">
+          <div className="mb-3 flex items-center gap-2">
+            <h3 className="font-semibold text-red-900">
+              Currently overdue ({data.overdueNow.count})
+            </h3>
+            <span className="text-xs text-red-700">
+              past original planned end · sorted by working days overdue
+            </span>
+          </div>
+          <ul className="space-y-1">
+            {data.overdueNow.jobs.slice(0, 10).map((j) => (
+              <li
+                key={j.id}
+                className="flex flex-wrap items-baseline gap-2 rounded-md border border-red-200 bg-white px-3 py-1.5 text-sm"
+              >
+                <Link
+                  href={`/jobs/${j.id}`}
+                  className="font-medium text-slate-900 hover:underline hover:text-red-700"
+                >
+                  {j.name}
+                </Link>
+                <span className="text-xs text-slate-600">{j.plotLabel}</span>
+                <span className="ml-auto inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-red-800">
+                  {j.daysOverdue}d late
+                </span>
+              </li>
+            ))}
+          </ul>
+          {data.overdueNow.count > 10 && (
+            <p className="mt-2 text-xs text-red-700">
+              +{data.overdueNow.count - 10} more — see the Delay Report tab
+              for the full list.
+            </p>
+          )}
+        </section>
+      )}
+
+      {/* (May 2026 Story-linkage audit) Toolbox talks — request +
+          completion lifecycle now reaches Story. */}
+      {data.toolboxTalks.total > 0 && (
+        <section className="rounded-xl border bg-white p-5">
+          <h3 className="mb-3 font-semibold text-slate-900">Toolbox talks</h3>
+          <div className="grid gap-3 sm:grid-cols-4">
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <p className="text-xs font-semibold uppercase tracking-wider text-slate-600">
+                Total
+              </p>
+              <p className="mt-1 text-2xl font-bold text-slate-900">
+                {data.toolboxTalks.total}
+              </p>
+            </div>
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+              <p className="text-xs font-semibold uppercase tracking-wider text-amber-700">
+                Requested
+              </p>
+              <p className="mt-1 text-2xl font-bold text-amber-900">
+                {data.toolboxTalks.requested}
+              </p>
+              <p className="text-xs text-amber-700">awaiting delivery</p>
+            </div>
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+              <p className="text-xs font-semibold uppercase tracking-wider text-emerald-700">
+                Completed
+              </p>
+              <p className="mt-1 text-2xl font-bold text-emerald-900">
+                {data.toolboxTalks.completed}
+              </p>
+            </div>
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <p className="text-xs font-semibold uppercase tracking-wider text-slate-600">
+                Attachments
+              </p>
+              <p className="mt-1 text-2xl font-bold text-slate-900">
+                {data.toolboxTalks.attachmentTotal}
+              </p>
+              <p className="text-xs text-slate-600">briefing docs</p>
+            </div>
+          </div>
+          {data.toolboxTalks.recent.length > 0 && (
+            <div className="mt-3">
+              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Recent
+              </p>
+              <ul className="space-y-1">
+                {data.toolboxTalks.recent.map((t) => (
+                  <li
+                    key={t.id}
+                    className="flex flex-wrap items-baseline gap-2 text-sm"
+                  >
+                    <span className="font-medium text-slate-800">
+                      {t.topic}
+                    </span>
+                    <span
+                      className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${
+                        t.status === "REQUESTED"
+                          ? "bg-amber-100 text-amber-800"
+                          : t.status === "COMPLETED"
+                            ? "bg-emerald-100 text-emerald-800"
+                            : "bg-slate-200 text-slate-600"
+                      }`}
+                    >
+                      {t.status}
+                    </span>
+                    {t.contractorCount > 0 && (
+                      <span className="text-xs text-slate-500">
+                        {t.contractorCount} contractor
+                        {t.contractorCount !== 1 ? "s" : ""}
+                      </span>
+                    )}
+                    {t.attachmentCount > 0 && (
+                      <span className="text-xs text-slate-500">
+                        · {t.attachmentCount} attachment
+                        {t.attachmentCount !== 1 ? "s" : ""}
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* (May 2026 Story-linkage audit) Handover readiness — sum of
+          required HandoverChecklist items across the site and how
+          many are signed off. Closure flow uses this to gate site
+          closure; surfacing in Story gives early visibility. */}
+      {data.handoverReadiness.requiredTotal > 0 && (
+        <section className="rounded-xl border bg-white p-5">
+          <h3 className="mb-1 font-semibold text-slate-900">
+            Handover readiness
+          </h3>
+          <p className="text-xs text-muted-foreground">
+            Required handover documents signed off across every plot
+            (EPC, gas-safe, electrical, NHBC, warranty etc.).
+          </p>
+          <div className="mt-3 flex items-center gap-3">
+            <div className="flex-1">
+              <div className="mb-1 flex items-center justify-between text-sm">
+                <span className="font-medium">
+                  {data.handoverReadiness.requiredChecked} of{" "}
+                  {data.handoverReadiness.requiredTotal} signed off
+                </span>
+                <span className="font-bold">
+                  {Math.round(
+                    (data.handoverReadiness.requiredChecked /
+                      data.handoverReadiness.requiredTotal) *
+                      100,
+                  )}
+                  %
+                </span>
+              </div>
+              <div className="h-3 overflow-hidden rounded-full bg-slate-100">
+                <div
+                  className="h-full rounded-full bg-emerald-500 transition-all"
+                  style={{
+                    width: `${(data.handoverReadiness.requiredChecked / data.handoverReadiness.requiredTotal) * 100}%`,
+                  }}
+                />
+              </div>
+            </div>
+          </div>
         </section>
       )}
 
