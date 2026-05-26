@@ -1,8 +1,11 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { cookies } from "next/headers";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/lib/auth";
 import { getUserSiteIds } from "@/lib/site-access";
+import { getServerCurrentDate } from "@/lib/dev-date";
+import { isJobEndOverdue } from "@/lib/lateness";
 import { Building2, AlertTriangle, CheckCircle, Activity } from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -43,7 +46,15 @@ export default async function PortfolioPage() {
           buildCompletePercent: true,
           jobs: {
             where: { children: { none: {} } },
-            select: { status: true, endDate: true, actualEndDate: true },
+            // (May 2026 SSoT pass) isJobEndOverdue reads originalEndDate
+            // — select it explicitly. endDate retained in case any caller
+            // wants the current plan date for display.
+            select: {
+              status: true,
+              endDate: true,
+              originalEndDate: true,
+              actualEndDate: true,
+            },
           },
         },
       },
@@ -51,7 +62,14 @@ export default async function PortfolioPage() {
     orderBy: [{ status: "asc" }, { name: "asc" }],
   });
 
-  const now = new Date();
+  // (May 2026 SSoT pass) Use dev-date so Portfolio's overdue counts
+  // agree with Dashboard / Daily Brief when QA simulates a future date.
+  // Pre-fix this called `new Date()` directly so a dev-date override
+  // moved every other surface but left Portfolio anchored to wall-clock.
+  const cookieStore = await cookies();
+  const now = getServerCurrentDate({
+    cookies: { get: (n: string) => cookieStore.get(n) ?? undefined },
+  });
   const cards = await Promise.all(
     sites.map(async (s) => {
       // Average build percent across plots.
@@ -64,10 +82,12 @@ export default async function PortfolioPage() {
           : 0;
       const allJobs = s.plots.flatMap((p) => p.jobs);
       const inProgress = allJobs.filter((j) => j.status === "IN_PROGRESS").length;
-      const overdue = allJobs.filter(
-        (j) =>
-          j.endDate && j.endDate.getTime() < now.getTime() && j.status !== "COMPLETED",
-      ).length;
+      // (May 2026 SSoT pass) Route through isJobEndOverdue (originalEndDate
+      // baseline). Pre-fix this used `endDate < now` inline — so a
+      // rescheduled job silently dropped out of the overdue count even
+      // though it had slipped against its original plan. Same Plot 33
+      // Foundation class of bug as the earlier sweep.
+      const overdue = allJobs.filter((j) => isJobEndOverdue(j, now)).length;
 
       const staleSnags = await prisma.snag.count({
         where: {

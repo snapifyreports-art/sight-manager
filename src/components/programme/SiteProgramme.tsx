@@ -23,6 +23,8 @@ import { Loader2, Columns3, ChevronRight, Download, FileText, Search, X, Camera,
 import Link from "next/link";
 import { getStageCode, getStageColor } from "@/lib/stage-codes";
 import { getCurrentStage } from "@/lib/plot-stage";
+import { deriveAggregateStatus } from "@/lib/parent-job";
+import type { JobStatus } from "@prisma/client";
 import { Input } from "@/components/ui/input";
 import { JobWeekPanel } from "@/components/programme/JobWeekPanel";
 import {
@@ -570,13 +572,12 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
           : null;
         const maxEnd = ends.reduce((a, b) => (a > b ? a : b));
 
-        // Determine aggregate status
-        const statuses = children.map((c) => c.status);
-        let aggStatus = "NOT_STARTED";
-        if (statuses.every((s) => s === "COMPLETED")) aggStatus = "COMPLETED";
-        else if (statuses.some((s) => s === "IN_PROGRESS" || s === "COMPLETED"))
-          aggStatus = "IN_PROGRESS";
-        else if (statuses.some((s) => s === "ON_HOLD")) aggStatus = "ON_HOLD";
+        // (May 2026 SSoT pass) Aggregate status routed through
+        // deriveAggregateStatus so synthetic-parent rendering can
+        // never drift from the real recomputeParentFromChildren DB
+        // writes or the programme-helpers getPlotStatus.
+        const statuses = children.map((c) => c.status as JobStatus);
+        const aggStatus = deriveAggregateStatus(statuses);
 
         // Use first child's stageCode or derive from stage name
         const firstChild = children.sort(

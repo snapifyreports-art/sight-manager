@@ -27,6 +27,32 @@ import type { JobStatus, Prisma, PrismaClient } from "@prisma/client";
 type Tx = PrismaClient | Prisma.TransactionClient;
 
 /**
+ * (May 2026 SSoT pass) Single source for "derive a parent's status
+ * from its children's statuses". The rules:
+ *
+ *   all COMPLETED                                  → COMPLETED
+ *   any IN_PROGRESS                                → IN_PROGRESS
+ *   any COMPLETED (but not all, no IN_PROGRESS)    → IN_PROGRESS
+ *   any ON_HOLD (no IN_PROGRESS, no COMPLETED)     → ON_HOLD
+ *   otherwise                                      → NOT_STARTED
+ *
+ * `recomputeParentFromChildren` writes this to DB. `getPlotStatus`
+ * in src/components/programme/programme-modules/helpers.ts and the
+ * GanttChart synthetic-parent render in SiteProgramme call this
+ * pure helper directly so the rules can never silently diverge.
+ *
+ * Empty-children case (statuses.length === 0): NOT_STARTED.
+ */
+export function deriveAggregateStatus(statuses: JobStatus[]): JobStatus {
+  if (statuses.length === 0) return "NOT_STARTED";
+  if (statuses.every((s) => s === "COMPLETED")) return "COMPLETED";
+  if (statuses.some((s) => s === "IN_PROGRESS")) return "IN_PROGRESS";
+  if (statuses.some((s) => s === "COMPLETED")) return "IN_PROGRESS";
+  if (statuses.some((s) => s === "ON_HOLD")) return "ON_HOLD";
+  return "NOT_STARTED";
+}
+
+/**
  * Recompute a parent Job's dates and status from its children.
  * No-op if the parent has no children (safe to call on leaf jobs).
  *
@@ -82,36 +108,11 @@ export async function recomputeParentFromChildren(
     .filter((d): d is Date => d !== null);
   const statuses = children.map((c) => c.status);
 
-  // Status derivation — mirrors Keith's model:
-  //   all COMPLETED                                  → COMPLETED
-  //   any IN_PROGRESS                                → IN_PROGRESS
-  //   any COMPLETED (but not all, no IN_PROGRESS)    → IN_PROGRESS (parent has started)
-  //   any ON_HOLD (no IN_PROGRESS, no COMPLETED)     → ON_HOLD
-  //   otherwise                                      → NOT_STARTED
-  //
-  // (May 2026 audit B-P1-23) Pre-fix the ON_HOLD branch required EVERY
-  // non-ON_HOLD child to be COMPLETED. So a parent with 4 NOT_STARTED
-  // sub-jobs + 1 ON_HOLD sub-job fell to the "otherwise → NOT_STARTED"
-  // branch — pausing a scheduled sub-job had no visible effect on the
-  // parent. Now: any ON_HOLD child propagates ON_HOLD to the parent
-  // (provided no child is actively in-progress, which still wins).
-  //
-  // (May 2026 SSoT pass) Added the "some-but-not-all COMPLETED" branch.
-  // Pre-fix, a parent with 2 COMPLETED + 3 NOT_STARTED children fell to
-  // NOT_STARTED — so Plot 33's "Foundation" claimed it hadn't started
-  // even though Dig & pour and Brickwork were signed off. A parent with
-  // at least one finished child has demonstrably started, so it rolls up
-  // to IN_PROGRESS until all children complete.
-  let status: JobStatus = "NOT_STARTED";
-  if (statuses.length > 0 && statuses.every((s) => s === "COMPLETED")) {
-    status = "COMPLETED";
-  } else if (statuses.some((s) => s === "IN_PROGRESS")) {
-    status = "IN_PROGRESS";
-  } else if (statuses.some((s) => s === "COMPLETED")) {
-    status = "IN_PROGRESS";
-  } else if (statuses.some((s) => s === "ON_HOLD")) {
-    status = "ON_HOLD";
-  }
+  // (May 2026 SSoT pass) Status derivation extracted to
+  // `deriveAggregateStatus` so the rule can never drift between this
+  // DB write and the synthetic-parent renderers in the Programme /
+  // Gantt views. See the helper docstring for the full rule.
+  const status = deriveAggregateStatus(statuses);
 
   const minStart = starts.length ? new Date(Math.min(...starts.map((d) => d.getTime()))) : null;
   const maxEnd = ends.length ? new Date(Math.max(...ends.map((d) => d.getTime()))) : null;

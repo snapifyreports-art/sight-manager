@@ -11,6 +11,7 @@ import { usePullForwardDecision } from "@/hooks/usePullForwardDecision";
 import { PostCompletionDialog } from "@/components/PostCompletionDialog";
 import { differenceInCalendarDays, isSameDay, format } from "date-fns";
 import { getCurrentDateAtMidnight } from "@/lib/dev-date";
+import { isJobEndOverdue } from "@/lib/lateness";
 import { cn } from "@/lib/utils";
 import {
   Package,
@@ -59,6 +60,10 @@ interface JobData {
   description: string | null;
   startDate: string | null;
   endDate: string | null;
+  // (May 2026 SSoT pass) originalEndDate carried so the "overdue"
+  // border uses the immutable baseline via isJobEndOverdue — match
+  // every other view's lateness semantics.
+  originalEndDate: string | null;
   status: string;
   signedOffAt: string | null;
   parentId: string | null;
@@ -465,7 +470,10 @@ function JobRow({
   now: Date;
 }) {
   const contractor = job.contractors?.[0]?.contact;
-  const isOverdue = variant === "progress" && job.endDate && new Date(job.endDate) < now;
+  // (May 2026 SSoT pass) Route through the lateness helper — reads
+  // originalEndDate (immutable baseline) so a rescheduled job stays
+  // flagged as overdue if it slipped from plan.
+  const isOverdue = variant === "progress" && isJobEndOverdue(job, now);
 
   // Readiness checklist for NOT_STARTED jobs
   const readiness = variant === "start" ? {

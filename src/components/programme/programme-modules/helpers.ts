@@ -8,8 +8,10 @@
  */
 
 import { format, isWeekend, startOfWeek } from "date-fns";
+import type { JobStatus } from "@prisma/client";
 import { getCurrentStage } from "@/lib/plot-stage";
 import { getStageCode } from "@/lib/stage-codes";
+import { deriveAggregateStatus } from "@/lib/parent-job";
 import {
   STATUS_PRIORITY,
   type ProgrammeJob,
@@ -142,11 +144,17 @@ export function hexToRgb(hex: string): [number, number, number] {
   ];
 }
 
-/** Dominant status for a plot's jobs. NONE means zero jobs. */
+/** Dominant status for a plot's jobs. NONE means zero jobs.
+ *
+ * (May 2026 SSoT pass) Delegates to `deriveAggregateStatus` so the
+ * rule matches recomputeParentFromChildren and the GanttChart
+ * synthetic-parent render. Pre-fix this hard-coded its own four-case
+ * derivation and missed the "some COMPLETED but not all" branch, so
+ * a plot with 2 jobs done + 3 not-started was reported as
+ * NOT_STARTED — same bug class as the parent-job rollup. */
 export function getPlotStatus(plot: ProgrammePlot): string {
   if (plot.jobs.length === 0) return "NONE";
-  if (plot.jobs.some((j) => j.status === "IN_PROGRESS")) return "IN_PROGRESS";
-  if (plot.jobs.every((j) => j.status === "COMPLETED")) return "COMPLETED";
-  if (plot.jobs.some((j) => j.status === "ON_HOLD")) return "ON_HOLD";
-  return "NOT_STARTED";
+  return deriveAggregateStatus(
+    plot.jobs.map((j) => j.status as JobStatus),
+  );
 }
