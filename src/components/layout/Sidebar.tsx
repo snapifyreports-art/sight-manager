@@ -114,6 +114,47 @@ const adminNavItems = [
 ];
 
 
+/**
+ * (May 2026 Keith request) Recently-visited site memory.
+ *
+ * Pins the last 3 sites the user actually opened to the top of the
+ * site-picker dropdown so a manager with 8 sites doesn't paginate
+ * through an alphabetical list to get to "the one I was just on".
+ *
+ * Storage shape: `sight-manager-recent-sites` is a JSON array of
+ * siteIds, most-recent first, dedup-and-cap-at-3. Reads happen
+ * lazily so SSR + first paint don't try to touch localStorage.
+ */
+const RECENT_SITES_KEY = "sight-manager-recent-sites";
+const RECENT_SITES_CAP = 3;
+
+function useRecentSites(currentSiteId: string | undefined): string[] {
+  const [recent, setRecent] = useState<string[]>([]);
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(RECENT_SITES_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) setRecent(parsed.filter((v) => typeof v === "string"));
+      }
+    } catch {}
+  }, []);
+  useEffect(() => {
+    if (!currentSiteId) return;
+    setRecent((prev) => {
+      const next = [currentSiteId, ...prev.filter((id) => id !== currentSiteId)].slice(
+        0,
+        RECENT_SITES_CAP,
+      );
+      try {
+        localStorage.setItem(RECENT_SITES_KEY, JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  }, [currentSiteId]);
+  return recent;
+}
+
 function formatRole(role: string) {
   return role
     .split("_")
@@ -227,6 +268,13 @@ function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: boolean; on
     try { localStorage.setItem("sight-manager-last-site", toStore); } catch {}
   }, [siteIdFromPath, siteFromQuery]);
 
+  // (May 2026 Keith request) Pinned recents — top 3 most-recently
+  // visited sites bubble to the top of the dropdown.
+  const recentSiteIds = useRecentSites(siteIdFromPath || siteFromQuery || undefined);
+  const recentSites = recentSiteIds
+    .map((id) => sites.find((s) => s.id === id))
+    .filter((s): s is (typeof sites)[number] => !!s);
+
   // Context-aware nav href — always pass site context to global pages
   const getNavHref = (href: string) => {
     const globalPages = ["/daily-brief", "/dashboard", "/analytics", "/events-log"];
@@ -295,12 +343,28 @@ function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: boolean; on
             className="w-full rounded-md border border-border/60 bg-background px-2.5 py-2 text-sm text-foreground shadow-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
           >
             <option value="">— All sites —</option>
-            {sites.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-                {s.status === "ON_HOLD" ? " (on hold)" : s.status === "COMPLETED" ? " ✓" : ""}
-              </option>
-            ))}
+            {recentSites.length > 0 && (
+              <optgroup label="Recent">
+                {recentSites.map((s) => (
+                  <option key={`recent-${s.id}`} value={s.id}>
+                    {s.name}
+                    {s.status === "ON_HOLD"
+                      ? " (on hold)"
+                      : s.status === "COMPLETED"
+                        ? " ✓"
+                        : ""}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+            <optgroup label={recentSites.length > 0 ? "All sites" : ""}>
+              {sites.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                  {s.status === "ON_HOLD" ? " (on hold)" : s.status === "COMPLETED" ? " ✓" : ""}
+                </option>
+              ))}
+            </optgroup>
           </select>
         </div>
       )}
@@ -679,6 +743,13 @@ export function MobileSiteBar() {
   const isOnSitePage = !!siteMatch?.[1];
   const currentTab = searchParams.get("tab") || "daily-brief";
 
+  // Same recents pin as the desktop sidebar — share the localStorage key
+  // so the two pickers agree on order.
+  const recentSiteIds = useRecentSites(siteIdFromPath || siteParam || undefined);
+  const recentSites = recentSiteIds
+    .map((id) => sites.find((s) => s.id === id))
+    .filter((s): s is (typeof sites)[number] => !!s);
+
   const handleChange = (id: string) => {
     // (May 2026 Keith bug report) "All sites" always navigates to
     // /sites, on every surface (mobile + desktop). Pre-fix the
@@ -716,9 +787,22 @@ export function MobileSiteBar() {
           className="flex-1 rounded bg-transparent text-[12px] text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1"
         >
           <option value="">— All sites —</option>
-          {sites.map((s) => (
-            <option key={s.id} value={s.id}>{s.name}</option>
-          ))}
+          {recentSites.length > 0 && (
+            <optgroup label="Recent">
+              {recentSites.map((s) => (
+                <option key={`recent-${s.id}`} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </optgroup>
+          )}
+          <optgroup label={recentSites.length > 0 ? "All sites" : ""}>
+            {sites.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+          </optgroup>
         </select>
       </div>
     </Suspense>
