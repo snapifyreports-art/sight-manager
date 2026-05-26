@@ -24,7 +24,7 @@ export const dynamic = "force-dynamic";
  * waiting for a new schema model + onboarding flow.
  */
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
@@ -43,7 +43,7 @@ export async function GET(
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const dayStart = getServerStartOfDay();
+    const dayStart = getServerStartOfDay(req);
     const dayEnd = new Date(dayStart.getTime() + 86_400_000);
 
     // Pull all JobContractor rows whose job overlaps today, then
