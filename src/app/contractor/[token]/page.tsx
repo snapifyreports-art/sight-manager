@@ -116,8 +116,8 @@ export default async function ContractorSharePage({
       job: {
         plot: { siteId },
         status: "COMPLETED",
+        // originalEndDate is non-nullable on Job — no filter needed.
         actualEndDate: { not: null },
-        originalEndDate: { not: null },
         children: { none: {} },
       },
     },
