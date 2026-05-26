@@ -114,6 +114,85 @@ import { PendingSignoffsSection } from "./daily-brief/PendingSignoffsSection";
 import { InactivePlotsSections } from "./daily-brief/InactivePlotsSections";
 import { UpcomingOrdersSection } from "./daily-brief/UpcomingOrdersSection";
 
+/**
+ * (May 2026 Keith request) Skeleton placeholder for the Daily Brief.
+ *
+ * The Brief is opened 20+ times a day per manager — the previous
+ * "centred spinner over blank canvas" felt 3× slower than it really
+ * was because the layout shifts in once data lands. The skeleton
+ * mirrors the section heights + grid (weather pair, jobs/materials/
+ * issues pills, lateness banner, today's-jobs cards) so when data
+ * arrives the page settles into shape rather than jumping.
+ *
+ * Pure pulse-animated grey blocks — no real data fetched, no event
+ * handlers, no risk of double-render. Kept in the same file as
+ * DailySiteBrief so the layout stays in lock-step with what the
+ * Brief actually renders.
+ */
+function DailyBriefSkeleton() {
+  return (
+    <div className="space-y-4 animate-pulse" aria-busy="true" aria-live="polite">
+      {/* Date heading */}
+      <div className="h-6 w-48 rounded bg-slate-200" />
+
+      {/* Weather pair */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="h-24 rounded-xl bg-slate-100" />
+        <div className="h-24 rounded-xl bg-slate-100" />
+      </div>
+
+      {/* Next-days strip */}
+      <div className="h-10 rounded-lg bg-slate-100" />
+
+      {/* Progress + stats row */}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="h-12 w-20 rounded bg-slate-100" />
+        <div className="h-6 w-24 rounded-full bg-slate-100" />
+        <div className="h-6 w-24 rounded-full bg-slate-100" />
+        <div className="h-6 w-24 rounded-full bg-slate-100" />
+        <div className="h-6 w-24 rounded-full bg-slate-100" />
+        <div className="h-6 w-24 rounded-full bg-slate-100" />
+      </div>
+
+      {/* Lateness banner */}
+      <div className="h-14 rounded-lg bg-amber-100/60" />
+
+      {/* Today's Jobs section header + 3 job cards */}
+      <div className="space-y-2 pt-2">
+        <div className="h-5 w-40 rounded bg-slate-200" />
+        <div className="space-y-2">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="rounded-lg border bg-white p-3">
+              <div className="mb-2 h-4 w-3/5 rounded bg-slate-100" />
+              <div className="mb-3 h-3 w-2/5 rounded bg-slate-100" />
+              <div className="flex flex-wrap gap-1.5">
+                <div className="h-5 w-16 rounded-full bg-slate-100" />
+                <div className="h-5 w-16 rounded-full bg-slate-100" />
+                <div className="h-5 w-16 rounded-full bg-slate-100" />
+                <div className="h-5 w-16 rounded-full bg-slate-100" />
+                <div className="h-5 w-16 rounded-full bg-slate-100" />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Materials section */}
+      <div className="space-y-2 pt-2">
+        <div className="h-5 w-32 rounded bg-slate-200" />
+        <div className="rounded-lg border bg-white p-3">
+          <div className="mb-2 h-4 w-1/3 rounded bg-slate-100" />
+          <div className="h-3 w-1/2 rounded bg-slate-100" />
+        </div>
+        <div className="rounded-lg border bg-white p-3">
+          <div className="mb-2 h-4 w-1/3 rounded bg-slate-100" />
+          <div className="h-3 w-1/2 rounded bg-slate-100" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
   const { devDate } = useDevDate();
   const [data, setData] = useState<BriefData | null>(null);
@@ -991,11 +1070,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
   };
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center py-12">
-        <Loader2 className="size-6 animate-spin text-muted-foreground" />
-      </div>
-    );
+    return <DailyBriefSkeleton />;
   }
 
   if (!data) return null;
