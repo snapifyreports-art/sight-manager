@@ -139,6 +139,51 @@ interface StoryData {
     deliveredLate: number;
     topSuppliers: Array<{ name: string; orderCount: number }>;
   };
+  // (May 2026 Story-linkage audit) Compliance — NCRs, DefectReports,
+  // Variations rolled up here so the Story narrative includes the QA
+  // / warranty / scope-change side of the build.
+  compliance: {
+    ncrs: {
+      total: number;
+      open: number;
+      closed: number;
+      recent: Array<{
+        id: string;
+        ref: string | null;
+        title: string;
+        status: string;
+        raisedAt: string;
+        closedAt: string | null;
+      }>;
+    };
+    defects: {
+      total: number;
+      open: number;
+      resolved: number;
+      recent: Array<{
+        id: string;
+        ref: string | null;
+        title: string;
+        status: string;
+        reportedAt: string;
+        resolvedAt: string | null;
+      }>;
+    };
+    variations: {
+      total: number;
+      approved: number;
+      costDelta: number;
+      daysDelta: number;
+      recent: Array<{
+        id: string;
+        ref: string | null;
+        title: string;
+        status: string;
+        costDelta: number | null;
+        daysDelta: number | null;
+      }>;
+    };
+  };
 }
 
 const REASON_LABELS: Record<string, { label: string; emoji: string }> = {
@@ -581,6 +626,115 @@ export function SiteStoryPanel({ siteId }: { siteId: string }) {
               </div>
             </div>
           )}
+        </section>
+      )}
+
+      {/* (May 2026 Story-linkage audit) Compliance — NCRs +
+          DefectReports + Variations. Renders only when there's
+          something to show so a clean site doesn't grow noise. */}
+      {(data.compliance.ncrs.total > 0 ||
+        data.compliance.defects.total > 0 ||
+        data.compliance.variations.total > 0) && (
+        <section className="rounded-xl border bg-white p-5">
+          <h3 className="mb-3 font-semibold text-slate-900">Compliance</h3>
+          <div className="grid gap-3 sm:grid-cols-3">
+            {data.compliance.ncrs.total > 0 && (
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <p className="text-xs font-semibold uppercase tracking-wider text-slate-600">
+                  NCRs
+                </p>
+                <p className="mt-1 text-2xl font-bold text-slate-900">
+                  {data.compliance.ncrs.total}
+                </p>
+                <p className="text-xs text-slate-600">
+                  {data.compliance.ncrs.open > 0 ? (
+                    <span className="text-amber-700">
+                      {data.compliance.ncrs.open} open
+                    </span>
+                  ) : (
+                    <span className="text-emerald-700">all closed</span>
+                  )}
+                </p>
+                {data.compliance.ncrs.recent.length > 0 && (
+                  <ul className="mt-2 space-y-0.5 text-xs">
+                    {data.compliance.ncrs.recent.slice(0, 3).map((n) => (
+                      <li key={n.id} className="truncate text-slate-700">
+                        {n.ref ? `${n.ref} · ` : ""}
+                        {n.title}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+            {data.compliance.defects.total > 0 && (
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <p className="text-xs font-semibold uppercase tracking-wider text-slate-600">
+                  Defects
+                </p>
+                <p className="mt-1 text-2xl font-bold text-slate-900">
+                  {data.compliance.defects.total}
+                </p>
+                <p className="text-xs text-slate-600">
+                  {data.compliance.defects.open > 0 ? (
+                    <span className="text-amber-700">
+                      {data.compliance.defects.open} open
+                    </span>
+                  ) : (
+                    <span className="text-emerald-700">
+                      all resolved
+                    </span>
+                  )}
+                </p>
+                {data.compliance.defects.recent.length > 0 && (
+                  <ul className="mt-2 space-y-0.5 text-xs">
+                    {data.compliance.defects.recent.slice(0, 3).map((d) => (
+                      <li key={d.id} className="truncate text-slate-700">
+                        {d.ref ? `${d.ref} · ` : ""}
+                        {d.title}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+            {data.compliance.variations.total > 0 && (
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <p className="text-xs font-semibold uppercase tracking-wider text-slate-600">
+                  Variations
+                </p>
+                <p className="mt-1 text-2xl font-bold text-slate-900">
+                  {data.compliance.variations.total}
+                </p>
+                <p className="text-xs text-slate-600">
+                  {data.compliance.variations.approved} approved
+                  {data.compliance.variations.costDelta !== 0 && (
+                    <>
+                      {" · £"}
+                      {Math.round(data.compliance.variations.costDelta).toLocaleString()}
+                    </>
+                  )}
+                  {data.compliance.variations.daysDelta !== 0 && (
+                    <>
+                      {" · "}
+                      {data.compliance.variations.daysDelta > 0 ? "+" : ""}
+                      {data.compliance.variations.daysDelta}d
+                    </>
+                  )}
+                </p>
+                {data.compliance.variations.recent.length > 0 && (
+                  <ul className="mt-2 space-y-0.5 text-xs">
+                    {data.compliance.variations.recent.slice(0, 3).map((v) => (
+                      <li key={v.id} className="truncate text-slate-700">
+                        {v.ref ? `${v.ref} · ` : ""}
+                        {v.title}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+          </div>
         </section>
       )}
 

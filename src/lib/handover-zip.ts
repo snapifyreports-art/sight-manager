@@ -18,6 +18,9 @@ import {
   renderCompletionSummaryPdf,
   renderPlotStoryPdf,
   renderPlotSnagLogPdf,
+  renderPlotNcrLogPdf,
+  renderPlotDefectLogPdf,
+  renderPlotVariationLogPdf,
   renderContractorSummaryPdf,
   renderContractorDetailPdf,
   renderSupplierSummaryPdf,
@@ -185,6 +188,73 @@ export async function buildHandoverArchive({
       snags,
     );
     archive.append(snagPdf, { name: `${folder}/snag-log.pdf` });
+
+    // (May 2026 Story-linkage audit) NCR / Defect / Variation logs per
+    // plot. These were silently absent from Handover ZIP pre-this pass
+    // — buyer pack stopped at snags + photos + docs. Now QA + warranty
+    // + scope-change narrative all land in 02_Plots/Plot_*/...
+    const plotLabel = `Plot ${plot.plotNumber || plot.name}`;
+
+    const ncrs = await prisma.nCR.findMany({
+      where: { plotId: plot.id },
+      orderBy: { raisedAt: "asc" },
+      select: {
+        ref: true,
+        title: true,
+        description: true,
+        rootCause: true,
+        correctiveAction: true,
+        status: true,
+        raisedAt: true,
+        closedAt: true,
+        raisedBy: { select: { name: true } },
+        closedBy: { select: { name: true } },
+        contact: { select: { name: true, company: true } },
+      },
+    });
+    if (ncrs.length > 0) {
+      const ncrPdf = await renderPlotNcrLogPdf(plotLabel, ncrs);
+      archive.append(ncrPdf, { name: `${folder}/ncr-log.pdf` });
+    }
+
+    const defects = await prisma.defectReport.findMany({
+      where: { plotId: plot.id },
+      orderBy: { reportedAt: "asc" },
+      select: {
+        ref: true,
+        title: true,
+        description: true,
+        status: true,
+        reportedAt: true,
+        resolvedAt: true,
+      },
+    });
+    if (defects.length > 0) {
+      const defectPdf = await renderPlotDefectLogPdf(plotLabel, defects);
+      archive.append(defectPdf, {
+        name: `${folder}/defect-log.pdf`,
+      });
+    }
+
+    const variations = await prisma.variation.findMany({
+      where: { plotId: plot.id },
+      orderBy: { createdAt: "asc" },
+      select: {
+        ref: true,
+        title: true,
+        description: true,
+        requestedBy: true,
+        costDelta: true,
+        daysDelta: true,
+        status: true,
+        approvedAt: true,
+        createdAt: true,
+      },
+    });
+    if (variations.length > 0) {
+      const varPdf = await renderPlotVariationLogPdf(plotLabel, variations);
+      archive.append(varPdf, { name: `${folder}/variation-log.pdf` });
+    }
 
     // certificates/ + drawings/ from SiteDocument by category
     const docs = await prisma.siteDocument.findMany({

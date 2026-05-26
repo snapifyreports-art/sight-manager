@@ -360,6 +360,213 @@ export async function renderPlotSnagLogPdf(
 }
 
 // ──────────────────────────────────────────────────────────────────────
+// (May 2026 Story-linkage audit) Per-plot NCR / Defect / Variation
+// log PDFs. Modelled after renderPlotSnagLogPdf so the layout, fonts
+// and table styling match the rest of the handover pack.
+
+export async function renderPlotNcrLogPdf(
+  plotName: string,
+  ncrs: Array<{
+    ref: string | null;
+    title: string;
+    description: string;
+    rootCause: string | null;
+    correctiveAction: string | null;
+    status: string;
+    raisedAt: Date;
+    closedAt: Date | null;
+    raisedBy: { name: string } | null;
+    closedBy: { name: string } | null;
+    contact: { name: string; company: string | null } | null;
+  }>,
+): Promise<Buffer> {
+  const { jsPDF, autoTable } = await loadJsPdf();
+  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+
+  doc.setFontSize(16);
+  doc.text(`NCR log — ${plotName}`, 14, 22);
+  doc.setFontSize(9);
+  doc.setTextColor(120);
+  doc.text(
+    `${ncrs.length} non-conformance${ncrs.length === 1 ? "" : "s"} recorded`,
+    14,
+    28,
+  );
+  doc.setTextColor(0);
+
+  if (ncrs.length === 0) {
+    doc.setFontSize(10);
+    doc.text("No NCRs recorded for this plot.", 14, 40);
+  } else {
+    autoTable(doc, {
+      startY: 36,
+      head: [["Ref", "Title", "Status", "Raised", "Closed", "Raised by"]],
+      body: ncrs.map((n) => [
+        n.ref ?? "—",
+        n.title.length > 50 ? `${n.title.slice(0, 50)}…` : n.title,
+        n.status,
+        format(n.raisedAt, "dd MMM yy"),
+        n.closedAt ? format(n.closedAt, "dd MMM yy") : "—",
+        n.raisedBy?.name ?? "—",
+      ]),
+      styles: { fontSize: 8, cellPadding: 1 },
+      headStyles: { fillColor: [241, 245, 249], textColor: [51, 65, 85] },
+    });
+
+    // Detail blocks below the summary table — root cause +
+    // corrective action are the point of an NCR, so they get full
+    // text rather than a truncated cell.
+    let y = (doc as unknown as { lastAutoTable?: { finalY?: number } })
+      .lastAutoTable?.finalY ?? 60;
+    y += 8;
+    for (const n of ncrs) {
+      if (y > 270) {
+        doc.addPage();
+        y = 22;
+      }
+      doc.setFontSize(11);
+      doc.text(`${n.ref ?? "(no ref)"} — ${n.title}`, 14, y);
+      y += 5;
+      doc.setFontSize(9);
+      doc.setTextColor(80);
+      const desc = doc.splitTextToSize(n.description || "—", 180);
+      doc.text(desc, 14, y);
+      y += desc.length * 4 + 2;
+      if (n.rootCause) {
+        doc.setTextColor(0);
+        doc.text("Root cause:", 14, y);
+        y += 4;
+        const rc = doc.splitTextToSize(n.rootCause, 180);
+        doc.setTextColor(80);
+        doc.text(rc, 14, y);
+        y += rc.length * 4 + 2;
+      }
+      if (n.correctiveAction) {
+        doc.setTextColor(0);
+        doc.text("Corrective action:", 14, y);
+        y += 4;
+        const ca = doc.splitTextToSize(n.correctiveAction, 180);
+        doc.setTextColor(80);
+        doc.text(ca, 14, y);
+        y += ca.length * 4 + 2;
+      }
+      doc.setTextColor(0);
+      y += 4;
+    }
+  }
+
+  return pdfBuffer(doc);
+}
+
+export async function renderPlotDefectLogPdf(
+  plotName: string,
+  defects: Array<{
+    ref: string | null;
+    title: string;
+    description: string;
+    status: string;
+    reportedAt: Date;
+    resolvedAt: Date | null;
+  }>,
+): Promise<Buffer> {
+  const { jsPDF, autoTable } = await loadJsPdf();
+  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+
+  doc.setFontSize(16);
+  doc.text(`Defect log — ${plotName}`, 14, 22);
+  doc.setFontSize(9);
+  doc.setTextColor(120);
+  doc.text(
+    `${defects.length} defect${defects.length === 1 ? "" : "s"} recorded`,
+    14,
+    28,
+  );
+  doc.setTextColor(0);
+
+  if (defects.length === 0) {
+    doc.setFontSize(10);
+    doc.text("No defects recorded for this plot.", 14, 40);
+  } else {
+    autoTable(doc, {
+      startY: 36,
+      head: [["Ref", "Title", "Description", "Status", "Reported", "Resolved"]],
+      body: defects.map((d) => [
+        d.ref ?? "—",
+        d.title.length > 40 ? `${d.title.slice(0, 40)}…` : d.title,
+        d.description.length > 60
+          ? `${d.description.slice(0, 60)}…`
+          : d.description,
+        d.status,
+        format(d.reportedAt, "dd MMM yy"),
+        d.resolvedAt ? format(d.resolvedAt, "dd MMM yy") : "—",
+      ]),
+      styles: { fontSize: 8, cellPadding: 1 },
+      headStyles: { fillColor: [241, 245, 249], textColor: [51, 65, 85] },
+    });
+  }
+
+  return pdfBuffer(doc);
+}
+
+export async function renderPlotVariationLogPdf(
+  plotName: string,
+  variations: Array<{
+    ref: string | null;
+    title: string;
+    description: string | null;
+    requestedBy: string | null;
+    costDelta: number | null;
+    daysDelta: number | null;
+    status: string;
+    approvedAt: Date | null;
+    createdAt: Date;
+  }>,
+): Promise<Buffer> {
+  const { jsPDF, autoTable } = await loadJsPdf();
+  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+
+  doc.setFontSize(16);
+  doc.text(`Variation log — ${plotName}`, 14, 22);
+  doc.setFontSize(9);
+  doc.setTextColor(120);
+  const totalCost = variations.reduce((s, v) => s + (v.costDelta ?? 0), 0);
+  const totalDays = variations.reduce((s, v) => s + (v.daysDelta ?? 0), 0);
+  doc.text(
+    `${variations.length} variation${variations.length === 1 ? "" : "s"} · £${Math.round(totalCost).toLocaleString()} cost delta · ${totalDays > 0 ? "+" : ""}${totalDays} working days`,
+    14,
+    28,
+  );
+  doc.setTextColor(0);
+
+  if (variations.length === 0) {
+    doc.setFontSize(10);
+    doc.text("No variations recorded for this plot.", 14, 40);
+  } else {
+    autoTable(doc, {
+      startY: 36,
+      head: [
+        ["Ref", "Title", "Requested by", "Status", "£ delta", "Days", "Approved"],
+      ],
+      body: variations.map((v) => [
+        v.ref ?? "—",
+        v.title.length > 40 ? `${v.title.slice(0, 40)}…` : v.title,
+        v.requestedBy ?? "—",
+        v.status,
+        v.costDelta != null
+          ? `£${Math.round(v.costDelta).toLocaleString()}`
+          : "—",
+        v.daysDelta != null ? `${v.daysDelta > 0 ? "+" : ""}${v.daysDelta}` : "—",
+        v.approvedAt ? format(v.approvedAt, "dd MMM yy") : "—",
+      ]),
+      styles: { fontSize: 8, cellPadding: 1 },
+      headStyles: { fillColor: [241, 245, 249], textColor: [51, 65, 85] },
+    });
+  }
+
+  return pdfBuffer(doc);
+}
+
+// ──────────────────────────────────────────────────────────────────────
 // 03_Contractor_Analysis/summary.pdf + per-contractor/<Name>.pdf
 // ──────────────────────────────────────────────────────────────────────
 export async function renderContractorSummaryPdf(
@@ -634,6 +841,9 @@ export function renderReadmeTxt(
     lines.push(`    ${f}/`);
     lines.push("        plot-story.pdf");
     lines.push("        snag-log.pdf");
+    lines.push("        ncr-log.pdf            (when NCRs recorded)");
+    lines.push("        defect-log.pdf         (when warranty defects recorded)");
+    lines.push("        variation-log.pdf      (when variations recorded)");
     lines.push("        certificates/  drawings/  photos/");
   }
   lines.push("");

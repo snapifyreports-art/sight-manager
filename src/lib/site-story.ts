@@ -91,6 +91,54 @@ export interface SiteStory {
     deliveredLate: number;
     topSuppliers: { name: string; orderCount: number }[];
   };
+  /** (May 2026 Story-linkage audit) Compliance rollups — NCRs,
+   *  defect reports, and variations were silently absent before
+   *  this. NCRs scope to siteId; defects + variations scope to
+   *  plotId (no direct siteId on those models). Counts are
+   *  open/total style + recent items so the panel renders a
+   *  scannable list without paging through every record. */
+  compliance: {
+    ncrs: {
+      total: number;
+      open: number;
+      closed: number;
+      recent: {
+        id: string;
+        ref: string | null;
+        title: string;
+        status: string;
+        raisedAt: string;
+        closedAt: string | null;
+      }[];
+    };
+    defects: {
+      total: number;
+      open: number;
+      resolved: number;
+      recent: {
+        id: string;
+        ref: string | null;
+        title: string;
+        status: string;
+        reportedAt: string;
+        resolvedAt: string | null;
+      }[];
+    };
+    variations: {
+      total: number;
+      approved: number;
+      costDelta: number;
+      daysDelta: number;
+      recent: {
+        id: string;
+        ref: string | null;
+        title: string;
+        status: string;
+        costDelta: number | null;
+        daysDelta: number | null;
+      }[];
+    };
+  };
 }
 
 export interface SiteMilestone {
@@ -116,6 +164,13 @@ export interface PlotStory {
   snagsOpen: number;
   photoCount: number;
   journalEntryCount: number;
+  // (May 2026 Story-linkage audit) Per-plot compliance counters.
+  ncrCount: number;
+  ncrOpenCount: number;
+  defectCount: number;
+  defectOpenCount: number;
+  variationCount: number;
+  variationApprovedCount: number;
   // Top events surfaced for the per-plot timeline
   highlights: PlotHighlight[];
 }
@@ -664,6 +719,133 @@ export async function buildSiteStory(
     resolvedAt: s.resolvedAt?.toISOString() ?? null,
   }));
 
+  // ─── Compliance: NCRs, DefectReports, Variations ────────────────────
+  // (May 2026 Story-linkage audit) These were silently absent from the
+  // build narrative — users entered them in the Quality / Compliance
+  // tabs but they never reached Story or Handover. Now: site-level
+  // totals + per-plot counts + recent items roll up here, the SiteStory
+  // panel surfaces them, and Handover ZIP renders per-plot PDFs.
+  const allNcrs = await tx.nCR.findMany({
+    where: { siteId },
+    select: {
+      id: true,
+      plotId: true,
+      ref: true,
+      title: true,
+      status: true,
+      raisedAt: true,
+      closedAt: true,
+    },
+    orderBy: { raisedAt: "desc" },
+  });
+  const ncrIsOpen = (s: string) => s === "OPEN" || s === "INVESTIGATING";
+  const ncrsTotal = allNcrs.length;
+  const ncrsOpen = allNcrs.filter((n) => ncrIsOpen(n.status)).length;
+  const ncrsClosed = allNcrs.filter((n) => n.status === "CLOSED").length;
+
+  const allDefects = await tx.defectReport.findMany({
+    where: { plotId: { in: plotIds } },
+    select: {
+      id: true,
+      plotId: true,
+      ref: true,
+      title: true,
+      status: true,
+      reportedAt: true,
+      resolvedAt: true,
+    },
+    orderBy: { reportedAt: "desc" },
+  });
+  const defectIsOpen = (s: string) => s === "REPORTED" || s === "IN_PROGRESS";
+  const defectsTotal = allDefects.length;
+  const defectsOpen = allDefects.filter((d) => defectIsOpen(d.status)).length;
+  const defectsResolved = allDefects.filter(
+    (d) => d.status === "RESOLVED" || d.status === "CLOSED",
+  ).length;
+
+  const allVariations = await tx.variation.findMany({
+    where: { plotId: { in: plotIds } },
+    select: {
+      id: true,
+      plotId: true,
+      ref: true,
+      title: true,
+      status: true,
+      costDelta: true,
+      daysDelta: true,
+      approvedAt: true,
+    },
+    orderBy: { createdAt: "desc" },
+  });
+  const variationsTotal = allVariations.length;
+  const variationsApproved = allVariations.filter(
+    (v) => v.status === "APPROVED" || v.status === "IMPLEMENTED",
+  ).length;
+  const variationsCostDelta = allVariations.reduce(
+    (sum, v) => sum + (v.costDelta ?? 0),
+    0,
+  );
+  const variationsDaysDelta = allVariations.reduce(
+    (sum, v) => sum + (v.daysDelta ?? 0),
+    0,
+  );
+
+  // Per-plot maps for the plotStories aggregation below.
+  const ncrCountsByPlot = new Map<string, { open: number; total: number }>();
+  for (const n of allNcrs) {
+    if (!n.plotId) continue;
+    const e = ncrCountsByPlot.get(n.plotId) ?? { open: 0, total: 0 };
+    e.total++;
+    if (ncrIsOpen(n.status)) e.open++;
+    ncrCountsByPlot.set(n.plotId, e);
+  }
+  const defectCountsByPlot = new Map<
+    string,
+    { open: number; total: number }
+  >();
+  for (const d of allDefects) {
+    const e = defectCountsByPlot.get(d.plotId) ?? { open: 0, total: 0 };
+    e.total++;
+    if (defectIsOpen(d.status)) e.open++;
+    defectCountsByPlot.set(d.plotId, e);
+  }
+  const variationCountsByPlot = new Map<
+    string,
+    { approved: number; total: number }
+  >();
+  for (const v of allVariations) {
+    const e =
+      variationCountsByPlot.get(v.plotId) ?? { approved: 0, total: 0 };
+    e.total++;
+    if (v.status === "APPROVED" || v.status === "IMPLEMENTED") e.approved++;
+    variationCountsByPlot.set(v.plotId, e);
+  }
+
+  const recentNcrs = allNcrs.slice(0, 5).map((n) => ({
+    id: n.id,
+    ref: n.ref,
+    title: n.title,
+    status: n.status,
+    raisedAt: n.raisedAt.toISOString(),
+    closedAt: n.closedAt?.toISOString() ?? null,
+  }));
+  const recentDefects = allDefects.slice(0, 5).map((d) => ({
+    id: d.id,
+    ref: d.ref,
+    title: d.title,
+    status: d.status,
+    reportedAt: d.reportedAt.toISOString(),
+    resolvedAt: d.resolvedAt?.toISOString() ?? null,
+  }));
+  const recentVariations = allVariations.slice(0, 5).map((v) => ({
+    id: v.id,
+    ref: v.ref,
+    title: v.title,
+    status: v.status,
+    costDelta: v.costDelta,
+    daysDelta: v.daysDelta,
+  }));
+
   // On-time completion = plots where every leaf job's actualEndDate
   // <= originalEndDate. Edge: plots not yet complete excluded.
   const onTimeCount = plots.filter((p) => {
@@ -781,6 +963,15 @@ export async function buildSiteStory(
       snagsOpen: plotSnagsOpen,
       photoCount: photoCountByPlot.get(p.id) ?? 0,
       journalEntryCount: journalsByPlot.get(p.id) ?? 0,
+      // (May 2026 Story-linkage audit) Per-plot compliance counters
+      // pulled from the maps built above.
+      ncrCount: ncrCountsByPlot.get(p.id)?.total ?? 0,
+      ncrOpenCount: ncrCountsByPlot.get(p.id)?.open ?? 0,
+      defectCount: defectCountsByPlot.get(p.id)?.total ?? 0,
+      defectOpenCount: defectCountsByPlot.get(p.id)?.open ?? 0,
+      variationCount: variationCountsByPlot.get(p.id)?.total ?? 0,
+      variationApprovedCount:
+        variationCountsByPlot.get(p.id)?.approved ?? 0,
       highlights: [], // populated below if includeFull
     };
   });
@@ -996,6 +1187,29 @@ export async function buildSiteStory(
       sentLate: orderSentLateCount,
       deliveredLate: ordersDeliveredLate,
       topSuppliers: topStorySuppliers,
+    },
+    // (May 2026 Story-linkage audit) Compliance rollup — NCRs +
+    // defects + variations now reach Story / Handover.
+    compliance: {
+      ncrs: {
+        total: ncrsTotal,
+        open: ncrsOpen,
+        closed: ncrsClosed,
+        recent: recentNcrs,
+      },
+      defects: {
+        total: defectsTotal,
+        open: defectsOpen,
+        resolved: defectsResolved,
+        recent: recentDefects,
+      },
+      variations: {
+        total: variationsTotal,
+        approved: variationsApproved,
+        costDelta: variationsCostDelta,
+        daysDelta: variationsDaysDelta,
+        recent: recentVariations,
+      },
     },
   };
 }
