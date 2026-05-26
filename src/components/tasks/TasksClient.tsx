@@ -39,6 +39,7 @@ import { useOrderStatus } from "@/hooks/useOrderStatus";
 import { useOrderEmail } from "@/hooks/useOrderEmail";
 import { useJobAction } from "@/hooks/useJobAction";
 import { useToast, fetchErrorMessage } from "@/components/ui/toast";
+import { LatenessSummary } from "@/components/lateness/LatenessSummary";
 
 // ---------- Types ----------
 
@@ -407,6 +408,14 @@ export function TasksClient() {
             : "All caught up across every site. Use the site picker above to dig into one."}
         </p>
       </div>
+
+      {/* (May 2026 Keith request) Lateness summary across every
+          accessible site. Auto-expands when there are events still
+          needing a reason so the unattributed ones surface here
+          immediately — the per-site Daily Brief has the same widget
+          scoped to its own site, and the goal of having it at the
+          all-sites view too is that nothing gets lost between sites. */}
+      <LatenessSummary status="open" />
 
       {/* Summary Cards */}
       <div className="grid grid-cols-2 gap-2 sm:gap-4 lg:grid-cols-3">

@@ -50,6 +50,24 @@ const KIND_LABEL: Record<string, string> = {
   ORDER_SEND_OVERDUE: "Order not sent",
 };
 
+// (May 2026 Keith request) "Needs attribution" predicate — the
+// reasonCode default is OTHER, set by the lateness cron when no
+// signal is available. Once a manager picks a reason, sets a
+// delayReason, attributes a contractor/supplier, OR adds a note,
+// the event is considered triaged. This lifts it out of the
+// "needs a reason" prompt in the Daily Brief headline and the
+// in-list sort, so genuinely-unattributed events surface first.
+function needsAttribution(e: LatenessEventDTO): boolean {
+  if (e.resolvedAt) return false;
+  if (e.excused) return false;
+  if (e.reasonCode && e.reasonCode !== "OTHER") return false;
+  if (e.delayReason) return false;
+  if (e.attributedContactId) return false;
+  if (e.attributedSupplierId) return false;
+  if (e.reasonNote && e.reasonNote.trim().length > 0) return false;
+  return true;
+}
+
 const REASON_OPTIONS: { value: string; label: string }[] = [
   { value: "OTHER", label: "Not yet attributed" },
   { value: "WEATHER_RAIN", label: "Weather — rain" },
@@ -102,7 +120,12 @@ export function LatenessSummary(props: Props) {
   const [contacts, setContacts] = useState<ContactOption[]>([]);
   const [suppliers, setSuppliers] = useState<SupplierOption[]>([]);
   const [loading, setLoading] = useState(true);
+  // (May 2026 Keith request) `userToggled` lets the auto-expand effect
+  // only fire once per data-load; once the manager has explicitly
+  // opened or closed the panel, we leave their choice alone instead of
+  // fighting it on every refresh.
   const [expanded, setExpanded] = useState(defaultExpanded);
+  const [userToggled, setUserToggled] = useState(false);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -177,6 +200,17 @@ export function LatenessSummary(props: Props) {
     };
   }, []);
 
+  // (May 2026 Keith request) Auto-expand the panel as soon as events
+  // load IF there are unattributed open events. Respects any manual
+  // toggle the manager has made since (userToggled). Run-once via
+  // events being the dep — re-renders without an event refresh
+  // don't re-trigger.
+  useEffect(() => {
+    if (!events || compact || userToggled) return;
+    const needs = events.some((e) => !e.resolvedAt && needsAttribution(e));
+    if (needs) setExpanded(true);
+  }, [events, compact, userToggled]);
+
   if (loading) {
     return (
       <div className="rounded-lg border bg-white p-3 text-sm text-muted-foreground">
@@ -201,6 +235,12 @@ export function LatenessSummary(props: Props) {
   // lost headline, the same way weather-excused delays are kept apart.
   const counted = (e: LatenessEventDTO) => !e.excused;
   const excusedCount = events.filter((e) => e.excused).length;
+  // (May 2026 Keith request) Count of open events still flagged "OTHER"
+  // with no attribution — these are the ones managers need to attend
+  // to in order for analytics to mean anything (the Site Story chips
+  // were 38 "OTHER" because triage wasn't surfaced anywhere prominent).
+  const needsAttributionEvents = open.filter(needsAttribution);
+  const needsCount = needsAttributionEvents.length;
   // (May 2026 audit D-P0-3) Split open vs resolved working-days. Pre-fix
   // the headline conflated them when status=all so the Delay Report tab
   // said "47 WD lost" (= open + historical resolved) while the weekly
@@ -210,6 +250,17 @@ export function LatenessSummary(props: Props) {
   const resolvedDays = resolved
     .filter(counted)
     .reduce((sum, e) => sum + e.daysLate, 0);
+
+  // (May 2026 Keith request) Sort so needs-reason events float to the
+  // top of the expanded list. Within each bucket, fall back to the
+  // API's order (resolved-first-asc-nulls-first, then wentLateOn desc)
+  // so the existing semantics survive.
+  const sortedEvents = [...events].sort((a, b) => {
+    const aN = needsAttribution(a) ? 0 : 1;
+    const bN = needsAttribution(b) ? 0 : 1;
+    if (aN !== bN) return aN - bN;
+    return 0;
+  });
 
   // Reason breakdown — keep summing all (non-excused) events so the
   // breakdown shows every reason that ever contributed (this is a "where
@@ -233,25 +284,40 @@ export function LatenessSummary(props: Props) {
   // events exist (rare — usually means the user filtered to status=resolved
   // explicitly), show the historical figure. Excused events tag on at the
   // end so the count is visible without distorting the WD-lost number.
+  // (May 2026 Keith request) The "X need a reason" tag goes next to the
+  // open count so managers triage the unattributed ones first — pre-fix
+  // these were silently rolled into the "OTHER" bucket and never chased.
   const excusedTag = excusedCount > 0 ? ` · ${excusedCount} excused` : "";
+  const needsTag = needsCount > 0 ? ` · ${needsCount} need a reason` : "";
   const headline =
     (open.length > 0
       ? resolved.length > 0
         ? `${open.length} open · ${openDays} WD lost (+${resolvedDays} WD historic)`
         : `${open.length} open · ${openDays} working day${openDays === 1 ? "" : "s"} lost`
       : `${resolved.length} resolved · ${resolvedDays} working day${resolvedDays === 1 ? "" : "s"} historically`) +
+    needsTag +
     excusedTag;
 
   return (
     <div className="rounded-lg border bg-white">
       <button
         type="button"
-        onClick={() => setExpanded((v) => !v)}
+        onClick={() => {
+          setExpanded((v) => !v);
+          // Stop the auto-expand effect from fighting the manager's
+          // explicit collapse on the next refresh.
+          setUserToggled(true);
+        }}
         aria-expanded={expanded}
-        className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left hover:bg-slate-50"
+        className={`flex w-full items-center justify-between gap-2 px-3 py-2 text-left hover:bg-slate-50 ${
+          needsCount > 0 ? "bg-amber-50" : ""
+        }`}
       >
         <div className="flex items-center gap-2">
-          <AlertTriangle className="size-4 text-amber-600" aria-hidden />
+          <AlertTriangle
+            className={`size-4 ${needsCount > 0 ? "text-amber-700" : "text-amber-600"}`}
+            aria-hidden
+          />
           <span className="text-sm font-semibold">{headline}</span>
         </div>
         <ChevronDown
@@ -281,7 +347,7 @@ export function LatenessSummary(props: Props) {
             </div>
           )}
           <ul className="divide-y">
-            {events.map((e) => (
+            {sortedEvents.map((e) => (
               <LatenessRow key={e.id} event={e} contacts={contacts} suppliers={suppliers} onChange={refresh} toast={toast} />
             ))}
           </ul>
@@ -352,10 +418,24 @@ function LatenessRow({
     }
   }
 
+  // (May 2026 Keith request) Visually flag rows still needing a reason.
+  // The left border + soft amber tint signals at a glance which rows
+  // the manager owes work on, without making the rest of the list noisy.
+  const needs = needsAttribution(event);
+
   return (
-    <li className="px-3 py-2 text-sm">
+    <li
+      className={`px-3 py-2 text-sm ${needs ? "border-l-4 border-l-amber-400 bg-amber-50/50" : ""}`}
+    >
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <p className="min-w-0 flex-1 truncate font-medium text-slate-900">{targetLabel}</p>
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <p className="min-w-0 truncate font-medium text-slate-900">{targetLabel}</p>
+          {needs && (
+            <span className="shrink-0 rounded-full bg-amber-200 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-amber-900">
+              Needs reason
+            </span>
+          )}
+        </div>
         <span
           className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${
             event.resolvedAt ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"
@@ -425,9 +505,13 @@ function LatenessRow({
             <button
               type="button"
               onClick={() => setEditing(true)}
-              className="text-[11px] font-medium text-blue-600 hover:underline"
+              className={
+                needs
+                  ? "rounded-md bg-amber-600 px-2 py-1 text-[11px] font-semibold text-white hover:bg-amber-700"
+                  : "text-[11px] font-medium text-blue-600 hover:underline"
+              }
             >
-              Set reason
+              {needs ? "Attribute reason" : "Set reason"}
             </button>
           )}
         </div>
