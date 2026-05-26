@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { format } from "date-fns";
-import { AlertTriangle, CheckCircle2, Clock, Loader2, ChevronDown, User } from "lucide-react";
+import { format, startOfWeek } from "date-fns";
+import { AlertTriangle, CheckCircle2, Clock, Loader2, ChevronDown, User, Layers } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 
@@ -66,6 +66,32 @@ function needsAttribution(e: LatenessEventDTO): boolean {
   if (e.attributedSupplierId) return false;
   if (e.reasonNote && e.reasonNote.trim().length > 0) return false;
   return true;
+}
+
+/**
+ * (May 2026 Keith request) Bulk-attribute grouping.
+ *
+ * When 18 identical "Brickwork 1st lift · Order not sent" rows pile
+ * up across 18 plots in the same week, they almost always share a
+ * root cause — but the manager still had to click "Attribute reason"
+ * 18 times. This group key collapses sibling events so they can be
+ * attributed in one go.
+ *
+ * Key shape: `${kind}|${stageName-or-supplierName}|${weekStart}`.
+ * Only events that still need attribution are eligible to group; a
+ * row that already has a reason stays rendered on its own so the
+ * manager can see what was done.
+ *
+ * Week boundaries align with the working week (Mon start) so an
+ * event that went late on a Friday doesn't drift into the next
+ * week's group when grouping is recomputed on Monday morning.
+ */
+function getGroupKey(e: LatenessEventDTO): string | null {
+  if (!needsAttribution(e)) return null;
+  const groupName = e.job?.name ?? e.order?.supplier.name ?? null;
+  if (!groupName) return null;
+  const weekStart = startOfWeek(new Date(e.wentLateOn), { weekStartsOn: 1 });
+  return `${e.kind}|${groupName}|${format(weekStart, "yyyy-MM-dd")}`;
 }
 
 const REASON_OPTIONS: { value: string; label: string }[] = [
@@ -262,6 +288,32 @@ export function LatenessSummary(props: Props) {
     return 0;
   });
 
+  // (May 2026 Keith request) Fold sibling needs-attribution events
+  // into one render slot per (kind, stage/supplier, week). Events
+  // that already have a reason — or that belong to a group of one —
+  // render individually as before.
+  type RenderItem =
+    | { type: "single"; event: LatenessEventDTO }
+    | { type: "group"; key: string; events: LatenessEventDTO[] };
+  const groupCounts = new Map<string, number>();
+  for (const e of sortedEvents) {
+    const k = getGroupKey(e);
+    if (k) groupCounts.set(k, (groupCounts.get(k) ?? 0) + 1);
+  }
+  const groupRendered = new Set<string>();
+  const renderItems: RenderItem[] = [];
+  for (const e of sortedEvents) {
+    const k = getGroupKey(e);
+    if (k && (groupCounts.get(k) ?? 0) >= 2) {
+      if (groupRendered.has(k)) continue;
+      groupRendered.add(k);
+      const groupEvents = sortedEvents.filter((ev) => getGroupKey(ev) === k);
+      renderItems.push({ type: "group", key: k, events: groupEvents });
+    } else {
+      renderItems.push({ type: "single", event: e });
+    }
+  }
+
   // Reason breakdown — keep summing all (non-excused) events so the
   // breakdown shows every reason that ever contributed (this is a "where
   // did the time go" lens, not a "what's open right now" lens). Prefer
@@ -347,9 +399,27 @@ export function LatenessSummary(props: Props) {
             </div>
           )}
           <ul className="divide-y">
-            {sortedEvents.map((e) => (
-              <LatenessRow key={e.id} event={e} contacts={contacts} suppliers={suppliers} onChange={refresh} toast={toast} />
-            ))}
+            {renderItems.map((item) =>
+              item.type === "group" ? (
+                <LatenessGroupRow
+                  key={`g:${item.key}`}
+                  events={item.events}
+                  contacts={contacts}
+                  suppliers={suppliers}
+                  onChange={refresh}
+                  toast={toast}
+                />
+              ) : (
+                <LatenessRow
+                  key={item.event.id}
+                  event={item.event}
+                  contacts={contacts}
+                  suppliers={suppliers}
+                  onChange={refresh}
+                  toast={toast}
+                />
+              ),
+            )}
           </ul>
         </div>
       )}
@@ -585,6 +655,216 @@ function LatenessRow({
                 setReasonNote(event.reasonNote ?? "");
                 setAttributedContactId(event.attributedContactId ?? "");
                 setAttributedSupplierId(event.attributedSupplierId ?? "");
+                setEditing(false);
+              }}
+              disabled={saving}
+              className="h-7 text-xs"
+            >
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
+    </li>
+  );
+}
+
+/**
+ * (May 2026 Keith request) Bulk-attribute row.
+ *
+ * Renders one card for N sibling lateness events (same stage, same
+ * kind, same week) so the manager can pick a reason once and apply
+ * it to every plot affected. Saves through the bulk endpoint in a
+ * single round-trip rather than N individual PATCHes.
+ */
+function LatenessGroupRow({
+  events,
+  contacts,
+  suppliers,
+  onChange,
+  toast,
+}: {
+  events: LatenessEventDTO[];
+  contacts: ContactOption[];
+  suppliers: SupplierOption[];
+  onChange: () => void;
+  toast: ReturnType<typeof useToast>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [reasonCode, setReasonCode] = useState<string>("OTHER");
+  const [reasonNote, setReasonNote] = useState("");
+  const [attributedContactId, setAttributedContactId] = useState("");
+  const [attributedSupplierId, setAttributedSupplierId] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  // All events share kind + stage by construction; pick the first
+  // for labels. Plot summary chips show up to 6 then "+N more".
+  const first = events[0]!;
+  const stageLabel =
+    first.job?.name ??
+    (first.order ? `Order · ${first.order.supplier.name}` : "Item");
+  const totalDaysLate = events.reduce((s, e) => s + e.daysLate, 0);
+  const plotChips = events
+    .map((e) =>
+      e.plot
+        ? e.plot.plotNumber
+          ? `Plot ${e.plot.plotNumber}`
+          : e.plot.name
+        : null,
+    )
+    .filter((v): v is string => !!v);
+  const earliestWentLate = events
+    .map((e) => new Date(e.wentLateOn).getTime())
+    .reduce((min, t) => Math.min(min, t), Infinity);
+
+  async function saveAll() {
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/lateness/bulk-attribute`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ids: events.map((e) => e.id),
+          reasonCode,
+          reasonNote: reasonNote || null,
+          attributedContactId: attributedContactId || null,
+          attributedSupplierId: attributedSupplierId || null,
+        }),
+      });
+      if (!res.ok) {
+        toast.error(await fetchErrorMessage(res, "Couldn't apply attribution"));
+        return;
+      }
+      const body = (await res.json()) as { updated: number };
+      setEditing(false);
+      toast.success(`Reason applied to ${body.updated} event${body.updated === 1 ? "" : "s"}`);
+      onChange();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <li className="border-l-4 border-l-amber-500 bg-amber-50/70 px-3 py-2 text-sm">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <Layers className="size-4 shrink-0 text-amber-700" aria-hidden />
+          <p className="min-w-0 truncate font-semibold text-slate-900">
+            {stageLabel}
+          </p>
+          <span className="shrink-0 rounded-full bg-amber-200 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-amber-900">
+            {events.length} affected · needs reason
+          </span>
+        </div>
+        <span className="shrink-0 rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-red-700">
+          {totalDaysLate}d total
+        </span>
+      </div>
+      <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+        <Clock className="size-3" aria-hidden />
+        <span>{KIND_LABEL[first.kind] ?? first.kind}</span>
+        <span>·</span>
+        <span>
+          First went late {format(new Date(earliestWentLate), "d MMM")}
+        </span>
+      </p>
+      {plotChips.length > 0 && (
+        <div className="mt-1 flex flex-wrap gap-1">
+          {plotChips.slice(0, 6).map((p) => (
+            <span
+              key={p}
+              className="rounded-full border border-amber-200 bg-white px-1.5 py-0.5 text-[10px] text-amber-900"
+            >
+              {p}
+            </span>
+          ))}
+          {plotChips.length > 6 && (
+            <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-900">
+              +{plotChips.length - 6} more
+            </span>
+          )}
+        </div>
+      )}
+
+      {!editing ? (
+        <div className="mt-2">
+          <button
+            type="button"
+            onClick={() => setEditing(true)}
+            className="rounded-md bg-amber-600 px-2 py-1 text-[11px] font-semibold text-white hover:bg-amber-700"
+          >
+            Set reason for all {events.length}
+          </button>
+        </div>
+      ) : (
+        <div className="mt-2 space-y-1.5 rounded border bg-white p-2">
+          <select
+            value={reasonCode}
+            onChange={(e) => setReasonCode(e.target.value)}
+            className="w-full rounded border bg-white px-2 py-1.5 text-xs"
+            aria-label="Lateness reason"
+          >
+            {REASON_OPTIONS.map((r) => (
+              <option key={r.value} value={r.value}>
+                {r.label}
+              </option>
+            ))}
+          </select>
+          {contacts.length > 0 && (
+            <select
+              value={attributedContactId}
+              onChange={(e) => setAttributedContactId(e.target.value)}
+              className="w-full rounded border bg-white px-2 py-1.5 text-xs"
+              aria-label="Attribute to contractor"
+            >
+              <option value="">— No contractor attribution —</option>
+              {contacts.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.company ? `${c.company} (${c.name})` : c.name}
+                </option>
+              ))}
+            </select>
+          )}
+          {suppliers.length > 0 && (
+            <select
+              value={attributedSupplierId}
+              onChange={(e) => setAttributedSupplierId(e.target.value)}
+              className="w-full rounded border bg-white px-2 py-1.5 text-xs"
+              aria-label="Attribute to supplier"
+            >
+              <option value="">— No supplier attribution —</option>
+              {suppliers.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+          )}
+          <input
+            type="text"
+            value={reasonNote}
+            onChange={(e) => setReasonNote(e.target.value)}
+            placeholder="Optional note (applied to every event in this group)"
+            className="w-full rounded border bg-white px-2 py-1.5 text-xs"
+          />
+          <div className="flex gap-1.5">
+            <Button
+              size="sm"
+              onClick={saveAll}
+              disabled={saving}
+              className="h-7 text-xs"
+            >
+              {saving ? <Loader2 className="size-3 animate-spin" /> : null}
+              Apply to all {events.length}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                setReasonCode("OTHER");
+                setReasonNote("");
+                setAttributedContactId("");
+                setAttributedSupplierId("");
                 setEditing(false);
               }}
               disabled={saving}
