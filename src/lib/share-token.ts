@@ -174,6 +174,39 @@ export function verifyCalendarToken(token: string): { userId: string; siteId: st
   }
 }
 
+// ─── Live cabin TV tokens ────────────────────────────────────────────────────
+//
+// (May 2026 Keith strategic) Token binding for the /live/[token]
+// wall-mounted dashboard. The portacabin TV needs read-only access
+// without anyone logging in, so a signed token is the access primitive.
+// Issued by an admin on the Site Detail page; can be rotated by reissuing
+// — old tokens stop verifying once the signing key or exp passes.
+export function signLiveToken(payload: { siteId: string; exp: number }): string {
+  const data = b64url(JSON.stringify(payload));
+  const sig = createHmac("sha256", requireSecret()).update(data).digest("base64url");
+  return `${data}.${sig}`;
+}
+
+export function verifyLiveToken(token: string): { siteId: string; exp: number } | null {
+  try {
+    const dot = token.lastIndexOf(".");
+    if (dot === -1) return null;
+    const data = token.slice(0, dot);
+    const sig = token.slice(dot + 1);
+    const expected = createHmac("sha256", requireSecret()).update(data).digest("base64url");
+    const sigBuf = Buffer.from(sig);
+    const expBuf = Buffer.from(expected);
+    if (sigBuf.length !== expBuf.length) return null;
+    if (!timingSafeEqual(sigBuf, expBuf)) return null;
+    const payload = JSON.parse(fromB64url(data));
+    if (typeof payload.siteId !== "string" || typeof payload.exp !== "number") return null;
+    if (Date.now() > payload.exp) return null;
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
 // Verify and decode a share token. Returns null if invalid or expired.
 export function verifyShareToken(token: string): { plotId: string; exp: number } | null {
   try {
