@@ -37,8 +37,16 @@ import {
 
 // ---------- Constants ----------
 
-const CELL_WIDTH_WEEK = 40;
-const CELL_WIDTH_DAY = 28;
+// (May 2026 Keith request) Cell widths sized so a 6-char stage code
+// label fits inside the bar without overlapping a neighbour. Prior
+// 40/28 truncated "1F2WPL" / "EXTBEN0" / "FNDGRD" labels because the
+// 8px font rendered ~5px/char, just barely exceeding the bar width.
+// Bumped to 56/36 with a larger 10px font for week view — labels
+// stay readable; horizontal scroll covers timelines longer than the
+// viewport. User explicitly rejected truncation, so we accept the
+// scroll instead.
+const CELL_WIDTH_WEEK = 56;
+const CELL_WIDTH_DAY = 36;
 const ROW_HEIGHT = 32;
 const HEADER_HEIGHT = 40;
 const HEADER_HEIGHT_DAY = 56; // two-row header for day view
@@ -1858,7 +1866,7 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                           >
                             <div
                               className={`relative flex items-center justify-center rounded font-bold transition-all hover:brightness-90 hover:shadow-sm ${
-                                viewMode === "day" ? "text-[7px]" : "text-[8px]"
+                                viewMode === "day" ? "text-[9px]" : "text-[10px]"
                               } ${
                                 job.status === "IN_PROGRESS" && ganttMode !== "original" ? "animate-[pulse-glow_2s_ease-in-out_infinite]" : ""
                               } ${
