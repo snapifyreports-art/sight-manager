@@ -72,16 +72,22 @@ export async function GET(_req: NextRequest) {
     return sorted[lo] + (sorted[hi] - sorted[lo]) * (pos - lo);
   }
 
+  // (May 2026 Keith request) Round every percentile to 1 dp. The
+  // `quantile` helper interpolates between samples, so a p90 falling
+  // between 5 and 6 days returned 5.199999999999999 — the table
+  // rendered every ugly digit. mean was already rounded; the others
+  // weren't.
+  const round1 = (n: number) => Math.round(n * 10) / 10;
   const items = Array.from(buckets.entries()).map(([stage, days]) => {
     const sorted = [...days].sort((a, b) => a - b);
     const mean = days.reduce((s, x) => s + x, 0) / days.length;
     return {
       stage,
       sample: days.length,
-      mean: Math.round(mean * 10) / 10,
-      median: quantile(sorted, 0.5),
-      p10: quantile(sorted, 0.1),
-      p90: quantile(sorted, 0.9),
+      mean: round1(mean),
+      median: round1(quantile(sorted, 0.5)),
+      p10: round1(quantile(sorted, 0.1)),
+      p90: round1(quantile(sorted, 0.9)),
       min: sorted[0],
       max: sorted[sorted.length - 1],
     };

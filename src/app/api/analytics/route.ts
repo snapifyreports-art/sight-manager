@@ -219,10 +219,16 @@ export async function GET(req: NextRequest) {
   });
 
   // ── Job Duration Analysis ──
-  // Group by job name and compute planned vs actual durations
+  // Group by job name and compute planned vs actual durations.
+  // (May 2026 Keith request) Also track the minimum sortOrder per
+  // group so the UI can render rows in build sequence rather than
+  // count-descending — the old order made the section read as random
+  // ("Joiners, Plumber, Sparks, Dig & pour, ..." across the same plot
+  // sequence). sortOrder mirrors the template ordering used everywhere
+  // else in the app.
   const jobDurationMap = new Map<
     string,
-    { planned: number[]; actual: number[]; count: number }
+    { planned: number[]; actual: number[]; count: number; minSortOrder: number }
   >();
 
   for (const job of jobs) {
@@ -236,9 +242,13 @@ export async function GET(req: NextRequest) {
       planned: [],
       actual: [],
       count: 0,
+      minSortOrder: Infinity,
     };
     entry.planned.push(plannedDays);
     entry.count++;
+    if (typeof job.sortOrder === "number" && job.sortOrder < entry.minSortOrder) {
+      entry.minSortOrder = job.sortOrder;
+    }
 
     if (job.actualStartDate && job.actualEndDate) {
       const actualDays = differenceInWorkingDays(
@@ -252,22 +262,34 @@ export async function GET(req: NextRequest) {
   }
 
   const jobDurations = Array.from(jobDurationMap.entries())
-    .map(([name, data]) => ({
-      jobName: name,
-      avgPlannedDays: Math.round(
-        data.planned.reduce((a, b) => a + b, 0) / data.planned.length
-      ),
-      avgActualDays:
+    .map(([name, data]) => {
+      const avgPlanned =
+        data.planned.reduce((a, b) => a + b, 0) / data.planned.length;
+      const avgActual =
         data.actual.length > 0
-          ? Math.round(
-              data.actual.reduce((a, b) => a + b, 0) / data.actual.length
-            )
-          : null,
-      count: data.count,
-    }))
+          ? data.actual.reduce((a, b) => a + b, 0) / data.actual.length
+          : null;
+      return {
+        jobName: name,
+        // Round to 1 dp so a 1.4-day average doesn't pretend to be 1d.
+        avgPlannedDays: Math.round(avgPlanned * 10) / 10,
+        avgActualDays:
+          avgActual !== null ? Math.round(avgActual * 10) / 10 : null,
+        // Pre-compute variance (actual - planned) for the table column.
+        // Null when there's no actual yet — the UI shows "—".
+        varianceDays:
+          avgActual !== null
+            ? Math.round((avgActual - avgPlanned) * 10) / 10
+            : null,
+        count: data.count,
+        sortOrder: Number.isFinite(data.minSortOrder)
+          ? data.minSortOrder
+          : Number.MAX_SAFE_INTEGER,
+      };
+    })
     .filter((d) => d.count >= 1)
-    .sort((a, b) => b.count - a.count)
-    .slice(0, 15);
+    .sort((a, b) => a.sortOrder - b.sortOrder || a.jobName.localeCompare(b.jobName))
+    .slice(0, 30);
 
   // ── Contractor Performance ──
   const contractorMap = new Map<

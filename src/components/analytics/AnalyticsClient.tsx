@@ -59,7 +59,13 @@ interface JobDuration {
   jobName: string;
   avgPlannedDays: number;
   avgActualDays: number | null;
+  // (May 2026 Keith request) Pre-computed actual − planned so the table
+  // doesn't have to subtract on every render. Null when no actuals yet.
+  varianceDays: number | null;
   count: number;
+  // Min sortOrder across the jobs in this group — drives the table
+  // ordering so build sequence (Foundation → ... → Painters) is preserved.
+  sortOrder: number;
 }
 
 interface ContractorPerf {
@@ -554,58 +560,75 @@ export function AnalyticsClient() {
         </div>
       </div>
 
-      {/* Row 2: Job Durations (planned vs actual) */}
+      {/* Row 2: Job Durations (planned vs actual)
+          (May 2026 Keith request) Was a bar chart — planned bars were
+          0-1 day for most stages and barely rendered, and the chart
+          sorted by count desc so the order looked random next to the
+          template sequence. A side-by-side table reads cleanly when
+          most rows are < 1 day and surfaces variance directly. Rows
+          come back from the API already sorted by sortOrder ascending
+          so build sequence is preserved. */}
       {data.jobDurations.length > 0 && (
         <div className="rounded-xl border bg-white p-4">
           <SectionHeader icon={Clock} title="Job Durations — Planned vs Actual" />
-          <ResponsiveContainer width="100%" height={300}>
-            <BarChart
-              data={data.jobDurations}
-              margin={{ top: 10, right: 10, left: 0, bottom: 30 }}
-            >
-              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-              <XAxis
-                dataKey="jobName"
-                tick={{ fontSize: 10 }}
-                interval={0}
-                angle={-25}
-                textAnchor="end"
-                height={60}
-              />
-              <YAxis
-                tick={{ fontSize: 11 }}
-                label={{
-                  value: "Days",
-                  angle: -90,
-                  position: "insideLeft",
-                  style: { fontSize: 11 },
-                }}
-              />
-              <Tooltip
-                contentStyle={{ fontSize: 12 }}
-                formatter={(value, name) => [
-                  `${value ?? 0} days`,
-                  name === "avgPlannedDays" ? "Planned" : "Actual",
-                ]}
-              />
-              <Legend
-                wrapperStyle={{ fontSize: 11 }}
-                formatter={(value) =>
-                  value === "avgPlannedDays" ? "Planned (avg)" : "Actual (avg)"
-                }
-              />
-              <Bar
-                dataKey="avgPlannedDays"
-                fill="#93c5fd"
-                radius={[4, 4, 0, 0]}
-              />
-              <Bar
-                dataKey="avgActualDays"
-                fill="#3b82f6"
-                radius={[4, 4, 0, 0]}
-              />
-            </BarChart>
-          </ResponsiveContainer>
+          <p className="text-xs text-muted-foreground">
+            Average working-day duration per stage, in build sequence.
+            Variance = actual − planned across every plot.
+          </p>
+          <div className="mt-3 overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="text-xs uppercase text-slate-500">
+                <tr className="border-b">
+                  <th className="pb-2 text-left font-medium">Stage</th>
+                  <th className="pb-2 text-right font-medium">Planned (avg)</th>
+                  <th className="pb-2 text-right font-medium">Actual (avg)</th>
+                  <th className="pb-2 text-right font-medium">Variance</th>
+                  <th className="pb-2 text-right font-medium">Jobs</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.jobDurations.map((d) => {
+                  // Variance threshold — round-trip tolerance of half a
+                  // working day either side counts as "on plan." Anything
+                  // beyond is amber/red (over) or green (under).
+                  const v = d.varianceDays;
+                  const varianceClass =
+                    v === null
+                      ? "text-muted-foreground"
+                      : v > 0.5
+                        ? "text-red-600"
+                        : v < -0.5
+                          ? "text-emerald-600"
+                          : "text-slate-500";
+                  const varianceLabel =
+                    v === null ? "—" : v > 0 ? `+${v}d` : `${v}d`;
+                  return (
+                    <tr key={d.jobName} className="border-b last:border-0">
+                      <td className="py-1.5 font-medium">{d.jobName}</td>
+                      <td className="py-1.5 text-right tabular-nums">
+                        {d.avgPlannedDays}d
+                      </td>
+                      <td className="py-1.5 text-right tabular-nums">
+                        {d.avgActualDays !== null ? (
+                          `${d.avgActualDays}d`
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </td>
+                      <td
+                        className={`py-1.5 text-right tabular-nums font-semibold ${varianceClass}`}
+                      >
+                        {varianceLabel}
+                      </td>
+                      <td className="py-1.5 text-right text-muted-foreground tabular-nums">
+                        {d.count}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
@@ -934,7 +957,12 @@ function DelayTrendsWidget() {
     return () => { cancelled = true; };
   }, []);
   if (!data) return null;
+  const totalEvents = data.series.reduce((s, w) => s + w.total, 0);
   const max = Math.max(1, ...data.series.map((s) => s.total));
+  // (May 2026 Keith request) Empty/sparse chart used to render as a
+  // wall of invisible bars with no axis labels — looked broken. Now:
+  // show a helpful empty state when there are no delays, and stamp
+  // week labels under every bar so the time axis is legible.
   return (
     <div className="rounded-xl border bg-white p-4">
       <h3 className="font-semibold">Delay trends (last 12 weeks)</h3>
@@ -942,20 +970,46 @@ function DelayTrendsWidget() {
         Cascade events per week. Top reasons:{" "}
         {data.topReasons.slice(0, 3).map((r) => `${r.reason} (${r.count})`).join(", ") || "no delays"}
       </p>
-      <div className="mt-3 flex h-32 items-end gap-1">
-        {data.series.map((s) => {
-          const pct = (s.total / max) * 100;
-          return (
-            <div key={s.weekStart} className="flex flex-1 flex-col items-center">
+      {totalEvents === 0 ? (
+        <p className="mt-4 rounded-md border border-dashed bg-slate-50 px-3 py-6 text-center text-sm text-muted-foreground">
+          No delay-cascade events in the last 12 weeks. Nothing to chart.
+        </p>
+      ) : (
+        <div className="mt-3">
+          <div className="flex h-32 items-end gap-1">
+            {data.series.map((s) => {
+              const pct = (s.total / max) * 100;
+              return (
+                <div
+                  key={s.weekStart}
+                  className="group relative flex flex-1 flex-col items-stretch"
+                  title={`${s.weekStart}: ${s.total} delay event${s.total !== 1 ? "s" : ""}`}
+                >
+                  <div className="flex flex-1 items-end">
+                    <div
+                      className="w-full rounded-t bg-amber-400 transition-colors group-hover:bg-amber-500"
+                      style={{ height: `${pct}%`, minHeight: s.total > 0 ? 2 : 0 }}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          {/* Week labels — "DD/MM" so the row reads at-a-glance. We
+              label every other week to avoid crowding on smaller
+              screens; the tooltip on each bar has the full date. */}
+          <div className="mt-1 flex gap-1">
+            {data.series.map((s, i) => (
               <div
-                className="w-full rounded-t bg-amber-400"
-                style={{ height: `${pct}%`, minHeight: s.total > 0 ? 2 : 0 }}
-                title={`${s.weekStart}: ${s.total}`}
-              />
-            </div>
-          );
-        })}
-      </div>
+                key={s.weekStart}
+                className="flex-1 text-center text-[9px] text-muted-foreground"
+              >
+                {i % 2 === 0 ? s.weekStart.slice(5).replace("-", "/") : ""}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1023,7 +1077,12 @@ function WeatherLossWidget() {
           </ul>
         </div>
       </div>
-      {data.byMonth && data.byMonth.length > 0 && maxMonth > 0 && (
+      {/* (May 2026 Keith request) Seasonality sparkline only renders
+          when there's enough data to read as a trend. Total < 3
+          weather days = the chart is 11 empty months and 1 spike,
+          which looks like a bug. Threshold of 3 keeps the section
+          honest: come back when you have a story to tell. */}
+      {data.byMonth && data.byMonth.length > 0 && maxMonth > 0 && data.totalDays >= 3 && (
         <div className="mt-4">
           <p className="text-xs font-medium text-slate-700">
             Seasonality (last {data.byMonth.length} months)
