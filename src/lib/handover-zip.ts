@@ -945,6 +945,9 @@ export async function buildHandoverArchive({
       children: { none: {} },
     },
     select: {
+      // (May 2026 audit P-* delay PDF) id selected so we can batch-
+      // resolve reason codes from LatenessEvent below.
+      id: true,
       name: true,
       status: true,
       endDate: true,
@@ -958,6 +961,31 @@ export async function buildHandoverArchive({
     orderBy: { endDate: "asc" },
   });
   const { differenceInWorkingDays } = await import("@/lib/working-days");
+  // (May 2026 audit) Pull the open JOB_END_OVERDUE lateness rows for
+  // these jobs so each row in the PDF carries the reason code. Single
+  // batch query, then map by jobId. delayReason.label preferred over
+  // the broad reasonCode enum when a manager has picked a specific one.
+  const overdueIds = overdueRaw.map((j) => j.id);
+  const overdueLateness = overdueIds.length
+    ? await prisma.latenessEvent.findMany({
+        where: {
+          targetType: "job",
+          targetId: { in: overdueIds },
+          kind: "JOB_END_OVERDUE",
+          resolvedAt: null,
+        },
+        select: {
+          targetId: true,
+          reasonCode: true,
+          delayReason: { select: { label: true } },
+        },
+      })
+    : [];
+  const reasonByJob = new Map<string, string | null>();
+  for (const le of overdueLateness) {
+    const label = le.delayReason?.label ?? le.reasonCode ?? null;
+    reasonByJob.set(le.targetId, label);
+  }
   const currentlyOverdueJobs = overdueRaw.map((j) => ({
     plotName: j.plot.plotNumber ? `Plot ${j.plot.plotNumber}` : j.plot.name,
     name: j.name,
@@ -969,6 +997,7 @@ export async function buildHandoverArchive({
     contractor: j.contractors[0]?.contact
       ? j.contractors[0].contact.company || j.contractors[0].contact.name
       : null,
+    reasonCode: reasonByJob.get(j.id) ?? null,
   }));
 
   // Lateness rollup (LatenessEvent table — open + resolved across the site).

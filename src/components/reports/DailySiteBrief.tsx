@@ -1053,7 +1053,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
 
   // Job row renderer with action buttons + optional checkbox
   const renderJobRow = (
-    j: { id: string; name: string; status: string; plot: { plotNumber: string | null; name: string }; assignedTo?: { name: string } | null; endDate?: string | null; contractors?: Array<{ contact: { id: string; name: string; company: string | null } }> },
+    j: { id: string; name: string; status: string; plot: { plotNumber: string | null; name: string }; assignedTo?: { name: string } | null; endDate?: string | null; originalEndDate?: string | null; contractors?: Array<{ contact: { id: string; name: string; company: string | null } }> },
     showAction = true,
     showContractorAssign = false
   ) => (
@@ -1099,6 +1099,16 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
           </span>
         )}
         {j.endDate && <span> · Due {format(new Date(j.endDate), "dd MMM")}</span>}
+        {/* (May 2026 Surfacing audit) When the current end date has
+            been moved out from its original baseline, show the
+            original inline so the reader sees how much it has slipped
+            — not just where it sits today. Quiet text colour so the
+            row doesn't read as having two ends. */}
+        {j.endDate && j.originalEndDate && j.endDate !== j.originalEndDate && (
+          <span className="ml-1 text-[10px] text-amber-700">
+            (orig {format(new Date(j.originalEndDate), "dd MMM")})
+          </span>
+        )}
       </p>
       {showAction && !bulkMode && (
         <JobActionStrip>

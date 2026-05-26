@@ -110,6 +110,10 @@ export async function GET(
       },
       select: {
         id: true, name: true, status: true, endDate: true, plotId: true,
+        // (May 2026 Surfacing audit) Carry original baseline so the
+        // overdue row can show "current end · originally Xd earlier"
+        // — slip is what the buyer cares about, not just lateness.
+        originalEndDate: true,
         plot: { select: { plotNumber: true, name: true } },
         assignedTo: { select: { name: true } },
       },
@@ -759,6 +763,7 @@ export async function GET(
     overdueJobs: overdueJobs.map((j) => ({
       ...j,
       endDate: j.endDate?.toISOString() ?? null,
+      originalEndDate: j.originalEndDate?.toISOString() ?? null,
     })),
     activeJobs: activeJobs.map((j) => ({
       ...j,

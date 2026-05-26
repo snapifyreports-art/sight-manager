@@ -147,6 +147,10 @@ export interface BriefData {
     name: string;
     status: string;
     endDate: string | null;
+    // (May 2026 Surfacing audit) Original baseline carried so the
+    // row can show slip vs the immutable plan, not just current vs
+    // today.
+    originalEndDate: string | null;
     plot: { plotNumber: string | null; name: string };
     assignedTo: { name: string } | null;
   }>;

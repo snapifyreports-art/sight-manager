@@ -1253,6 +1253,11 @@ interface DelayReportShape {
     daysLate: number;
     isWeatherExcused: boolean;
     contractor: string | null;
+    /** (May 2026) Per-job reason from the LatenessEvent. The lateness
+     *  cron stamps this when the job first goes overdue; managers can
+     *  override via the attribution picker. Used in the PDF row so a
+     *  buyer sees WHY each overdue job is overdue, not just THAT it is. */
+    reasonCode?: string | null;
   }>;
   overdueDeliveries: Array<{
     items: string;
@@ -1341,13 +1346,20 @@ export async function renderDelayReportPdf(
     );
     autoTable(doc, {
       startY: lastY + 16,
-      head: [["Plot", "Job", "Status", "WD overdue", "Contractor", "Weather?"]],
+      head: [["Plot", "Job", "Status", "WD overdue", "Contractor", "Reason", "Weather?"]],
       body: data.currentlyOverdueJobs.map((j) => [
         j.plotName,
         j.name,
         j.status === "IN_PROGRESS" ? "In progress" : j.status === "NOT_STARTED" ? "Not started" : j.status,
         String(j.daysLate),
         j.contractor ?? "—",
+        // (May 2026) Reason code per overdue job — the LatenessEvent
+        // carries it; collapse OTHER to a placeholder so a default-only
+        // row reads "needs attribution" rather than as a confident
+        // "OTHER" answer.
+        j.reasonCode && j.reasonCode !== "OTHER"
+          ? j.reasonCode.replace(/_/g, " ")
+          : "(needs attribution)",
         j.isWeatherExcused ? "Yes" : "No",
       ]),
       styles: { fontSize: 8, cellPadding: 1 },

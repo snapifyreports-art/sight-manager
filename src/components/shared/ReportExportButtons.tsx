@@ -70,7 +70,16 @@ export function ReportExportButtons({
     const wb = XLSX.utils.book_new();
     // Sheet names are limited to 31 chars.
     XLSX.utils.book_append_sheet(wb, ws, sheetName.slice(0, 31));
-    XLSX.writeFile(wb, `${filename}.xlsx`);
+    // (May 2026 audit) Auto-append today's date unless the caller
+    // already included one in the filename. Pre-this, every download
+    // was just "budget-report.xlsx" — stacking reports across days
+    // overwrote each other in Downloads. Detect YYYY-MM-DD anywhere
+    // in the supplied filename so opt-in date naming stays respected.
+    const hasDate = /\d{4}-\d{2}-\d{2}/.test(filename);
+    const dateSuffix = hasDate
+      ? ""
+      : `-${new Date().toISOString().slice(0, 10)}`;
+    XLSX.writeFile(wb, `${filename}${dateSuffix}.xlsx`);
   };
 
   const canExcel = !!rows && rows.length > 0;

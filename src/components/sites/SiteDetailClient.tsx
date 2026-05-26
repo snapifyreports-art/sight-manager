@@ -127,6 +127,11 @@ interface PlotItem {
   nextOrderDate: string | null;
   awaitingDeliveryCount: number;
   openSnagCount: number;
+  // (May 2026 Surfacing audit) House value on plot cards — stored on
+  // Plot but only ever read by the Budget Report pre-this. Inline so
+  // the margin is visible without drilling.
+  buildBudget: number | null;
+  salePrice: number | null;
 }
 
 interface SiteDetail {
@@ -2372,6 +2377,55 @@ export function SiteDetailClient({
                           </div>
                         )}
                       </>
+                    )}
+
+                    {/* (May 2026 Surfacing audit) House value — show
+                        build budget + sale price + margin % inline so
+                        the financial picture is visible without
+                        drilling into the Budget Report. Renders only
+                        when at least one figure is set. */}
+                    {(plot.buildBudget != null || plot.salePrice != null) && (
+                      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 border-t pt-1.5 text-[11px]">
+                        {plot.buildBudget != null && (
+                          <span className="text-slate-600">
+                            Budget{" "}
+                            <span className="font-semibold text-slate-800">
+                              £{plot.buildBudget.toLocaleString()}
+                            </span>
+                          </span>
+                        )}
+                        {plot.salePrice != null && (
+                          <span className="text-slate-600">
+                            Sale{" "}
+                            <span className="font-semibold text-slate-800">
+                              £{plot.salePrice.toLocaleString()}
+                            </span>
+                          </span>
+                        )}
+                        {plot.buildBudget != null &&
+                          plot.salePrice != null &&
+                          plot.buildBudget > 0 && (
+                            (() => {
+                              const margin =
+                                plot.salePrice - plot.buildBudget;
+                              const marginPct = Math.round(
+                                (margin / plot.salePrice) * 100,
+                              );
+                              const cls =
+                                margin > 0
+                                  ? "text-emerald-700"
+                                  : margin < 0
+                                    ? "text-red-700"
+                                    : "text-slate-600";
+                              return (
+                                <span className={`font-semibold ${cls}`}>
+                                  {margin >= 0 ? "+" : ""}
+                                  £{margin.toLocaleString()} ({marginPct}%)
+                                </span>
+                              );
+                            })()
+                          )}
+                      </div>
                     )}
                   </CardContent>
                 </Card>

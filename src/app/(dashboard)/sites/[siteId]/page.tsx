@@ -181,6 +181,11 @@ export default async function SiteDetailPage({
         houseType: plot.houseType,
         createdAt: plot.createdAt.toISOString(),
         _count: { jobs: plot._count.jobs },
+        // (May 2026 Surfacing audit) House value on plot cards — these
+        // are stored on Plot but were only ever read by the Budget
+        // Report. Surfacing inline makes margin visible at a glance.
+        buildBudget: plot.buildBudget,
+        salePrice: plot.salePrice,
         jobStatusSummary: {
           NOT_STARTED: leafJobs.filter((j) => j.status === "NOT_STARTED").length,
           IN_PROGRESS: leafJobs.filter((j) => j.status === "IN_PROGRESS").length,
