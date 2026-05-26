@@ -115,11 +115,35 @@ export default async function ContractorSharePage({
 
   // (May 2026 Keith request) Toolbox talks this contractor was linked
   // to — surfaced on the shared page exactly as on the internal card.
-  const toolboxTalks = await prisma.toolboxTalk.findMany({
-    where: { siteId, contractorIds: { has: contactId } },
-    select: { id: true, topic: true, deliveredAt: true },
-    orderBy: { deliveredAt: "desc" },
+  // REQUESTED talks (status: REQUESTED) get pulled separately and
+  // pinned to the top so a contractor opening the link sees what they
+  // need to action.
+  const toolboxTalksAll = await prisma.toolboxTalk.findMany({
+    where: {
+      siteId,
+      contractorIds: { has: contactId },
+      status: { not: "CANCELLED" },
+    },
+    select: {
+      id: true,
+      topic: true,
+      notes: true,
+      status: true,
+      requestedAt: true,
+      dueBy: true,
+      deliveredAt: true,
+      attachments: {
+        orderBy: { createdAt: "asc" },
+        select: { id: true, url: true, fileName: true, size: true },
+      },
+      documentUrl: true,
+      documentFileName: true,
+      documentSize: true,
+    },
+    orderBy: { requestedAt: "desc" },
   });
+  const toolboxRequests = toolboxTalksAll.filter((t) => t.status === "REQUESTED");
+  const toolboxTalks = toolboxTalksAll.filter((t) => t.status === "COMPLETED");
 
   const openSnagsRaw = await prisma.snag.findMany({
     where: { contactId, plot: { siteId }, status: { in: ["OPEN", "IN_PROGRESS"] } },
@@ -604,8 +628,105 @@ export default async function ContractorSharePage({
           </details>
         )}
 
-        {/* (May 2026 Keith request) Toolbox talks this contractor was
-            linked to — same view as the manager's internal card. */}
+        {/* (May 2026 Keith request) REQUESTED toolbox talks — open by
+            default so a contractor following the link sees what's
+            outstanding without having to expand. Shows the topic, the
+            manager's reason, any attached briefing docs, and the due
+            date. No acknowledge button yet — the manager still flips
+            status from in-app once the talk has actually happened. */}
+        {toolboxRequests.length > 0 && (
+          <details
+            open
+            className="group rounded-lg border border-amber-300 bg-amber-50 shadow-sm"
+          >
+            <summary className="flex cursor-pointer items-center gap-2 px-4 py-3 font-semibold text-amber-800 [&::-webkit-details-marker]:hidden">
+              <HardHat className="size-5 text-amber-600" />
+              Toolbox Talks Requested of You ({toolboxRequests.length})
+              <svg
+                className="ml-auto size-4 shrink-0 transition-transform group-open:rotate-180"
+                viewBox="0 0 20 20"
+                fill="currentColor"
+              >
+                <path
+                  fillRule="evenodd"
+                  d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z"
+                  clipRule="evenodd"
+                />
+              </svg>
+            </summary>
+            <div className="space-y-2 border-t border-amber-200 px-4 py-3">
+              {toolboxRequests.map((t) => {
+                const atts =
+                  t.attachments.length > 0
+                    ? t.attachments
+                    : t.documentUrl
+                      ? [
+                          {
+                            id: `legacy-${t.id}`,
+                            url: t.documentUrl,
+                            fileName: t.documentFileName || "Attachment",
+                            size: t.documentSize,
+                          },
+                        ]
+                      : [];
+                return (
+                  <div
+                    key={t.id}
+                    className="rounded-md border border-amber-200 bg-white px-3 py-2.5"
+                  >
+                    <p className="font-medium text-slate-800">{t.topic}</p>
+                    {t.notes && (
+                      <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">
+                        {t.notes}
+                      </p>
+                    )}
+                    <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-slate-500">
+                      <span>
+                        Requested{" "}
+                        {t.requestedAt.toLocaleDateString("en-GB", {
+                          day: "numeric",
+                          month: "short",
+                          year: "2-digit",
+                        })}
+                      </span>
+                      {t.dueBy && (
+                        <span className="font-semibold text-amber-700">
+                          Due by{" "}
+                          {t.dueBy.toLocaleDateString("en-GB", {
+                            day: "numeric",
+                            month: "short",
+                            year: "2-digit",
+                          })}
+                        </span>
+                      )}
+                    </div>
+                    {atts.length > 0 && (
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {atts.map((a) => (
+                          <a
+                            key={a.id}
+                            href={a.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-700 hover:bg-blue-50 hover:text-blue-700"
+                          >
+                            <span className="max-w-[180px] truncate">
+                              {a.fileName}
+                            </span>
+                          </a>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </details>
+        )}
+
+        {/* (May 2026 Keith request) Completed toolbox talks this
+            contractor was linked to — same view as the manager's
+            internal card. */}
         {toolboxTalks.length > 0 && (
           <details className="group rounded-lg border bg-white shadow-sm">
             <summary className="flex cursor-pointer items-center gap-2 px-4 py-3 font-semibold text-amber-700 [&::-webkit-details-marker]:hidden">
@@ -623,11 +744,17 @@ export default async function ContractorSharePage({
                     {t.topic}
                   </span>
                   <span className="shrink-0 text-xs text-muted-foreground">
-                    {t.deliveredAt.toLocaleDateString("en-GB", {
-                      day: "numeric",
-                      month: "short",
-                      year: "2-digit",
-                    })}
+                    {/* deliveredAt is now nullable in the schema; this
+                        list filters to COMPLETED rows which always have
+                        one, but guard anyway so a partial migration
+                        can't crash the public page. */}
+                    {t.deliveredAt
+                      ? t.deliveredAt.toLocaleDateString("en-GB", {
+                          day: "numeric",
+                          month: "short",
+                          year: "2-digit",
+                        })
+                      : "—"}
                   </span>
                 </div>
               ))}

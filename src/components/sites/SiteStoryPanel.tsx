@@ -63,7 +63,7 @@ interface StoryData {
     totalDelayDaysOther: number;
     totalRainDays: number;
     totalTemperatureDays: number;
-    delayReasonBreakdown: { reason: string; count: number }[];
+    delayReasonBreakdown: { reason: string; count: number; daysLate: number }[];
     onTimePlotCompletionRate: number;
     snagsRaised: number;
     snagsResolved: number;
@@ -356,6 +356,14 @@ export function SiteStoryPanel({ siteId }: { siteId: string }) {
                     <span>{meta.emoji}</span>
                     <span className="font-medium">{meta.label}</span>
                     <span className="text-slate-500">×{r.count}</span>
+                    {r.daysLate > 0 && (
+                      <span className="text-slate-400">·</span>
+                    )}
+                    {r.daysLate > 0 && (
+                      <span className="font-semibold text-slate-700">
+                        {r.daysLate}d
+                      </span>
+                    )}
                   </span>
                 );
               })}

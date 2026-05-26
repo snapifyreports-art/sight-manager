@@ -195,6 +195,81 @@ export function snagRaisedEmail({
   };
 }
 
+// (May 2026 Keith request) Toolbox-talk request email. Sent when a
+// manager requests a talk (vs logging one already delivered) so the
+// linked contractors get a heads-up with the topic, reason, due date,
+// and any attached briefing docs/photos. Attachments are linked, not
+// inlined — large RAMS PDFs would otherwise bloat the message.
+export function toolboxTalkRequestedEmail({
+  contractorName,
+  topic,
+  reason,
+  requesterName,
+  siteName,
+  dueBy,
+  attachments,
+}: {
+  contractorName: string;
+  topic: string;
+  reason: string | null;
+  requesterName: string;
+  siteName: string;
+  dueBy: string | null;
+  attachments: Array<{ url: string; fileName: string }>;
+}) {
+  const safeContractor = escapeHtml(contractorName);
+  const safeTopic = escapeHtml(topic);
+  const safeReason = escapeHtml(reason ?? "");
+  const safeRequester = escapeHtml(requesterName);
+  const safeSite = escapeHtml(siteName);
+  const safeDueBy = escapeHtml(dueBy ?? "");
+
+  const reasonHtml = reason
+    ? `<p style="margin:0 0 16px;color:#475569;font-size:14px;line-height:1.6;">${safeReason}</p>`
+    : "";
+
+  const dueHtml = dueBy
+    ? `<p style="margin:0 0 4px;color:#92400e;font-size:13px;"><strong>Please complete by:</strong> ${safeDueBy}</p>`
+    : "";
+
+  const attachmentsHtml =
+    attachments.length > 0
+      ? `<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:16px;margin:0 0 24px;">
+          <p style="margin:0 0 8px;color:#0f172a;font-size:13px;font-weight:600;">Attachments</p>
+          ${attachments
+            .map(
+              (a) =>
+                `<p style="margin:0 0 4px;font-size:13px;"><a href="${escapeHtml(a.url)}" style="color:#2563eb;text-decoration:underline;">${escapeHtml(a.fileName)}</a></p>`,
+            )
+            .join("")}
+        </div>`
+      : "";
+
+  return {
+    subject: `Toolbox talk requested — ${topic}`,
+    html: baseTemplate(`
+      <h2 style="margin:0 0 16px;color:#0f172a;font-size:20px;">Toolbox Talk Requested</h2>
+      <p style="margin:0 0 16px;color:#475569;font-size:14px;line-height:1.6;">
+        Hi ${safeContractor},
+      </p>
+      <p style="margin:0 0 16px;color:#475569;font-size:14px;line-height:1.6;">
+        <strong>${safeRequester}</strong> has requested a toolbox talk on
+        <strong>${safeSite}</strong>:
+      </p>
+      <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:16px;margin:0 0 16px;">
+        <p style="margin:0 0 8px;color:#0f172a;font-size:15px;font-weight:600;">${safeTopic}</p>
+        ${reasonHtml}
+        ${dueHtml}
+      </div>
+      ${attachmentsHtml}
+      <p style="margin:0;color:#475569;font-size:14px;line-height:1.6;">
+        Please review the topic, run the talk with your team, and confirm
+        with the site manager once it's done.
+      </p>
+    `),
+  };
+}
+
 export function nextStageReadyEmail({
   contractorName,
   completedJobName,

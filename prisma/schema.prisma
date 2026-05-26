@@ -1079,6 +1079,19 @@ enum SiteComplianceStatus {
 /// when delivered. Each row records the topic, when, and who attended
 /// (as a comma-separated free text field — full attendance schema would
 /// require linking to Contact rows for non-User attendees).
+///
+/// (May 2026 Keith request) Talks now have a request-then-deliver
+/// lifecycle. A manager can REQUEST a talk (e.g. spotted a contractor
+/// without PPE) which fires an email to the linked contractors with
+/// any attached briefing docs, then later flips to COMPLETED once
+/// they've actually run it. Existing rows backfilled to COMPLETED via
+/// the `status` column default.
+enum TBTStatus {
+  REQUESTED
+  COMPLETED
+  CANCELLED
+}
+
 model ToolboxTalk {
   id           String   @id @default(cuid())
   siteId       String
@@ -1091,12 +1104,29 @@ model ToolboxTalk {
   // the contractor-comms query filters with `contractorIds has <id>`.
   // The free-text `attendees` field stays for ad-hoc worker names.
   contractorIds String[] @default([])
-  deliveredAt  DateTime @default(now())
-  deliveredBy  String? // userId of the manager who ran it (nullable so future scripted entries are possible)
-  // (#175) Optional attached document — e.g. signed register, briefing
-  // slide deck, RAMS reference. Stored in the same Supabase photos
-  // bucket as job photos; we keep the original filename + size so the
-  // download link reads sensibly.
+  // (May 2026 Keith request) Lifecycle. Default COMPLETED so the
+  // legacy "log already-delivered talk" code path stays correct
+  // without changes; every pre-existing row also backfills to
+  // COMPLETED when this column is added (Postgres applies the default
+  // to all existing rows during ALTER TABLE ADD COLUMN ... DEFAULT).
+  // The new "request a talk" API explicitly overrides to REQUESTED.
+  status        TBTStatus @default(COMPLETED)
+  requestedAt   DateTime  @default(now())
+  requestedById String?   // userId of the manager who raised the request
+  dueBy         DateTime? // optional deadline — when does the talk need to happen by
+  emailSentAt   DateTime? // audit: when the request email went out
+  emailSentToCount Int?   // audit: how many contractor emails we successfully sent
+  // deliveredAt / deliveredBy now nullable — only set on transition to
+  // COMPLETED. Existing rows backfilled via the status default keep
+  // their previously-required deliveredAt value, so legacy reads stay
+  // sound.
+  deliveredAt  DateTime?
+  deliveredBy  String?
+  // (#175) Legacy single-attachment fields — kept for back-compat with
+  // existing rows. New writes go through ToolboxTalkAttachment so a
+  // talk can carry many files (signed register + slide deck + RAMS).
+  // Readers should prefer `attachments[]`; fall back to these columns
+  // when attachments is empty AND documentUrl is set (legacy rows).
   documentUrl       String?
   documentFileName  String?
   documentSize      Int?
@@ -1104,9 +1134,29 @@ model ToolboxTalk {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  site Site @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  site        Site                    @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  attachments ToolboxTalkAttachment[]
 
   @@index([siteId, deliveredAt])
+  @@index([siteId, status])
+}
+
+/// (May 2026 Keith request) Multiple attachments per toolbox talk —
+/// signed register, slide deck, RAMS reference, photos of the
+/// incident that triggered the request. Files live in the same
+/// Supabase photos bucket as job photos.
+model ToolboxTalkAttachment {
+  id        String   @id @default(cuid())
+  talkId    String
+  url       String
+  fileName  String
+  size      Int?
+  mimeType  String?
+  createdAt DateTime @default(now())
+
+  talk ToolboxTalk @relation(fields: [talkId], references: [id], onDelete: Cascade)
+
+  @@index([talkId])
 }
 
 /// (May 2026 audit #178) Non-Conformance Report — heavier than a snag.

@@ -69,7 +69,8 @@
       "Bash(find /c/Users/keith/OneDrive/Desktop/sight-manager -name *.sql -o -name *seed* -o -name *template*migration*)",
       "PowerShell(npx tsc --noEmit 2>&1)",
       "PowerShell(Get-ChildItem \"$env:ProgramFiles\\\\nodejs\", \"$env:LOCALAPPDATA\\\\Programs\\\\nodejs\", \"$env:APPDATA\\\\npm\" -ErrorAction SilentlyContinue | Select-Object -First 5)",
-      "Bash(git show *)"
+      "Bash(git show *)",
+      "Bash(git push *)"
     ]
   }
 }

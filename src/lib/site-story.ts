@@ -43,7 +43,7 @@ export interface SiteStory {
     totalDelayDaysOther: number;
     totalRainDays: number;
     totalTemperatureDays: number;
-    delayReasonBreakdown: { reason: string; count: number }[];
+    delayReasonBreakdown: { reason: string; count: number; daysLate: number }[];
     onTimePlotCompletionRate: number;
     snagsRaised: number;
     snagsResolved: number;
@@ -484,6 +484,11 @@ export async function buildSiteStory(
   });
 
   const reasonCounts = new Map<string, number>();
+  // (May 2026 Keith request) Track total working-days lost per reason so
+  // the Story chips can show "Rain ×1 · 2d" instead of just an event
+  // count — a single rain event costing 2d matters more than 38 OTHER
+  // events that were each 1d.
+  const reasonDaysLate = new Map<string, number>();
   let weatherDelayDays = 0;
   let otherDelayDays = 0;
 
@@ -491,6 +496,7 @@ export async function buildSiteStory(
     for (const ev of latenessForVariance) {
       const reason = ev.reasonCode;
       reasonCounts.set(reason, (reasonCounts.get(reason) ?? 0) + 1);
+      reasonDaysLate.set(reason, (reasonDaysLate.get(reason) ?? 0) + ev.daysLate);
       if (reason === "WEATHER_RAIN" || reason === "WEATHER_TEMPERATURE" || reason === "WEATHER_WIND") {
         weatherDelayDays += ev.daysLate;
       } else {
@@ -508,6 +514,9 @@ export async function buildSiteStory(
     for (const ev of legacyDelayEvents) {
       const reason = ev.delayReasonType ?? "OTHER";
       reasonCounts.set(reason, (reasonCounts.get(reason) ?? 0) + 1);
+      // Legacy path has no structured daysLate — fall back to +1 per event,
+      // same convention the bucket totals use above.
+      reasonDaysLate.set(reason, (reasonDaysLate.get(reason) ?? 0) + 1);
       if (reason === "WEATHER_RAIN" || reason === "WEATHER_TEMPERATURE") {
         weatherDelayDays += 1;
       } else {
@@ -536,8 +545,15 @@ export async function buildSiteStory(
   });
 
   const delayReasonBreakdown = Array.from(reasonCounts.entries())
-    .map(([reason, count]) => ({ reason, count }))
-    .sort((a, b) => b.count - a.count);
+    .map(([reason, count]) => ({
+      reason,
+      count,
+      daysLate: reasonDaysLate.get(reason) ?? 0,
+    }))
+    // Sort by days-late descending so the most-impactful reasons come
+    // first — count alone over-weighted "Other ×38 × 1d" against
+    // "Rain ×1 × 3d" which was the more disruptive incident.
+    .sort((a, b) => b.daysLate - a.daysLate || b.count - a.count);
 
   const rainedOff = await tx.rainedOffDay.findMany({
     where: { siteId },

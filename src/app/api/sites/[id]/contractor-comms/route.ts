@@ -194,8 +194,17 @@ export async function GET(
   // (May 2026 Keith request) Toolbox talks linked to each contractor —
   // when a manager links a contractor on a toolbox talk, it shows in
   // their Contractor Comms (and on their shared page).
+  // (May 2026 Keith request) deliveredAt is now nullable — REQUESTED
+  // talks haven't been delivered yet, so this report (which is a record
+  // of completed comms) restricts to COMPLETED talks only. Outstanding
+  // requests surface in the dedicated SiteToolboxTalks panel and on
+  // the contractor share page instead.
   const toolboxTalks = await prisma.toolboxTalk.findMany({
-    where: { siteId, NOT: { contractorIds: { isEmpty: true } } },
+    where: {
+      siteId,
+      status: "COMPLETED",
+      NOT: { contractorIds: { isEmpty: true } },
+    },
     select: { id: true, topic: true, deliveredAt: true, contractorIds: true },
     orderBy: { deliveredAt: "desc" },
   });
@@ -205,7 +214,9 @@ export async function GET(
       .map((t) => ({
         id: t.id,
         topic: t.topic,
-        deliveredAt: t.deliveredAt.toISOString(),
+        // Safe: filter above restricts to COMPLETED which always has
+        // deliveredAt set. `?? ""` defends against any race regardless.
+        deliveredAt: t.deliveredAt?.toISOString() ?? "",
       }));
   }
 
