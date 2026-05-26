@@ -726,7 +726,7 @@ export async function GET(
       return isRainy || isCold;
     });
     if (atRiskDays.length > 0) {
-      const horizon = addDays(now, 3);
+      const horizon = addDays(targetDate, 3);
       const sensitiveJobs = await prisma.job.findMany({
         where: {
           plot: { siteId: id },
