@@ -48,8 +48,12 @@ interface DelayedJob {
   // plotId rather than the previous plotNumber string match (which
   // collided when two plots on different sites shared a number).
   plot: { id: string; plotNumber: string | null; name: string };
+  // (May 2026 click-through pass) Contractor carries id so it can
+  // deep-link to /contacts/[id]. assignedTo is a User (responsible
+  // site-manager) — no public user-detail page exists, so it stays
+  // a plain string.
   assignedTo: string | null;
-  contractor: string | null;
+  contractor: { id: string; name: string } | null;
   lateOrders: Array<{
     id: string;
     items: string | null;
@@ -118,7 +122,17 @@ function JobDelayCard({ job }: { job: DelayedJob }) {
           </div>
           <p className="text-xs text-muted-foreground mt-0.5">
             {job.plot.plotNumber ? `Plot ${job.plot.plotNumber}` : job.plot.name}
-            {!isWeather && job.contractor && ` · ${job.contractor}`}
+            {!isWeather && job.contractor && (
+              <>
+                {" · "}
+                <Link
+                  href={`/contacts/${job.contractor.id}`}
+                  className="hover:underline hover:text-blue-700"
+                >
+                  {job.contractor.name}
+                </Link>
+              </>
+            )}
             {job.assignedTo && ` · ${job.assignedTo}`}
           </p>
         </div>

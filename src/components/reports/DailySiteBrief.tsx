@@ -1984,7 +1984,17 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                             </div>
                             <p className="text-xs text-muted-foreground">
                               <Link href={`/sites/${siteId}/plots/${j.plotId}`} className="hover:underline hover:text-blue-600">{plotLbl}</Link>
-                              {contractor && ` · ${contractor.company || contractor.name}`}
+                              {contractor && (
+                                <>
+                                  {" · "}
+                                  <Link
+                                    href={`/contacts/${contractor.id}`}
+                                    className="hover:underline hover:text-blue-600"
+                                  >
+                                    {contractor.company || contractor.name}
+                                  </Link>
+                                </>
+                              )}
                               {daysSince > 0 && ` · Completed ${daysSince} day${daysSince !== 1 ? "s" : ""} ago`}
                             </p>
                             <JobActionStrip>
@@ -2268,7 +2278,17 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                       <p className="text-xs text-muted-foreground">
                         {j.plot.plotNumber ? `Plot ${j.plot.plotNumber}` : j.plot.name}
                         {j.assignedTo && <span> · {j.assignedTo.name}</span>}
-                        {j.contractors?.[0]?.contact && <span> · {j.contractors[0].contact.company || j.contractors[0].contact.name}</span>}
+                        {j.contractors?.[0]?.contact && (
+                          <span>
+                            {" · "}
+                            <Link
+                              href={`/contacts/${j.contractors[0].contact.id}`}
+                              className="hover:underline hover:text-blue-600"
+                            >
+                              {j.contractors[0].contact.company || j.contractors[0].contact.name}
+                            </Link>
+                          </span>
+                        )}
                       </p>
                       <p className="text-[10px] text-purple-600">
                         Originally {j.originalStartDate ? format(new Date(j.originalStartDate), "dd MMM") : "earlier"}

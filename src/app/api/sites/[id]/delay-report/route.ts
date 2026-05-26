@@ -63,10 +63,13 @@ export async function GET(
           // (which collides when two plots on different sites share
           // the same number after a re-numbering).
           plot: { select: { id: true, plotNumber: true, name: true } },
+          // (May 2026 click-through pass) Contact id included so the
+          // Delay Report cards can deep-link contractor labels. User
+          // ids deliberately omitted — there's no /users/[id] page.
           assignedTo: { select: { name: true } },
           contractors: {
             include: {
-              contact: { select: { name: true, company: true } },
+              contact: { select: { id: true, name: true, company: true } },
             },
           },
           orders: {
@@ -266,11 +269,18 @@ export async function GET(
       allDelayEvents,
       causes,
       plot: job.plot,
+      // assignedTo is a User (the responsible site manager) — no
+      // /users/[id] detail page exists, so render as plain text.
       assignedTo: job.assignedTo?.name ?? null,
-      contractor:
-        job.contractors[0]?.contact?.company ??
-        job.contractors[0]?.contact?.name ??
-        null,
+      // contractor is a Contact — carry the id so the UI can link.
+      contractor: job.contractors[0]?.contact
+        ? {
+            id: job.contractors[0].contact.id,
+            name:
+              job.contractors[0].contact.company ??
+              job.contractors[0].contact.name,
+          }
+        : null,
       lateOrders: job.orders
         .filter((o) => {
           if (o.deliveredDate && o.expectedDeliveryDate) {
