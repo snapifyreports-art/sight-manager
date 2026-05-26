@@ -21,6 +21,8 @@ import {
   renderPlotNcrLogPdf,
   renderPlotDefectLogPdf,
   renderPlotVariationLogPdf,
+  renderPlotPreStartChecksPdf,
+  renderPlotDrawSchedulePdf,
   renderContractorSummaryPdf,
   renderContractorDetailPdf,
   renderSupplierSummaryPdf,
@@ -254,6 +256,138 @@ export async function buildHandoverArchive({
     if (variations.length > 0) {
       const varPdf = await renderPlotVariationLogPdf(plotLabel, variations);
       archive.append(varPdf, { name: `${folder}/variation-log.pdf` });
+    }
+
+    // (May 2026 Story-linkage audit) Pre-start checks — handover-
+    // readiness audit. Emit only when checks were ever defined for
+    // the plot.
+    const preStartChecks = await prisma.preStartCheck.findMany({
+      where: { plotId: plot.id },
+      orderBy: { sortOrder: "asc" },
+      select: {
+        label: true,
+        checked: true,
+        checkedAt: true,
+        notes: true,
+        checkedBy: { select: { name: true } },
+      },
+    });
+    if (preStartChecks.length > 0) {
+      const psPdf = await renderPlotPreStartChecksPdf(
+        plotLabel,
+        preStartChecks,
+      );
+      archive.append(psPdf, { name: `${folder}/pre-start-checks.pdf` });
+    }
+
+    // Per-plot draw schedule. Buyer's solicitor wants this in writing.
+    const drawSchedule = await prisma.plotDrawSchedule.findMany({
+      where: { plotId: plot.id },
+      orderBy: { sortOrder: "asc" },
+      select: {
+        name: true,
+        amount: true,
+        status: true,
+        dueAt: true,
+        paidAt: true,
+        notes: true,
+        triggerJob: { select: { name: true } },
+      },
+    });
+    if (drawSchedule.length > 0) {
+      const dsPdf = await renderPlotDrawSchedulePdf(plotLabel, drawSchedule);
+      archive.append(dsPdf, { name: `${folder}/draw-schedule.pdf` });
+    }
+
+    // VoiceNotes for this plot — copy the audio files into a
+    // per-plot voice-notes/ folder and emit a transcript-index.txt
+    // so the buyer/director can find the relevant clips without
+    // listening to every one. Same parallel-batch fetch pattern as
+    // photos and docs above.
+    const voiceNotes = await prisma.voiceNote.findMany({
+      where: { plotId: plot.id },
+      orderBy: { createdAt: "asc" },
+      select: {
+        id: true,
+        url: true,
+        durationSec: true,
+        caption: true,
+        transcript: true,
+        createdAt: true,
+        job: { select: { name: true } },
+      },
+    });
+    if (voiceNotes.length > 0) {
+      const VOICE_BATCH = 5;
+      for (let j = 0; j < voiceNotes.length; j += VOICE_BATCH) {
+        const batch = voiceNotes.slice(j, j + VOICE_BATCH);
+        const streams = await Promise.all(
+          batch.map((v) => fetchAsStream(v.url)),
+        );
+        batch.forEach((v, idx) => {
+          const stream = streams[idx];
+          if (!stream) return;
+          const ext = extractExtension(v.url, "m4a");
+          const dateStr = format(v.createdAt, "yyyy-MM-dd-HHmm");
+          const captionPart = v.caption
+            ? `_${safeName(v.caption).slice(0, 40)}`
+            : "";
+          archive.append(stream, {
+            name: `${folder}/voice-notes/${dateStr}${captionPart}.${ext}`,
+          });
+        });
+      }
+      // Transcript index — one text file summarising every clip so
+      // a reader can grep for a phrase without playing the audio.
+      const indexLines: string[] = [];
+      indexLines.push(`Voice notes — ${plotLabel}`);
+      indexLines.push("");
+      for (const v of voiceNotes) {
+        indexLines.push(
+          `[${format(v.createdAt, "dd MMM yy HH:mm")}] ${v.job?.name ? `(${v.job.name}) ` : ""}${v.caption ?? ""}${v.durationSec ? ` — ${v.durationSec}s` : ""}`,
+        );
+        if (v.transcript) {
+          indexLines.push(`  ${v.transcript}`);
+        }
+        indexLines.push("");
+      }
+      archive.append(indexLines.join("\n"), {
+        name: `${folder}/voice-notes/_index.txt`,
+      });
+    }
+
+    // PhotoAnnotation count — stored against JobPhotos that already
+    // get copied into the photos/ folder. We append an annotations
+    // manifest so a reader can see which photos were marked up
+    // (the stroke overlays themselves still need a future renderer
+    // — schema:1450 has them serialised as JSON for now).
+    const annotations = await prisma.photoAnnotation.findMany({
+      where: { plotId: plot.id },
+      orderBy: { createdAt: "asc" },
+      select: {
+        id: true,
+        caption: true,
+        createdAt: true,
+        createdBy: { select: { name: true } },
+        jobPhoto: { select: { caption: true } },
+      },
+    });
+    if (annotations.length > 0) {
+      const lines: string[] = [];
+      lines.push(`Photo annotations — ${plotLabel}`);
+      lines.push("");
+      lines.push(
+        `${annotations.length} annotation${annotations.length === 1 ? "" : "s"} recorded against this plot's photos.`,
+      );
+      lines.push("");
+      for (const a of annotations) {
+        lines.push(
+          `[${format(a.createdAt, "dd MMM yy HH:mm")}] ${a.createdBy?.name ?? "unknown"} — ${a.caption ?? "(no caption)"} (on photo: ${a.jobPhoto?.caption ?? "(no caption)"})`,
+        );
+      }
+      archive.append(lines.join("\n"), {
+        name: `${folder}/photos/_annotations.txt`,
+      });
     }
 
     // certificates/ + drawings/ from SiteDocument by category

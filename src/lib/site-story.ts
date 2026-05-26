@@ -139,6 +139,15 @@ export interface SiteStory {
       }[];
     };
   };
+  /** (May 2026 Story-linkage audit) Evidence-trail rollups: voice
+   *  notes and photo annotations are user-entered artefacts that
+   *  belong in the build narrative. PreStartChecks roll up as a
+   *  handover-readiness signal at site level. */
+  evidence: {
+    preStartChecks: { total: number; checked: number };
+    voiceNotes: { total: number };
+    photoAnnotations: { total: number };
+  };
 }
 
 export interface SiteMilestone {
@@ -171,6 +180,12 @@ export interface PlotStory {
   defectOpenCount: number;
   variationCount: number;
   variationApprovedCount: number;
+  // PreStartCheck completion ratio (handover-readiness signal).
+  preStartTotal: number;
+  preStartChecked: number;
+  // Evidence-trail counters — voice notes + photo annotations on this plot.
+  voiceNoteCount: number;
+  photoAnnotationCount: number;
   // Top events surfaced for the per-plot timeline
   highlights: PlotHighlight[];
 }
@@ -846,6 +861,64 @@ export async function buildSiteStory(
     daysDelta: v.daysDelta,
   }));
 
+  // ─── PreStartCheck / VoiceNote / PhotoAnnotation per-plot rollups ──
+  // (May 2026 Story-linkage audit) These three were silently missing
+  // from Story / Handover the same way NCRs / Defects / Variations
+  // were. PreStartCheck completion is a handover-readiness signal;
+  // VoiceNote + PhotoAnnotation are evidence trails that should both
+  // be visible per plot and exported.
+  const allPreStartChecks = await tx.preStartCheck.findMany({
+    where: { plotId: { in: plotIds } },
+    select: {
+      id: true,
+      plotId: true,
+      label: true,
+      checked: true,
+      checkedAt: true,
+      notes: true,
+    },
+  });
+  const preStartByPlot = new Map<
+    string,
+    { total: number; checked: number }
+  >();
+  for (const c of allPreStartChecks) {
+    const e = preStartByPlot.get(c.plotId) ?? { total: 0, checked: 0 };
+    e.total++;
+    if (c.checked) e.checked++;
+    preStartByPlot.set(c.plotId, e);
+  }
+  const preStartTotal = allPreStartChecks.length;
+  const preStartChecked = allPreStartChecks.filter((c) => c.checked).length;
+
+  const voiceNoteCountsByPlot = await tx.voiceNote.groupBy({
+    by: ["plotId"],
+    where: { plotId: { in: plotIds } },
+    _count: true,
+  });
+  const voiceNoteByPlot = new Map<string, number>();
+  for (const r of voiceNoteCountsByPlot) {
+    voiceNoteByPlot.set(r.plotId, r._count);
+  }
+  const voiceNoteTotal = voiceNoteCountsByPlot.reduce(
+    (s, r) => s + r._count,
+    0,
+  );
+
+  const annotationCountsByPlot = await tx.photoAnnotation.groupBy({
+    by: ["plotId"],
+    where: { plotId: { in: plotIds } },
+    _count: true,
+  });
+  const annotationByPlot = new Map<string, number>();
+  for (const r of annotationCountsByPlot) {
+    annotationByPlot.set(r.plotId, r._count);
+  }
+  const annotationTotal = annotationCountsByPlot.reduce(
+    (s, r) => s + r._count,
+    0,
+  );
+
   // On-time completion = plots where every leaf job's actualEndDate
   // <= originalEndDate. Edge: plots not yet complete excluded.
   const onTimeCount = plots.filter((p) => {
@@ -972,6 +1045,10 @@ export async function buildSiteStory(
       variationCount: variationCountsByPlot.get(p.id)?.total ?? 0,
       variationApprovedCount:
         variationCountsByPlot.get(p.id)?.approved ?? 0,
+      preStartTotal: preStartByPlot.get(p.id)?.total ?? 0,
+      preStartChecked: preStartByPlot.get(p.id)?.checked ?? 0,
+      voiceNoteCount: voiceNoteByPlot.get(p.id) ?? 0,
+      photoAnnotationCount: annotationByPlot.get(p.id) ?? 0,
       highlights: [], // populated below if includeFull
     };
   });
@@ -1210,6 +1287,11 @@ export async function buildSiteStory(
         daysDelta: variationsDaysDelta,
         recent: recentVariations,
       },
+    },
+    evidence: {
+      preStartChecks: { total: preStartTotal, checked: preStartChecked },
+      voiceNotes: { total: voiceNoteTotal },
+      photoAnnotations: { total: annotationTotal },
     },
   };
 }

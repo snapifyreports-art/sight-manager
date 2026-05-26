@@ -566,6 +566,113 @@ export async function renderPlotVariationLogPdf(
   return pdfBuffer(doc);
 }
 
+// (May 2026 Story-linkage audit) Pre-start check log per plot — pre-
+// handover readiness signal (do all the items on the plot checklist
+// have a tick + a date + who-checked?).
+export async function renderPlotPreStartChecksPdf(
+  plotName: string,
+  checks: Array<{
+    label: string;
+    checked: boolean;
+    checkedAt: Date | null;
+    notes: string | null;
+    checkedBy: { name: string } | null;
+  }>,
+): Promise<Buffer> {
+  const { jsPDF, autoTable } = await loadJsPdf();
+  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+
+  doc.setFontSize(16);
+  doc.text(`Pre-start checks — ${plotName}`, 14, 22);
+  doc.setFontSize(9);
+  doc.setTextColor(120);
+  const checked = checks.filter((c) => c.checked).length;
+  doc.text(
+    `${checked} of ${checks.length} items checked`,
+    14,
+    28,
+  );
+  doc.setTextColor(0);
+
+  if (checks.length === 0) {
+    doc.setFontSize(10);
+    doc.text("No pre-start checks recorded.", 14, 40);
+  } else {
+    autoTable(doc, {
+      startY: 36,
+      head: [["Item", "Status", "Checked", "By", "Notes"]],
+      body: checks.map((c) => [
+        c.label.length > 50 ? `${c.label.slice(0, 50)}…` : c.label,
+        c.checked ? "✓ Checked" : "—",
+        c.checkedAt ? format(c.checkedAt, "dd MMM yy") : "—",
+        c.checkedBy?.name ?? "—",
+        c.notes ?? "",
+      ]),
+      styles: { fontSize: 8, cellPadding: 1.2 },
+      columnStyles: { 4: { cellWidth: 60 } },
+      headStyles: { fillColor: [241, 245, 249], textColor: [51, 65, 85] },
+    });
+  }
+
+  return pdfBuffer(doc);
+}
+
+// Per-plot draw schedule — payment milestones, amounts, status,
+// trigger jobs. Useful for the buyer's solicitor + accountant.
+export async function renderPlotDrawSchedulePdf(
+  plotName: string,
+  draws: Array<{
+    name: string;
+    amount: number;
+    status: string;
+    dueAt: Date | null;
+    paidAt: Date | null;
+    notes: string | null;
+    triggerJob: { name: string } | null;
+  }>,
+): Promise<Buffer> {
+  const { jsPDF, autoTable } = await loadJsPdf();
+  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+
+  doc.setFontSize(16);
+  doc.text(`Draw schedule — ${plotName}`, 14, 22);
+  doc.setFontSize(9);
+  doc.setTextColor(120);
+  const total = draws.reduce((s, d) => s + d.amount, 0);
+  const paid = draws
+    .filter((d) => d.status === "PAID")
+    .reduce((s, d) => s + d.amount, 0);
+  doc.text(
+    `${draws.length} milestone${draws.length === 1 ? "" : "s"} · £${Math.round(total).toLocaleString()} total · £${Math.round(paid).toLocaleString()} paid`,
+    14,
+    28,
+  );
+  doc.setTextColor(0);
+
+  if (draws.length === 0) {
+    doc.setFontSize(10);
+    doc.text("No draw schedule defined.", 14, 40);
+  } else {
+    autoTable(doc, {
+      startY: 36,
+      head: [["#", "Milestone", "Amount", "Status", "Due", "Paid", "Trigger"]],
+      body: draws.map((d, i) => [
+        String(i + 1),
+        d.name.length > 40 ? `${d.name.slice(0, 40)}…` : d.name,
+        `£${Math.round(d.amount).toLocaleString()}`,
+        d.status,
+        d.dueAt ? format(d.dueAt, "dd MMM yy") : "—",
+        d.paidAt ? format(d.paidAt, "dd MMM yy") : "—",
+        d.triggerJob?.name ?? "—",
+      ]),
+      styles: { fontSize: 8, cellPadding: 1 },
+      headStyles: { fillColor: [241, 245, 249], textColor: [51, 65, 85] },
+    });
+  }
+
+  return pdfBuffer(doc);
+}
+
 // ──────────────────────────────────────────────────────────────────────
 // 03_Contractor_Analysis/summary.pdf + per-contractor/<Name>.pdf
 // ──────────────────────────────────────────────────────────────────────
@@ -844,7 +951,10 @@ export function renderReadmeTxt(
     lines.push("        ncr-log.pdf            (when NCRs recorded)");
     lines.push("        defect-log.pdf         (when warranty defects recorded)");
     lines.push("        variation-log.pdf      (when variations recorded)");
+    lines.push("        pre-start-checks.pdf   (when pre-start checks defined)");
+    lines.push("        draw-schedule.pdf      (when draw schedule defined)");
     lines.push("        certificates/  drawings/  photos/");
+    lines.push("        voice-notes/           (audio clips + _index.txt transcript summary)");
   }
   lines.push("");
   lines.push("03_Contractor_Analysis/");

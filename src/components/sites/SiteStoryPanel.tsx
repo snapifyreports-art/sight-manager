@@ -106,6 +106,16 @@ interface StoryData {
     snagsOpen: number;
     photoCount: number;
     journalEntryCount: number;
+    ncrCount?: number;
+    ncrOpenCount?: number;
+    defectCount?: number;
+    defectOpenCount?: number;
+    variationCount?: number;
+    variationApprovedCount?: number;
+    preStartTotal?: number;
+    preStartChecked?: number;
+    voiceNoteCount?: number;
+    photoAnnotationCount?: number;
     highlights: Array<{
       date: string;
       type: string;
@@ -183,6 +193,11 @@ interface StoryData {
         daysDelta: number | null;
       }>;
     };
+  };
+  evidence: {
+    preStartChecks: { total: number; checked: number };
+    voiceNotes: { total: number };
+    photoAnnotations: { total: number };
   };
 }
 
@@ -626,6 +641,66 @@ export function SiteStoryPanel({ siteId }: { siteId: string }) {
               </div>
             </div>
           )}
+        </section>
+      )}
+
+      {/* (May 2026 Story-linkage audit) Evidence & readiness —
+          PreStartCheck completion ratio + voice-note count + photo-
+          annotation count. Surfaces only when there's something to
+          show, same auto-hide rule as Compliance below. */}
+      {(data.evidence.preStartChecks.total > 0 ||
+        data.evidence.voiceNotes.total > 0 ||
+        data.evidence.photoAnnotations.total > 0) && (
+        <section className="rounded-xl border bg-white p-5">
+          <h3 className="mb-3 font-semibold text-slate-900">
+            Evidence &amp; readiness
+          </h3>
+          <div className="grid gap-3 sm:grid-cols-3">
+            {data.evidence.preStartChecks.total > 0 && (
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <p className="text-xs font-semibold uppercase tracking-wider text-slate-600">
+                  Pre-start checks
+                </p>
+                <p className="mt-1 text-2xl font-bold text-slate-900">
+                  {data.evidence.preStartChecks.checked}
+                  <span className="text-base font-normal text-slate-500">
+                    {" / "}
+                    {data.evidence.preStartChecks.total}
+                  </span>
+                </p>
+                <p className="text-xs text-slate-600">
+                  {data.evidence.preStartChecks.checked ===
+                  data.evidence.preStartChecks.total
+                    ? "all checked"
+                    : `${data.evidence.preStartChecks.total - data.evidence.preStartChecks.checked} outstanding`}
+                </p>
+              </div>
+            )}
+            {data.evidence.voiceNotes.total > 0 && (
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <p className="text-xs font-semibold uppercase tracking-wider text-slate-600">
+                  Voice notes
+                </p>
+                <p className="mt-1 text-2xl font-bold text-slate-900">
+                  {data.evidence.voiceNotes.total}
+                </p>
+                <p className="text-xs text-slate-600">
+                  recorded against jobs &amp; snags
+                </p>
+              </div>
+            )}
+            {data.evidence.photoAnnotations.total > 0 && (
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <p className="text-xs font-semibold uppercase tracking-wider text-slate-600">
+                  Photo annotations
+                </p>
+                <p className="mt-1 text-2xl font-bold text-slate-900">
+                  {data.evidence.photoAnnotations.total}
+                </p>
+                <p className="text-xs text-slate-600">marked up on photos</p>
+              </div>
+            )}
+          </div>
         </section>
       )}
 
