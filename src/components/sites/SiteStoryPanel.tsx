@@ -1148,29 +1148,77 @@ export function SiteStoryPanel({ siteId }: { siteId: string }) {
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {data.contractorPerformance.slice(0, 12).map((c) => (
-                  <tr key={c.contactId} className="hover:bg-slate-50/50">
-                    <td className="px-3 py-2">
-                      <div className="font-medium text-slate-900">{c.name}</div>
-                      {c.company && (
-                        <div className="text-xs text-slate-500">{c.company}</div>
-                      )}
-                    </td>
-                    <td className="px-3 py-2 text-center">{c.jobsAssigned}</td>
-                    <td className="px-3 py-2 text-center">{c.jobsCompleted}</td>
-                    <td className="px-3 py-2 text-center text-emerald-700">
-                      {c.jobsOnTime}
-                    </td>
-                    <td className="px-3 py-2 text-center text-amber-700">
-                      {c.jobsLate}
-                    </td>
-                    <td className="px-3 py-2 text-right">
-                      {c.totalDelayDaysAttributed > 0
-                        ? `${c.totalDelayDaysAttributed}d`
-                        : "—"}
-                    </td>
-                  </tr>
-                ))}
+                {/* (May 2026 Keith audit) Sort active contractors (any
+                    jobs completed) to the top so the eye lands on rows
+                    with actual signal. Contractors with assignments but
+                    no completions yet render a single muted "Hasn't
+                    started yet" cell instead of five "0 / 0 / 0 / —"
+                    columns — they're still listed (so a manager can see
+                    who's queued up) but don't pull attention. */}
+                {[...data.contractorPerformance]
+                  .sort((a, b) => {
+                    const aActive = a.jobsCompleted > 0 ? 1 : 0;
+                    const bActive = b.jobsCompleted > 0 ? 1 : 0;
+                    if (aActive !== bActive) return bActive - aActive;
+                    return b.jobsAssigned - a.jobsAssigned;
+                  })
+                  .slice(0, 12)
+                  .map((c) => {
+                    const notStarted = c.jobsCompleted === 0;
+                    return (
+                      <tr
+                        key={c.contactId}
+                        className={
+                          notStarted
+                            ? "text-slate-400 hover:bg-slate-50/50"
+                            : "hover:bg-slate-50/50"
+                        }
+                      >
+                        <td className="px-3 py-2">
+                          <div
+                            className={
+                              notStarted
+                                ? "font-medium text-slate-500"
+                                : "font-medium text-slate-900"
+                            }
+                          >
+                            {c.name}
+                          </div>
+                          {c.company && (
+                            <div className="text-xs text-slate-400">
+                              {c.company}
+                            </div>
+                          )}
+                        </td>
+                        {notStarted ? (
+                          <td colSpan={5} className="px-3 py-2 text-xs italic">
+                            Hasn&rsquo;t started yet · {c.jobsAssigned} job
+                            {c.jobsAssigned === 1 ? "" : "s"} assigned
+                          </td>
+                        ) : (
+                          <>
+                            <td className="px-3 py-2 text-center">
+                              {c.jobsAssigned}
+                            </td>
+                            <td className="px-3 py-2 text-center">
+                              {c.jobsCompleted}
+                            </td>
+                            <td className="px-3 py-2 text-center text-emerald-700">
+                              {c.jobsOnTime}
+                            </td>
+                            <td className="px-3 py-2 text-center text-amber-700">
+                              {c.jobsLate}
+                            </td>
+                            <td className="px-3 py-2 text-right">
+                              {c.totalDelayDaysAttributed > 0
+                                ? `${c.totalDelayDaysAttributed}d`
+                                : "—"}
+                            </td>
+                          </>
+                        )}
+                      </tr>
+                    );
+                  })}
               </tbody>
             </table>
           </div>
