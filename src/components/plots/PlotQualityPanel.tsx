@@ -45,6 +45,7 @@ interface Check {
   checked: boolean;
   checkedAt: string | null;
   notes: string | null;
+  checkedByName: string | null;
 }
 
 interface Variation {
@@ -57,6 +58,13 @@ interface Variation {
   daysDelta: number | null;
   status: "REQUESTED" | "APPROVED" | "REJECTED" | "IMPLEMENTED";
   createdAt: string;
+  // (May 2026 Surfacing audit) Approval audit trail — populated by
+  // the API via a follow-up User lookup. Pre-this the dropdown
+  // status flipped to APPROVED but the UI never showed who approved
+  // it or when.
+  approvedAt: string | null;
+  approvedById: string | null;
+  approvedByName: string | null;
 }
 
 interface Defect {
@@ -67,6 +75,10 @@ interface Defect {
   status: "REPORTED" | "IN_PROGRESS" | "RESOLVED" | "CLOSED";
   reportedAt: string;
   resolvedAt: string | null;
+  // (May 2026 Surfacing audit) Audit trail — populated by the API.
+  reportedByName: string | null;
+  resolvedByName: string | null;
+  contractorName: string | null;
 }
 
 type Tab = "checks" | "variations" | "defects" | "draws";
@@ -228,6 +240,22 @@ function ChecksSection({ plotId }: { plotId: string }) {
               {c.checkedAt && (
                 <span className="text-[11px] text-slate-500">
                   {format(parseISO(c.checkedAt), "dd MMM HH:mm")}
+                  {c.checkedByName && (
+                    <>
+                      {" by "}
+                      <span className="font-medium text-slate-700">
+                        {c.checkedByName}
+                      </span>
+                    </>
+                  )}
+                </span>
+              )}
+              {c.notes && (
+                <span
+                  className="ml-1 max-w-[200px] truncate text-[11px] italic text-slate-500"
+                  title={c.notes}
+                >
+                  &ldquo;{c.notes}&rdquo;
                 </span>
               )}
               <button
@@ -409,6 +437,20 @@ function VariationsSection({ plotId }: { plotId: string }) {
                       <option value="REJECTED">REJECTED</option>
                       <option value="IMPLEMENTED">IMPLEMENTED</option>
                     </select>
+                    {/* (May 2026 Surfacing audit) Approval audit
+                        trail inline so changing the dropdown to
+                        APPROVED leaves a visible "by [Name] on
+                        [Date]" — pre-this only the status badge
+                        changed and the metadata was invisible. */}
+                    {v.approvedAt && (
+                      <p className="mt-1 text-[10px] text-emerald-700">
+                        Approved by{" "}
+                        <span className="font-medium">
+                          {v.approvedByName ?? "(unknown)"}
+                        </span>{" "}
+                        on {format(new Date(v.approvedAt), "dd MMM yy")}
+                      </p>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -597,9 +639,30 @@ function DefectsSection({ plotId }: { plotId: string }) {
               </p>
               <p className="mt-2 text-[11px] text-muted-foreground">
                 Reported {format(parseISO(d.reportedAt), "dd MMM yyyy")}
-                {d.resolvedAt
-                  ? ` · Resolved ${format(parseISO(d.resolvedAt), "dd MMM yyyy")}`
-                  : ""}
+                {d.reportedByName && (
+                  <>
+                    {" by "}
+                    <span className="font-medium">{d.reportedByName}</span>
+                  </>
+                )}
+                {d.resolvedAt && (
+                  <>
+                    {" · Resolved "}
+                    {format(parseISO(d.resolvedAt), "dd MMM yyyy")}
+                    {d.resolvedByName && (
+                      <>
+                        {" by "}
+                        <span className="font-medium">{d.resolvedByName}</span>
+                      </>
+                    )}
+                  </>
+                )}
+                {d.contractorName && (
+                  <>
+                    {" · Assigned to "}
+                    <span className="font-medium">{d.contractorName}</span>
+                  </>
+                )}
               </p>
             </div>
           ))}

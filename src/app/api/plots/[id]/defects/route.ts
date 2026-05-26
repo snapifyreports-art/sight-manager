@@ -48,11 +48,48 @@ export async function GET(
   const a = await authoriseByPlot(id);
   if ("error" in a) return a.error;
 
+  // (May 2026 Surfacing audit) Surface reporter / resolver / assigned-
+  // contractor names. DefectReport has FK columns but no Prisma
+  // relations in the schema, so resolve names via follow-up findMany.
   const defects = await prisma.defectReport.findMany({
     where: { plotId: id },
     orderBy: [{ reportedAt: "desc" }],
   });
-  return NextResponse.json(defects);
+  const userIds = Array.from(
+    new Set(
+      defects.flatMap((d) =>
+        [d.reportedById, d.resolvedById].filter((x): x is string => !!x),
+      ),
+    ),
+  );
+  const contactIds = Array.from(
+    new Set(defects.map((d) => d.contractorId).filter((x): x is string => !!x)),
+  );
+  const [users, contacts] = await Promise.all([
+    userIds.length
+      ? prisma.user.findMany({
+          where: { id: { in: userIds } },
+          select: { id: true, name: true },
+        })
+      : Promise.resolve([]),
+    contactIds.length
+      ? prisma.contact.findMany({
+          where: { id: { in: contactIds } },
+          select: { id: true, name: true, company: true },
+        })
+      : Promise.resolve([]),
+  ]);
+  const userMap = new Map(users.map((u) => [u.id, u.name]));
+  const contactMap = new Map(
+    contacts.map((c) => [c.id, c.company || c.name]),
+  );
+  const enriched = defects.map((d) => ({
+    ...d,
+    reportedByName: d.reportedById ? userMap.get(d.reportedById) ?? null : null,
+    resolvedByName: d.resolvedById ? userMap.get(d.resolvedById) ?? null : null,
+    contractorName: d.contractorId ? contactMap.get(d.contractorId) ?? null : null,
+  }));
+  return NextResponse.json(enriched);
 }
 
 export async function POST(

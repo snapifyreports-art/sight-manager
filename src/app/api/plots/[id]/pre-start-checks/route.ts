@@ -45,11 +45,28 @@ export async function GET(
   const a = await authoriseByPlot(id);
   if ("error" in a) return a.error;
 
+  // (May 2026 Surfacing audit) Resolve checkedBy User names so the
+  // UI can render "Checked by [Name] on [Date]" — pre-this only the
+  // timestamp was shown.
   const checks = await prisma.preStartCheck.findMany({
     where: { plotId: id },
     orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
   });
-  return NextResponse.json(checks);
+  const userIds = Array.from(
+    new Set(checks.map((c) => c.checkedById).filter((x): x is string => !!x)),
+  );
+  const users = userIds.length
+    ? await prisma.user.findMany({
+        where: { id: { in: userIds } },
+        select: { id: true, name: true },
+      })
+    : [];
+  const userMap = new Map(users.map((u) => [u.id, u.name]));
+  const enriched = checks.map((c) => ({
+    ...c,
+    checkedByName: c.checkedById ? userMap.get(c.checkedById) ?? null : null,
+  }));
+  return NextResponse.json(enriched);
 }
 
 export async function POST(

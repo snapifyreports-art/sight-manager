@@ -45,11 +45,30 @@ export async function GET(
   const a = await authoriseByPlot(id);
   if ("error" in a) return a.error;
 
+  // (May 2026 Surfacing audit) Surface "Approved by [Name] on [Date]"
+  // next to the status badge. Variation has approvedById as an FK
+  // but no Prisma relation defined in the schema, so resolve names
+  // via a follow-up findMany rather than an include.
   const vars_ = await prisma.variation.findMany({
     where: { plotId: id },
     orderBy: [{ createdAt: "desc" }],
   });
-  return NextResponse.json(vars_);
+  const approverIds = Array.from(
+    new Set(vars_.map((v) => v.approvedById).filter((x): x is string => !!x)),
+  );
+  const approvers =
+    approverIds.length > 0
+      ? await prisma.user.findMany({
+          where: { id: { in: approverIds } },
+          select: { id: true, name: true },
+        })
+      : [];
+  const approverMap = new Map(approvers.map((u) => [u.id, u.name]));
+  const enriched = vars_.map((v) => ({
+    ...v,
+    approvedByName: v.approvedById ? approverMap.get(v.approvedById) ?? null : null,
+  }));
+  return NextResponse.json(enriched);
 }
 
 export async function POST(
