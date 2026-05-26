@@ -342,7 +342,9 @@ export async function buildHandoverArchive({
     }
 
     // Per-plot draw schedule. Buyer's solicitor wants this in writing.
-    const drawSchedule = await prisma.plotDrawSchedule.findMany({
+    // PlotDrawSchedule.triggerJobId is a plain FK — no Prisma relation
+    // defined — so resolve job names via a separate Job.findMany.
+    const drawRows = await prisma.plotDrawSchedule.findMany({
       where: { plotId: plot.id },
       orderBy: { sortOrder: "asc" },
       select: {
@@ -352,10 +354,35 @@ export async function buildHandoverArchive({
         dueAt: true,
         paidAt: true,
         notes: true,
-        triggerJob: { select: { name: true } },
+        triggerJobId: true,
       },
     });
-    if (drawSchedule.length > 0) {
+    if (drawRows.length > 0) {
+      const triggerJobIds = Array.from(
+        new Set(
+          drawRows
+            .map((d) => d.triggerJobId)
+            .filter((v): v is string => !!v),
+        ),
+      );
+      const triggerJobs = triggerJobIds.length
+        ? await prisma.job.findMany({
+            where: { id: { in: triggerJobIds } },
+            select: { id: true, name: true },
+          })
+        : [];
+      const triggerJobMap = new Map(triggerJobs.map((j) => [j.id, j.name]));
+      const drawSchedule = drawRows.map((d) => ({
+        name: d.name,
+        amount: d.amount,
+        status: d.status,
+        dueAt: d.dueAt,
+        paidAt: d.paidAt,
+        notes: d.notes,
+        triggerJob: d.triggerJobId
+          ? { name: triggerJobMap.get(d.triggerJobId) ?? "Unknown" }
+          : null,
+      }));
       const dsPdf = await renderPlotDrawSchedulePdf(plotLabel, drawSchedule);
       archive.append(dsPdf, { name: `${folder}/draw-schedule.pdf` });
     }
@@ -391,7 +418,9 @@ export async function buildHandoverArchive({
     // so the buyer/director can find the relevant clips without
     // listening to every one. Same parallel-batch fetch pattern as
     // photos and docs above.
-    const voiceNotes = await prisma.voiceNote.findMany({
+    // VoiceNote.jobId is a plain FK — no Prisma relation defined —
+    // so resolve job names via a separate Job.findMany.
+    const voiceNoteRows = await prisma.voiceNote.findMany({
       where: { plotId: plot.id },
       orderBy: { createdAt: "asc" },
       select: {
@@ -401,9 +430,32 @@ export async function buildHandoverArchive({
         caption: true,
         transcript: true,
         createdAt: true,
-        job: { select: { name: true } },
+        jobId: true,
       },
     });
+    const voiceJobIds = Array.from(
+      new Set(
+        voiceNoteRows
+          .map((v) => v.jobId)
+          .filter((v): v is string => !!v),
+      ),
+    );
+    const voiceJobs = voiceJobIds.length
+      ? await prisma.job.findMany({
+          where: { id: { in: voiceJobIds } },
+          select: { id: true, name: true },
+        })
+      : [];
+    const voiceJobMap = new Map(voiceJobs.map((j) => [j.id, j.name]));
+    const voiceNotes = voiceNoteRows.map((v) => ({
+      id: v.id,
+      url: v.url,
+      durationSec: v.durationSec,
+      caption: v.caption,
+      transcript: v.transcript,
+      createdAt: v.createdAt,
+      job: v.jobId ? { name: voiceJobMap.get(v.jobId) ?? null } : null,
+    }));
     if (voiceNotes.length > 0) {
       const VOICE_BATCH = 5;
       for (let j = 0; j < voiceNotes.length; j += VOICE_BATCH) {
