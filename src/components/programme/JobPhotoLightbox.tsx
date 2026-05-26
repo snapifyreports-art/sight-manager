@@ -13,6 +13,7 @@ import {
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PhotoAnnotationsPanel } from "@/components/programme/PhotoAnnotationsPanel";
 
 /**
  * (May 2026 audit) Photo lightbox extracted from JobWeekPanel.
@@ -196,6 +197,15 @@ export function JobPhotoLightbox({
                   </div>
                 )}
               </div>
+
+              {/* (May 2026 Surfacing audit) Photo annotations panel —
+                  lists captions + authors + dates for any markup
+                  recorded against this photo. Hidden when there are
+                  no annotations on the photo. Pre-this annotations
+                  were stored but never surfaced. */}
+              {!isSynthetic && (
+                <PhotoAnnotationsPanel photoId={photo.id} />
+              )}
 
               {/* Info + actions */}
               <div className="flex items-center justify-between">

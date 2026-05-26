@@ -36,6 +36,7 @@ import {
 import { JobSiblingNav } from "@/components/jobs/JobSiblingNav";
 import { SnagDialog } from "@/components/snags/SnagDialog";
 import { LatenessSummary } from "@/components/lateness/LatenessSummary";
+import { JobActionTimeline } from "@/components/jobs/JobActionTimeline";
 import { Button } from "@/components/ui/button";
 import { Breadcrumbs } from "@/components/ui/breadcrumbs";
 import { Badge } from "@/components/ui/badge";
@@ -842,6 +843,24 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
           slipped, why, who carried it. Hides when there's nothing
           late + no resolved history. */}
       <LatenessSummary jobId={job.id} status="all" />
+
+      {/* (May 2026 Surfacing audit) Append-only action timeline —
+          start / stop / complete / signoff / notes. JobAction rows
+          were written on every action but never read by the UI;
+          this card surfaces them so a manager can audit who did
+          what when. */}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm">Action timeline</CardTitle>
+          <CardDescription className="text-xs">
+            Every start, stop, complete, sign-off and note on this job
+            — append-only audit trail.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <JobActionTimeline jobId={job.id} />
+        </CardContent>
+      </Card>
 
       {/* Info Grid */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

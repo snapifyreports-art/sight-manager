@@ -29,6 +29,41 @@ const ACTION_EVENT_MAP: Record<string, EventType> = {
   note: "JOB_EDITED",
 };
 
+// (May 2026 Surfacing audit) Read the append-only JobAction history
+// for a job — drives the timeline modal on JobDetailClient. Pre-this
+// the rows were written by every start/stop/complete/signoff/note
+// flow but never read back by the UI.
+export async function GET(
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const session = await auth();
+  if (!session) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  const { id } = await params;
+  const job = await prisma.job.findUnique({
+    where: { id },
+    select: { plot: { select: { siteId: true } } },
+  });
+  if (!job) return NextResponse.json({ error: "Job not found" }, { status: 404 });
+  if (
+    !(await canAccessSite(
+      session.user.id,
+      (session.user as { role: string }).role,
+      job.plot.siteId,
+    ))
+  ) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+  const actions = await prisma.jobAction.findMany({
+    where: { jobId: id },
+    orderBy: { createdAt: "desc" },
+    include: { user: { select: { id: true, name: true } } },
+  });
+  return NextResponse.json(actions);
+}
+
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }

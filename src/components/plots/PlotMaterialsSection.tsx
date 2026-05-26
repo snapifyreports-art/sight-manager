@@ -136,6 +136,19 @@ export function PlotMaterialsSection({ plotId }: { plotId: string }) {
 
   if (loading) return <div className="p-6 text-sm text-muted-foreground"><Loader2 className="inline size-4 animate-spin mr-2" />Loading materials…</div>;
 
+  // (May 2026 Surfacing audit) Burn-down progress — what % of the
+  // expected qty has been delivered + consumed across all materials.
+  // Pre-this the totals were buried in a single comma-list under the
+  // header; the bars make at-a-glance variance visible.
+  const deliveredPct =
+    totals.expected > 0
+      ? Math.min(100, Math.round((totals.delivered / totals.expected) * 100))
+      : 0;
+  const consumedPct =
+    totals.expected > 0
+      ? Math.min(100, Math.round((totals.consumed / totals.expected) * 100))
+      : 0;
+
   return (
     <div className="space-y-4">
       {confirmDialog}
@@ -146,6 +159,35 @@ export function PlotMaterialsSection({ plotId }: { plotId: string }) {
         </div>
         <Button size="sm" onClick={() => setAddOpen(true)}><Plus className="size-4" /> Add manual</Button>
       </div>
+
+      {/* (May 2026 Surfacing audit) Burn-down — single visual showing
+          how much of the expected qty has actually arrived and been
+          consumed. Renders only when there are materials with an
+          expected qty so a blank plot doesn't show empty bars. */}
+      {materials.length > 0 && totals.expected > 0 && (
+        <div className="rounded-xl border bg-white p-3">
+          <div className="mb-2 flex items-center justify-between text-xs">
+            <span className="font-medium text-slate-700">Delivered vs expected</span>
+            <span className="tabular-nums text-slate-500">{deliveredPct}%</span>
+          </div>
+          <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+            <div
+              className="h-full rounded-full bg-blue-500 transition-all"
+              style={{ width: `${deliveredPct}%` }}
+            />
+          </div>
+          <div className="mt-3 mb-2 flex items-center justify-between text-xs">
+            <span className="font-medium text-slate-700">Consumed vs expected</span>
+            <span className="tabular-nums text-slate-500">{consumedPct}%</span>
+          </div>
+          <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+            <div
+              className="h-full rounded-full bg-emerald-500 transition-all"
+              style={{ width: `${consumedPct}%` }}
+            />
+          </div>
+        </div>
+      )}
 
       {materials.length === 0 ? (
         <div className="rounded-xl border border-dashed p-4 text-sm text-muted-foreground">
@@ -184,7 +226,32 @@ export function PlotMaterialsSection({ plotId }: { plotId: string }) {
                       onBlur={(e) => { const v = Number(e.target.value); if (v !== m.consumed) updateField(m, { consumed: v }); }}
                     />
                   </td>
-                  <td className="px-3 py-2 text-right tabular-nums">{(m.delivered - m.consumed).toLocaleString()}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">
+                    <span className="inline-flex items-center gap-1">
+                      {(m.delivered - m.consumed).toLocaleString()}
+                      {/* (May 2026 Surfacing audit) Variance pill —
+                          flag under-delivery (delivered < expected)
+                          or over-consumption (consumed > delivered)
+                          inline so the manager sees the issue without
+                          scanning numbers. */}
+                      {m.delivered < m.quantity && (
+                        <span
+                          className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800"
+                          title={`Short by ${(m.quantity - m.delivered).toLocaleString()} ${m.unit}`}
+                        >
+                          short
+                        </span>
+                      )}
+                      {m.consumed > m.delivered && (
+                        <span
+                          className="rounded-full bg-red-100 px-1.5 py-0.5 text-[10px] font-semibold text-red-800"
+                          title="Consumed more than delivered — check delivery records"
+                        >
+                          over
+                        </span>
+                      )}
+                    </span>
+                  </td>
                   <td className="px-3 py-2 text-[11px] uppercase text-muted-foreground">{m.sourceType}</td>
                   <td className="px-3 py-2 text-right">
                     <button onClick={() => deleteMaterial(m)} className="text-muted-foreground hover:text-destructive">
