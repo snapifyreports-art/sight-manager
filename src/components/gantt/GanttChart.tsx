@@ -4,6 +4,8 @@ import { useRef, useEffect, useMemo, useState, useCallback } from "react";
 import { differenceInDays, getMonth } from "date-fns";
 import { getCurrentDate } from "@/lib/dev-date";
 import { cn } from "@/lib/utils";
+import { deriveAggregateStatus } from "@/lib/parent-job";
+import type { JobStatus } from "@prisma/client";
 import {
   getWeeksBetween,
   getPositionForDate,
@@ -73,16 +75,12 @@ interface GanttChartProps {
 
 /** Compute aggregate status from child jobs */
 function computeAggregateStatus(children: GanttJob[]): string {
-  if (children.length === 0) return "NOT_STARTED";
-  const allCompleted = children.every((c) => c.status === "COMPLETED");
-  if (allCompleted) return "COMPLETED";
-  const anyInProgress = children.some(
-    (c) => c.status === "IN_PROGRESS" || c.status === "COMPLETED"
-  );
-  if (anyInProgress) return "IN_PROGRESS";
-  const anyOnHold = children.some((c) => c.status === "ON_HOLD");
-  if (anyOnHold) return "ON_HOLD";
-  return "NOT_STARTED";
+  // (May 2026 SSoT pass) Routed through deriveAggregateStatus so the
+  // synthetic-parent bar in the Gantt agrees with the real
+  // recomputeParentFromChildren DB write + site-story's plot status +
+  // programme/helpers getPlotStatus. Pre-this the rule was inlined
+  // here as a 4th copy.
+  return deriveAggregateStatus(children.map((c) => c.status as JobStatus));
 }
 
 /** Compute progress percentage (completed children / total) */

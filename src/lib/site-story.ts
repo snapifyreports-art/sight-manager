@@ -1,7 +1,8 @@
-import type { Prisma, PrismaClient, EventType } from "@prisma/client";
+import type { Prisma, PrismaClient, EventType, JobStatus } from "@prisma/client";
 import { differenceInWorkingDays } from "./working-days";
 import { whereOrdersForSite } from "./order-scope";
 import { isJobEndOverdue, workingDaysEndOverdue } from "./lateness";
+import { deriveAggregateStatus } from "./parent-job";
 
 /**
  * Site Story synthesizer — single source of truth for "what actually
@@ -1130,23 +1131,15 @@ export async function buildSiteStory(
   });
 
   const plotStories: PlotStory[] = plots.map((p) => {
-    // (May 2026 SSoT pass) Mirrors the parent-job.ts status derivation
-    // so the Site Story plot status agrees with the parent-stage rollup
-    // shown on the plot page. Pre-fix, a plot with 2 COMPLETED + 3
-    // NOT_STARTED leaf jobs fell to NOT_STARTED — same partial-done bug
-    // class as Plot 33 "Foundation."
-    const status: PlotStory["status"] =
-      p.jobs.length === 0
-        ? "NOT_STARTED"
-        : p.jobs.every((j) => j.status === "COMPLETED")
-          ? "COMPLETED"
-          : p.jobs.some((j) => j.status === "IN_PROGRESS")
-            ? "IN_PROGRESS"
-            : p.jobs.some((j) => j.status === "COMPLETED")
-              ? "IN_PROGRESS"
-              : p.jobs.some((j) => j.status === "ON_HOLD")
-                ? "ON_HOLD"
-                : "NOT_STARTED";
+    // (May 2026 SSoT pass) Routed through deriveAggregateStatus so
+    // this surface stays in lock-step with recomputeParentFromChildren
+    // and the programme / GanttChart synthetic-parent renderers.
+    // Pre-this the rule was inlined here as a 5-deep ternary —
+    // correct, but a 3rd copy that would drift if status rules ever
+    // changed. Plot 33's "Foundation" bug was the same class of issue.
+    const status = deriveAggregateStatus(
+      p.jobs.map((j) => j.status as JobStatus),
+    ) as PlotStory["status"];
 
     const plotEarliestActual = p.jobs
       .map((j) => j.actualStartDate)

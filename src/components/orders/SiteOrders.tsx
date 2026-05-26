@@ -708,7 +708,14 @@ export function SiteOrders({ siteId }: SiteOrdersProps) {
                       <OrderStatusBadge status={dominantStatus} />
                     </span>
                   </div>
-                  <p className="text-xs font-medium text-foreground">{order.job.name}</p>
+                  <p className="text-xs font-medium text-foreground">
+                    <Link
+                      href={`/jobs/${order.job.id}`}
+                      className="hover:underline hover:text-blue-700"
+                    >
+                      {order.job.name}
+                    </Link>
+                  </p>
                   {/* Plot badges */}
                   <div className="flex flex-wrap gap-1 pt-0.5">
                     {group.slice(0, 6).map((o) => (

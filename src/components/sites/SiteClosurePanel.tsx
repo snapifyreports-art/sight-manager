@@ -49,6 +49,32 @@ interface ClosureSummary {
     journalEntryCount: number;
     snagCount: number;
   }>;
+  // (May 2026 Closure-deepening) Compliance + readiness + toolbox
+  // counts from the Story SSoT — Closure used to gate only on
+  // incomplete plots + open snags. Now every category that affects
+  // handover readiness flows through here so a manager can't ship
+  // the ZIP while NCRs, defects, variations, handover docs, pre-
+  // start checks or outstanding toolbox talks are unresolved.
+  compliance?: {
+    ncrs: { total: number; open: number; closed: number };
+    defects: { total: number; open: number; resolved: number };
+    variations: { total: number; approved: number };
+  };
+  evidence?: {
+    preStartChecks: { total: number; checked: number };
+  };
+  handoverReadiness?: {
+    requiredTotal: number;
+    requiredChecked: number;
+  };
+  toolboxTalks?: {
+    total: number;
+    requested: number;
+    completed: number;
+  };
+  overdueNow?: {
+    count: number;
+  };
 }
 
 export function SiteClosurePanel({ siteId }: { siteId: string }) {
@@ -125,8 +151,36 @@ export function SiteClosurePanel({ siteId }: { siteId: string }) {
     (sum, p) => sum + p.journalEntryCount,
     0,
   );
+  // (May 2026 Closure-deepening) Pull out the new readiness signals.
+  // Each falls back gracefully when the Story payload doesn't carry
+  // the field (old caches / staging environments).
+  const openNcrs = data.compliance?.ncrs.open ?? 0;
+  const openDefects = data.compliance?.defects.open ?? 0;
+  const variationsOutstanding =
+    data.compliance?.variations
+      ? data.compliance.variations.total -
+        data.compliance.variations.approved
+      : 0;
+  const handoverDocsRequired = data.handoverReadiness?.requiredTotal ?? 0;
+  const handoverDocsSigned = data.handoverReadiness?.requiredChecked ?? 0;
+  const handoverDocsReady =
+    handoverDocsRequired === 0 || handoverDocsSigned === handoverDocsRequired;
+  const preStartRequired = data.evidence?.preStartChecks.total ?? 0;
+  const preStartChecked = data.evidence?.preStartChecks.checked ?? 0;
+  const preStartReady =
+    preStartRequired === 0 || preStartChecked === preStartRequired;
+  const toolboxOutstanding = data.toolboxTalks?.requested ?? 0;
+  const overdueNow = data.overdueNow?.count ?? 0;
   const allReady =
-    incompletePlots === 0 && data.variance.snagsOpen === 0;
+    incompletePlots === 0 &&
+    data.variance.snagsOpen === 0 &&
+    openNcrs === 0 &&
+    openDefects === 0 &&
+    variationsOutstanding === 0 &&
+    handoverDocsReady &&
+    preStartReady &&
+    toolboxOutstanding === 0 &&
+    overdueNow === 0;
 
   return (
     <div className="space-y-6">
@@ -170,6 +224,56 @@ export function SiteClosurePanel({ siteId }: { siteId: string }) {
             okLabel="Site marked as Completed"
             warnLabel="Site is still active — generating now will produce a snapshot of today's state"
           />
+          {/* (May 2026 Closure-deepening) Compliance gates — only
+              render when the Story payload carries them so older
+              caches don't show false negatives. */}
+          {data.compliance && (
+            <>
+              <ChecklistRow
+                ok={openNcrs === 0}
+                okLabel="No open NCRs"
+                warnLabel={`${openNcrs} non-conformance${openNcrs !== 1 ? "s" : ""} still open — buyer pack will flag these`}
+              />
+              <ChecklistRow
+                ok={openDefects === 0}
+                okLabel="No open warranty defects"
+                warnLabel={`${openDefects} defect report${openDefects !== 1 ? "s" : ""} unresolved`}
+              />
+              <ChecklistRow
+                ok={variationsOutstanding === 0}
+                okLabel="All variations approved or rejected"
+                warnLabel={`${variationsOutstanding} variation${variationsOutstanding !== 1 ? "s" : ""} not yet finalised (REQUESTED / IMPLEMENTED-pending)`}
+              />
+            </>
+          )}
+          {data.handoverReadiness && handoverDocsRequired > 0 && (
+            <ChecklistRow
+              ok={handoverDocsReady}
+              okLabel={`All ${handoverDocsRequired} required handover documents signed off`}
+              warnLabel={`${handoverDocsRequired - handoverDocsSigned} of ${handoverDocsRequired} handover documents still unsigned (EPC / gas-safe / electrical / NHBC etc.)`}
+            />
+          )}
+          {data.evidence && preStartRequired > 0 && (
+            <ChecklistRow
+              ok={preStartReady}
+              okLabel={`All ${preStartRequired} pre-start checks complete`}
+              warnLabel={`${preStartRequired - preStartChecked} of ${preStartRequired} pre-start checks outstanding`}
+            />
+          )}
+          {data.toolboxTalks && (
+            <ChecklistRow
+              ok={toolboxOutstanding === 0}
+              okLabel="No outstanding toolbox talks"
+              warnLabel={`${toolboxOutstanding} toolbox talk${toolboxOutstanding !== 1 ? "s" : ""} requested but not yet delivered`}
+            />
+          )}
+          {data.overdueNow && (
+            <ChecklistRow
+              ok={overdueNow === 0}
+              okLabel="No jobs past their original planned end"
+              warnLabel={`${overdueNow} job${overdueNow !== 1 ? "s" : ""} currently overdue against the immutable baseline`}
+            />
+          )}
         </ul>
       </section>
 
