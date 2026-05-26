@@ -198,7 +198,11 @@ export async function buildHandoverArchive({
     // + scope-change narrative all land in 02_Plots/Plot_*/...
     const plotLabel = `Plot ${plot.plotNumber || plot.name}`;
 
-    const ncrs = await prisma.nCR.findMany({
+    // NCR.raisedById/closedById are plain FK columns — no Prisma
+    // relation defined — so resolve user names via a separate User
+    // lookup, then reshape into the nested-object form the renderer
+    // expects.
+    const ncrRows = await prisma.nCR.findMany({
       where: { plotId: plot.id },
       orderBy: { raisedAt: "asc" },
       select: {
@@ -210,12 +214,43 @@ export async function buildHandoverArchive({
         status: true,
         raisedAt: true,
         closedAt: true,
-        raisedBy: { select: { name: true } },
-        closedBy: { select: { name: true } },
+        raisedById: true,
+        closedById: true,
         contact: { select: { name: true, company: true } },
       },
     });
-    if (ncrs.length > 0) {
+    if (ncrRows.length > 0) {
+      const ncrUserIds = Array.from(
+        new Set(
+          ncrRows.flatMap((n) =>
+            [n.raisedById, n.closedById].filter((v): v is string => !!v),
+          ),
+        ),
+      );
+      const ncrUsers = ncrUserIds.length
+        ? await prisma.user.findMany({
+            where: { id: { in: ncrUserIds } },
+            select: { id: true, name: true },
+          })
+        : [];
+      const ncrUserMap = new Map(ncrUsers.map((u) => [u.id, u.name]));
+      const ncrs = ncrRows.map((n) => ({
+        ref: n.ref,
+        title: n.title,
+        description: n.description,
+        rootCause: n.rootCause,
+        correctiveAction: n.correctiveAction,
+        status: n.status,
+        raisedAt: n.raisedAt,
+        closedAt: n.closedAt,
+        raisedBy: n.raisedById
+          ? { name: ncrUserMap.get(n.raisedById) ?? "Unknown" }
+          : null,
+        closedBy: n.closedById
+          ? { name: ncrUserMap.get(n.closedById) ?? "Unknown" }
+          : null,
+        contact: n.contact,
+      }));
       const ncrPdf = await renderPlotNcrLogPdf(plotLabel, ncrs);
       archive.append(ncrPdf, { name: `${folder}/ncr-log.pdf` });
     }
@@ -262,7 +297,9 @@ export async function buildHandoverArchive({
     // (May 2026 Story-linkage audit) Pre-start checks — handover-
     // readiness audit. Emit only when checks were ever defined for
     // the plot.
-    const preStartChecks = await prisma.preStartCheck.findMany({
+    // PreStartCheck.checkedById is a plain FK — no Prisma relation —
+    // so resolve via a separate User lookup like the NCR block above.
+    const preStartRows = await prisma.preStartCheck.findMany({
       where: { plotId: plot.id },
       orderBy: { sortOrder: "asc" },
       select: {
@@ -270,10 +307,33 @@ export async function buildHandoverArchive({
         checked: true,
         checkedAt: true,
         notes: true,
-        checkedBy: { select: { name: true } },
+        checkedById: true,
       },
     });
-    if (preStartChecks.length > 0) {
+    if (preStartRows.length > 0) {
+      const psUserIds = Array.from(
+        new Set(
+          preStartRows
+            .map((p) => p.checkedById)
+            .filter((v): v is string => !!v),
+        ),
+      );
+      const psUsers = psUserIds.length
+        ? await prisma.user.findMany({
+            where: { id: { in: psUserIds } },
+            select: { id: true, name: true },
+          })
+        : [];
+      const psUserMap = new Map(psUsers.map((u) => [u.id, u.name]));
+      const preStartChecks = preStartRows.map((p) => ({
+        label: p.label,
+        checked: p.checked,
+        checkedAt: p.checkedAt,
+        notes: p.notes,
+        checkedBy: p.checkedById
+          ? { name: psUserMap.get(p.checkedById) ?? "Unknown" }
+          : null,
+      }));
       const psPdf = await renderPlotPreStartChecksPdf(
         plotLabel,
         preStartChecks,
@@ -388,17 +448,42 @@ export async function buildHandoverArchive({
     // manifest so a reader can see which photos were marked up
     // (the stroke overlays themselves still need a future renderer
     // — schema:1450 has them serialised as JSON for now).
-    const annotations = await prisma.photoAnnotation.findMany({
+    // PhotoAnnotation.createdById is a plain FK — no Prisma relation
+    // — so resolve names via a separate User lookup.
+    const annotationRows = await prisma.photoAnnotation.findMany({
       where: { plotId: plot.id },
       orderBy: { createdAt: "asc" },
       select: {
         id: true,
         caption: true,
         createdAt: true,
-        createdBy: { select: { name: true } },
+        createdById: true,
         jobPhoto: { select: { caption: true } },
       },
     });
+    const annUserIds = Array.from(
+      new Set(
+        annotationRows
+          .map((a) => a.createdById)
+          .filter((v): v is string => !!v),
+      ),
+    );
+    const annUsers = annUserIds.length
+      ? await prisma.user.findMany({
+          where: { id: { in: annUserIds } },
+          select: { id: true, name: true },
+        })
+      : [];
+    const annUserMap = new Map(annUsers.map((u) => [u.id, u.name]));
+    const annotations = annotationRows.map((a) => ({
+      id: a.id,
+      caption: a.caption,
+      createdAt: a.createdAt,
+      createdBy: a.createdById
+        ? { name: annUserMap.get(a.createdById) ?? null }
+        : null,
+      jobPhoto: a.jobPhoto,
+    }));
     if (annotations.length > 0) {
       const lines: string[] = [];
       lines.push(`Photo annotations — ${plotLabel}`);
