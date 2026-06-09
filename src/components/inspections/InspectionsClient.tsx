@@ -1,0 +1,259 @@
+"use client";
+
+import { useCallback, useMemo, useState } from "react";
+import Link from "next/link";
+import { format } from "date-fns";
+import { ClipboardCheck, Plus, Trash2, Loader2, ExternalLink } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { useInspectionAction, type InspectionFinding } from "@/hooks/useInspectionAction";
+import { inspectionStatusColor, inspectionStatusLabel } from "@/lib/inspection-doctype";
+
+interface Insp {
+  id: string;
+  name: string;
+  type: string;
+  status: "SCHEDULED" | "BOOKED" | "PASSED" | "FAILED" | "OVERDUE";
+  scheduledDate: string;
+  bookedDate: string | null;
+  bookingLeadWeeks: number | null;
+  anchorJobId: string | null;
+  certificateDocumentId: string | null;
+  plot: { id: string; name: string; plotNumber: string | null; siteId: string; site: { name: string } };
+  anchorJob: { id: string; name: string } | null;
+  inspector: { id: string; name: string; company: string | null } | null;
+  certificate: { id: string; name: string; url: string } | null;
+  _count: { snags: number; ncrs: number };
+}
+
+const TYPE_LABEL: Record<string, string> = {
+  NHBC: "NHBC", BUILDING_CONTROL: "Building Control", WARRANTY_CML: "Warranty/CML", INTERNAL_QA: "Internal QA", OTHER: "Other",
+};
+const FILTERS = ["All", "Upcoming", "Overdue", "Passed", "Failed"] as const;
+type Filter = (typeof FILTERS)[number];
+
+export function InspectionsClient({ initial, canManage }: { initial: Insp[]; canManage: boolean }) {
+  const [items, setItems] = useState<Insp[]>(initial);
+  const [filter, setFilter] = useState<Filter>("Upcoming");
+  const [dialog, setDialog] = useState<{ kind: "pass" | "fail"; insp: Insp } | null>(null);
+
+  const refetch = useCallback(async () => {
+    const res = await fetch("/api/inspections");
+    if (res.ok) setItems(await res.json());
+  }, []);
+
+  const action = useInspectionAction({ onChange: refetch });
+
+  const filtered = useMemo(() => {
+    return items.filter((i) => {
+      if (filter === "All") return true;
+      if (filter === "Upcoming") return i.status === "SCHEDULED" || i.status === "BOOKED";
+      if (filter === "Overdue") return i.status === "OVERDUE";
+      if (filter === "Passed") return i.status === "PASSED";
+      if (filter === "Failed") return i.status === "FAILED";
+      return true;
+    });
+  }, [items, filter]);
+
+  const counts = useMemo(() => ({
+    Overdue: items.filter((i) => i.status === "OVERDUE").length,
+    Upcoming: items.filter((i) => i.status === "SCHEDULED" || i.status === "BOOKED").length,
+    Failed: items.filter((i) => i.status === "FAILED").length,
+  }), [items]);
+
+  return (
+    <div className="space-y-4 p-4 md:p-6">
+      <div className="flex items-center gap-2">
+        <ClipboardCheck className="size-6 text-amber-600" />
+        <div>
+          <h1 className="text-xl font-bold">Inspections</h1>
+          <p className="text-xs text-muted-foreground">
+            {counts.Overdue > 0 && <span className="font-medium text-amber-600">{counts.Overdue} overdue · </span>}
+            {counts.Upcoming} upcoming{counts.Failed > 0 ? ` · ${counts.Failed} failed` : ""} across your sites
+          </p>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap gap-1.5">
+        {FILTERS.map((f) => (
+          <button
+            key={f}
+            onClick={() => setFilter(f)}
+            className={`rounded-full border px-3 py-1 text-xs ${filter === f ? "border-amber-500 bg-amber-50 font-medium text-amber-700" : "border-input text-muted-foreground hover:bg-muted/40"}`}
+          >
+            {f}
+            {f === "Overdue" && counts.Overdue > 0 ? ` (${counts.Overdue})` : ""}
+          </button>
+        ))}
+      </div>
+
+      {filtered.length === 0 ? (
+        <p className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
+          No inspections {filter !== "All" ? `(${filter.toLowerCase()})` : "yet"}. They appear here once a plot built from a
+          template with inspections is created, or when you add one to a plot.
+        </p>
+      ) : (
+        <div className="divide-y rounded-lg border">
+          {filtered.map((i) => {
+            const overdue = i.status === "OVERDUE";
+            const pending = action.isPending(i.id);
+            return (
+              <div key={i.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 p-3">
+                <div className="min-w-[200px] flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium">{i.name}</span>
+                    <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground">{TYPE_LABEL[i.type] ?? i.type}</span>
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    <Link href={`/sites/${i.plot.siteId}?tab=plots`} className="hover:underline">
+                      {i.plot.site.name} · Plot {i.plot.plotNumber ?? i.plot.name}
+                    </Link>
+                    {i.anchorJob ? <span> · after {i.anchorJob.name}</span> : null}
+                  </div>
+                </div>
+
+                <div className="text-sm">
+                  <div className={overdue ? "font-medium text-amber-600" : ""}>{format(new Date(i.scheduledDate), "EEE d MMM yyyy")}</div>
+                  <div className="text-xs text-muted-foreground">{i.inspector ? i.inspector.name : "No inspector set"}</div>
+                </div>
+
+                <span
+                  className="rounded-full px-2 py-0.5 text-[11px] font-medium text-white"
+                  style={{ backgroundColor: inspectionStatusColor(i.status) }}
+                >
+                  {inspectionStatusLabel(i.status)}
+                </span>
+
+                {(i._count.snags > 0 || i._count.ncrs > 0) && (
+                  <span className="text-[11px] text-muted-foreground">
+                    {i._count.snags > 0 ? `${i._count.snags} snag${i._count.snags === 1 ? "" : "s"}` : ""}
+                    {i._count.snags > 0 && i._count.ncrs > 0 ? " · " : ""}
+                    {i._count.ncrs > 0 ? `${i._count.ncrs} NCR${i._count.ncrs === 1 ? "" : "s"}` : ""}
+                  </span>
+                )}
+
+                {i.certificate && (
+                  <a href={i.certificate.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[11px] text-blue-600 hover:underline">
+                    Certificate <ExternalLink className="size-3" />
+                  </a>
+                )}
+
+                {canManage && (
+                  <div className="ml-auto flex items-center gap-1.5">
+                    {pending && <Loader2 className="size-4 animate-spin text-muted-foreground" />}
+                    {(i.status === "SCHEDULED" || i.status === "OVERDUE") && (
+                      <Button size="sm" variant="outline" disabled={pending} onClick={() => action.book(i.id)}>Book</Button>
+                    )}
+                    {i.status !== "PASSED" && i.status !== "FAILED" && (
+                      <>
+                        <Button size="sm" disabled={pending} onClick={() => setDialog({ kind: "pass", insp: i })}>Pass</Button>
+                        <Button size="sm" variant="outline" disabled={pending} onClick={() => setDialog({ kind: "fail", insp: i })}>Fail</Button>
+                      </>
+                    )}
+                    {i.status === "FAILED" && (
+                      <Button size="sm" variant="outline" disabled={pending} onClick={() => action.reinspect(i.id)}>Re-inspect</Button>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {dialog && (
+        <SignOffDialog
+          kind={dialog.kind}
+          insp={dialog.insp}
+          onClose={() => setDialog(null)}
+          onDone={() => { setDialog(null); refetch(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ---- Pass / Fail sign-off dialog with findings ----
+function SignOffDialog({ kind, insp, onClose, onDone }: { kind: "pass" | "fail"; insp: Insp; onClose: () => void; onDone: () => void }) {
+  const action = useInspectionAction({ silent: false });
+  const [certId, setCertId] = useState(insp.certificateDocumentId ?? "");
+  const [tickHandover, setTickHandover] = useState(true);
+  const [findings, setFindings] = useState<InspectionFinding[]>([]);
+  const [busy, setBusy] = useState(false);
+
+  const addFinding = () => setFindings((f) => [...f, { kind: "SNAG", description: "", severity: "MEDIUM" }]);
+  const setFinding = (idx: number, patch: Partial<InspectionFinding>) =>
+    setFindings((f) => f.map((x, i) => (i === idx ? { ...x, ...patch } : x)));
+  const removeFinding = (idx: number) => setFindings((f) => f.filter((_, i) => i !== idx));
+
+  async function submit() {
+    setBusy(true);
+    const valid = findings.filter((f) => f.description.trim());
+    const r =
+      kind === "pass"
+        ? await action.pass(insp.id, { certificateDocumentId: certId || undefined, tickHandover, findings: valid })
+        : await action.fail(insp.id, { findings: valid });
+    setBusy(false);
+    if (r.ok) onDone();
+  }
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader><DialogTitle>{kind === "pass" ? "Pass" : "Fail"} — {insp.name}</DialogTitle></DialogHeader>
+        <div className="space-y-3 py-2">
+          {kind === "pass" && (
+            <>
+              <div>
+                <Label>Certificate document ID</Label>
+                <Input value={certId} onChange={(e) => setCertId(e.target.value)} placeholder="Attach the signed certificate (required to pass)" />
+                <p className="mt-1 text-[11px] text-muted-foreground">Upload the certificate in the plot&apos;s Documents tab, then paste its ID. Passing without one is blocked.</p>
+              </div>
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={tickHandover} onChange={(e) => setTickHandover(e.target.checked)} />
+                Also tick the matching handover certificate item
+              </label>
+            </>
+          )}
+          <div>
+            <div className="mb-1 flex items-center justify-between">
+              <Label>Findings (optional)</Label>
+              <Button size="sm" variant="outline" onClick={addFinding}><Plus className="size-3.5" /> Add finding</Button>
+            </div>
+            {findings.length === 0 ? (
+              <p className="text-[11px] text-muted-foreground">No findings. Add any defects raised at this inspection — each becomes a snag or NCR for the responsible contractor.</p>
+            ) : (
+              <div className="space-y-2">
+                {findings.map((f, idx) => (
+                  <div key={idx} className="flex items-start gap-2 rounded border p-2">
+                    <select value={f.kind} onChange={(e) => setFinding(idx, { kind: e.target.value as "SNAG" | "NCR" })} className="h-9 rounded-md border border-input bg-transparent px-2 text-sm">
+                      <option value="SNAG">Snag</option>
+                      <option value="NCR">NCR</option>
+                    </select>
+                    <Input value={f.description} onChange={(e) => setFinding(idx, { description: e.target.value })} placeholder="Describe the defect" className="flex-1" />
+                    <select value={f.severity} onChange={(e) => setFinding(idx, { severity: e.target.value as InspectionFinding["severity"] })} className="h-9 rounded-md border border-input bg-transparent px-2 text-sm">
+                      <option value="LOW">Low</option>
+                      <option value="MEDIUM">Medium</option>
+                      <option value="HIGH">High</option>
+                      <option value="CRITICAL">Critical</option>
+                    </select>
+                    <button onClick={() => removeFinding(idx)} className="mt-2 text-muted-foreground hover:text-destructive"><Trash2 className="size-3.5" /></button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button onClick={submit} disabled={busy}>
+            {busy && <Loader2 className="size-4 animate-spin" />}
+            {kind === "pass" ? "Confirm pass" : "Confirm fail"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
