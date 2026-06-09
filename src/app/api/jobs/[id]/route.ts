@@ -153,6 +153,8 @@ export async function PUT(
     // PUT can include status (via direct edit) — recompute the plot
     // percent so the cached value never drifts from leaf statuses.
     await recomputePlotPercent(prisma, job.plotId);
+    // (Jun 2026) A manual date edit moves any anchored inspections too.
+    await (await import("@/lib/inspection-dates")).recomputeInspectionDates(prisma, job.plotId);
 
     await logEvent(prisma, {
       type: "JOB_EDITED",

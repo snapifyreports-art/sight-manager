@@ -1,5 +1,6 @@
 import { addWeeks, addDays } from "date-fns";
 import { snapToWorkingDay, addWorkingDays } from "@/lib/working-days";
+import { computeInspectionScheduledDate } from "@/lib/inspection-dates";
 
 // Types matching what Prisma returns for template jobs with children
 interface TemplateOrderItem {
@@ -186,8 +187,12 @@ export async function createJobsFromTemplate(
   templateJobs: TemplateJobWithChildren[],
   supplierMappings: Record<string, string> | null,
   assignedToId?: string | null
-): Promise<TemplateApplyWarning[]> {
+): Promise<{ warnings: TemplateApplyWarning[]; jobIdMap: Map<string, string> }> {
   const warnings: TemplateApplyWarning[] = [];
+  // (Jun 2026) Map every templateJob.id → the real Job.id created on this
+  // plot, so apply-time can wire Inspection.anchorJobId from the template's
+  // anchorTemplateJobId (and JobDependency edges in a later feature).
+  const jobIdMap = new Map<string, string>();
   // Pre-compute every templateJob's start/end on this plot so that
   // anchor-based orders can resolve their anchor job's date even if it
   // lives in a different stage that hasn't been written to the DB yet.
@@ -256,6 +261,7 @@ export async function createJobsFromTemplate(
           ...(assignedToId ? { assignedToId } : {}),
         },
       });
+      jobIdMap.set(templateJob.id, parentJob.id);
 
       // Parent-stage contractor assignment (if template specified one on the parent)
       if (templateJob.contactId) {
@@ -304,6 +310,7 @@ export async function createJobsFromTemplate(
             ...(assignedToId ? { assignedToId } : {}),
           },
         });
+        jobIdMap.set(child.id, job.id);
 
         // Create contractor assignment from template
         if (child.contactId) {
@@ -363,6 +370,7 @@ export async function createJobsFromTemplate(
           ...(assignedToId ? { assignedToId } : {}),
         },
       });
+      jobIdMap.set(templateJob.id, job.id);
 
       // Create contractor assignment from template
       if (templateJob.contactId) {
@@ -383,7 +391,79 @@ export async function createJobsFromTemplate(
       );
     }
   }
-  return warnings;
+  return { warnings, jobIdMap };
+}
+
+/**
+ * (Jun 2026) Create per-plot Inspection rows from a template's
+ * TemplateInspection defs, after the jobs exist. Resolves each
+ * anchorTemplateJobId → the real Job via `jobIdMap`, reads that job's
+ * dates, and derives scheduledDate. Runs inside the apply transaction so
+ * a partial failure rolls the whole plot back (no jobs-without-inspections).
+ * Returns the number of inspections created.
+ */
+export async function createInspectionsFromTemplate(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  tx: any,
+  plotId: string,
+  templateInspections: Array<{
+    id: string;
+    name: string;
+    type: string;
+    anchorTemplateJobId: string;
+    anchorEdge: string;
+    offsetDays: number;
+    bookingLeadWeeks: number | null;
+  }>,
+  jobIdMap: Map<string, string>,
+): Promise<number> {
+  if (templateInspections.length === 0) return 0;
+
+  // Real anchor job ids + their dates (one query).
+  const anchorJobIds = Array.from(
+    new Set(
+      templateInspections
+        .map((ti) => jobIdMap.get(ti.anchorTemplateJobId))
+        .filter((v): v is string => !!v),
+    ),
+  );
+  const jobs: Array<{ id: string; startDate: Date | null; endDate: Date | null }> =
+    anchorJobIds.length > 0
+      ? await tx.job.findMany({
+          where: { id: { in: anchorJobIds } },
+          select: { id: true, startDate: true, endDate: true },
+        })
+      : [];
+  const jobDate = new Map(jobs.map((j) => [j.id, j]));
+
+  let created = 0;
+  for (const ti of templateInspections) {
+    const realJobId = jobIdMap.get(ti.anchorTemplateJobId);
+    const job = realJobId ? jobDate.get(realJobId) : null;
+    if (!job) continue; // anchor not found (shouldn't happen) — skip
+    const scheduledDate = computeInspectionScheduledDate(
+      job,
+      ti.anchorEdge === "END" ? "END" : "START",
+      ti.offsetDays,
+    );
+    if (!scheduledDate) continue; // anchor undated — skip
+    await tx.inspection.create({
+      data: {
+        plotId,
+        sourceTemplateInspectionId: ti.id,
+        type: ti.type as never,
+        name: ti.name,
+        status: "SCHEDULED",
+        anchorJobId: realJobId,
+        anchorEdge: ti.anchorEdge === "END" ? "END" : "START",
+        offsetDays: ti.offsetDays,
+        bookingLeadWeeks: ti.bookingLeadWeeks,
+        scheduledDate,
+      },
+    });
+    created++;
+  }
+  return created;
 }
 
 /**

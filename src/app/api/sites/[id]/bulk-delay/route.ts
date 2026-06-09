@@ -214,6 +214,9 @@ export async function POST(
     {
       const { recomputePlotPercent } = await import("@/lib/plot-percent");
       await recomputePlotPercent(prisma, plotId);
+      // (Jun 2026) Anchored inspections shift with their jobs.
+      const { recomputeInspectionDates } = await import("@/lib/inspection-dates");
+      await recomputeInspectionDates(prisma, plotId);
     }
 
     results.push({

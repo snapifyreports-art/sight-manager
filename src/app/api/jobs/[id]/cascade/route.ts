@@ -290,6 +290,11 @@ export async function PUT(
       Array.from(parentIds).map((pid) => recomputeParentFromChildren(prisma, pid))
     );
 
+    // (Jun 2026) Keep anchored inspection dates in lock-step with the jobs
+    // that just moved — skips PASSED/FAILED (their result is fixed).
+    const { recomputeInspectionDates } = await import("@/lib/inspection-dates");
+    await recomputeInspectionDates(prisma, job.plotId);
+
     // (#180) Defensive plot-percent recompute — cascade only changes
     // dates, not statuses, so the percent shouldn't change. But if a
     // job's endDate moves across today and a downstream watcher reads

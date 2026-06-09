@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { randomBytes } from "crypto";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { createJobsFromTemplate } from "@/lib/apply-template-helpers";
+import { createJobsFromTemplate, createInspectionsFromTemplate } from "@/lib/apply-template-helpers";
 import { canAccessSite } from "@/lib/site-access";
 import { sessionHasPermission } from "@/lib/permissions";
 import { apiError } from "@/lib/api-errors";
@@ -126,7 +126,7 @@ export async function POST(request: NextRequest) {
 
   // Pull the rows scoped to whichever flavour we're applying — base
   // when no variant, the variant's own rows when one was picked.
-  const [scopedJobs, scopedMaterials, scopedDocuments] = await Promise.all([
+  const [scopedJobs, scopedMaterials, scopedDocuments, scopedInspections] = await Promise.all([
     prisma.templateJob.findMany({
       where: { templateId, variantId: resolvedVariantId, parentId: null },
       orderBy: { sortOrder: "asc" },
@@ -162,6 +162,9 @@ export async function POST(request: NextRequest) {
       where: { templateId, variantId: resolvedVariantId },
     }),
     prisma.templateDocument.findMany({
+      where: { templateId, variantId: resolvedVariantId },
+    }),
+    prisma.templateInspection.findMany({
       where: { templateId, variantId: resolvedVariantId },
     }),
   ]);
@@ -209,7 +212,7 @@ export async function POST(request: NextRequest) {
 
     // 2. Create Jobs from template/variant (handles both hierarchical and flat)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const warnings = await createJobsFromTemplate(
+    const { warnings, jobIdMap } = await createJobsFromTemplate(
       tx,
       plot.id,
       plotStartDate,
@@ -217,6 +220,12 @@ export async function POST(request: NextRequest) {
       supplierMappings || null,
       site.assignedToId
     );
+
+    // 2a. Create per-plot Inspections from the template defs, anchored to
+    // the real jobs (inside the tx — partial failure rolls the plot back).
+    if (scopedInspections.length > 0) {
+      await createInspectionsFromTemplate(tx, plot.id, scopedInspections, jobIdMap);
+    }
 
     // 2b. Copy TemplateMaterial rows → PlotMaterial (sourceType=TEMPLATE, snapshot)
     if (scopedMaterials.length > 0) {

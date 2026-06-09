@@ -3,7 +3,7 @@ import { randomBytes } from "crypto";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { templateJobsInclude } from "@/lib/template-includes";
-import { createJobsFromTemplate } from "@/lib/apply-template-helpers";
+import { createJobsFromTemplate, createInspectionsFromTemplate } from "@/lib/apply-template-helpers";
 import { canAccessSite } from "@/lib/site-access";
 import { friendlyMessage } from "@/lib/api-errors";
 import { sessionHasPermission } from "@/lib/permissions";
@@ -123,7 +123,7 @@ export async function POST(request: NextRequest) {
     };
   }
 
-  const [scopedJobs, scopedMaterials, scopedDocuments] = await Promise.all([
+  const [scopedJobs, scopedMaterials, scopedDocuments, scopedInspections] = await Promise.all([
     prisma.templateJob.findMany({
       where: { templateId, variantId: resolvedVariantId, parentId: null },
       orderBy: { sortOrder: "asc" },
@@ -159,6 +159,9 @@ export async function POST(request: NextRequest) {
       where: { templateId, variantId: resolvedVariantId },
     }),
     prisma.templateDocument.findMany({
+      where: { templateId, variantId: resolvedVariantId },
+    }),
+    prisma.templateInspection.findMany({
       where: { templateId, variantId: resolvedVariantId },
     }),
   ]);
@@ -241,7 +244,7 @@ export async function POST(request: NextRequest) {
         });
 
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const w = await createJobsFromTemplate(
+        const { warnings: w, jobIdMap } = await createJobsFromTemplate(
           tx,
           plot.id,
           perPlotStart,
@@ -249,6 +252,11 @@ export async function POST(request: NextRequest) {
           supplierMappings || null,
           site.assignedToId
         );
+
+        // Create per-plot Inspections from template defs (same tx)
+        if (scopedInspections.length > 0) {
+          await createInspectionsFromTemplate(tx, plot.id, scopedInspections, jobIdMap);
+        }
 
         // Copy TemplateMaterial rows → PlotMaterial snapshot
         if (scopedMaterials.length > 0) {

@@ -645,6 +645,9 @@ export async function POST(
   // "note", "photo") are filtered out before the call.
   if (action === "complete" || action === "start" || action === "signoff" || action === "uncomplete") {
     await recomputePlotPercent(prisma, existing.plotId);
+    // (Jun 2026) Late-complete auto-cascade can shift downstream jobs;
+    // keep their anchored inspections in lock-step.
+    await (await import("@/lib/inspection-dates")).recomputeInspectionDates(prisma, existing.plotId);
   }
 
   // (May 2026 Story pass) PLOT_COMPLETED milestone. There's no
