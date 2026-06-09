@@ -1109,6 +1109,18 @@ export function PlotDetailClient({
   const refreshPlot = useCallback(() => { router.refresh(); }, [router]);
   useRefreshOnFocus(refreshPlot);
 
+  // Inspection hold-points for this plot → ! markers on the Gantt tab.
+  const [inspections, setInspections] = useState<
+    Array<{ id: string; name: string; status: string; scheduledDate: string }>
+  >([]);
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/inspections?plotId=${plot.id}`)
+      .then(async (r) => { if (!cancelled && r.ok) setInspections(await r.json()); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [plot.id]);
+
   const jobsWithDates = plot.jobs.filter(
     (j) => j.startDate !== null || j.endDate !== null
   );
@@ -1283,7 +1295,7 @@ export function PlotDetailClient({
               </CardContent>
             </Card>
           ) : (
-            <GanttChart key={devDate ?? "live"} jobs={plot.jobs} enableDateControls />
+            <GanttChart key={devDate ?? "live"} jobs={plot.jobs} enableDateControls inspections={inspections} />
           )}
         </TabsContent>
 

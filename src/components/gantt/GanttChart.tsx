@@ -21,6 +21,8 @@ import {
 import { GanttBar } from "./GanttBar";
 import { GanttOrderFlag } from "./GanttOrderFlag";
 import { TodayMarker } from "./TodayMarker";
+import { inspectionStatusColor, inspectionStatusLabel } from "@/lib/inspection-doctype";
+import type { InspectionStatus } from "@prisma/client";
 
 interface GanttJob {
   id: string;
@@ -67,10 +69,19 @@ interface JobRow {
 
 type DisplayRow = ParentGroup | JobRow;
 
+interface GanttInspection {
+  id: string;
+  name: string;
+  status: string;
+  scheduledDate: string;
+}
+
 interface GanttChartProps {
   jobs: GanttJob[];
   /** Whether to show original/current toggle and overlay controls. Requires original dates on jobs. */
   enableDateControls?: boolean;
+  /** Inspection hold-points to flag on the timeline as ! warnings. */
+  inspections?: GanttInspection[];
 }
 
 /** Compute aggregate status from child jobs */
@@ -93,7 +104,7 @@ function computeProgress(children: GanttJob[]): number {
 /** Parent row height — same as regular row */
 const PARENT_ROW_HEIGHT = ROW_HEIGHT;
 
-export function GanttChart({ jobs, enableDateControls = false }: GanttChartProps) {
+export function GanttChart({ jobs, enableDateControls = false, inspections = [] }: GanttChartProps) {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   // Date mode: show bars using current or original dates
@@ -309,11 +320,16 @@ export function GanttChart({ jobs, enableDateControls = false }: GanttChartProps
     return result;
   }, [allRows]);
 
-  // Calculate timeline range from all jobs (include original dates when overlay is on)
-  const { timelineStart, timelineEnd } = useMemo(
-    () => getTimelineRange(allJobs, showOverlay || dateMode === "original"),
-    [allJobs, showOverlay, dateMode]
-  );
+  // Calculate timeline range from all jobs (include original dates when overlay
+  // is on). Inspection scheduledDates are folded in as zero-width pseudo-jobs so
+  // a hold-point anchored past the last job's end can't fall off the chart.
+  const { timelineStart, timelineEnd } = useMemo(() => {
+    const rangeInput = [
+      ...allJobs,
+      ...inspections.map((i) => ({ startDate: i.scheduledDate, endDate: i.scheduledDate })),
+    ];
+    return getTimelineRange(rangeInput, showOverlay || dateMode === "original");
+  }, [allJobs, inspections, showOverlay, dateMode]);
 
   // Week columns
   const weeks = useMemo(
@@ -736,6 +752,32 @@ export function GanttChart({ jobs, enableDateControls = false }: GanttChartProps
                         )}
                       </div>
                     ))}
+                  </div>
+                );
+              })}
+
+              {/* Inspection ! markers — a status-coloured vertical line down
+                  the whole chart at each inspection's scheduledDate, with an
+                  ! flag at the top. Plot-level (not row-bound) so it reads as
+                  a hold-point across every trade on that day. */}
+              {inspections.map((ins) => {
+                const d = new Date(ins.scheduledDate);
+                const left = getPositionForDate(d, timelineStart, DAY_WIDTH);
+                const colour = inspectionStatusColor(ins.status as InspectionStatus);
+                return (
+                  <div
+                    key={`insp-${ins.id}`}
+                    className="pointer-events-none absolute top-0 z-20"
+                    style={{ left: `${left}px`, height: `${totalHeight}px` }}
+                  >
+                    <div className="absolute top-0 h-full w-px opacity-60" style={{ backgroundColor: colour }} />
+                    <div
+                      title={`${ins.name} — ${inspectionStatusLabel(ins.status as InspectionStatus)} (${ins.scheduledDate.slice(0, 10)})`}
+                      className="absolute top-0 flex h-4 min-w-4 -translate-x-1/2 items-center justify-center rounded-sm px-1 text-[10px] font-bold leading-none text-white shadow"
+                      style={{ backgroundColor: colour }}
+                    >
+                      !
+                    </div>
                   </div>
                 );
               })}
