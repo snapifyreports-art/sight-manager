@@ -55,6 +55,13 @@ const EXPECTED_COLUMNS: Array<[table: string, column: string]> = [
   ["Plot", "buildBudget"],
   ["Plot", "salePrice"],
   ["EventLog", "detail"],
+  // (Jun 2026) Inspections Phase 0 — fail the deploy if the inspections
+  // migration hasn't been applied to the target DB.
+  ["TemplateInspection", "anchorTemplateJobId"],
+  ["Inspection", "scheduledDate"],
+  ["Inspection", "status"],
+  ["Snag", "inspectionId"],
+  ["NCR", "inspectionId"],
 ];
 
 async function checkSchemaColumns() {

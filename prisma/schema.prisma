@@ -50,6 +50,30 @@ enum ContactType {
   CONTRACTOR
 }
 
+/// (Jun 2026) First-class Inspections. Category groups inspections for
+/// reporting + handover-cert routing; OTHER is the escape hatch (extending
+/// a Postgres enum needs a migration, so OTHER avoids churn until a
+/// type-table is justified).
+enum InspectionType {
+  NHBC
+  BUILDING_CONTROL
+  WARRANTY_CML
+  INTERNAL_QA
+  OTHER
+}
+
+/// Inspection lifecycle. OVERDUE is a STORED status the cron transitions
+/// into (not derived) so Brief / Gantt colour / email all read one field.
+/// booking-due / week-before / day-of are ALERTS (side-channels), never
+/// states. Re-inspection re-opens FAILED → SCHEDULED.
+enum InspectionStatus {
+  SCHEDULED
+  BOOKED
+  PASSED
+  FAILED
+  OVERDUE
+}
+
 enum NotificationType {
   JOBS_STARTING_TODAY
   JOBS_OVERDUE
@@ -68,6 +92,13 @@ enum NotificationType {
   SNAG_RAISED
   DELIVERY_CONFIRMED
   JOB_MILESTONE
+  // (Jun 2026) Inspection alerts — push/email preference grid. Distinct
+  // from the EventType INSPECTION_* values (those are the immutable story
+  // audit trail; these gate notifications).
+  INSPECTION_BOOKING_DUE
+  INSPECTION_WEEK_BEFORE
+  INSPECTION_DAY_OF
+  INSPECTION_OVERDUE
 }
 
 enum SnagPriority {
@@ -118,6 +149,14 @@ enum EventType {
   HANDOVER_COMPLETED // handover checklist finished / pack generated
   PHOTO_SHARED // a photo was published to the customer
   WEATHER_IMPACT // weather affected a job/plot (rained-off, temperature)
+  // (Jun 2026) Inspection lifecycle — immutable Site Story / handover audit
+  // trail. EventLog.detail carries { inspectionId, type, scheduledDate,
+  // bookedDate?, resultDate?, certificateId?, findingIds? }.
+  INSPECTION_SCHEDULED
+  INSPECTION_BOOKED
+  INSPECTION_PASSED
+  INSPECTION_FAILED
+  INSPECTION_OVERDUE
   USER_ACTION
   NOTIFICATION
   SYSTEM
@@ -309,6 +348,7 @@ model Plot {
   voiceNotes            VoiceNote[]
   photoAnnotations      PhotoAnnotation[]
   latenessEvents        LatenessEvent[]
+  inspections           Inspection[]
 
   @@unique([siteId, plotNumber])
   @@index([siteId]) // hot path: every site page loads plots
@@ -378,6 +418,7 @@ model Job {
   snags       Snag[]
   ncrs        NCR[]
   latenessEvents LatenessEvent[]
+  anchoredInspections Inspection[] @relation("InspectionAnchorJob")
 
   @@index([plotId])       // hot: programme, daily-brief, reports join on plot
   @@index([status])       // hot: "NOT_STARTED where startDate < today" etc.
@@ -578,6 +619,7 @@ model Contact {
   documents      SiteDocument[]
   ncrs           NCR[]
   attributedLatenessEvents LatenessEvent[]
+  inspections    Inspection[] // as the assigned inspector (type CONTRACTOR)
 }
 
 // ---------- Plot Templates ----------
@@ -609,6 +651,7 @@ model PlotTemplate {
   jobs         TemplateJob[]
   materials    TemplateMaterial[]
   documents    TemplateDocument[]
+  inspections  TemplateInspection[]
   variants     TemplateVariant[]
   auditEvents  TemplateAuditEvent[]
   sourcedPlots Plot[]             @relation("PlotSourceTemplate")
@@ -640,6 +683,7 @@ model TemplateVariant {
   jobs              TemplateJob[]
   materials         TemplateMaterial[]
   documents         TemplateDocument[]
+  inspections       TemplateInspection[]
   // Legacy override tables — kept for migration, deprecated post-rework.
   jobOverrides      TemplateVariantJobOverride[]
   materialOverrides TemplateVariantMaterialOverride[]
@@ -825,8 +869,86 @@ model TemplateJob {
   orders           TemplateOrder[]
   anchoredOrders   TemplateOrder[]               @relation("OrderAnchorJob")
   variantOverrides TemplateVariantJobOverride[]
+  anchoredInspections TemplateInspection[]       @relation("TemplateInspectionAnchor")
 
   @@index([templateId, variantId])
+}
+
+// ---------- Inspections ----------
+// (Jun 2026) First-class inspections — defined on a template (mirrors the
+// Quants/TemplateMaterial "section" pattern), instantiated per-plot on
+// apply, anchored to a job so the scheduled date MOVES with that job.
+// Non-blocking to the programme; soft-gate + alerts + findings handled in
+// app code. See future-plans/inspections-feature/Inspections-Build-Plan.md.
+
+/// Template-level inspection definition (variant-scoped via nullable
+/// variantId, exactly like TemplateJob/TemplateMaterial).
+model TemplateInspection {
+  id                  String   @id @default(cuid())
+  templateId          String
+  variantId           String? // null = base template; X = that variant owns it
+  name                String // free text, e.g. "NHBC Superstructure"
+  type                InspectionType
+  description         String?
+  sortOrder           Int      @default(0)
+  // Anchor: which template job, which edge, and a signed day offset.
+  anchorTemplateJobId String
+  anchorEdge          String   @default("START") // "START" | "END"
+  offsetDays          Int      @default(0) // signed: −N before / +N after the edge
+  // "Book N weeks before the scheduled date" → drives the booking-due alert.
+  bookingLeadWeeks    Int?
+  createdAt           DateTime @default(now())
+
+  template  PlotTemplate     @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  variant   TemplateVariant? @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  anchorJob TemplateJob      @relation("TemplateInspectionAnchor", fields: [anchorTemplateJobId], references: [id], onDelete: Cascade)
+  instances Inspection[]
+
+  @@unique([templateId, variantId, name])
+  @@index([templateId, variantId])
+}
+
+/// Per-plot inspection instance. scheduledDate is DERIVED from the anchor
+/// job's date (+edge+offset) and recomputed in-transaction on every job
+/// move — denormalised cache, never an independent baseline. passedAt /
+/// failedAt are the immutable factual results (reports use these, never
+/// scheduledDate). Findings raised at sign-off link back via
+/// Snag.inspectionId / NCR.inspectionId (each finding user-classified).
+model Inspection {
+  id                       String           @id @default(cuid())
+  plotId                   String
+  sourceTemplateInspectionId String?
+  type                     InspectionType
+  name                     String
+  status                   InspectionStatus @default(SCHEDULED)
+  // SSoT anchor — the REAL Job on this plot. Nullable + SetNull so deleting
+  // the anchor job doesn't destroy the inspection record / certs / findings.
+  anchorJobId              String?
+  anchorEdge               String           @default("START")
+  offsetDays               Int              @default(0)
+  bookingLeadWeeks         Int? // snapshotted from the template at apply
+  scheduledDate            DateTime // DERIVED + denormalised (see model doc)
+  bookedDate               DateTime?
+  passedAt                 DateTime? // immutable factual result
+  failedAt                 DateTime? // immutable factual result
+  inspectorContactId       String? // a Contact (type CONTRACTOR) for now
+  certificateDocumentId    String? // SiteDocument — required (in API) to PASS
+  notes                    String?
+  createdAt                DateTime         @default(now())
+  updatedAt                DateTime         @updatedAt
+
+  plot                     Plot                @relation(fields: [plotId], references: [id], onDelete: Cascade)
+  sourceTemplateInspection TemplateInspection? @relation(fields: [sourceTemplateInspectionId], references: [id], onDelete: SetNull)
+  anchorJob                Job?                @relation("InspectionAnchorJob", fields: [anchorJobId], references: [id], onDelete: SetNull)
+  inspector                Contact?            @relation(fields: [inspectorContactId], references: [id], onDelete: SetNull)
+  certificate              SiteDocument?       @relation("InspectionCert", fields: [certificateDocumentId], references: [id], onDelete: SetNull)
+  snags                    Snag[]              @relation("InspectionSnags")
+  ncrs                     NCR[]               @relation("InspectionNCRs")
+
+  @@index([plotId])
+  @@index([status])
+  @@index([scheduledDate]) // cron range queries
+  @@index([anchorJobId]) // recompute lookup on job move
 }
 
 model TemplateOrder {
@@ -970,6 +1092,10 @@ model Snag {
   resolvedAt   DateTime?
   resolvedById String?
   notes        String?
+  // (Jun 2026) Set when this snag was raised as a finding during an
+  // inspection sign-off (user-classified Snag-or-NCR). SetNull so deleting
+  // the inspection keeps the snag in the funnel.
+  inspectionId String?
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt
 
@@ -979,6 +1105,7 @@ model Snag {
   contact    Contact?    @relation(fields: [contactId], references: [id])
   raisedBy   User        @relation("SnagRaised", fields: [raisedById], references: [id])
   resolvedBy User?       @relation("SnagResolved", fields: [resolvedById], references: [id])
+  inspection Inspection? @relation("InspectionSnags", fields: [inspectionId], references: [id], onDelete: SetNull)
   photos     SnagPhoto[]
 
   @@index([plotId])      // hot: snag lists per plot
@@ -1035,6 +1162,7 @@ model SiteDocument {
   uploadedBy      User                 @relation("UploadedDocuments", fields: [uploadedById], references: [id])
   handoverItems   HandoverChecklist[]
   complianceItems SiteComplianceItem[] @relation("ComplianceDocument")
+  inspectionCerts Inspection[]         @relation("InspectionCert")
 
   @@index([contactId])
   @@index([siteId])        // hot: site-docs list
@@ -1178,6 +1306,10 @@ model NCR {
   status            NCRStatus    @default(OPEN)
   raisedById        String?
   closedById        String?
+  // (Jun 2026) Set when raised as a finding during an inspection sign-off
+  // (user-classified Snag-or-NCR). SetNull keeps the NCR if the inspection
+  // is deleted.
+  inspectionId      String?
   raisedAt          DateTime     @default(now())
   closedAt          DateTime?
   createdAt         DateTime     @default(now())
@@ -1187,6 +1319,7 @@ model NCR {
   plot     Plot?    @relation(fields: [plotId], references: [id], onDelete: SetNull)
   job      Job?     @relation(fields: [jobId], references: [id], onDelete: SetNull)
   contact  Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  inspection Inspection? @relation("InspectionNCRs", fields: [inspectionId], references: [id], onDelete: SetNull)
 
   @@index([siteId, status])
   @@index([plotId])

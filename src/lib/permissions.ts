@@ -13,12 +13,14 @@ export const ALL_PERMISSIONS = [
   "VIEW_ANALYTICS",
   "VIEW_SETTINGS",
   "VIEW_USERS",
+  "VIEW_INSPECTIONS",
   // Actions
   "SIGN_OFF_JOBS",
   "MANAGE_ORDERS",
   "EDIT_PROGRAMME",
   "DELETE_ITEMS",
   "MANAGE_USERS",
+  "MANAGE_INSPECTIONS",
 ] as const;
 
 export type Permission = (typeof ALL_PERMISSIONS)[number];
@@ -74,6 +76,11 @@ export const PERMISSION_META: Record<
     description: "View the users page",
     group: "page",
   },
+  VIEW_INSPECTIONS: {
+    label: "Inspections",
+    description: "View the inspections page and per-site inspections",
+    group: "page",
+  },
   SIGN_OFF_JOBS: {
     label: "Sign Off Jobs",
     description: "Can sign off and complete jobs",
@@ -99,6 +106,12 @@ export const PERMISSION_META: Record<
     description: "Can create, edit, delete users and change permissions",
     group: "action",
   },
+  MANAGE_INSPECTIONS: {
+    label: "Manage Inspections",
+    description:
+      "Can book, pass/fail, reschedule and assign inspections and raise findings",
+    group: "action",
+  },
 };
 
 // --- Default permissions per role ---
@@ -122,6 +135,7 @@ export const DEFAULT_PERMISSIONS: Record<UserRole, string[]> = {
     "VIEW_ORDERS",
     "VIEW_CONTACTS",
     "VIEW_SETTINGS",
+    "VIEW_INSPECTIONS",
     "MANAGE_ORDERS",
   ],
   CONTRACTOR: ["VIEW_DASHBOARD", "VIEW_TASKS", "VIEW_SETTINGS"],
@@ -140,6 +154,7 @@ export const NAV_PERMISSION_MAP: Record<string, string> = {
   "/analytics": "VIEW_ANALYTICS",
   "/settings": "VIEW_SETTINGS",
   "/users": "VIEW_USERS",
+  "/inspections": "VIEW_INSPECTIONS",
 };
 
 // --- Utility ---
