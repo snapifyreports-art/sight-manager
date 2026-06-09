@@ -58,6 +58,7 @@ import type {
   TemplateJobData,
   TemplateOrderData,
   SupplierData,
+  TemplateInspectionData,
 } from "./types";
 import {
   UK_HOUSEBUILDING_STAGES,
@@ -162,6 +163,19 @@ export function TemplateEditor({
   const [savingMeta, setSavingMeta] = useState(false);
   const [togglingDraft, setTogglingDraft] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
+
+  // (Jun 2026) Template inspection hold-points, fetched once so both the
+  // desktop and mobile timeline previews can plot "!" markers showing
+  // WHERE each NHBC/Building-Control hold-point lands on the programme.
+  const [timelineInspections, setTimelineInspections] = useState<TemplateInspectionData[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    fetch(apiUrl("/inspections"))
+      .then(async (r) => { if (!cancelled && r.ok) setTimelineInspections(await r.json()); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [template.id, variantId]);
   const [ordersTableOpen, setOrdersTableOpen] = useState(false);
   const [contractorsTableOpen, setContractorsTableOpen] = useState(false);
 
@@ -2015,7 +2029,7 @@ export function TemplateEditor({
       {/* Mobile programme visual — read-only fit-to-width stage bars, so
           the programme can be VISUALISED on phones (the desktop Gantt is
           hidden below md). Shown above the collapsible detail summary. */}
-      <TemplateMobileTimeline template={template} />
+      <TemplateMobileTimeline template={template} inspections={timelineInspections} />
 
       {/* Mobile summary — read-only, replaces the Gantt below md. */}
       <TemplateMobileSummary template={template} />
@@ -2026,6 +2040,7 @@ export function TemplateEditor({
         <div className="hidden md:block">
           <TemplateTimeline
             jobs={template.jobs}
+            inspections={timelineInspections}
             onJobUpdate={handleTimelineJobUpdate}
             expandedJobIds={expandedJobs}
             onToggleExpand={toggleJobExpand}

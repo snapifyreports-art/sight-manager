@@ -2,7 +2,8 @@
 
 import { useState, useRef, useCallback, useMemo } from "react";
 import { ChevronRight, ChevronDown, Package } from "lucide-react";
-import type { TemplateJobData } from "./types";
+import type { TemplateJobData, TemplateInspectionData } from "./types";
+import { computeInspectionMarkers } from "./template-inspection-markers";
 import { formatWeekRange } from "@/lib/week-format";
 
 const WEEK_WIDTH = 48;
@@ -61,6 +62,8 @@ interface TimelineRow {
 
 interface TemplateTimelineProps {
   jobs: TemplateJobData[];
+  /** Template inspection hold-points — rendered as "!" markers. */
+  inspections?: TemplateInspectionData[];
   onJobUpdate?: (jobId: string, startWeek: number, endWeek: number) => void;
   expandedJobIds?: Set<string>;
   onToggleExpand?: (jobId: string) => void;
@@ -75,7 +78,7 @@ interface DragState {
   startX: number;
 }
 
-export function TemplateTimeline({ jobs, onJobUpdate, expandedJobIds, onToggleExpand, onBarClick }: TemplateTimelineProps) {
+export function TemplateTimeline({ jobs, inspections = [], onJobUpdate, expandedJobIds, onToggleExpand, onBarClick }: TemplateTimelineProps) {
   // Use external expand state if provided, otherwise fallback to internal
   const [internalExpanded, setInternalExpanded] = useState<Set<string>>(new Set());
   const effectiveExpanded = expandedJobIds ?? internalExpanded;
@@ -259,6 +262,13 @@ export function TemplateTimeline({ jobs, onJobUpdate, expandedJobIds, onToggleEx
     const week = col < preStartCols ? gridStartWeek + col : col - preStartCols + 1;
     if (week !== 0) weekHeaders.push(week);
   }
+
+  // (Jun 2026) Inspection hold-point markers — positioned at the derived
+  // marker week (anchor edge + offset→weeks), mirroring the live plot Gantt.
+  const inspectionMarkers = useMemo(
+    () => computeInspectionMarkers(jobs, inspections),
+    [jobs, inspections],
+  );
 
   // All rows use ROW_HEIGHT (collapsed group headers need bar space too)
   const rowHeights = rows.map(() => ROW_HEIGHT);
@@ -554,6 +564,26 @@ export function TemplateTimeline({ jobs, onJobUpdate, expandedJobIds, onToggleEx
                 />
               ))}
 
+              {/* (Jun 2026) Inspection "!" hold-point markers — a faint
+                  amber line down the chart at the marker week + a flag at
+                  the top, so authors see WHERE each NHBC/Building-Control
+                  hold-point lands before applying. */}
+              {inspectionMarkers.map((mk) => (
+                <div
+                  key={`insp-${mk.id}`}
+                  className="pointer-events-none absolute top-0 z-20"
+                  style={{ left: weekToLeft(mk.week) + weekPixels / 2, height: totalHeight }}
+                >
+                  <div className="absolute top-0 h-full w-px bg-amber-400/60" />
+                  <div
+                    className="pointer-events-auto absolute top-0 flex h-4 min-w-4 -translate-x-1/2 items-center justify-center rounded-sm bg-amber-500 px-1 text-[10px] font-bold leading-none text-white shadow"
+                    title={`${mk.name} — ${mk.type} · anchored ${mk.edgeLabel}`}
+                  >
+                    !
+                  </div>
+                </div>
+              ))}
+
               {/* Row backgrounds */}
               {rows.map((row, idx) => {
                 const colorSet =
@@ -790,6 +820,12 @@ export function TemplateTimeline({ jobs, onJobUpdate, expandedJobIds, onToggleEx
                 <div className="size-3 rounded-full bg-green-500 ring-2 ring-white shadow-sm" />
                 Delivery week
               </div>
+              {inspectionMarkers.length > 0 && (
+                <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                  <div className="flex size-3 items-center justify-center rounded-sm bg-amber-500 text-[8px] font-bold leading-none text-white">!</div>
+                  Inspection hold-point
+                </div>
+              )}
               {interactive && (
                 <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
                   <div className="h-3 w-0.5 rounded bg-slate-400" />

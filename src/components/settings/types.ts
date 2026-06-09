@@ -97,6 +97,17 @@ export interface TemplateAuditEventData {
   createdAt: string;
 }
 
+/** A template-level inspection hold-point, as rendered on the timeline
+ *  previews (markers) and in the TemplateExtras panel. */
+export interface TemplateInspectionData {
+  id: string;
+  name: string;
+  type: string;
+  anchorTemplateJobId: string;
+  anchorEdge: string;
+  offsetDays: number;
+}
+
 export interface TemplateData {
   id: string;
   name: string;
