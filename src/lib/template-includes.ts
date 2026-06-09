@@ -6,6 +6,27 @@
 // rows. Use `variantJobsInclude(variantId)` below for variant-scoped
 // fetches.
 
+// (Jun 2026) Inspections — base-template-scoped inspection defs, with the
+// anchor template job summarised for the editor's "anchored to" label.
+export const templateInspectionsInclude = {
+  where: { variantId: null },
+  orderBy: { sortOrder: "asc" as const },
+  include: {
+    anchorJob: { select: { id: true, name: true, startWeek: true, stageCode: true } },
+  },
+};
+
+/** Variant-scoped inspection defs (mirror of templateInspectionsInclude). */
+export function variantInspectionsInclude(variantId: string) {
+  return {
+    where: { variantId },
+    orderBy: { sortOrder: "asc" as const },
+    include: {
+      anchorJob: { select: { id: true, name: true, startWeek: true, stageCode: true } },
+    },
+  };
+}
+
 export const templateJobsInclude = {
   where: { parentId: null, variantId: null },
   orderBy: { sortOrder: "asc" as const },
