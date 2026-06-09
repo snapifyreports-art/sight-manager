@@ -661,11 +661,18 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
         });
       }
 
-      // Remove top-level parents that have been replaced by synthetic aggregates
-      // (e.g. real "Groundworks" parent replaced by synthetic "GW" from children)
+      // Remove top-level parents that have been replaced by synthetic
+      // aggregates. `grouped` is keyed by the child's `parentStage`, which is
+      // the parent's NAME — so match on name (the stageCode-only check missed
+      // every parent whose stageCode is null, leaving a duplicate parent +
+      // synthetic pair that rendered invisibly on top of each other until
+      // lane-stacking split them apart). Keep the stageCode check too for any
+      // legacy data where parentStage holds a code.
       const syntheticStages = new Set(grouped.keys());
       const filteredTopLevel = topLevel.filter(
-        (j) => !j.stageCode || !syntheticStages.has(j.stageCode)
+        (j) =>
+          !syntheticStages.has(j.name) &&
+          (!j.stageCode || !syntheticStages.has(j.stageCode)),
       );
 
       const allJobs = [...filteredTopLevel, ...synthetic].sort(
