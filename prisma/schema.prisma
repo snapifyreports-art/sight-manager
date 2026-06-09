@@ -1537,10 +1537,11 @@ model DelayReason {
 ///      `grep "eventLog\.(update|delete|deleteMany|updateMany)"` returning
 ///      empty. Anyone adding such a call MUST justify it in code review.
 ///   2. Cascade deletes via FK are allowed when the parent (Site / Plot /
-///      Job / User) is removed — `onDelete` is set deliberately. Site uses
-///      Cascade so a deleted site doesn't leave dangling logs; plot/job/
-///      user use SetNull so site-level history survives those deletions.
-///      This is the only sanctioned removal path.
+///      Job / User) is removed — `onDelete` is set deliberately. ALL of
+///      site/plot/job/user use SetNull so the audit row survives the
+///      parent's deletion (the refs just null out); the log is never
+///      cascade-removed. To purge logs you must delete them explicitly
+///      (which the append-only trigger blocks unless dropped first).
 ///   3. (May 2026 audit #74) An explicit DB-level CHECK / trigger isn't
 ///      added because Prisma is the only thing that talks to this table.
 ///      The contract is enforced at the application layer.
