@@ -804,10 +804,25 @@ export async function POST(
 
     const contractor = nextJob?.contractors?.[0]?.contact ?? null;
 
+    // (Jun 2026 Inspections soft-gate) Completing a job that still has an
+    // open hold-point anchored to it doesn't block the sign-off, but the
+    // post-completion dialog surfaces the reminder so the manager books /
+    // chases the inspection rather than walking past it.
+    const openInspections = (
+      await (await import("@/lib/inspection-softgate")).findOpenRequiredInspections(prisma, id)
+    ).map((ins) => ({
+      id: ins.id,
+      name: ins.name,
+      type: ins.type,
+      status: ins.status,
+      scheduledDate: ins.scheduledDate.toISOString(),
+    }));
+
     return NextResponse.json({
       ...job,
       _completionContext: {
         daysDeviation,
+        openInspections,
         nextJob: nextJob
           ? {
               id: nextJob.id,

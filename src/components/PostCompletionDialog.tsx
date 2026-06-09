@@ -47,6 +47,14 @@ interface NextJob {
   orders?: NextJobOrder[];
 }
 
+interface OpenInspection {
+  id: string;
+  name: string;
+  type: string;
+  status: string;
+  scheduledDate: string;
+}
+
 interface PostCompletionDialogProps {
   open: boolean;
   completedJobName: string;
@@ -54,6 +62,9 @@ interface PostCompletionDialogProps {
   nextJob: NextJob | null;
   plotId: string;
   signOffNotes?: string;
+  /** (Jun 2026) Open hold-points anchored to the just-completed job —
+   *  shown as a non-blocking reminder so the manager books / chases them. */
+  openInspections?: OpenInspection[];
   onClose: () => void;
   onDecisionMade: () => void;
 }
@@ -67,6 +78,7 @@ export function PostCompletionDialog({
   daysDeviation,
   nextJob,
   plotId,
+  openInspections,
   onClose,
   onDecisionMade,
 }: PostCompletionDialogProps) {
@@ -207,6 +219,30 @@ export function PostCompletionDialog({
           {daysDeviation === 0 && (
             <div className="mt-3 flex items-center gap-2 rounded-lg bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700">
               <Minus className="size-4 shrink-0" /> On original programme
+            </div>
+          )}
+
+          {/* (Jun 2026 soft-gate) Non-blocking reminder: this job has an
+              open inspection hold-point anchored to it. */}
+          {openInspections && openInspections.length > 0 && (
+            <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+              <div className="flex items-center gap-2 text-sm font-semibold text-amber-800">
+                <AlertTriangle className="size-4 shrink-0" />
+                {openInspections.length} inspection{openInspections.length !== 1 ? "s" : ""} still open on this job
+              </div>
+              <ul className="mt-1 space-y-0.5 text-xs text-amber-800">
+                {openInspections.map((ins) => (
+                  <li key={ins.id} className="flex items-center justify-between gap-2">
+                    <span className="min-w-0 truncate">{ins.name}</span>
+                    <span className="shrink-0 font-medium">
+                      {ins.status.toLowerCase()} · {format(new Date(ins.scheduledDate), "d MMM")}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              <a href="/inspections" className="mt-1 inline-block text-xs font-semibold text-amber-900 underline">
+                Book / record results →
+              </a>
             </div>
           )}
         </div>

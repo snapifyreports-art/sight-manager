@@ -60,6 +60,7 @@ import {
   GitBranch,
   StickyNote,
   RotateCcw,
+  ClipboardCheck,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SnagDialog } from "@/components/snags/SnagDialog";
@@ -398,6 +399,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
     nextJob: { id: string; name: string; contractorName: string | null; assignedToName: string | null } | null;
     plotId: string;
     signOffNotes?: string;
+    openInspections?: Array<{ id: string; name: string; type: string; status: string; scheduledDate: string }>;
   } | null>(null);
 
   // Contractor quick-assign state
@@ -952,6 +954,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
             daysDeviation: number;
             nextJob: { id: string; name: string; contractorName: string | null; assignedToName: string | null } | null;
             plotId: string;
+            openInspections?: Array<{ id: string; name: string; type: string; status: string; scheduledDate: string }>;
           };
         } | undefined;
         signOffPreviews.forEach((url) => URL.revokeObjectURL(url));
@@ -1512,6 +1515,50 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
             </div>
           </div>
         )}
+
+        {/* (Jun 2026 Inspections) Hold-point windows — overdue / booking-due
+            / due-today / upcoming. Same windows the cron pushes; surfaced
+            here so a manager opening the Brief sees what to book + prep.
+            Chips link to /inspections where they book / pass / fail. */}
+        {data.inspections && (() => {
+          const ins = data.inspections;
+          const total = ins.overdue.length + ins.bookingDue.length + ins.dueToday.length + ins.upcoming.length;
+          if (total === 0) return null;
+          const InspGroup = ({ label, items, tone }: { label: string; items: typeof ins.overdue; tone: string }) =>
+            items.length === 0 ? null : (
+              <div>
+                <div className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-slate-500">{label} ({items.length})</div>
+                <ul className="flex flex-wrap gap-1">
+                  {items.slice(0, 10).map((i) => (
+                    <li key={i.id}>
+                      <a
+                        href="/inspections"
+                        title={`${i.name} — ${i.type} · ${i.plotLabel} · ${format(new Date(i.scheduledDate), "d MMM")}${i.inspectorName ? ` · ${i.inspectorName}` : ""}`}
+                        className={cn("inline-block rounded border px-1.5 py-0.5 text-[11px] hover:brightness-95", tone)}
+                      >
+                        {i.plotLabel} · {i.name}
+                      </a>
+                    </li>
+                  ))}
+                  {items.length > 10 && <li className="text-[11px] text-slate-500">+{items.length - 10} more</li>}
+                </ul>
+              </div>
+            );
+          return (
+            <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50/60 p-3">
+              <div className="flex items-center gap-2 text-sm font-semibold text-amber-900">
+                <ClipboardCheck className="size-4" />
+                <span>Inspections — {total} hold-point{total === 1 ? "" : "s"} need attention</span>
+              </div>
+              <div className="space-y-2">
+                <InspGroup label="Overdue" items={ins.overdue} tone="border-red-200 bg-red-50 text-red-800" />
+                <InspGroup label="Book now" items={ins.bookingDue} tone="border-amber-300 bg-amber-100 text-amber-900" />
+                <InspGroup label="Due today" items={ins.dueToday} tone="border-blue-200 bg-blue-50 text-blue-800" />
+                <InspGroup label="Next 7 days" items={ins.upcoming} tone="border-slate-200 bg-white text-slate-700" />
+              </div>
+            </div>
+          );
+        })()}
       </div>
 
       {/* Summary pills — Keith May 2026: hide zero-count pills so the
@@ -2937,6 +2984,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
         nextJob={completionContext?.nextJob ?? null}
         plotId={completionContext?.plotId ?? ""}
         signOffNotes={completionContext?.signOffNotes}
+        openInspections={completionContext?.openInspections ?? []}
         onClose={() => setCompletionContext(null)}
         onDecisionMade={() => setRefreshKey((k) => k + 1)}
       />

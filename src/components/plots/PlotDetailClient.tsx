@@ -911,6 +911,7 @@ function PlotOverview({
         daysDeviation={completionContext?.daysDeviation ?? 0}
         nextJob={completionContext?.nextJob ?? null}
         plotId={completionContext?.plotId ?? plot.id}
+        openInspections={completionContext?.openInspections ?? []}
         onClose={() => setCompletionContext(null)}
         onDecisionMade={() => { setCompletionContext(null); forceRefresh(); }}
       />

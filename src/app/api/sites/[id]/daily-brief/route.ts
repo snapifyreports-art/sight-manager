@@ -775,6 +775,59 @@ export async function GET(
     }
   }
 
+  // (Jun 2026 Inspections) Daily-brief hold-point section. The cron
+  // pushes notifications; the Brief itself surfaces the same windows so a
+  // manager opening it sees what to book / prep / chase. Buckets:
+  // overdue, due today, upcoming (next 7 days), booking-due (now within
+  // the lead window and not yet booked).
+  const briefInspections = await prisma.inspection.findMany({
+    where: {
+      plot: { siteId: id },
+      status: { in: ["SCHEDULED", "BOOKED", "OVERDUE"] },
+    },
+    orderBy: { scheduledDate: "asc" },
+    select: {
+      id: true,
+      name: true,
+      type: true,
+      status: true,
+      scheduledDate: true,
+      bookedDate: true,
+      bookingLeadWeeks: true,
+      plotId: true,
+      plot: { select: { plotNumber: true, name: true } },
+      inspector: { select: { name: true, company: true } },
+    },
+  });
+  const inspWeekAhead = addDays(dayStart, 7);
+  const inspTomorrowStart = addDays(dayStart, 1);
+  const mapInsp = (i: (typeof briefInspections)[number]) => ({
+    id: i.id,
+    name: i.name,
+    type: i.type,
+    status: i.status,
+    scheduledDate: i.scheduledDate.toISOString(),
+    bookedDate: i.bookedDate?.toISOString() ?? null,
+    plotId: i.plotId,
+    plotLabel: i.plot.plotNumber ? `Plot ${i.plot.plotNumber}` : i.plot.name,
+    inspectorName: i.inspector?.name ?? null,
+  });
+  const inspOverdue = briefInspections.filter((i) => i.status === "OVERDUE").map(mapInsp);
+  const inspDueToday = briefInspections
+    .filter((i) => i.status !== "OVERDUE" && i.scheduledDate >= dayStart && i.scheduledDate < inspTomorrowStart)
+    .map(mapInsp);
+  const inspUpcoming = briefInspections
+    .filter((i) => i.status !== "OVERDUE" && i.scheduledDate >= inspTomorrowStart && i.scheduledDate < inspWeekAhead)
+    .map(mapInsp);
+  // Booking-due: not yet booked, lead window has opened (scheduledDate − lead ≤ today).
+  const inspBookingDue = briefInspections
+    .filter((i) => {
+      if (i.status !== "SCHEDULED" || i.bookingLeadWeeks == null) return false;
+      const dueBy = addDays(i.scheduledDate, -i.bookingLeadWeeks * 7);
+      return dueBy <= dayStart;
+    })
+    .map(mapInsp);
+
   return NextResponse.json({
     site,
     date: dayStart.toISOString(),
@@ -795,6 +848,9 @@ export async function GET(
       pendingSignOffCount: pendingSignOffs.length,
       upcomingDeliveryCount: upcomingDeliveries.length,
       awaitingSignOffCount: awaitingSignOff.length,
+      inspectionOverdueCount: inspOverdue.length,
+      inspectionBookingDueCount: inspBookingDue.length,
+      inspectionUpcomingCount: inspDueToday.length + inspUpcoming.length,
     },
     jobsStartingToday: jobsStartingToday.map((j) => {
       const orders = j.orders ?? [];
@@ -886,5 +942,11 @@ export async function GET(
     })),
     weather,
     weatherAtRisk,
+    inspections: {
+      overdue: inspOverdue,
+      dueToday: inspDueToday,
+      upcoming: inspUpcoming,
+      bookingDue: inspBookingDue,
+    },
   });
 }

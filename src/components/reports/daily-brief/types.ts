@@ -33,6 +33,9 @@ export interface BriefData {
     openSnagCount: number;
     inactivePlotCount: number;
     pendingSignOffCount?: number;
+    inspectionOverdueCount?: number;
+    inspectionBookingDueCount?: number;
+    inspectionUpcomingCount?: number;
   };
   inactivePlots?: Array<{
     id: string;
@@ -341,6 +344,29 @@ export interface BriefData {
       contact: { id: string; name: string; company: string | null };
     }>;
   }>;
+  /**
+   * (Jun 2026 Inspections) Hold-point windows for the Brief — overdue,
+   * due today, upcoming (next 7 days) and booking-due (lead window open,
+   * not yet booked). Mirrors the cron's alert windows.
+   */
+  inspections?: {
+    overdue: BriefInspection[];
+    dueToday: BriefInspection[];
+    upcoming: BriefInspection[];
+    bookingDue: BriefInspection[];
+  };
+}
+
+export interface BriefInspection {
+  id: string;
+  name: string;
+  type: string;
+  status: string;
+  scheduledDate: string;
+  bookedDate: string | null;
+  plotId: string;
+  plotLabel: string;
+  inspectorName: string | null;
 }
 
 /**
