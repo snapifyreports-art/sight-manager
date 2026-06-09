@@ -50,6 +50,7 @@ import { TemplateValidationPanel } from "./TemplateValidationPanel";
 import { TemplateCostFooter } from "./TemplateCostFooter";
 import { ApplyTemplatePreview } from "./ApplyTemplatePreview";
 import { TemplateMobileSummary } from "./TemplateMobileSummary";
+import { TemplateMobileTimeline } from "./TemplateMobileTimeline";
 import { TemplateOrdersTableDialog } from "./TemplateOrdersTableDialog";
 import { TemplateContractorsTableDialog } from "./TemplateContractorsTableDialog";
 import type {
@@ -2010,6 +2011,11 @@ export function TemplateEditor({
           );
         }}
       />
+
+      {/* Mobile programme visual — read-only fit-to-width stage bars, so
+          the programme can be VISUALISED on phones (the desktop Gantt is
+          hidden below md). Shown above the collapsible detail summary. */}
+      <TemplateMobileTimeline template={template} />
 
       {/* Mobile summary — read-only, replaces the Gantt below md. */}
       <TemplateMobileSummary template={template} />
