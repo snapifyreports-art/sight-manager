@@ -32,6 +32,7 @@ export async function GET(
     orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
     include: {
       anchorJob: { select: { id: true, name: true, stageCode: true } },
+      defaultInspector: { select: { id: true, name: true } },
     },
   });
   return NextResponse.json(inspections);
@@ -69,6 +70,7 @@ export async function POST(
     offsetDays,
     bookingLeadWeeks,
     sortOrder,
+    defaultInspectorContactId,
   } = body;
 
   if (!name || typeof name !== "string") {
@@ -107,8 +109,12 @@ export async function POST(
         bookingLeadWeeks:
           typeof bookingLeadWeeks === "number" ? Math.trunc(bookingLeadWeeks) : null,
         sortOrder: typeof sortOrder === "number" ? sortOrder : 0,
+        defaultInspectorContactId: defaultInspectorContactId || null,
       },
-      include: { anchorJob: { select: { id: true, name: true, stageCode: true } } },
+      include: {
+        anchorJob: { select: { id: true, name: true, stageCode: true } },
+        defaultInspector: { select: { id: true, name: true } },
+      },
     });
 
     await prisma.templateAuditEvent

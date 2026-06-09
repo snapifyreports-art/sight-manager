@@ -22,6 +22,7 @@ import { differenceInWorkingDays } from "@/lib/working-days";
 import { Loader2, Columns3, ChevronRight, Download, FileText, Search, X, Camera, StickyNote, CalendarDays, Calendar, Layers, List, CheckSquare, Check, Clock, ZoomIn, ZoomOut, Maximize2, Minimize2, Play } from "lucide-react";
 import Link from "next/link";
 import { getStageCode, getStageColor } from "@/lib/stage-codes";
+import { inspectionStatusColor } from "@/lib/inspection-doctype";
 import { getCurrentStage } from "@/lib/plot-stage";
 import { deriveAggregateStatus } from "@/lib/parent-job";
 import type { JobStatus } from "@prisma/client";
@@ -142,6 +143,27 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
 
   // Schedule status per plot (traffic lights)
   const [scheduleStatuses, setScheduleStatuses] = useState<Record<string, { status: string; daysDeviation: number; awaitingRestart: boolean }>>({});
+
+  // (Jun 2026) Inspections per plot → the ! warning markers on the grid.
+  const [inspections, setInspections] = useState<
+    Array<{ id: string; name: string; type: string; status: string; scheduledDate: string; plotId: string }>
+  >([]);
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/inspections?siteId=${siteId}`)
+      .then(async (r) => { if (!cancelled && r.ok) setInspections(await r.json()); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [siteId]);
+  const inspectionsByPlot = useMemo(() => {
+    const m = new Map<string, typeof inspections>();
+    for (const i of inspections) {
+      const a = m.get(i.plotId) ?? [];
+      a.push(i);
+      m.set(i.plotId, a);
+    }
+    return m;
+  }, [inspections]);
 
   useEffect(() => {
     // (May 2026 pattern sweep) Guard with .ok + cancellation flag.
@@ -2085,6 +2107,42 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                               <div className="size-2 rounded-full bg-teal-500" />
                             </button>
                           )}
+                        </div>
+                      </div>
+                    );
+                  });
+                })}
+
+                {/* Inspection ! warning markers — top strip of the plot
+                    row at each inspection's scheduledDate. Status-coloured
+                    so the site manager sees "prep needed" at a glance.
+                    Top strip so it never collides with the bottom order dots. */}
+                {processedPlots.map((plot, plotIndex) => {
+                  const plotInsps = inspectionsByPlot.get(plot.id) ?? [];
+                  if (plotInsps.length === 0) return null;
+                  return columns.map((col, colIdx) => {
+                    const colDateStr = format(col.date, "yyyy-MM-dd");
+                    const colEndStr = format(col.endDate, "yyyy-MM-dd");
+                    const inCell = plotInsps.filter((ins) => {
+                      const ds = ins.scheduledDate.slice(0, 10);
+                      return ds >= colDateStr && ds < colEndStr;
+                    });
+                    if (inCell.length === 0) return null;
+                    const colour = inspectionStatusColor(
+                      inCell[0].status as Parameters<typeof inspectionStatusColor>[0],
+                    );
+                    return (
+                      <div
+                        key={`insp-${plot.id}-${col.key}`}
+                        className="pointer-events-none absolute"
+                        style={{ left: colIdx * cellWidth, top: plotIndex * effectiveRowHeight, width: cellWidth, height: ROW_HEIGHT }}
+                      >
+                        <div
+                          title={inCell.map((i) => `${i.name} — ${i.status.toLowerCase()} (${format(new Date(i.scheduledDate), "d MMM")})`).join("\n")}
+                          className="absolute left-1/2 top-0 flex h-4 min-w-4 -translate-x-1/2 items-center justify-center rounded-sm px-0.5 text-[10px] font-bold leading-none text-white shadow"
+                          style={{ backgroundColor: colour }}
+                        >
+                          !{inCell.length > 1 ? inCell.length : ""}
                         </div>
                       </div>
                     );

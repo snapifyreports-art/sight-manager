@@ -41,7 +41,7 @@ export async function PUT(
   }
 
   const body = await req.json();
-  const { name, type, description, anchorTemplateJobId, anchorEdge, offsetDays, bookingLeadWeeks, sortOrder } = body;
+  const { name, type, description, anchorTemplateJobId, anchorEdge, offsetDays, bookingLeadWeeks, sortOrder, defaultInspectorContactId } = body;
 
   if (type !== undefined && !VALID_TYPES.includes(type)) {
     return NextResponse.json({ error: "type must be a valid InspectionType" }, { status: 400 });
@@ -79,8 +79,14 @@ export async function PUT(
           ? { bookingLeadWeeks: bookingLeadWeeks === null ? null : Math.trunc(Number(bookingLeadWeeks)) }
           : {}),
         ...(sortOrder !== undefined ? { sortOrder: Number(sortOrder) || 0 } : {}),
+        ...(defaultInspectorContactId !== undefined
+          ? { defaultInspectorContactId: defaultInspectorContactId || null }
+          : {}),
       },
-      include: { anchorJob: { select: { id: true, name: true, stageCode: true } } },
+      include: {
+        anchorJob: { select: { id: true, name: true, stageCode: true } },
+        defaultInspector: { select: { id: true, name: true } },
+      },
     });
 
     await prisma.templateAuditEvent

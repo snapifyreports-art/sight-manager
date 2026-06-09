@@ -54,6 +54,12 @@ interface TemplateInspectionRow {
   bookingLeadWeeks: number | null;
   sortOrder: number;
   anchorJob: { id: string; name: string; stageCode: string | null } | null;
+  defaultInspectorContactId: string | null;
+  defaultInspector: { id: string; name: string } | null;
+}
+interface ContactOption {
+  id: string;
+  name: string;
 }
 interface AnchorJobRow {
   id: string;
@@ -88,6 +94,7 @@ export function TemplateExtras({
   const [documents, setDocuments] = useState<TemplateDocument[]>([]);
   const [inspections, setInspections] = useState<TemplateInspectionRow[]>([]);
   const [anchorJobs, setAnchorJobs] = useState<AnchorJobRow[]>([]);
+  const [contacts, setContacts] = useState<ContactOption[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Inspection add dialog
@@ -98,6 +105,7 @@ export function TemplateExtras({
   const [iAnchorEdge, setIAnchorEdge] = useState<"START" | "END">("END");
   const [iOffsetDays, setIOffsetDays] = useState("0");
   const [iBookingLeadWeeks, setIBookingLeadWeeks] = useState("");
+  const [iInspectorId, setIInspectorId] = useState("");
   const [iSubmitting, setISubmitting] = useState(false);
 
   // Material add dialog
@@ -126,16 +134,23 @@ export function TemplateExtras({
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [mRes, dRes, iRes, jRes] = await Promise.all([
+    const [mRes, dRes, iRes, jRes, cRes] = await Promise.all([
       fetch(`/api/plot-templates/${templateId}/materials${variantQ}`),
       fetch(`/api/plot-templates/${templateId}/documents${variantQ}`),
       fetch(`/api/plot-templates/${templateId}/inspections${variantQ}`),
       fetch(`/api/plot-templates/${templateId}/jobs${variantQ}`),
+      fetch(`/api/contacts`),
     ]);
     if (mRes.ok) setMaterials(await mRes.json());
     if (dRes.ok) setDocuments(await dRes.json());
     if (iRes.ok) setInspections(await iRes.json());
     if (jRes.ok) setAnchorJobs(await jRes.json());
+    if (cRes.ok) {
+      const all = await cRes.json();
+      setContacts(
+        (Array.isArray(all) ? all : []).map((c: { id: string; name: string }) => ({ id: c.id, name: c.name })),
+      );
+    }
     setLoading(false);
   }, [templateId, variantQ]);
 
@@ -148,7 +163,8 @@ export function TemplateExtras({
       fetch(`/api/plot-templates/${templateId}/documents${variantQ}`),
       fetch(`/api/plot-templates/${templateId}/inspections${variantQ}`),
       fetch(`/api/plot-templates/${templateId}/jobs${variantQ}`),
-    ]).then(async ([mRes, dRes, iRes, jRes]) => {
+      fetch(`/api/contacts`),
+    ]).then(async ([mRes, dRes, iRes, jRes, cRes]) => {
       if (cancelled) return;
       if (mRes.ok) setMaterials(await mRes.json());
       if (cancelled) return;
@@ -157,6 +173,13 @@ export function TemplateExtras({
       if (iRes.ok) setInspections(await iRes.json());
       if (cancelled) return;
       if (jRes.ok) setAnchorJobs(await jRes.json());
+      if (cancelled) return;
+      if (cRes.ok) {
+        const all = await cRes.json();
+        setContacts(
+          (Array.isArray(all) ? all : []).map((c: { id: string; name: string }) => ({ id: c.id, name: c.name })),
+        );
+      }
     }).finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [templateId, variantQ]);
@@ -250,6 +273,7 @@ export function TemplateExtras({
           anchorEdge: iAnchorEdge,
           offsetDays: Number(iOffsetDays) || 0,
           bookingLeadWeeks: iBookingLeadWeeks ? Number(iBookingLeadWeeks) : null,
+          defaultInspectorContactId: iInspectorId || null,
         }),
       });
       if (!res.ok) {
@@ -257,7 +281,7 @@ export function TemplateExtras({
         return;
       }
       setIOpen(false);
-      setIName(""); setIAnchorJobId(""); setIOffsetDays("0"); setIBookingLeadWeeks("");
+      setIName(""); setIAnchorJobId(""); setIOffsetDays("0"); setIBookingLeadWeeks(""); setIInspectorId("");
       load();
     } finally { setISubmitting(false); }
   }
@@ -552,6 +576,7 @@ export function TemplateExtras({
                   <th className="px-3 py-1.5 text-left">Name</th>
                   <th className="px-3 py-1.5 text-left">Type</th>
                   <th className="px-3 py-1.5 text-left">Anchored to</th>
+                  <th className="px-3 py-1.5 text-left">Inspector</th>
                   <th className="px-3 py-1.5 text-left">Book ahead</th>
                   <th className="px-3 py-1.5"></th>
                 </tr>
@@ -568,6 +593,7 @@ export function TemplateExtras({
                         {ins.offsetDays ? ` ${ins.offsetDays > 0 ? "+" : ""}${ins.offsetDays}d` : ""}
                       </span>
                     </td>
+                    <td className="px-3 py-1.5 text-muted-foreground">{ins.defaultInspector?.name ?? "—"}</td>
                     <td className="px-3 py-1.5 text-muted-foreground">{ins.bookingLeadWeeks ? `${ins.bookingLeadWeeks} wk` : "—"}</td>
                     <td className="px-3 py-1.5 text-right">
                       <button onClick={() => deleteInspection(ins.id)} className="text-muted-foreground hover:text-destructive">
@@ -748,14 +774,27 @@ export function TemplateExtras({
               <Label>Offset (working days ±)</Label>
               <Input type="number" value={iOffsetDays} onChange={(e) => setIOffsetDays(e.target.value)} placeholder="0" />
             </div>
-            <div className="col-span-2">
+            <div>
               <Label>Book ahead (weeks, optional)</Label>
               <Input
                 type="number"
                 value={iBookingLeadWeeks}
                 onChange={(e) => setIBookingLeadWeeks(e.target.value)}
-                placeholder="e.g. 2 — alerts the manager to book 2 wks before"
+                placeholder="e.g. 2"
               />
+            </div>
+            <div>
+              <Label>Default inspector (optional)</Label>
+              <select
+                value={iInspectorId}
+                onChange={(e) => setIInspectorId(e.target.value)}
+                className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm"
+              >
+                <option value="">Unassigned</option>
+                {contacts.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
             </div>
           </div>
           <DialogFooter>
