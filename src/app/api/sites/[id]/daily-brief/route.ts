@@ -11,6 +11,7 @@ import {
   whereOrderOverdue,
 } from "@/lib/lateness";
 import { whereOrdersForSite } from "@/lib/order-scope";
+import { sessionHasPermission } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -780,7 +781,14 @@ export async function GET(
   // manager opening it sees what to book / prep / chase. Buckets:
   // overdue, due today, upcoming (next 7 days), booking-due (now within
   // the lead window and not yet booked).
-  const briefInspections = await prisma.inspection.findMany({
+  // (Jun 2026 audit fix) Inspection data is gated on VIEW_INSPECTIONS —
+  // a CONTRACTOR with site access but no inspections permission must not
+  // see hold-point details on the Brief (matches the /inspections gate).
+  const canViewInspections = sessionHasPermission(
+    session.user as { role?: string; permissions?: string[] },
+    "VIEW_INSPECTIONS",
+  );
+  const briefInspections = canViewInspections ? await prisma.inspection.findMany({
     where: {
       plot: { siteId: id },
       status: { in: ["SCHEDULED", "BOOKED", "OVERDUE"] },
@@ -798,7 +806,7 @@ export async function GET(
       plot: { select: { plotNumber: true, name: true } },
       inspector: { select: { name: true, company: true } },
     },
-  });
+  }) : [];
   const inspWeekAhead = addDays(dayStart, 7);
   const inspTomorrowStart = addDays(dayStart, 1);
   const mapInsp = (i: (typeof briefInspections)[number]) => ({

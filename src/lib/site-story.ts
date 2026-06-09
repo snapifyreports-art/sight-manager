@@ -1194,10 +1194,15 @@ export async function buildSiteStory(
     inspectionByPlot.set(ins.plotId, c);
   }
   // Recent feed = most-recently-resolved first, falling back to scheduled.
+  // (Jun 2026 audit fix) "Recent" must show genuinely-recent RESULTS, not
+  // future-dated SCHEDULED rows. Resolved (passed/failed) sort by their
+  // result date, newest first; unresolved rows fall to the bottom (key 0)
+  // so a SCHEDULED inspection months out can't outrank a result from
+  // yesterday.
   const recentInspections = [...inspectionRows]
     .sort((a, b) => {
-      const ad = (a.passedAt ?? a.failedAt ?? a.scheduledDate).getTime();
-      const bd = (b.passedAt ?? b.failedAt ?? b.scheduledDate).getTime();
+      const ad = (a.passedAt ?? a.failedAt)?.getTime() ?? 0;
+      const bd = (b.passedAt ?? b.failedAt)?.getTime() ?? 0;
       return bd - ad;
     })
     .slice(0, 12)

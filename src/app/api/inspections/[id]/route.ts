@@ -14,6 +14,11 @@ export async function GET(
 ) {
   const session = await auth();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // (Jun 2026 audit fix) Match the list route — VIEW_INSPECTIONS is the
+  // boundary for all inspection detail, not just the list.
+  if (!sessionHasPermission(session.user as { role?: string; permissions?: string[] }, "VIEW_INSPECTIONS")) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
 
   const { id } = await params;
   const insp = await prisma.inspection.findUnique({

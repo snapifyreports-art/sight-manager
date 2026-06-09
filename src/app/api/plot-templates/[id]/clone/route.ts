@@ -61,6 +61,7 @@ export async function POST(
         },
         materials: { where: { variantId: null } },
         documents: { where: { variantId: null } },
+        inspections: { where: { variantId: null } },
       },
     });
     if (!source) return NextResponse.json({ error: "Template not found" }, { status: 404 });
@@ -192,6 +193,28 @@ export async function POST(
           category: d.category,
           isPlaceholder: true,
         })),
+      });
+    }
+
+    // Inspections (Jun 2026 audit fix — were silently dropped, so a
+    // cloned template lost every statutory/QA hold-point). Remap each
+    // anchor via jobIdMap; skip any whose anchor didn't clone.
+    for (const ins of source.inspections) {
+      const newAnchorId = jobIdMap.get(ins.anchorTemplateJobId);
+      if (!newAnchorId) continue;
+      await prisma.templateInspection.create({
+        data: {
+          templateId: clone.id,
+          name: ins.name,
+          type: ins.type,
+          description: ins.description,
+          sortOrder: ins.sortOrder,
+          anchorTemplateJobId: newAnchorId,
+          anchorEdge: ins.anchorEdge,
+          offsetDays: ins.offsetDays,
+          bookingLeadWeeks: ins.bookingLeadWeeks,
+          defaultInspectorContactId: ins.defaultInspectorContactId,
+        },
       });
     }
 

@@ -1005,6 +1005,7 @@ export function renderReadmeTxt(
     lines.push(`    ${f}/`);
     lines.push("        plot-story.pdf");
     lines.push("        snag-log.pdf");
+    lines.push("        inspection-log.txt     (statutory + QA hold-point register, when inspections exist)");
     lines.push("        ncr-log.pdf            (when NCRs recorded)");
     lines.push("        defect-log.pdf         (when warranty defects recorded)");
     lines.push("        variation-log.pdf      (when variations recorded)");

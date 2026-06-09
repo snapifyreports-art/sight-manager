@@ -20,6 +20,7 @@ import {
   Package,
   Camera,
   Flag,
+  ClipboardCheck,
 } from "lucide-react";
 import { format } from "date-fns";
 import { LatenessSummary } from "@/components/lateness/LatenessSummary";
@@ -117,6 +118,11 @@ interface StoryData {
     preStartChecked?: number;
     voiceNoteCount?: number;
     photoAnnotationCount?: number;
+    inspectionTotal?: number;
+    inspectionsPassed?: number;
+    inspectionsFailed?: number;
+    inspectionsOpen?: number;
+    inspectionsOverdue?: number;
     highlights: Array<{
       date: string;
       type: string;
@@ -1163,6 +1169,21 @@ export function SiteStoryPanel({ siteId }: { siteId: string }) {
                       {p.journalEntryCount > 0 && (
                         <span>{p.journalEntryCount} updates</span>
                       )}
+                      {(p.inspectionTotal ?? 0) > 0 && (
+                        <span
+                          className={
+                            (p.inspectionsFailed ?? 0) > 0
+                              ? "font-medium text-red-600"
+                              : (p.inspectionsOverdue ?? 0) > 0
+                                ? "font-medium text-amber-600"
+                                : undefined
+                          }
+                        >
+                          {p.inspectionsPassed ?? 0}/{p.inspectionTotal} inspections
+                          {(p.inspectionsFailed ?? 0) > 0 && ` · ${p.inspectionsFailed} failed`}
+                          {(p.inspectionsOverdue ?? 0) > 0 && ` · ${p.inspectionsOverdue} overdue`}
+                        </span>
+                      )}
                     </div>
                   </div>
                   <PlotStatusPill status={p.status} />
@@ -1431,6 +1452,13 @@ function HighlightRow({
     LATENESS: { Icon: AlertCircle, color: "text-amber-600" },
     WEATHER: { Icon: CloudRain, color: "text-sky-500" },
     MILESTONE: { Icon: Flag, color: "text-emerald-600" },
+    // (Jun 2026 audit fix) Inspection pass/fail had no icon → fell back to
+    // a grey clock, indistinguishable from a delay. Green when it reads
+    // "passed", red when "failed".
+    INSPECTION: {
+      Icon: ClipboardCheck,
+      color: /fail/i.test(highlight.description) ? "text-red-600" : "text-violet-600",
+    },
   };
   const { Icon, color } = STYLE[highlight.type] ?? {
     Icon: Clock,

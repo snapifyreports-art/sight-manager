@@ -84,6 +84,25 @@ const NOTIFICATION_TYPE_META: Record<
     label: "Job Milestones",
     description: "When a job is started, completed, or signed off. The three actions that move a plot forward — note edits and stops aren't included to keep this quiet.",
   },
+  // (Jun 2026 audit fix) Inspection hold-point alerts. Without these
+  // entries the four INSPECTION_* preference rows were silently dropped
+  // from the settings grid, so a manager had no way to mute them.
+  INSPECTION_BOOKING_DUE: {
+    label: "Inspection — Book Now",
+    description: "Reminder to book a statutory or QA inspection — the booking lead-time window has opened.",
+  },
+  INSPECTION_WEEK_BEFORE: {
+    label: "Inspection — Next Week",
+    description: "A hold-point inspection (NHBC / Building Control / warranty) is due in 7 days — time for final checks.",
+  },
+  INSPECTION_DAY_OF: {
+    label: "Inspection — Today",
+    description: "A hold-point inspection is scheduled today.",
+  },
+  INSPECTION_OVERDUE: {
+    label: "Inspection — Overdue",
+    description: "A hold-point inspection passed its scheduled date without a recorded result.",
+  },
 };
 
 interface Preference {

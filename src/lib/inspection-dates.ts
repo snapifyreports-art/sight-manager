@@ -74,6 +74,7 @@ export function computeTemplateInspectionDates(
 export async function recomputeInspectionDates(
   db: Db,
   plotId: string,
+  today?: Date,
 ): Promise<number> {
   const inspections = await db.inspection.findMany({
     where: {
@@ -81,9 +82,26 @@ export async function recomputeInspectionDates(
       anchorJobId: { not: null },
       status: { in: ["SCHEDULED", "BOOKED", "OVERDUE"] },
     },
-    select: { id: true, anchorJobId: true, anchorEdge: true, offsetDays: true, scheduledDate: true },
+    select: {
+      id: true,
+      anchorJobId: true,
+      anchorEdge: true,
+      offsetDays: true,
+      scheduledDate: true,
+      status: true,
+      bookedDate: true,
+    },
   });
   if (inspections.length === 0) return 0;
+
+  // Start-of-day "today" so an OVERDUE inspection whose anchor moved to
+  // *today* doesn't bounce. Caller may pass a server/dev date; otherwise
+  // use real now (dev-date testing aside, callers in a tx have one).
+  const todayStart = (() => {
+    const d = today ? new Date(today) : new Date();
+    d.setHours(0, 0, 0, 0);
+    return d;
+  })();
 
   const jobIds = Array.from(
     new Set(inspections.map((i) => i.anchorJobId).filter((v): v is string => !!v)),
@@ -104,8 +122,21 @@ export async function recomputeInspectionDates(
       insp.offsetDays,
     );
     if (!next) continue;
-    if (next.getTime() === new Date(insp.scheduledDate).getTime()) continue; // no change
-    await db.inspection.update({ where: { id: insp.id }, data: { scheduledDate: next } });
+
+    const dateChanged = next.getTime() !== new Date(insp.scheduledDate).getTime();
+    // (Jun 2026 audit fix) An OVERDUE inspection whose anchor job is
+    // delayed so its new scheduled date is today or later is no longer
+    // overdue — un-flip it (back to BOOKED if a booking was held, else
+    // SCHEDULED). Without this it stays OVERDUE forever and the Brief +
+    // cron keep nagging about an inspection that's actually weeks away.
+    const unflip = insp.status === "OVERDUE" && next.getTime() >= todayStart.getTime();
+    if (!dateChanged && !unflip) continue; // nothing to do
+
+    const data: { scheduledDate: Date; status?: "SCHEDULED" | "BOOKED" } = {
+      scheduledDate: next,
+    };
+    if (unflip) data.status = insp.bookedDate ? "BOOKED" : "SCHEDULED";
+    await db.inspection.update({ where: { id: insp.id }, data });
     updated++;
   }
   return updated;

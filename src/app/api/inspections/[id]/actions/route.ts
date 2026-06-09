@@ -6,6 +6,7 @@ import { sessionHasPermission } from "@/lib/permissions";
 import { canAccessSite } from "@/lib/site-access";
 import { logEvent } from "@/lib/event-log";
 import { handoverDocTypeForInspection } from "@/lib/inspection-doctype";
+import { computeInspectionScheduledDate } from "@/lib/inspection-dates";
 
 export const dynamic = "force-dynamic";
 
@@ -34,7 +35,7 @@ export async function POST(
     where: { id },
     include: {
       plot: { select: { id: true, siteId: true } },
-      anchorJob: { select: { id: true, contractors: { select: { contactId: true }, take: 1 } } },
+      anchorJob: { select: { id: true, startDate: true, endDate: true, contractors: { select: { contactId: true }, take: 1 } } },
     },
   });
   if (!insp) return NextResponse.json({ error: "Inspection not found" }, { status: 404 });
@@ -48,16 +49,22 @@ export async function POST(
   // Shared: create findings (snags / NCRs), each linked to this inspection.
   async function createFindings(tx: typeof prisma, findings: Finding[]) {
     let snags = 0, ncrs = 0;
+    // (Jun 2026 audit fix) NCRs raised from inspection findings must get a
+    // sequential NCR-NNN ref like manually-raised ones, else the formal QA
+    // register shows a raw cuid fragment. Seed the counter once, increment.
+    let ncrSeq = await tx.nCR.count({ where: { siteId: insp!.plot.siteId } });
     for (const f of findings) {
       if (!f.description?.trim()) continue;
       const contactId = f.contactId !== undefined ? f.contactId : defaultContactId;
       if (f.kind === "NCR") {
+        ncrSeq += 1;
         await tx.nCR.create({
           data: {
             siteId: insp!.plot.siteId,
             plotId: insp!.plotId,
             jobId: insp!.anchorJobId,
             contactId,
+            ref: `NCR-${String(ncrSeq).padStart(3, "0")}`,
             title: `${insp!.name}: ${f.description.trim().slice(0, 80)}`,
             description: f.description.trim(),
             status: "OPEN",
@@ -102,12 +109,30 @@ export async function POST(
       if (!certId) {
         return NextResponse.json({ error: "A certificate must be attached before passing" }, { status: 400 });
       }
+      // (Jun 2026 audit fix) The certificate must be a document on THIS
+      // site — otherwise a wrong-site/plot doc could satisfy a statutory
+      // hold-point and the file would be missing from the plot's handover
+      // folder. A plot-scoped cert (plotId === this plot) is ideal; a
+      // site-level one is allowed but the ZIP loop only bundles plot docs.
+      const certDoc = await prisma.siteDocument.findUnique({
+        where: { id: certId },
+        select: { siteId: true, plotId: true },
+      });
+      if (!certDoc || certDoc.siteId !== insp.plot.siteId) {
+        return NextResponse.json(
+          { error: "The certificate document must belong to this site" },
+          { status: 400 },
+        );
+      }
       const passDate = body.passDate ? new Date(body.passDate) : new Date();
       const docType = handoverDocTypeForInspection(insp.type);
       const result = await prisma.$transaction(async (tx) => {
         await tx.inspection.update({
           where: { id },
-          data: { status: "PASSED", passedAt: passDate, certificateDocumentId: certId },
+          // Clear failedAt defensively: a FAILED→reinspect→PASS row must
+          // not carry both result timestamps (status is the SSoT but
+          // exports that read failedAt would mis-classify it).
+          data: { status: "PASSED", passedAt: passDate, failedAt: null, certificateDocumentId: certId },
         });
         // Handover tick is a CONFIRMED choice (tickHandover), never automatic.
         if (body.tickHandover && docType) {
@@ -149,9 +174,29 @@ export async function POST(
 
     if (action === "reinspect") {
       if (insp.status !== "FAILED") return NextResponse.json({ error: "Only a failed inspection can be re-inspected" }, { status: 400 });
+      // (Jun 2026 audit fix) Re-opening a FAILED inspection must (a) clear
+      // failedAt so the row doesn't carry both a fail AND a later pass
+      // timestamp, and (b) get a fresh future date — if no newDate is
+      // given, re-derive from the still-attached anchor job rather than
+      // leaving the old (past) date, which the cron would instantly flip
+      // back to OVERDUE.
+      let reDate: Date | null = body.newDate ? new Date(body.newDate) : null;
+      if (!reDate && insp.anchorJob) {
+        reDate = computeInspectionScheduledDate(
+          { startDate: insp.anchorJob.startDate, endDate: insp.anchorJob.endDate },
+          insp.anchorEdge === "END" ? "END" : "START",
+          insp.offsetDays,
+        );
+      }
       const updated = await prisma.inspection.update({
         where: { id },
-        data: { status: "SCHEDULED", bookedDate: null, ...(body.newDate ? { scheduledDate: new Date(body.newDate) } : {}) },
+        data: {
+          status: "SCHEDULED",
+          bookedDate: null,
+          failedAt: null,
+          passedAt: null,
+          ...(reDate ? { scheduledDate: reDate } : {}),
+        },
       });
       await logEvent(prisma, { type: "INSPECTION_SCHEDULED", description: `Re-inspection scheduled for "${insp.name}"`, siteId: insp.plot.siteId, plotId: insp.plotId, jobId: insp.anchorJobId, userId, detail: { inspectionId: id } }).catch(() => {});
       return NextResponse.json(updated);

@@ -88,7 +88,7 @@ export async function POST(
         });
 
         if (jobs.length === 0) {
-          return { jobs: 0, orders: 0, materials: 0, documents: 0 };
+          return { jobs: 0, orders: 0, materials: 0, documents: 0, inspections: 0 };
         }
 
         const oldToNew = new Map<string, string>();
@@ -218,6 +218,35 @@ export async function POST(
           });
         }
 
+        // Inspections (Jun 2026 audit fix — these were silently dropped,
+        // so a seeded variant lost every NHBC/Building-Control/Warranty
+        // hold-point). Remap each one's anchor via the job map; skip any
+        // whose anchor didn't clone (defensive).
+        const inspections = await tx.templateInspection.findMany({
+          where: sourceWhere,
+        });
+        let inspectionCount = 0;
+        for (const ins of inspections) {
+          const newAnchorId = oldToNew.get(ins.anchorTemplateJobId);
+          if (!newAnchorId) continue;
+          await tx.templateInspection.create({
+            data: {
+              templateId,
+              variantId,
+              name: ins.name,
+              type: ins.type,
+              description: ins.description,
+              sortOrder: ins.sortOrder,
+              anchorTemplateJobId: newAnchorId,
+              anchorEdge: ins.anchorEdge,
+              offsetDays: ins.offsetDays,
+              bookingLeadWeeks: ins.bookingLeadWeeks,
+              defaultInspectorContactId: ins.defaultInspectorContactId,
+            },
+          });
+          inspectionCount += 1;
+        }
+
         await tx.templateAuditEvent.create({
           data: {
             templateId,
@@ -235,6 +264,7 @@ export async function POST(
           orders: orderCount,
           materials: materials.length,
           documents: docs.length,
+          inspections: inspectionCount,
         };
       },
       // Complex templates can have 20+ stages each with 5+ orders and
