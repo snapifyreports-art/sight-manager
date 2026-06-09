@@ -195,25 +195,44 @@ export function TemplateTimeline({ jobs, onJobUpdate, expandedJobIds, onToggleEx
   const allJobs: TemplateJobData[] = jobs.flatMap((j) =>
     j.children && j.children.length > 0 ? [j, ...j.children] : [j]
   );
-  const maxWeek = Math.max(
-    ...allJobs.map((j) => {
-      const preview = dragPreview?.jobId === j.id ? dragPreview : null;
-      return preview ? preview.endWeek : j.endWeek;
-    }),
-  );
-
   // Week numbers skip 0: ..., -2, -1, 1, 2, ...
   // Going back from a positive week across the boundary requires an extra -1 to jump over the missing 0.
   // e.g. startWeek=1, offset=-2 → raw=-1 → adjusted=-2 (2 weeks before Wk 1 is Wk -2)
   const adjustWeek = (startWeek: number, raw: number) =>
     raw <= 0 && startWeek >= 1 ? raw - 1 : raw;
 
-  const allOrderWeeks = allJobs.flatMap((j) =>
-    (j.orders ?? []).map((o) =>
-      adjustWeek(j.startWeek, j.startWeek + o.orderWeekOffset)
-    )
+  // Every order contributes TWO markers — the order week AND the
+  // delivery week (= order + lead time). BOTH must fit on the grid or a
+  // dot renders off-chart. Previously the bounds only considered order
+  // weeks + job end-weeks, so a delivery dot (or any marker) outside
+  // [earliest order … last job] was clipped. Bound the axis to include
+  // EVERY marker on both sides so no Gantt ever loses a dot.
+  const allMarkerWeeks = allJobs.flatMap((j) =>
+    (j.orders ?? []).flatMap((o) => [
+      adjustWeek(j.startWeek, j.startWeek + o.orderWeekOffset),
+      adjustWeek(
+        j.startWeek,
+        j.startWeek + o.orderWeekOffset + o.deliveryWeekOffset,
+      ),
+    ]),
   );
-  const gridStartWeek = allOrderWeeks.length > 0 ? Math.min(1, ...allOrderWeeks) : 1;
+
+  const maxJobWeek = Math.max(
+    ...allJobs.map((j) => {
+      const preview = dragPreview?.jobId === j.id ? dragPreview : null;
+      return preview ? preview.endWeek : j.endWeek;
+    }),
+  );
+  // Right bound includes any order/delivery marker that lands after the
+  // last job (e.g. a delivery for a final-stage job).
+  const maxWeek =
+    allMarkerWeeks.length > 0
+      ? Math.max(maxJobWeek, ...allMarkerWeeks)
+      : maxJobWeek;
+
+  // Left bound includes the earliest marker (order OR delivery).
+  const gridStartWeek =
+    allMarkerWeeks.length > 0 ? Math.min(1, ...allMarkerWeeks) : 1;
 
   // Pre-start columns (Wk -N … Wk -1) + positive columns (Wk 1 … Wk maxWeek) + padding
   // Week 0 is skipped, so if gridStartWeek < 1 we add (0 - gridStartWeek) pre-start cols

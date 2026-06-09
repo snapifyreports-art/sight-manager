@@ -705,6 +705,23 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
           const d = new Date(job.endDate);
           if (!maxDate || d > maxDate) maxDate = d;
         }
+        // Order + delivery dots render on this Gantt (see ordersWithJob
+        // below), and an order is placed/delivered weeks before/after its
+        // job — so the axis MUST extend to include those dates or the dot
+        // falls off-chart. Bound against the same per-job order source the
+        // markers use.
+        for (const o of job.orders ?? []) {
+          if (o.dateOfOrder) {
+            const d = new Date(o.dateOfOrder);
+            if (!minDate || d < minDate) minDate = d;
+            if (!maxDate || d > maxDate) maxDate = d;
+          }
+          if (o.expectedDeliveryDate) {
+            const d = new Date(o.expectedDeliveryDate);
+            if (!minDate || d < minDate) minDate = d;
+            if (!maxDate || d > maxDate) maxDate = d;
+          }
+        }
       }
     }
 
