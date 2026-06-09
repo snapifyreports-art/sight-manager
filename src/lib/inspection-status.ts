@@ -8,8 +8,12 @@
  * bookingLeadWeeks, so it pairs a coarse `where` with a row predicate.
  */
 import { addDays, isSameDay } from "date-fns";
+import type { InspectionStatus } from "@prisma/client";
 
 const toDate = (v: Date | string): Date => (v instanceof Date ? v : new Date(v));
+
+const OPEN: InspectionStatus[] = ["SCHEDULED", "BOOKED"];
+const OPEN_PLUS_OVERDUE: InspectionStatus[] = ["SCHEDULED", "BOOKED", "OVERDUE"];
 
 /**
  * Inspections that should flip to OVERDUE: scheduled date passed and not
@@ -18,7 +22,7 @@ const toDate = (v: Date | string): Date => (v instanceof Date ? v : new Date(v))
 export function whereInspectionOverdueCandidates(today: Date) {
   return {
     scheduledDate: { lt: today },
-    status: { in: ["SCHEDULED", "BOOKED"] as const },
+    status: { in: OPEN },
   };
 }
 
@@ -26,7 +30,7 @@ export function whereInspectionOverdueCandidates(today: Date) {
 export function whereInspectionDayOf(today: Date) {
   return {
     scheduledDate: { gte: today, lt: addDays(today, 1) },
-    status: { in: ["SCHEDULED", "BOOKED", "OVERDUE"] as const },
+    status: { in: OPEN_PLUS_OVERDUE },
   };
 }
 
@@ -34,7 +38,7 @@ export function whereInspectionDayOf(today: Date) {
 export function whereInspectionWeekBefore(today: Date) {
   return {
     scheduledDate: { gte: addDays(today, 7), lt: addDays(today, 8) },
-    status: { in: ["SCHEDULED", "BOOKED"] as const },
+    status: { in: OPEN },
   };
 }
 
@@ -46,7 +50,7 @@ export function whereInspectionWeekBefore(today: Date) {
 export function whereInspectionBookingDueCandidates(today: Date) {
   return {
     bookingLeadWeeks: { not: null },
-    status: "SCHEDULED" as const, // not booked yet
+    status: "SCHEDULED" as InspectionStatus, // not booked yet
     scheduledDate: { gte: today }, // booking-due never after the inspection
   };
 }

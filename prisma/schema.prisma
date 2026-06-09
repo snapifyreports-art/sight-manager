@@ -620,6 +620,7 @@ model Contact {
   ncrs           NCR[]
   attributedLatenessEvents LatenessEvent[]
   inspections    Inspection[] // as the assigned inspector (type CONTRACTOR)
+  templateInspectionDefaults TemplateInspection[] @relation("TemplateInspectionInspector")
 }
 
 // ---------- Plot Templates ----------
@@ -897,12 +898,16 @@ model TemplateInspection {
   offsetDays          Int      @default(0) // signed: −N before / +N after the edge
   // "Book N weeks before the scheduled date" → drives the booking-due alert.
   bookingLeadWeeks    Int?
+  // Optional default inspector (a Contact, type CONTRACTOR) carried onto
+  // each applied plot's Inspection so e.g. the NHBC inspector auto-assigns.
+  defaultInspectorContactId String?
   createdAt           DateTime @default(now())
 
-  template  PlotTemplate     @relation(fields: [templateId], references: [id], onDelete: Cascade)
-  variant   TemplateVariant? @relation(fields: [variantId], references: [id], onDelete: Cascade)
-  anchorJob TemplateJob      @relation("TemplateInspectionAnchor", fields: [anchorTemplateJobId], references: [id], onDelete: Cascade)
-  instances Inspection[]
+  template         PlotTemplate     @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  variant          TemplateVariant? @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  anchorJob        TemplateJob      @relation("TemplateInspectionAnchor", fields: [anchorTemplateJobId], references: [id], onDelete: Cascade)
+  defaultInspector Contact?         @relation("TemplateInspectionInspector", fields: [defaultInspectorContactId], references: [id], onDelete: SetNull)
+  instances        Inspection[]
 
   @@unique([templateId, variantId, name])
   @@index([templateId, variantId])
