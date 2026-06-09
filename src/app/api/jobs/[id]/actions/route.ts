@@ -75,7 +75,7 @@ export async function POST(
 
   const { id } = await params;
   const body = await req.json();
-  const { action, notes, signOffNotes, skipOrderProgression, actualStartDate } = body;
+  const { action, notes, signOffNotes, skipOrderProgression, actualStartDate, inspectionOverrideReason } = body;
 
   if (!action) {
     return NextResponse.json(
@@ -131,16 +131,53 @@ export async function POST(
     return NextResponse.json({ error: "You do not have permission to sign off jobs" }, { status: 403 });
   }
 
+  // (Jun 2026) Hard-blocker inspection gate. Completing a job that has an
+  // OPEN inspection flagged isBlocking is blocked unless the manager passes
+  // an override reason — a deliberate "going around the safeguard" action,
+  // captured for the audit trail (Keith's per-hold-point design).
+  if (action === "complete") {
+    const blocking = await prisma.inspection.findMany({
+      where: {
+        anchorJobId: id,
+        isBlocking: true,
+        status: { in: ["SCHEDULED", "BOOKED", "OVERDUE", "FAILED"] },
+      },
+      select: { id: true, name: true, type: true, status: true, scheduledDate: true },
+      orderBy: { scheduledDate: "asc" },
+    });
+    if (blocking.length > 0 && !(typeof inspectionOverrideReason === "string" && inspectionOverrideReason.trim())) {
+      return NextResponse.json(
+        {
+          error: `This job has ${blocking.length} open hard hold-point${blocking.length > 1 ? "s" : ""} that must be passed first (or overridden with a reason).`,
+          requiresInspectionOverride: true,
+          blockingInspections: blocking.map((b) => ({
+            id: b.id,
+            name: b.name,
+            type: b.type,
+            status: b.status,
+            scheduledDate: b.scheduledDate.toISOString(),
+          })),
+        },
+        { status: 409 },
+      );
+    }
+  }
+
   const now = getServerCurrentDate(req);
 
   try {
-  // Create the job action record
+  // Create the job action record. A hold-point override is appended to the
+  // notes so the audit trail records WHO bypassed WHICH safeguard and WHY.
+  const overrideNote =
+    action === "complete" && typeof inspectionOverrideReason === "string" && inspectionOverrideReason.trim()
+      ? `[Hold-point override] ${inspectionOverrideReason.trim()}`
+      : null;
   await prisma.jobAction.create({
     data: {
       jobId: id,
       userId: session.user.id,
       action,
-      notes: notes || signOffNotes || null,
+      notes: [notes || signOffNotes || null, overrideNote].filter(Boolean).join(" — ") || null,
     },
   });
 

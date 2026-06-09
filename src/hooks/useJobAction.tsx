@@ -163,6 +163,16 @@ export function useJobAction(
   const [stopDialog, setStopDialog] = useState<{ job: JobForAction } | null>(null);
   const [stopReason, setStopReason] = useState("");
 
+  // ---- Hard-blocker inspection override dialog ----
+  // Shown when completing a job is blocked by an open isBlocking inspection.
+  // The manager types a reason to deliberately override the safeguard.
+  const [inspectionBlock, setInspectionBlock] = useState<{
+    jobName: string;
+    blockingInspections: Array<{ id: string; name: string; type: string; status: string; scheduledDate: string }>;
+    retry: (reason: string) => void | Promise<unknown>;
+  } | null>(null);
+  const [inspectionBlockReason, setInspectionBlockReason] = useState("");
+
   // ---- Core action executor ----
   const executeAction = useCallback(
     async (jobId: string, action: string, notes?: string, extraBody?: Record<string, unknown>) => {
@@ -183,6 +193,17 @@ export function useJobAction(
           onSuccess?.(action, jobId, data);
         } else {
           const err = await res.json().catch(() => null);
+          // Hard-blocker hold-point → open the override dialog instead of a toast.
+          if (res.status === 409 && err?.requiresInspectionOverride) {
+            setInspectionBlockReason("");
+            setInspectionBlock({
+              jobName: activeJob?.name ?? "this job",
+              blockingInspections: err.blockingInspections ?? [],
+              retry: (reason: string) =>
+                executeAction(jobId, action, notes, { ...extraBody, inspectionOverrideReason: reason }),
+            });
+            return;
+          }
           toast.error(err?.error ?? `Failed to ${action} job (HTTP ${res.status})`);
         }
       } catch (e) {
@@ -192,7 +213,7 @@ export function useJobAction(
         setActiveJob(null);
       }
     },
-    [onSuccess, toast]
+    [onSuccess, toast, activeJob]
   );
 
   // ---- Simple-action executor (no pre-start checks) ----
@@ -210,6 +231,7 @@ export function useJobAction(
         signOffNotes?: string;
         skipOrderProgression?: boolean;
         actualStartDate?: string;
+        inspectionOverrideReason?: string;
         silent?: boolean; // if true, skip success toast (caller will do its own feedback)
       }
     ): Promise<{ ok: boolean; data?: unknown; error?: string }> => {
@@ -220,6 +242,7 @@ export function useJobAction(
         if (opts?.signOffNotes !== undefined) body.signOffNotes = opts.signOffNotes;
         if (opts?.skipOrderProgression) body.skipOrderProgression = true;
         if (opts?.actualStartDate) body.actualStartDate = opts.actualStartDate;
+        if (opts?.inspectionOverrideReason) body.inspectionOverrideReason = opts.inspectionOverrideReason;
 
         const res = await fetch(`/api/jobs/${jobId}/actions`, {
           method: "POST",
@@ -240,6 +263,17 @@ export function useJobAction(
           return { ok: true, data };
         } else {
           const err = await res.json().catch(() => null);
+          // Hard-blocker hold-point → open the override dialog (no error toast).
+          if (res.status === 409 && err?.requiresInspectionOverride) {
+            setInspectionBlockReason("");
+            setInspectionBlock({
+              jobName: "this job",
+              blockingInspections: err.blockingInspections ?? [],
+              retry: (reason: string) =>
+                runSimpleAction(jobId, action, { ...opts, inspectionOverrideReason: reason }),
+            });
+            return { ok: false, error: err?.error, data: { blocked: true } };
+          }
           const msg = err?.error ?? `Failed to ${action} job (HTTP ${res.status})`;
           if (!opts?.silent) toast.error(msg);
           return { ok: false, error: msg };
@@ -2000,6 +2034,71 @@ export function useJobAction(
               }}
             >
               {isLoading ? <><Loader2 className="size-3.5 animate-spin" /> Stopping…</> : "Stop Job"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* (Jun 2026) Hard-blocker hold-point override. Completing this job is
+          blocked by an open inspection flagged as a hard hold-point. The
+          manager must type a reason to deliberately override the safeguard
+          (captured in the audit trail). */}
+      <Dialog
+        open={!!inspectionBlock}
+        onOpenChange={(o) => { if (!o) { setInspectionBlock(null); setInspectionBlockReason(""); } }}
+      >
+        <DialogContent className="w-[calc(100vw-2rem)] max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="size-4 text-red-500" />
+              Hold-point blocks completion
+            </DialogTitle>
+            <DialogDescription>
+              <span className="font-medium">{inspectionBlock?.jobName}</span> can&apos;t be completed while these inspections are open. Pass them, or override with a reason.
+            </DialogDescription>
+          </DialogHeader>
+          <ul className="space-y-1 rounded-lg border border-red-200 bg-red-50 p-2.5 text-sm">
+            {inspectionBlock?.blockingInspections.map((i) => (
+              <li key={i.id} className="flex items-center justify-between gap-2">
+                <span className="min-w-0 truncate text-red-800">{i.name}</span>
+                <span className="shrink-0 text-xs font-medium text-red-600">{i.status.toLowerCase()}</span>
+              </li>
+            ))}
+          </ul>
+          <div className="space-y-2 py-1">
+            <Label htmlFor="insp-override-reason" className="text-sm">Override reason</Label>
+            <Textarea
+              id="insp-override-reason"
+              autoFocus
+              value={inspectionBlockReason}
+              onChange={(e) => setInspectionBlockReason(e.target.value)}
+              placeholder="e.g. Inspector signed off verbally — certificate to follow / completing under client instruction"
+              rows={3}
+              className="resize-none"
+            />
+          </div>
+          <DialogFooter className="flex-col-reverse gap-2 sm:flex-row">
+            <Button variant="outline" onClick={() => { setInspectionBlock(null); setInspectionBlockReason(""); }} disabled={isLoading}>
+              Cancel
+            </Button>
+            <a
+              href="/inspections"
+              className="inline-flex h-9 items-center justify-center rounded-md border px-3 text-sm font-medium hover:bg-accent"
+            >
+              Go to inspections
+            </a>
+            <Button
+              variant="destructive"
+              disabled={isLoading || !inspectionBlockReason.trim()}
+              onClick={async () => {
+                const r = inspectionBlock?.retry;
+                const reason = inspectionBlockReason.trim();
+                setInspectionBlock(null);
+                setInspectionBlockReason("");
+                if (r) await r(reason);
+              }}
+            >
+              {isLoading ? <><Loader2 className="size-3.5 animate-spin" /> Overriding…</> : "Override & complete"}
             </Button>
           </DialogFooter>
         </DialogContent>

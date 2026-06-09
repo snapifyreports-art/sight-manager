@@ -927,7 +927,15 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
       if (!isAlreadyCompleted) {
         // Silent: the signoff action will toast; a duplicate "Job marked complete"
         // would confuse the user in a sign-off flow.
-        await runSimpleAction(signOffTarget.id, "complete", { silent: true });
+        const completeRes = await runSimpleAction(signOffTarget.id, "complete", { silent: true });
+        // (Jun 2026) If completion is blocked by an open hard hold-point,
+        // runSimpleAction has opened the override dialog — STOP here so we
+        // don't attempt signoff on a still-incomplete job. The manager
+        // overrides from that dialog (which retries the completion path).
+        if (!completeRes.ok) {
+          setSignOffSubmitting(false);
+          return;
+        }
       }
       const res = await runSimpleAction(signOffTarget.id, "signoff", {
         signOffNotes: signOffNotes.trim() || undefined,
