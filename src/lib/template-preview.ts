@@ -124,10 +124,14 @@ export function previewTemplateApply(
         canonicalWeek,
       );
       // Convert week → working-day cursor → calendar date.
+      // No Math.max clamp: early long-lead orders can legitimately fall
+      // BEFORE the plot start (pre-start procurement), exactly as the real
+      // apply does (resolveOrderDates counts back from the job's date with
+      // no floor). orderDay/deliveryDay may be negative → date before start.
       const orderDay = (orderWeek - 1) * 5;
       const deliveryDay = (deliveryWeek - 1) * 5;
-      const orderDate = addWorkingDays(start, Math.max(0, orderDay));
-      const deliveryDate = addWorkingDays(start, Math.max(0, deliveryDay));
+      const orderDate = addWorkingDays(start, orderDay);
+      const deliveryDate = addWorkingDays(start, deliveryDay);
       const cost =
         order.items?.reduce(
           (sum, it) => sum + (it.quantity || 0) * (it.unitCost || 0),
@@ -212,10 +216,11 @@ function computeOrderWeek(
     deliveryWeek = refStart + sign * amountWeeks;
     orderWeek = deliveryWeek - leadWeeks;
   }
-  return {
-    orderWeek: Math.max(1, orderWeek),
-    deliveryWeek: Math.max(1, deliveryWeek),
-  };
+  // No Math.max(1, …) clamp — the real apply (resolveOrderDates) schedules
+  // early long-lead orders BEFORE the plot's week 1 (pre-start procurement),
+  // so the preview must show those negative weeks too rather than pinning
+  // everything to week 1 and under-stating the lead-in.
+  return { orderWeek, deliveryWeek };
 }
 
 /**

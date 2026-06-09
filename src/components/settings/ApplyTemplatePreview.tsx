@@ -139,13 +139,15 @@ export function ApplyTemplatePreview({
                       <td className="px-3 py-1.5 tabular-nums">
                         {formatDate(o.orderDate)}{" "}
                         <span className="text-muted-foreground">
-                          (w{o.orderWeek})
+                          {o.orderWeek < 1 ? "(pre-start)" : `(w${o.orderWeek})`}
                         </span>
                       </td>
                       <td className="px-3 py-1.5 tabular-nums">
                         {formatDate(o.deliveryDate)}{" "}
                         <span className="text-muted-foreground">
-                          (w{o.deliveryWeek})
+                          {o.deliveryWeek < 1
+                            ? "(pre-start)"
+                            : `(w${o.deliveryWeek})`}
                         </span>
                       </td>
                       <td className="px-3 py-1.5 text-right tabular-nums">
