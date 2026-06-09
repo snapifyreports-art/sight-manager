@@ -12,6 +12,7 @@ import {
   HardHat,
   Truck,
   FileText,
+  ClipboardCheck,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast, fetchErrorMessage } from "@/components/ui/toast";
@@ -66,6 +67,16 @@ interface ClosureSummary {
   handoverReadiness?: {
     requiredTotal: number;
     requiredChecked: number;
+  };
+  // (Jun 2026 Inspections) Open (SCHEDULED/BOOKED/OVERDUE) or FAILED
+  // hold-points block a clean handover — every statutory/QA inspection
+  // must be PASSED before the site is ready to close.
+  inspections?: {
+    total: number;
+    passed: number;
+    failed: number;
+    open: number;
+    overdue: number;
   };
   toolboxTalks?: {
     total: number;
@@ -171,6 +182,11 @@ export function SiteClosurePanel({ siteId }: { siteId: string }) {
     preStartRequired === 0 || preStartChecked === preStartRequired;
   const toolboxOutstanding = data.toolboxTalks?.requested ?? 0;
   const overdueNow = data.overdueNow?.count ?? 0;
+  const inspectionsOpen = data.inspections?.open ?? 0;
+  const inspectionsFailed = data.inspections?.failed ?? 0;
+  const inspectionsUnresolved = inspectionsOpen + inspectionsFailed;
+  const inspectionsReady =
+    (data.inspections?.total ?? 0) === 0 || inspectionsUnresolved === 0;
   const allReady =
     incompletePlots === 0 &&
     data.variance.snagsOpen === 0 &&
@@ -179,6 +195,7 @@ export function SiteClosurePanel({ siteId }: { siteId: string }) {
     variationsOutstanding === 0 &&
     handoverDocsReady &&
     preStartReady &&
+    inspectionsReady &&
     toolboxOutstanding === 0 &&
     overdueNow === 0;
 
@@ -253,6 +270,13 @@ export function SiteClosurePanel({ siteId }: { siteId: string }) {
               warnLabel={`${handoverDocsRequired - handoverDocsSigned} of ${handoverDocsRequired} handover documents still unsigned (EPC / gas-safe / electrical / NHBC etc.)`}
             />
           )}
+          {data.inspections && data.inspections.total > 0 && (
+            <ChecklistRow
+              ok={inspectionsReady}
+              okLabel={`All ${data.inspections.total} inspections passed`}
+              warnLabel={`${inspectionsUnresolved} inspection${inspectionsUnresolved !== 1 ? "s" : ""} not passed${inspectionsFailed > 0 ? ` (${inspectionsFailed} failed)` : ""}${inspectionsOpen > 0 ? ` (${inspectionsOpen} still open)` : ""} — NHBC / Building Control / warranty holds must clear before handover`}
+            />
+          )}
           {data.evidence && preStartRequired > 0 && (
             <ChecklistRow
               ok={preStartReady}
@@ -313,6 +337,14 @@ export function SiteClosurePanel({ siteId }: { siteId: string }) {
             value={String(data.variance.snagsRaised)}
             sub={`${data.variance.snagsOpen} still open`}
           />
+          {data.inspections && data.inspections.total > 0 && (
+            <SummaryCard
+              icon={ClipboardCheck}
+              label="Inspections"
+              value={`${data.inspections.passed}/${data.inspections.total}`}
+              sub={`passed · ${inspectionsUnresolved} outstanding`}
+            />
+          )}
         </div>
       </section>
 

@@ -193,6 +193,52 @@ export async function buildHandoverArchive({
     );
     archive.append(snagPdf, { name: `${folder}/snag-log.pdf` });
 
+    // (Jun 2026 Inspections) Per-plot inspection register — statutory +
+    // QA hold-points with result, date, inspector and whether a
+    // certificate is attached. Plain text (no PDF renderer) to keep the
+    // handover build robust; the cert files themselves arrive via the
+    // certificates/ folder copied from SiteDocument below.
+    const plotInspections = await prisma.inspection.findMany({
+      where: { plotId: plot.id },
+      orderBy: { scheduledDate: "asc" },
+      select: {
+        name: true,
+        type: true,
+        status: true,
+        scheduledDate: true,
+        bookedDate: true,
+        passedAt: true,
+        failedAt: true,
+        notes: true,
+        inspector: { select: { name: true, company: true } },
+        certificate: { select: { name: true } },
+      },
+    });
+    if (plotInspections.length > 0) {
+      const lines: string[] = [
+        `INSPECTION REGISTER — Plot ${plot.plotNumber || plot.name}`,
+        `Generated ${format(new Date(), "d MMM yyyy")}`,
+        "",
+        `${plotInspections.filter((x) => x.status === "PASSED").length} of ${plotInspections.length} passed`,
+        "",
+      ];
+      for (const ins of plotInspections) {
+        const resolved = ins.passedAt ?? ins.failedAt;
+        lines.push(`• ${ins.name}  [${ins.type}]`);
+        lines.push(`    Status:     ${ins.status}`);
+        lines.push(`    Scheduled:  ${format(ins.scheduledDate, "d MMM yyyy")}`);
+        if (ins.bookedDate) lines.push(`    Booked for: ${format(ins.bookedDate, "d MMM yyyy")}`);
+        if (resolved) lines.push(`    Result on:  ${format(resolved, "d MMM yyyy")}`);
+        if (ins.inspector) {
+          lines.push(`    Inspector:  ${ins.inspector.name}${ins.inspector.company ? ` (${ins.inspector.company})` : ""}`);
+        }
+        lines.push(`    Certificate: ${ins.certificate ? ins.certificate.name : "— not attached —"}`);
+        if (ins.notes) lines.push(`    Notes:      ${ins.notes.replace(/\s+/g, " ").slice(0, 300)}`);
+        lines.push("");
+      }
+      archive.append(lines.join("\n"), { name: `${folder}/inspection-log.txt` });
+    }
+
     // (May 2026 Story-linkage audit) NCR / Defect / Variation logs per
     // plot. These were silently absent from Handover ZIP pre-this pass
     // — buyer pack stopped at snags + photos + docs. Now QA + warranty

@@ -157,6 +157,25 @@ export interface SiteStory {
     requiredTotal: number;
     requiredChecked: number;
   };
+  /** (Jun 2026 Inspections) Statutory + QA hold-point rollup across every
+   *  plot. Closure readiness gates on `open`/`failed` reaching zero; the
+   *  recent feed surfaces the latest results for the closure review. */
+  inspections: {
+    total: number;
+    passed: number;
+    failed: number;
+    open: number;
+    overdue: number;
+    recent: {
+      id: string;
+      name: string;
+      type: string;
+      status: string;
+      scheduledDate: string;
+      plotNumber: string | null;
+      resolvedAt: string | null;
+    }[];
+  };
   /** (May 2026 Story-linkage audit) ToolboxTalk rollup — pre-this
    *  Story ignored TBT entirely. Surfaces request lifecycle + most
    *  recent entries so a closure review sees which talks went
@@ -230,6 +249,14 @@ export interface PlotStory {
   // Evidence-trail counters — voice notes + photo annotations on this plot.
   voiceNoteCount: number;
   photoAnnotationCount: number;
+  // (Jun 2026 Inspections) Statutory/QA hold-point counters — a passed
+  // inspection is a handover-readiness signal; an open/failed one blocks
+  // closure. Open = SCHEDULED/BOOKED/OVERDUE; overdue is a subset of open.
+  inspectionTotal: number;
+  inspectionsPassed: number;
+  inspectionsFailed: number;
+  inspectionsOpen: number;
+  inspectionsOverdue: number;
   // Top events surfaced for the per-plot timeline
   highlights: PlotHighlight[];
 }
@@ -252,7 +279,8 @@ export interface PlotHighlight {
     | "ORDER"
     | "LATENESS"
     | "WEATHER"
-    | "MILESTONE";
+    | "MILESTONE"
+    | "INSPECTION";
   description: string;
   jobName?: string;
   reason?: string;
@@ -1130,6 +1158,59 @@ export async function buildSiteStory(
     _count: true,
   });
 
+  // ─── Inspections (statutory + QA hold-points) ───────────────────────
+  // (Jun 2026) Load once; derive per-plot counters + the site-level
+  // rollup + recent feed. Open = not yet PASSED and not FAILED-terminal —
+  // i.e. SCHEDULED/BOOKED/OVERDUE still need action before closure.
+  const inspectionRows =
+    plotIds.length === 0
+      ? []
+      : await tx.inspection.findMany({
+          where: { plotId: { in: plotIds } },
+          select: {
+            id: true,
+            name: true,
+            type: true,
+            status: true,
+            scheduledDate: true,
+            passedAt: true,
+            failedAt: true,
+            plotId: true,
+            plot: { select: { plotNumber: true } },
+          },
+          orderBy: { scheduledDate: "asc" },
+        });
+  type InspCounts = { total: number; passed: number; failed: number; open: number; overdue: number };
+  const inspectionByPlot = new Map<string, InspCounts>();
+  const siteInspections: InspCounts = { total: 0, passed: 0, failed: 0, open: 0, overdue: 0 };
+  for (const ins of inspectionRows) {
+    const c = inspectionByPlot.get(ins.plotId) ?? { total: 0, passed: 0, failed: 0, open: 0, overdue: 0 };
+    c.total++;
+    siteInspections.total++;
+    if (ins.status === "PASSED") { c.passed++; siteInspections.passed++; }
+    else if (ins.status === "FAILED") { c.failed++; siteInspections.failed++; }
+    else { c.open++; siteInspections.open++; }
+    if (ins.status === "OVERDUE") { c.overdue++; siteInspections.overdue++; }
+    inspectionByPlot.set(ins.plotId, c);
+  }
+  // Recent feed = most-recently-resolved first, falling back to scheduled.
+  const recentInspections = [...inspectionRows]
+    .sort((a, b) => {
+      const ad = (a.passedAt ?? a.failedAt ?? a.scheduledDate).getTime();
+      const bd = (b.passedAt ?? b.failedAt ?? b.scheduledDate).getTime();
+      return bd - ad;
+    })
+    .slice(0, 12)
+    .map((ins) => ({
+      id: ins.id,
+      name: ins.name,
+      type: ins.type,
+      status: ins.status,
+      scheduledDate: ins.scheduledDate.toISOString(),
+      plotNumber: ins.plot?.plotNumber ?? null,
+      resolvedAt: (ins.passedAt ?? ins.failedAt)?.toISOString() ?? null,
+    }));
+
   const plotStories: PlotStory[] = plots.map((p) => {
     // (May 2026 SSoT pass) Routed through deriveAggregateStatus so
     // this surface stays in lock-step with recomputeParentFromChildren
@@ -1205,6 +1286,11 @@ export async function buildSiteStory(
       preStartChecked: preStartByPlot.get(p.id)?.checked ?? 0,
       voiceNoteCount: voiceNoteByPlot.get(p.id) ?? 0,
       photoAnnotationCount: annotationByPlot.get(p.id) ?? 0,
+      inspectionTotal: inspectionByPlot.get(p.id)?.total ?? 0,
+      inspectionsPassed: inspectionByPlot.get(p.id)?.passed ?? 0,
+      inspectionsFailed: inspectionByPlot.get(p.id)?.failed ?? 0,
+      inspectionsOpen: inspectionByPlot.get(p.id)?.open ?? 0,
+      inspectionsOverdue: inspectionByPlot.get(p.id)?.overdue ?? 0,
       highlights: [], // populated below if includeFull
     };
   });
@@ -1290,6 +1376,22 @@ export async function buildSiteStory(
         description: j.body.slice(0, 280),
       });
       eventsByPlot.set(j.plotId, list);
+    }
+
+    // (Jun 2026 Inspections) Resolved inspections (PASSED/FAILED) land on
+    // the plot timeline at their result date — drawn from the inspection
+    // rows directly rather than EventLog so the narrative is complete even
+    // for results recorded before event logging covered inspections.
+    for (const ins of inspectionRows) {
+      const resolvedAt = ins.passedAt ?? ins.failedAt;
+      if (!resolvedAt) continue;
+      const list = eventsByPlot.get(ins.plotId) ?? [];
+      list.push({
+        date: resolvedAt.toISOString(),
+        type: "INSPECTION",
+        description: `${ins.name} ${ins.status === "PASSED" ? "passed" : "failed"}`,
+      });
+      eventsByPlot.set(ins.plotId, list);
     }
 
     for (const ps of plotStories) {
@@ -1452,6 +1554,14 @@ export async function buildSiteStory(
     handoverReadiness: {
       requiredTotal: handoverRequiredTotal,
       requiredChecked: handoverRequiredChecked,
+    },
+    inspections: {
+      total: siteInspections.total,
+      passed: siteInspections.passed,
+      failed: siteInspections.failed,
+      open: siteInspections.open,
+      overdue: siteInspections.overdue,
+      recent: recentInspections,
     },
     toolboxTalks: {
       total: allToolboxTalks.length,

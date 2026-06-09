@@ -204,6 +204,22 @@ interface StoryData {
     requiredTotal: number;
     requiredChecked: number;
   };
+  inspections?: {
+    total: number;
+    passed: number;
+    failed: number;
+    open: number;
+    overdue: number;
+    recent: Array<{
+      id: string;
+      name: string;
+      type: string;
+      status: string;
+      scheduledDate: string;
+      plotNumber: string | null;
+      resolvedAt: string | null;
+    }>;
+  };
   toolboxTalks: {
     total: number;
     requested: number;
@@ -846,6 +862,64 @@ export function SiteStoryPanel({ siteId }: { siteId: string }) {
               </div>
             </div>
           </div>
+        </section>
+      )}
+
+      {/* (Jun 2026 Inspections) Statutory + QA hold-point rollup —
+          passed/open/failed across every plot, plus the most-recent
+          results. Auto-hides when no inspections exist on the site. */}
+      {data.inspections && data.inspections.total > 0 && (
+        <section className="rounded-xl border bg-white p-5">
+          <h3 className="mb-1 font-semibold text-slate-900">Inspections</h3>
+          <p className="text-xs text-muted-foreground">
+            NHBC, Building Control, warranty and internal QA hold-points
+            across the site. Open or failed inspections block a clean handover.
+          </p>
+          <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <p className="text-xs font-semibold uppercase tracking-wider text-slate-600">Total</p>
+              <p className="mt-1 text-2xl font-bold text-slate-900">{data.inspections.total}</p>
+            </div>
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+              <p className="text-xs font-semibold uppercase tracking-wider text-emerald-700">Passed</p>
+              <p className="mt-1 text-2xl font-bold text-emerald-700">{data.inspections.passed}</p>
+            </div>
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <p className="text-xs font-semibold uppercase tracking-wider text-slate-600">Open</p>
+              <p className="mt-1 text-2xl font-bold text-slate-900">{data.inspections.open}</p>
+              {data.inspections.overdue > 0 && (
+                <p className="text-[11px] font-medium text-amber-600">{data.inspections.overdue} overdue</p>
+              )}
+            </div>
+            <div className={`rounded-lg border p-3 ${data.inspections.failed > 0 ? "border-red-200 bg-red-50" : "border-slate-200 bg-slate-50"}`}>
+              <p className={`text-xs font-semibold uppercase tracking-wider ${data.inspections.failed > 0 ? "text-red-700" : "text-slate-600"}`}>Failed</p>
+              <p className={`mt-1 text-2xl font-bold ${data.inspections.failed > 0 ? "text-red-700" : "text-slate-900"}`}>{data.inspections.failed}</p>
+            </div>
+          </div>
+          {data.inspections.recent.length > 0 && (
+            <ul className="mt-3 space-y-1.5 text-sm">
+              {data.inspections.recent.slice(0, 6).map((ins) => (
+                <li key={ins.id} className="flex items-center justify-between gap-2">
+                  <span className="min-w-0 truncate text-slate-700">
+                    {ins.plotNumber ? `Plot ${ins.plotNumber} — ` : ""}{ins.name}
+                  </span>
+                  <span
+                    className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${
+                      ins.status === "PASSED"
+                        ? "bg-emerald-100 text-emerald-700"
+                        : ins.status === "FAILED"
+                          ? "bg-red-100 text-red-700"
+                          : ins.status === "OVERDUE"
+                            ? "bg-amber-100 text-amber-700"
+                            : "bg-slate-100 text-slate-600"
+                    }`}
+                  >
+                    {ins.status.toLowerCase()}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
       )}
 
