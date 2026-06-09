@@ -30,6 +30,8 @@ import {
   FileCheck,
   Truck,
   CalendarPlus,
+  ClipboardCheck,
+  ShieldAlert,
 } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -80,12 +82,24 @@ interface CalendarOrder {
   plot: { plotNumber: string | null; name: string };
 }
 
+interface CalendarInspection {
+  id: string;
+  name: string;
+  type: string;
+  status: string;
+  date: string | null;
+  booked: boolean;
+  isBlocking: boolean;
+  plot: { plotNumber: string | null; name: string };
+}
+
 interface CalendarData {
   month: string;
   jobs: CalendarJob[];
   deliveries: CalendarDelivery[];
   ordersToPlace: CalendarOrder[];
   rainedOffDays: Array<{ date: string; note: string | null; type: string }>;
+  inspections: CalendarInspection[];
 }
 
 interface DayEvents {
@@ -93,10 +107,19 @@ interface DayEvents {
   jobsEnding: CalendarJob[];
   deliveries: CalendarDelivery[];
   ordersToPlace: CalendarOrder[];
+  inspections: CalendarInspection[];
   isRainedOff: boolean;
   rainNote: string | null;
   weatherType: "RAIN" | "TEMPERATURE" | "BOTH" | null;
 }
+
+const INSPECTION_TYPE_LABEL: Record<string, string> = {
+  NHBC: "NHBC",
+  BUILDING_CONTROL: "Building Control",
+  WARRANTY_CML: "Warranty/CML",
+  INTERNAL_QA: "Internal QA",
+  OTHER: "Inspection",
+};
 
 const STATUS_COLORS: Record<string, string> = {
   NOT_STARTED: "bg-slate-200 text-slate-700",
@@ -141,6 +164,7 @@ export function SiteCalendar({ siteId }: SiteCalendarProps) {
           jobsEnding: [],
           deliveries: [],
           ordersToPlace: [],
+          inspections: [],
           isRainedOff: false,
           rainNote: null,
           weatherType: null,
@@ -171,6 +195,12 @@ export function SiteCalendar({ siteId }: SiteCalendarProps) {
     for (const order of data.ordersToPlace) {
       const key = order.dateOfOrder.slice(0, 10);
       getOrCreate(key).ordersToPlace.push(order);
+    }
+
+    for (const insp of data.inspections ?? []) {
+      if (!insp.date) continue;
+      const key = insp.date.slice(0, 10);
+      getOrCreate(key).inspections.push(insp);
     }
 
     for (const rain of data.rainedOffDays) {
@@ -341,6 +371,7 @@ export function SiteCalendar({ siteId }: SiteCalendarProps) {
               events.jobsStarting.length > 0 ||
               events.jobsEnding.length > 0 ||
               events.deliveries.length > 0 ||
+              events.inspections.length > 0 ||
               events.isRainedOff
             );
 
@@ -409,9 +440,21 @@ export function SiteCalendar({ siteId }: SiteCalendarProps) {
                         📦 {d.supplier}
                       </div>
                     ))}
-                    {(events!.jobsStarting.length + events!.jobsEnding.length + events!.deliveries.length > 3) && (
+                    {events!.inspections.slice(0, 1).map((insp) => (
+                      <div
+                        key={`i-${insp.id}`}
+                        className={`truncate rounded px-1 text-[9px] leading-tight ${
+                          /OVERDUE/.test(insp.status)
+                            ? "bg-red-100 text-red-700"
+                            : "bg-violet-100 text-violet-700"
+                        }`}
+                      >
+                        🔎 {insp.name}
+                      </div>
+                    ))}
+                    {(events!.jobsStarting.length + events!.jobsEnding.length + events!.deliveries.length + events!.inspections.length > 4) && (
                       <div className="text-[9px] text-muted-foreground">
-                        +{events!.jobsStarting.length + events!.jobsEnding.length + events!.deliveries.length - 3} more
+                        +{events!.jobsStarting.length + events!.jobsEnding.length + events!.deliveries.length + events!.inspections.length - 4} more
                       </div>
                     )}
                   </div>
@@ -456,12 +499,14 @@ export function SiteCalendar({ siteId }: SiteCalendarProps) {
               const jobsStartingNotStarted = (selectedEvents?.jobsStarting ?? []).filter(
                 (j) => j.status === "NOT_STARTED"
               );
+              const inspectionsDue = selectedEvents?.inspections ?? [];
 
               const hasAnything =
                 ordersToPlace.length > 0 ||
                 signOffsNeeded.length > 0 ||
                 deliveriesExpected.length > 0 ||
                 jobsStartingNotStarted.length > 0 ||
+                inspectionsDue.length > 0 ||
                 (selectedEvents &&
                   (selectedEvents.jobsStarting.length > 0 ||
                     selectedEvents.jobsEnding.length > 0 ||
@@ -521,6 +566,49 @@ export function SiteCalendar({ siteId }: SiteCalendarProps) {
                                 </>
                               )}
                             </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Inspections due / booked */}
+                  {inspectionsDue.length > 0 && (
+                    <div>
+                      <h5 className="mb-1 flex items-center gap-1 text-xs font-semibold text-violet-700">
+                        <ClipboardCheck className="size-3" />
+                        Inspections ({inspectionsDue.length})
+                      </h5>
+                      <div className="space-y-1">
+                        {inspectionsDue.map((insp) => (
+                          <div
+                            key={`insp-${insp.id}`}
+                            className={`flex items-center justify-between rounded border px-2 py-1.5 text-sm ${
+                              insp.status === "OVERDUE"
+                                ? "border-red-100 bg-red-50/30"
+                                : "border-violet-100 bg-violet-50/30"
+                            }`}
+                          >
+                            <div className="min-w-0 flex-1">
+                              <Link href="/inspections" className="font-medium text-blue-600 hover:underline">
+                                {insp.name}
+                              </Link>
+                              {insp.isBlocking && (
+                                <ShieldAlert className="ml-1 inline size-3 text-red-500" aria-label="Hold-point — blocks job completion" />
+                              )}
+                              <span className="ml-2 text-xs text-muted-foreground">
+                                {INSPECTION_TYPE_LABEL[insp.type] ?? insp.type} · {insp.plot.plotNumber ? `Plot ${insp.plot.plotNumber}` : insp.plot.name}
+                              </span>
+                            </div>
+                            <span className={`ml-2 shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                              insp.status === "OVERDUE"
+                                ? "bg-red-100 text-red-700"
+                                : insp.booked
+                                  ? "bg-violet-100 text-violet-700"
+                                  : "bg-slate-100 text-slate-600"
+                            }`}>
+                              {insp.status === "BOOKED" || insp.booked ? "BOOKED" : insp.status}
+                            </span>
                           </div>
                         ))}
                       </div>
@@ -746,6 +834,9 @@ export function SiteCalendar({ siteId }: SiteCalendarProps) {
         </span>
         <span className="flex items-center gap-1">
           <span className="inline-block size-2 rounded bg-purple-200" /> Delivery
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="inline-block size-2 rounded bg-violet-300" /> Inspection
         </span>
         <span className="flex items-center gap-1">
           <CloudRain className="size-3 text-blue-400" /> Rained off

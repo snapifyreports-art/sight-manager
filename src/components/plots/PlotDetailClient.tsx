@@ -276,15 +276,102 @@ function AddJobDialog({
 
 // ---------- Overview Tab ----------
 
+// (Jun 2026) Manually add a one-off inspection to a plot — for holds not
+// defined on the template. Anchor it to a job (date derives + moves with it)
+// or set a fixed date.
+function AddInspectionDialog({
+  plotId,
+  jobs,
+  onClose,
+  onAdded,
+}: {
+  plotId: string;
+  jobs: Array<{ id: string; name: string }>;
+  onClose: () => void;
+  onAdded: () => void;
+}) {
+  const toast = useToast();
+  const [name, setName] = useState("");
+  const [type, setType] = useState("NHBC");
+  const [anchorJobId, setAnchorJobId] = useState("");
+  const [scheduledDate, setScheduledDate] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function submit() {
+    if (!name.trim() || (!anchorJobId && !scheduledDate)) return;
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/inspections`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          plotId,
+          name: name.trim(),
+          type,
+          ...(anchorJobId ? { anchorJobId, anchorEdge: "END" } : {}),
+          ...(!anchorJobId && scheduledDate ? { scheduledDate } : {}),
+        }),
+      });
+      if (!res.ok) { toast.error(await fetchErrorMessage(res, "Failed to add inspection")); return; }
+      onAdded();
+    } finally { setBusy(false); }
+  }
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader><DialogTitle>Add inspection</DialogTitle></DialogHeader>
+        <div className="grid grid-cols-2 gap-3 py-2">
+          <div className="col-span-2">
+            <Label>Name</Label>
+            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. NHBC Superstructure" />
+          </div>
+          <div>
+            <Label>Type</Label>
+            <select value={type} onChange={(e) => setType(e.target.value)} className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm">
+              {[["NHBC", "NHBC"], ["BUILDING_CONTROL", "Building Control"], ["WARRANTY_CML", "Warranty/CML"], ["INTERNAL_QA", "Internal QA"], ["OTHER", "Other"]].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
+          </div>
+          <div>
+            <Label>Anchor to job (optional)</Label>
+            <select value={anchorJobId} onChange={(e) => setAnchorJobId(e.target.value)} className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm">
+              <option value="">Fixed date instead…</option>
+              {jobs.map((j) => <option key={j.id} value={j.id}>{j.name}</option>)}
+            </select>
+          </div>
+          {!anchorJobId && (
+            <div className="col-span-2">
+              <Label>Scheduled date</Label>
+              <Input type="date" value={scheduledDate} onChange={(e) => setScheduledDate(e.target.value)} />
+            </div>
+          )}
+          {anchorJobId && (
+            <p className="col-span-2 text-[11px] text-muted-foreground">Date derives from the job&apos;s end and moves with it.</p>
+          )}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button disabled={busy || !name.trim() || (!anchorJobId && !scheduledDate)} onClick={submit}>
+            {busy ? <Loader2 className="size-4 animate-spin" /> : "Add"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function PlotOverview({
   plot,
   snagSummary,
   inspections,
+  onInspectionsChange,
 }: {
   plot: PlotData;
   snagSummary: Record<string, number>;
   inspections: Array<{ id: string; name: string; type: string; status: string; scheduledDate: string }>;
+  onInspectionsChange: () => void | Promise<void>;
 }) {
+  const [addInspectionOpen, setAddInspectionOpen] = useState(false);
   // Midnight-snap so SSR + hydration agree on today's date (prevents React #418).
   const today = getCurrentDateAtMidnight();
   const router = useRouter();
@@ -908,7 +995,7 @@ function PlotOverview({
       {/* (Jun 2026) Inspections — statutory/QA hold-points on this plot.
           Open/overdue/failed are the actionable ones; click through to the
           Inspections page to book / pass / fail. */}
-      {inspections.length > 0 && (() => {
+      {(() => {
         const open = inspections.filter((i) => i.status === "SCHEDULED" || i.status === "BOOKED");
         const overdue = inspections.filter((i) => i.status === "OVERDUE");
         const failed = inspections.filter((i) => i.status === "FAILED");
@@ -929,34 +1016,52 @@ function PlotOverview({
               <CardTitle className="flex items-center gap-1.5 text-base">
                 <ClipboardCheck className="size-4 text-amber-600" /> Inspections
               </CardTitle>
-              <Link href="/inspections" className="text-xs font-medium text-blue-600 hover:underline">View all →</Link>
+              <div className="flex items-center gap-3">
+                <button onClick={() => setAddInspectionOpen(true)} className="text-xs font-medium text-blue-600 hover:underline">+ Add</button>
+                {inspections.length > 0 && <Link href="/inspections" className="text-xs font-medium text-blue-600 hover:underline">View all →</Link>}
+              </div>
             </CardHeader>
             <CardContent>
-              <div className="mb-3 flex flex-wrap gap-3 text-xs">
-                <span>{passed.length}/{inspections.length} passed</span>
-                {overdue.length > 0 && <span className="font-medium text-amber-600">{overdue.length} overdue</span>}
-                {failed.length > 0 && <span className="font-medium text-red-600">{failed.length} failed</span>}
-                {open.length > 0 && <span>{open.length} open</span>}
-              </div>
-              {actionable.length === 0 ? (
-                <p className="text-sm text-emerald-600">All inspections passed ✓</p>
+              {inspections.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No inspections on this plot. They come from the template, or add one with <span className="font-medium">+ Add</span>.</p>
               ) : (
-                <ul className="space-y-1.5">
-                  {actionable.map((i) => (
-                    <li key={i.id} className="flex items-center justify-between gap-2 text-sm">
-                      <span className="min-w-0 truncate">{i.name}</span>
-                      <span className="flex shrink-0 items-center gap-2">
-                        <span className="text-xs text-muted-foreground">{format(new Date(i.scheduledDate), "d MMM")}</span>
-                        <span className={pill(i.status)}>{i.status.toLowerCase()}</span>
-                      </span>
-                    </li>
-                  ))}
-                </ul>
+                <>
+                  <div className="mb-3 flex flex-wrap gap-3 text-xs">
+                    <span>{passed.length}/{inspections.length} passed</span>
+                    {overdue.length > 0 && <span className="font-medium text-amber-600">{overdue.length} overdue</span>}
+                    {failed.length > 0 && <span className="font-medium text-red-600">{failed.length} failed</span>}
+                    {open.length > 0 && <span>{open.length} open</span>}
+                  </div>
+                  {actionable.length === 0 ? (
+                    <p className="text-sm text-emerald-600">All inspections passed ✓</p>
+                  ) : (
+                    <ul className="space-y-1.5">
+                      {actionable.map((i) => (
+                        <li key={i.id} className="flex items-center justify-between gap-2 text-sm">
+                          <span className="min-w-0 truncate">{i.name}</span>
+                          <span className="flex shrink-0 items-center gap-2">
+                            <span className="text-xs text-muted-foreground">{format(new Date(i.scheduledDate), "d MMM")}</span>
+                            <span className={pill(i.status)}>{i.status.toLowerCase()}</span>
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </>
               )}
             </CardContent>
           </Card>
         );
       })()}
+
+      {addInspectionOpen && (
+        <AddInspectionDialog
+          plotId={plot.id}
+          jobs={plot.jobs.map((j) => ({ id: j.id, name: j.name }))}
+          onClose={() => setAddInspectionOpen(false)}
+          onAdded={() => { setAddInspectionOpen(false); void onInspectionsChange(); }}
+        />
+      )}
 
       {/* Centralised pre-start / early-start / order-conflict dialogs */}
       {jobActionDialogs}
@@ -1169,6 +1274,10 @@ export function PlotDetailClient({
   const [inspections, setInspections] = useState<
     Array<{ id: string; name: string; type: string; status: string; scheduledDate: string }>
   >([]);
+  const refetchInspections = useCallback(async () => {
+    const r = await fetch(`/api/inspections?plotId=${plot.id}`);
+    if (r.ok) setInspections(await r.json());
+  }, [plot.id]);
   useEffect(() => {
     let cancelled = false;
     fetch(`/api/inspections?plotId=${plot.id}`)
@@ -1334,7 +1443,7 @@ export function PlotDetailClient({
 
         {/* Overview Tab */}
         <TabsContent value="overview">
-          <PlotOverview plot={plot} snagSummary={snagSummary} inspections={inspections} />
+          <PlotOverview plot={plot} snagSummary={snagSummary} inspections={inspections} onInspectionsChange={refetchInspections} />
         </TabsContent>
 
         {/* Gantt Chart Tab */}

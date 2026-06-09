@@ -42,6 +42,9 @@ import { SitePhotoAlbum } from "@/components/sites/SitePhotoAlbum";
 import { SiteCompliance } from "@/components/sites/SiteCompliance";
 import { SiteToolboxTalks } from "@/components/sites/SiteToolboxTalks";
 import { SiteNCRs } from "@/components/sites/SiteNCRs";
+import { InspectionsClient } from "@/components/inspections/InspectionsClient";
+import { useSession } from "next-auth/react";
+import { sessionHasPermission } from "@/lib/permissions";
 import {
   Card,
   CardContent,
@@ -530,6 +533,11 @@ export function SiteDetailClient({
 }) {
   const router = useRouter();
   const toast = useToast();
+  const { data: sessionData } = useSession();
+  const canManageInspections = sessionHasPermission(
+    (sessionData?.user ?? undefined) as { role?: string; permissions?: string[] } | undefined,
+    "MANAGE_INSPECTIONS",
+  );
   const [site, setSite] = useState(initialSite);
 
   // Sync site state when server re-renders (e.g. after router.refresh())
@@ -2520,6 +2528,13 @@ export function SiteDetailClient({
           {/* (May 2026 audit #178) Non-Conformance Reports. */}
           <div className={activeTab !== "ncrs" ? "hidden" : undefined}>
             {visitedTabs.has("ncrs") && <SiteNCRs siteId={site.id} />}
+          </div>
+
+          {/* (Jun 2026) Statutory + QA inspection hold-points for this site. */}
+          <div className={activeTab !== "inspections" ? "hidden" : undefined}>
+            {visitedTabs.has("inspections") && (
+              <InspectionsClient initial={[]} canManage={canManageInspections} siteId={site.id} embedded />
+            )}
           </div>
 
           <div className={activeTab !== "daily-brief" ? "hidden" : undefined}>

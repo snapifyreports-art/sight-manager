@@ -428,6 +428,21 @@ export function GanttChart({ jobs, enableDateControls = false, inspections = [] 
         </div>
       )}
 
+      {/* (Jun 2026) Inspection marker legend — only when this plot has holds. */}
+      {inspections.length > 0 && (
+        <div className="mb-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+          <span className="flex items-center gap-1">
+            <span className="flex size-3.5 items-center justify-center rounded-sm bg-amber-500 text-[8px] font-bold leading-none text-white">!</span>
+            inspection hold-point (click to manage)
+          </span>
+          {([["Scheduled", "#6b7280"], ["Booked", "#2563eb"], ["Passed", "#16a34a"], ["Failed", "#dc2626"], ["Overdue", "#f59e0b"]] as const).map(([label, c]) => (
+            <span key={label} className="flex items-center gap-1">
+              <span className="size-2.5 rounded-full" style={{ backgroundColor: c }} /> {label}
+            </span>
+          ))}
+        </div>
+      )}
+
     <div className="border border-gray-200 rounded-lg overflow-hidden bg-white">
       <div className="flex">
         {/* Left Panel (sticky job names) */}
@@ -771,13 +786,14 @@ export function GanttChart({ jobs, enableDateControls = false, inspections = [] 
                     style={{ left: `${left}px`, height: `${totalHeight}px` }}
                   >
                     <div className="absolute top-0 h-full w-px opacity-60" style={{ backgroundColor: colour }} />
-                    <div
-                      title={`${ins.name} — ${inspectionStatusLabel(ins.status as InspectionStatus)} (${ins.scheduledDate.slice(0, 10)})`}
-                      className="absolute top-0 flex h-4 min-w-4 -translate-x-1/2 items-center justify-center rounded-sm px-1 text-[10px] font-bold leading-none text-white shadow"
+                    <a
+                      href="/inspections"
+                      title={`${ins.name} — ${inspectionStatusLabel(ins.status as InspectionStatus)} (${ins.scheduledDate.slice(0, 10)}) · click to manage`}
+                      className="pointer-events-auto absolute top-0 flex h-4 min-w-4 -translate-x-1/2 cursor-pointer items-center justify-center rounded-sm px-1 text-[10px] font-bold leading-none text-white shadow hover:brightness-110"
                       style={{ backgroundColor: colour }}
                     >
                       !
-                    </div>
+                    </a>
                   </div>
                 );
               })}

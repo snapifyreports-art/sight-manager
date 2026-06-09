@@ -81,6 +81,7 @@ const SITE_TAB_GROUPS = [
       { label: "QR Codes",       tab: "qr-codes" },
       { label: "Customer Pages", tab: "customer-pages" },
       { label: "Compliance",     tab: "compliance" },
+      { label: "Inspections",    tab: "inspections" },
       { label: "Toolbox Talks",  tab: "toolbox" },
       { label: "NCRs",           tab: "ncrs" },
       { label: "Story",          tab: "story" },

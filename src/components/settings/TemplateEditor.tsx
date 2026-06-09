@@ -3610,6 +3610,22 @@ export function TemplateEditor({
               This will permanently delete this job and all its orders.
             </DialogDescription>
           </DialogHeader>
+          {(() => {
+            // (Jun 2026) Warn if inspections are anchored to this job (or its
+            // children) — they cascade-delete with the stage.
+            if (!deletingJobId) return null;
+            const ids = new Set<string>([deletingJobId]);
+            for (const stage of template.jobs) {
+              if (stage.id === deletingJobId) for (const c of stage.children ?? []) ids.add(c.id);
+            }
+            const n = timelineInspections.filter((i) => ids.has(i.anchorTemplateJobId)).length;
+            if (n === 0) return null;
+            return (
+              <div className="rounded-md border border-amber-300 bg-amber-50 p-2.5 text-sm text-amber-800">
+                ⚠️ {n} inspection hold-point{n > 1 ? "s are" : " is"} anchored to this stage and will be deleted too. Re-anchor {n > 1 ? "them" : "it"} first if you want to keep {n > 1 ? "them" : "it"}.
+              </div>
+            );
+          })()}
           <DialogFooter>
             <DialogClose render={<Button variant="outline" />}>
               Cancel

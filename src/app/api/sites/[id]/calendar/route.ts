@@ -31,7 +31,7 @@ export async function GET(
   const rangeStart = startOfMonth(subMonths(targetDate, 0));
   const rangeEnd = endOfMonth(addMonths(targetDate, 0));
 
-  const [jobs, deliveries, rainedOffDays, ordersToPlace] = await Promise.all([
+  const [jobs, deliveries, rainedOffDays, ordersToPlace, inspections] = await Promise.all([
     // Jobs with dates in range
     prisma.job.findMany({
       where: {
@@ -125,6 +125,28 @@ export async function GET(
         },
       },
     }),
+
+    // Inspections with a date in range (scheduled, booked, or already concluded this month)
+    prisma.inspection.findMany({
+      where: {
+        plot: { siteId: id },
+        OR: [
+          { scheduledDate: { gte: rangeStart, lte: rangeEnd } },
+          { bookedDate: { gte: rangeStart, lte: rangeEnd } },
+        ],
+      },
+      select: {
+        id: true,
+        name: true,
+        type: true,
+        status: true,
+        scheduledDate: true,
+        bookedDate: true,
+        isBlocking: true,
+        plot: { select: { plotNumber: true, name: true } },
+      },
+      orderBy: { scheduledDate: "asc" },
+    }),
   ]);
 
   return NextResponse.json({
@@ -164,6 +186,17 @@ export async function GET(
       date: r.date.toISOString(),
       type: r.type,
       note: r.note,
+    })),
+    inspections: inspections.map((i) => ({
+      id: i.id,
+      name: i.name,
+      type: i.type,
+      status: i.status,
+      // bookedDate wins (confirmed slot) over the derived scheduledDate.
+      date: (i.bookedDate ?? i.scheduledDate)?.toISOString() ?? null,
+      booked: !!i.bookedDate,
+      isBlocking: i.isBlocking,
+      plot: i.plot,
     })),
   });
 }

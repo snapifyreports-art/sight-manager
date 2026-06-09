@@ -53,16 +53,22 @@ const TYPE_LABEL: Record<string, string> = {
 const FILTERS = ["All", "Upcoming", "Overdue", "Passed", "Failed"] as const;
 type Filter = (typeof FILTERS)[number];
 
-export function InspectionsClient({ initial, canManage }: { initial: Insp[]; canManage: boolean }) {
+export function InspectionsClient({ initial, canManage, siteId, embedded }: { initial: Insp[]; canManage: boolean; siteId?: string; embedded?: boolean }) {
   const [items, setItems] = useState<Insp[]>(initial);
   const [filter, setFilter] = useState<Filter>("Upcoming");
   const [dialog, setDialog] = useState<{ kind: "pass" | "fail"; insp: Insp } | null>(null);
   const [notify, setNotify] = useState<Insp | null>(null);
 
   const refetch = useCallback(async () => {
-    const res = await fetch("/api/inspections");
+    const res = await fetch(`/api/inspections${siteId ? `?siteId=${siteId}` : ""}`);
     if (res.ok) setItems(await res.json());
-  }, []);
+  }, [siteId]);
+
+  // When embedded in a site tab (no server-rendered initial), fetch on mount.
+  useEffect(() => {
+    if (siteId && initial.length === 0) void refetch();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [siteId]);
 
   const action = useInspectionAction({ onChange: refetch });
 
@@ -84,7 +90,7 @@ export function InspectionsClient({ initial, canManage }: { initial: Insp[]; can
   }), [items]);
 
   return (
-    <div className="space-y-4 p-4 md:p-6">
+    <div className={embedded ? "space-y-4" : "space-y-4 p-4 md:p-6"}>
       <div className="flex items-center gap-2">
         <ClipboardCheck className="size-6 text-amber-600" />
         <div>
@@ -119,8 +125,8 @@ export function InspectionsClient({ initial, canManage }: { initial: Insp[]; can
 
       {filtered.length === 0 ? (
         <p className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
-          No inspections {filter !== "All" ? `(${filter.toLowerCase()})` : "yet"}. They appear here once a plot built from a
-          template with inspections is created, or when you add one to a plot.
+          No inspections {filter !== "All" ? `(${filter.toLowerCase()})` : "yet"}. They appear here when a plot is created from a
+          template that defines inspections, or when you add one from a plot&apos;s Overview tab.
         </p>
       ) : (
         <div className="divide-y rounded-lg border">

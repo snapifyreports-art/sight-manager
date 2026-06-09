@@ -154,6 +154,26 @@ export async function GET(
     },
   });
 
+  // Inspections that still need to happen (scheduled/booked/overdue).
+  // scheduledDate is always present (DERIVED, non-nullable in schema).
+  const inspections = await prisma.inspection.findMany({
+    where: {
+      plot: { siteId },
+      status: { in: ["SCHEDULED", "BOOKED", "OVERDUE"] },
+    },
+    select: {
+      id: true,
+      name: true,
+      type: true,
+      status: true,
+      scheduledDate: true,
+      bookedDate: true,
+      isBlocking: true,
+      plot: { select: { name: true, plotNumber: true } },
+    },
+    orderBy: { scheduledDate: "asc" },
+  });
+
   const now = new Date();
   const lines: string[] = [];
   lines.push("BEGIN:VCALENDAR");
@@ -204,6 +224,41 @@ export async function GET(
 
     lines.push("BEGIN:VEVENT");
     lines.push(`UID:order-${o.id}@sight-manager`);
+    lines.push(`DTSTAMP:${fmtDateUtc(now)}`);
+    lines.push(`DTSTART;VALUE=DATE:${fmtDate(startDay)}`);
+    lines.push(`DTEND;VALUE=DATE:${fmtDate(endExclusive)}`);
+    lines.push(foldLine(`SUMMARY:${escapeIcs(summary)}`));
+    lines.push(foldLine(`DESCRIPTION:${escapeIcs(desc)}`));
+    lines.push("END:VEVENT");
+  }
+
+  const INSP_TYPE_LABEL: Record<string, string> = {
+    NHBC: "NHBC",
+    BUILDING_CONTROL: "Building Control",
+    WARRANTY_CML: "Warranty/CML",
+    INTERNAL_QA: "Internal QA",
+    OTHER: "Inspection",
+  };
+  for (const insp of inspections) {
+    // Booked date (if a specific slot is confirmed) takes precedence over the derived scheduled date.
+    const day = insp.bookedDate ?? insp.scheduledDate;
+    if (!day) continue;
+    const startDay = new Date(day);
+    const endExclusive = new Date(startDay);
+    endExclusive.setUTCDate(endExclusive.getUTCDate() + 1);
+
+    const plotLabel = insp.plot.plotNumber ? `Plot ${insp.plot.plotNumber}` : insp.plot.name;
+    const typeLabel = INSP_TYPE_LABEL[insp.type] ?? "Inspection";
+    const blockTag = insp.isBlocking ? " (hold-point)" : "";
+    const summary = `🔎 ${typeLabel}: ${insp.name} — ${plotLabel}${blockTag}`;
+    const desc =
+      `${typeLabel} inspection "${insp.name}" — ${plotLabel}\n` +
+      `Status: ${insp.status}${insp.bookedDate ? " (booked)" : ""}\n` +
+      `${insp.isBlocking ? "Hard hold-point — anchor job cannot complete until this passes.\n" : ""}` +
+      `${site.name}`;
+
+    lines.push("BEGIN:VEVENT");
+    lines.push(`UID:inspection-${insp.id}@sight-manager`);
     lines.push(`DTSTAMP:${fmtDateUtc(now)}`);
     lines.push(`DTSTART;VALUE=DATE:${fmtDate(startDay)}`);
     lines.push(`DTEND;VALUE=DATE:${fmtDate(endExclusive)}`);
