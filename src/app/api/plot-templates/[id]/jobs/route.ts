@@ -6,6 +6,26 @@ import { sessionHasPermission } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
 
+// GET /api/plot-templates/[id]/jobs — flat job list for the scope
+// (?variantId=X; null = base). Used by the inspection anchor picker.
+export async function GET(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const session = await auth();
+  if (!session) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  const { id } = await params;
+  const variantId = new URL(request.url).searchParams.get("variantId");
+  const jobs = await prisma.templateJob.findMany({
+    where: { templateId: id, variantId },
+    orderBy: { sortOrder: "asc" },
+    select: { id: true, name: true, stageCode: true, parentId: true, sortOrder: true },
+  });
+  return NextResponse.json(jobs);
+}
+
 // POST /api/plot-templates/[id]/jobs — add a job to a template
 export async function POST(
   request: NextRequest,

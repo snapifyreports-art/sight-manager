@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Package, FileText, Plus, Loader2, Trash2, Upload, ExternalLink, Download } from "lucide-react";
+import { Package, FileText, Plus, Loader2, Trash2, Upload, ExternalLink, Download, ClipboardCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -43,6 +43,35 @@ interface TemplateDocument {
   isPlaceholder?: boolean;
   createdAt: string;
 }
+interface TemplateInspectionRow {
+  id: string;
+  name: string;
+  type: string;
+  description: string | null;
+  anchorTemplateJobId: string;
+  anchorEdge: string;
+  offsetDays: number;
+  bookingLeadWeeks: number | null;
+  sortOrder: number;
+  anchorJob: { id: string; name: string; stageCode: string | null } | null;
+}
+interface AnchorJobRow {
+  id: string;
+  name: string;
+  stageCode: string | null;
+  parentId: string | null;
+  sortOrder: number;
+}
+
+const INSPECTION_TYPES = [
+  { value: "NHBC", label: "NHBC" },
+  { value: "BUILDING_CONTROL", label: "Building Control / LABC" },
+  { value: "WARRANTY_CML", label: "Warranty / CML" },
+  { value: "INTERNAL_QA", label: "Internal QA" },
+  { value: "OTHER", label: "Other" },
+] as const;
+const inspectionTypeLabel = (t: string) =>
+  INSPECTION_TYPES.find((x) => x.value === t)?.label ?? t;
 
 export function TemplateExtras({
   templateId,
@@ -57,7 +86,19 @@ export function TemplateExtras({
   const variantQ = variantId ? `?variantId=${variantId}` : "";
   const [materials, setMaterials] = useState<TemplateMaterial[]>([]);
   const [documents, setDocuments] = useState<TemplateDocument[]>([]);
+  const [inspections, setInspections] = useState<TemplateInspectionRow[]>([]);
+  const [anchorJobs, setAnchorJobs] = useState<AnchorJobRow[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Inspection add dialog
+  const [iOpen, setIOpen] = useState(false);
+  const [iName, setIName] = useState("");
+  const [iType, setIType] = useState<string>("NHBC");
+  const [iAnchorJobId, setIAnchorJobId] = useState("");
+  const [iAnchorEdge, setIAnchorEdge] = useState<"START" | "END">("END");
+  const [iOffsetDays, setIOffsetDays] = useState("0");
+  const [iBookingLeadWeeks, setIBookingLeadWeeks] = useState("");
+  const [iSubmitting, setISubmitting] = useState(false);
 
   // Material add dialog
   const [mOpen, setMOpen] = useState(false);
@@ -85,12 +126,16 @@ export function TemplateExtras({
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [mRes, dRes] = await Promise.all([
+    const [mRes, dRes, iRes, jRes] = await Promise.all([
       fetch(`/api/plot-templates/${templateId}/materials${variantQ}`),
       fetch(`/api/plot-templates/${templateId}/documents${variantQ}`),
+      fetch(`/api/plot-templates/${templateId}/inspections${variantQ}`),
+      fetch(`/api/plot-templates/${templateId}/jobs${variantQ}`),
     ]);
     if (mRes.ok) setMaterials(await mRes.json());
     if (dRes.ok) setDocuments(await dRes.json());
+    if (iRes.ok) setInspections(await iRes.json());
+    if (jRes.ok) setAnchorJobs(await jRes.json());
     setLoading(false);
   }, [templateId, variantQ]);
 
@@ -101,11 +146,17 @@ export function TemplateExtras({
     Promise.all([
       fetch(`/api/plot-templates/${templateId}/materials${variantQ}`),
       fetch(`/api/plot-templates/${templateId}/documents${variantQ}`),
-    ]).then(async ([mRes, dRes]) => {
+      fetch(`/api/plot-templates/${templateId}/inspections${variantQ}`),
+      fetch(`/api/plot-templates/${templateId}/jobs${variantQ}`),
+    ]).then(async ([mRes, dRes, iRes, jRes]) => {
       if (cancelled) return;
       if (mRes.ok) setMaterials(await mRes.json());
       if (cancelled) return;
       if (dRes.ok) setDocuments(await dRes.json());
+      if (cancelled) return;
+      if (iRes.ok) setInspections(await iRes.json());
+      if (cancelled) return;
+      if (jRes.ok) setAnchorJobs(await jRes.json());
     }).finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [templateId, variantQ]);
@@ -180,6 +231,48 @@ export function TemplateExtras({
     });
     if (!res.ok) {
       toast.error(await fetchErrorMessage(res, "Failed to update material"));
+      return;
+    }
+    load();
+  }
+
+  async function addInspection() {
+    if (!iName || !iAnchorJobId) return;
+    setISubmitting(true);
+    try {
+      const res = await fetch(`/api/plot-templates/${templateId}/inspections${variantQ}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: iName,
+          type: iType,
+          anchorTemplateJobId: iAnchorJobId,
+          anchorEdge: iAnchorEdge,
+          offsetDays: Number(iOffsetDays) || 0,
+          bookingLeadWeeks: iBookingLeadWeeks ? Number(iBookingLeadWeeks) : null,
+        }),
+      });
+      if (!res.ok) {
+        toast.error(await fetchErrorMessage(res, "Failed to add inspection"));
+        return;
+      }
+      setIOpen(false);
+      setIName(""); setIAnchorJobId(""); setIOffsetDays("0"); setIBookingLeadWeeks("");
+      load();
+    } finally { setISubmitting(false); }
+  }
+
+  async function deleteInspection(id: string) {
+    const ok = await confirm({
+      title: "Delete this inspection from the template?",
+      body: "Plots already created from this template aren't affected — only future applies.",
+      confirmLabel: "Delete inspection",
+      danger: true,
+    });
+    if (!ok) return;
+    const res = await fetch(`/api/plot-templates/${templateId}/inspections/${id}`, { method: "DELETE" });
+    if (!res.ok) {
+      toast.error(await fetchErrorMessage(res, "Failed to delete inspection"));
       return;
     }
     load();
@@ -434,6 +527,61 @@ export function TemplateExtras({
         )}
       </div>
 
+      {/* Inspections — first-class hold-points anchored to a job. They
+          move with that job, don't block the programme, and drive
+          booking/prep alerts + handover certs. */}
+      <div id="template-extras-inspections" className="scroll-mt-20">
+        <div className="mb-2 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <ClipboardCheck className="size-4 text-amber-600" />
+            <h3 className="text-sm font-semibold">Inspections ({inspections.length})</h3>
+          </div>
+          <Button size="sm" onClick={() => setIOpen(true)} disabled={anchorJobs.length === 0}>
+            <Plus className="size-3.5" /> Add
+          </Button>
+        </div>
+        {inspections.length === 0 ? (
+          <p className="rounded border border-dashed p-3 text-xs text-muted-foreground">
+            No inspections yet. Add hold-points (NHBC, Building Control, CML…) anchored to a job — they move with that job, don&apos;t block the programme, and alert the site manager to book + prep.
+          </p>
+        ) : (
+          <div className="overflow-x-auto rounded-lg border">
+            <table className="w-full text-sm">
+              <thead className="border-b bg-muted/30 text-[11px] uppercase text-muted-foreground">
+                <tr>
+                  <th className="px-3 py-1.5 text-left">Name</th>
+                  <th className="px-3 py-1.5 text-left">Type</th>
+                  <th className="px-3 py-1.5 text-left">Anchored to</th>
+                  <th className="px-3 py-1.5 text-left">Book ahead</th>
+                  <th className="px-3 py-1.5"></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {inspections.map((ins) => (
+                  <tr key={ins.id} className="hover:bg-muted/20">
+                    <td className="px-3 py-1.5 font-medium">{ins.name}</td>
+                    <td className="px-3 py-1.5 text-muted-foreground">{inspectionTypeLabel(ins.type)}</td>
+                    <td className="px-3 py-1.5 text-muted-foreground">
+                      {ins.anchorJob?.name ?? "—"}
+                      <span className="text-[11px]">
+                        {" "}· {ins.anchorEdge === "END" ? "end" : "start"}
+                        {ins.offsetDays ? ` ${ins.offsetDays > 0 ? "+" : ""}${ins.offsetDays}d` : ""}
+                      </span>
+                    </td>
+                    <td className="px-3 py-1.5 text-muted-foreground">{ins.bookingLeadWeeks ? `${ins.bookingLeadWeeks} wk` : "—"}</td>
+                    <td className="px-3 py-1.5 text-right">
+                      <button onClick={() => deleteInspection(ins.id)} className="text-muted-foreground hover:text-destructive">
+                        <Trash2 className="size-3.5" />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
       {/* Drawings — id used by the validation panel's quick-fix
           "Upload drawing" button. */}
       <div id="template-extras-drawings" className="scroll-mt-20">
@@ -532,6 +680,88 @@ export function TemplateExtras({
             <Button variant="outline" onClick={() => setMOpen(false)}>Cancel</Button>
             <Button onClick={addMaterial} disabled={mSubmitting || !mName || !mQuantity}>
               {mSubmitting && <Loader2 className="size-4 animate-spin" />}
+              Add
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add inspection dialog */}
+      <Dialog open={iOpen} onOpenChange={setIOpen}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Add inspection to template</DialogTitle></DialogHeader>
+          <div className="grid grid-cols-2 gap-3 py-2">
+            <div className="col-span-2">
+              <Label>Name</Label>
+              <Input value={iName} onChange={(e) => setIName(e.target.value)} placeholder="e.g. NHBC Superstructure" />
+            </div>
+            <div>
+              <Label>Type</Label>
+              <select
+                value={iType}
+                onChange={(e) => setIType(e.target.value)}
+                className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm"
+              >
+                {INSPECTION_TYPES.map((t) => (
+                  <option key={t.value} value={t.value}>{t.label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <Label>Anchored to job</Label>
+              <select
+                value={iAnchorJobId}
+                onChange={(e) => setIAnchorJobId(e.target.value)}
+                className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm"
+              >
+                <option value="">Select a job…</option>
+                {anchorJobs
+                  .filter((j) => !j.parentId)
+                  .sort((a, b) => a.sortOrder - b.sortOrder)
+                  .map((stage) => {
+                    const kids = anchorJobs
+                      .filter((j) => j.parentId === stage.id)
+                      .sort((a, b) => a.sortOrder - b.sortOrder);
+                    return (
+                      <optgroup key={stage.id} label={stage.name}>
+                        <option value={stage.id}>{stage.name} (whole stage)</option>
+                        {kids.map((k) => (
+                          <option key={k.id} value={k.id}>— {k.name}</option>
+                        ))}
+                      </optgroup>
+                    );
+                  })}
+              </select>
+            </div>
+            <div>
+              <Label>When</Label>
+              <select
+                value={iAnchorEdge}
+                onChange={(e) => setIAnchorEdge(e.target.value as "START" | "END")}
+                className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm"
+              >
+                <option value="END">At job end</option>
+                <option value="START">At job start</option>
+              </select>
+            </div>
+            <div>
+              <Label>Offset (working days ±)</Label>
+              <Input type="number" value={iOffsetDays} onChange={(e) => setIOffsetDays(e.target.value)} placeholder="0" />
+            </div>
+            <div className="col-span-2">
+              <Label>Book ahead (weeks, optional)</Label>
+              <Input
+                type="number"
+                value={iBookingLeadWeeks}
+                onChange={(e) => setIBookingLeadWeeks(e.target.value)}
+                placeholder="e.g. 2 — alerts the manager to book 2 wks before"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIOpen(false)}>Cancel</Button>
+            <Button onClick={addInspection} disabled={iSubmitting || !iName || !iAnchorJobId}>
+              {iSubmitting && <Loader2 className="size-4 animate-spin" />}
               Add
             </Button>
           </DialogFooter>
