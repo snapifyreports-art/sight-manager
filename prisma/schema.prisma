@@ -901,6 +901,10 @@ model TemplateInspection {
   // Optional default inspector (a Contact, type CONTRACTOR) carried onto
   // each applied plot's Inspection so e.g. the NHBC inspector auto-assigns.
   defaultInspectorContactId String?
+  // When true this is a HARD hold-point: completing the anchor job while
+  // this inspection is open is blocked (override+reason required). False =
+  // informational reminder only. Keith's call — configured per hold-point.
+  isBlocking          Boolean  @default(false)
   createdAt           DateTime @default(now())
 
   template         PlotTemplate     @relation(fields: [templateId], references: [id], onDelete: Cascade)
@@ -932,6 +936,9 @@ model Inspection {
   anchorEdge               String           @default("START")
   offsetDays               Int              @default(0)
   bookingLeadWeeks         Int? // snapshotted from the template at apply
+  // Hard hold-point — completing the anchor job while this is open is
+  // blocked (override+reason). Snapshotted from the template at apply.
+  isBlocking               Boolean          @default(false)
   scheduledDate            DateTime // DERIVED + denormalised (see model doc)
   bookedDate               DateTime?
   passedAt                 DateTime? // immutable factual result

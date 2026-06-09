@@ -56,6 +56,7 @@ interface TemplateInspectionRow {
   anchorJob: { id: string; name: string; stageCode: string | null } | null;
   defaultInspectorContactId: string | null;
   defaultInspector: { id: string; name: string } | null;
+  isBlocking: boolean;
 }
 interface ContactOption {
   id: string;
@@ -106,6 +107,7 @@ export function TemplateExtras({
   const [iOffsetDays, setIOffsetDays] = useState("0");
   const [iBookingLeadWeeks, setIBookingLeadWeeks] = useState("");
   const [iInspectorId, setIInspectorId] = useState("");
+  const [iIsBlocking, setIIsBlocking] = useState(false);
   const [iSubmitting, setISubmitting] = useState(false);
 
   // Material add dialog
@@ -274,6 +276,7 @@ export function TemplateExtras({
           offsetDays: Number(iOffsetDays) || 0,
           bookingLeadWeeks: iBookingLeadWeeks ? Number(iBookingLeadWeeks) : null,
           defaultInspectorContactId: iInspectorId || null,
+          isBlocking: iIsBlocking,
         }),
       });
       if (!res.ok) {
@@ -281,7 +284,7 @@ export function TemplateExtras({
         return;
       }
       setIOpen(false);
-      setIName(""); setIAnchorJobId(""); setIOffsetDays("0"); setIBookingLeadWeeks(""); setIInspectorId("");
+      setIName(""); setIAnchorJobId(""); setIOffsetDays("0"); setIBookingLeadWeeks(""); setIInspectorId(""); setIIsBlocking(false);
       load();
     } finally { setISubmitting(false); }
   }
@@ -584,7 +587,14 @@ export function TemplateExtras({
               <tbody className="divide-y">
                 {inspections.map((ins) => (
                   <tr key={ins.id} className="hover:bg-muted/20">
-                    <td className="px-3 py-1.5 font-medium">{ins.name}</td>
+                    <td className="px-3 py-1.5 font-medium">
+                      {ins.name}
+                      {ins.isBlocking && (
+                        <span className="ml-1.5 rounded bg-amber-100 px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-amber-700" title="Hard blocker — blocks completing the anchor job while open">
+                          blocks
+                        </span>
+                      )}
+                    </td>
                     <td className="px-3 py-1.5 text-muted-foreground">{inspectionTypeLabel(ins.type)}</td>
                     <td className="px-3 py-1.5 text-muted-foreground">
                       {ins.anchorJob?.name ?? "—"}
@@ -796,6 +806,20 @@ export function TemplateExtras({
                 ))}
               </select>
             </div>
+            <label className="col-span-2 flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50/50 p-2.5 text-sm">
+              <input
+                type="checkbox"
+                checked={iIsBlocking}
+                onChange={(e) => setIIsBlocking(e.target.checked)}
+                className="mt-0.5 size-4 accent-amber-600"
+              />
+              <span>
+                <span className="font-medium">Hard blocker</span>
+                <span className="block text-[11px] text-muted-foreground">
+                  Block completing the anchor job while this inspection is open (manager can override with a reason). Leave off for a reminder only.
+                </span>
+              </span>
+            </label>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIOpen(false)}>Cancel</Button>

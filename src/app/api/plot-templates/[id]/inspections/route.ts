@@ -71,6 +71,7 @@ export async function POST(
     bookingLeadWeeks,
     sortOrder,
     defaultInspectorContactId,
+    isBlocking,
   } = body;
 
   if (!name || typeof name !== "string") {
@@ -110,6 +111,7 @@ export async function POST(
           typeof bookingLeadWeeks === "number" ? Math.trunc(bookingLeadWeeks) : null,
         sortOrder: typeof sortOrder === "number" ? sortOrder : 0,
         defaultInspectorContactId: defaultInspectorContactId || null,
+        isBlocking: isBlocking === true,
       },
       include: {
         anchorJob: { select: { id: true, name: true, stageCode: true } },

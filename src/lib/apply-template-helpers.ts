@@ -415,6 +415,7 @@ export async function createInspectionsFromTemplate(
     offsetDays: number;
     bookingLeadWeeks: number | null;
     defaultInspectorContactId?: string | null;
+    isBlocking?: boolean;
   }>,
   jobIdMap: Map<string, string>,
 ): Promise<number> {
@@ -459,6 +460,7 @@ export async function createInspectionsFromTemplate(
         anchorEdge: ti.anchorEdge === "END" ? "END" : "START",
         offsetDays: ti.offsetDays,
         bookingLeadWeeks: ti.bookingLeadWeeks,
+        isBlocking: ti.isBlocking ?? false,
         scheduledDate,
         inspectorContactId: ti.defaultInspectorContactId ?? null,
       },
