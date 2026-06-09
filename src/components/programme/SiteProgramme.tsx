@@ -1074,41 +1074,19 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
     doc.save(`${site.name.replace(/\s+/g, "_")}_programme.pdf`);
   }, [site, processedPlots, columns, hasFilters, todayIndex, viewMode]);
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center py-16">
-        <Loader2 className="size-6 animate-spin text-muted-foreground" />
-      </div>
-    );
-  }
-
-  if (!site || site.plots.length === 0) {
-    return (
-      <p className="py-8 text-center text-sm text-muted-foreground">
-        No plots found. Add plots to see the programme view.
-      </p>
-    );
-  }
-
-  // Overlay mode doubles row height: top half shows Current plan, bottom half
-  // shows Original plan greyed out. Keith's feedback (Apr 2026): the old
-  // 4px ghost strip at the bottom of a cell was illegible — you could see
-  // "something shifted" but not what/from where. Two full-height labelled
-  // rows make the before/after comparison obvious.
-  const effectiveRowHeight = ganttMode === "overlay" ? ROW_HEIGHT * 2 : ROW_HEIGHT;
-
   // (Jun 2026) Overlapping-job lanes. When two leaf jobs on a plot run
   // concurrently (two trades started in unison, or one pulled early so its
   // window overlaps a still-running job), stack them into separate
   // sub-lanes so NEITHER is hidden behind the other. Greedy interval-
   // partition by [start,end]. A plot with no overlaps stays one lane →
-  // pixel-identical to before. Disabled in overlay mode, which already
-  // uses a 2-row band for the current-vs-original comparison.
-  const stackingEnabled = ganttMode !== "overlay";
+  // pixel-identical to before. Disabled in overlay mode (its own 2-row
+  // band). MUST be above the early returns below so the hook order is
+  // stable across loading / empty / loaded renders (React error #310).
   const { laneCountByPlot, laneByJob } = useMemo(() => {
     const laneCountByPlot = new Map<string, number>();
     const laneByJob = new Map<string, number>();
-    if (!stackingEnabled) {
+    const stacking = ganttMode !== "overlay";
+    if (!stacking) {
       for (const p of processedPlots) laneCountByPlot.set(p.id, 1);
       return { laneCountByPlot, laneByJob };
     }
@@ -1137,8 +1115,34 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
       laneCountByPlot.set(p.id, Math.max(1, laneEnds.length));
     }
     return { laneCountByPlot, laneByJob };
-  }, [processedPlots, ganttMode, stackingEnabled]);
+  }, [processedPlots, ganttMode]);
 
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-16">
+        <Loader2 className="size-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (!site || site.plots.length === 0) {
+    return (
+      <p className="py-8 text-center text-sm text-muted-foreground">
+        No plots found. Add plots to see the programme view.
+      </p>
+    );
+  }
+
+  // Overlay mode doubles row height: top half shows Current plan, bottom half
+  // shows Original plan greyed out. Keith's feedback (Apr 2026): the old
+  // 4px ghost strip at the bottom of a cell was illegible — you could see
+  // "something shifted" but not what/from where. Two full-height labelled
+  // rows make the before/after comparison obvious.
+  const effectiveRowHeight = ganttMode === "overlay" ? ROW_HEIGHT * 2 : ROW_HEIGHT;
+
+  // Lane stacking (computed above, before the early returns to keep hook
+  // order stable). Disabled in overlay mode, which uses its own 2-row band.
+  const stackingEnabled = ganttMode !== "overlay";
   const laneHeight = ROW_HEIGHT;
   const rowHeights = processedPlots.map((p) =>
     stackingEnabled ? (laneCountByPlot.get(p.id) ?? 1) * laneHeight : effectiveRowHeight,
