@@ -167,6 +167,14 @@ interface JobDetail {
     createdAt: string;
     uploadedBy?: { id: string; name: string } | null;
   }>;
+  anchoredInspections?: Array<{
+    id: string;
+    name: string;
+    type: string;
+    status: string;
+    scheduledDate: string;
+    isBlocking: boolean;
+  }>;
 }
 
 interface NextJobContractor {
@@ -1263,6 +1271,39 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
             <p className="text-sm text-muted-foreground whitespace-pre-wrap">
               {job.description}
             </p>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* (Jun 2026) Hold-points anchored to this job — closes the loop with
+          the completion blocker so the manager sees what must clear. */}
+      {(job.anchoredInspections?.length ?? 0) > 0 && (
+        <Card>
+          <CardHeader className="flex-row items-center justify-between pb-3">
+            <CardTitle className="text-base">Inspection hold-points</CardTitle>
+            <a href="/inspections" className="text-xs font-medium text-blue-600 hover:underline">Manage →</a>
+          </CardHeader>
+          <CardContent className="space-y-1.5">
+            {job.anchoredInspections!.map((i) => {
+              const c =
+                i.status === "PASSED" ? "bg-emerald-100 text-emerald-700"
+                : i.status === "FAILED" ? "bg-red-100 text-red-700"
+                : i.status === "OVERDUE" ? "bg-amber-100 text-amber-700"
+                : i.status === "BOOKED" ? "bg-blue-100 text-blue-700"
+                : "bg-slate-100 text-slate-600";
+              return (
+                <div key={i.id} className="flex items-center justify-between gap-2 text-sm">
+                  <span className="flex min-w-0 items-center gap-1.5 truncate">
+                    {i.name}
+                    {i.isBlocking && <span className="rounded bg-red-100 px-1 py-0.5 text-[9px] font-semibold uppercase text-red-700">blocks</span>}
+                  </span>
+                  <span className="flex shrink-0 items-center gap-2">
+                    <span className="text-xs text-muted-foreground">{format(new Date(i.scheduledDate), "d MMM")}</span>
+                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${c}`}>{i.status.toLowerCase()}</span>
+                  </span>
+                </div>
+              );
+            })}
           </CardContent>
         </Card>
       )}

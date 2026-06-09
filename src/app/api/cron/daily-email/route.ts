@@ -53,6 +53,8 @@ export async function GET(req: NextRequest) {
         overdueDeliveries,
         ordersToPlace,
         openSnags,
+        inspectionsOverdue,
+        inspectionsDueWeek,
       ] = await Promise.all([
         // (May 2026 audit D-P1-3) Route the overdue / late-start counts
         // through the Lateness SSOT (`@/lib/lateness`) so future
@@ -97,6 +99,19 @@ export async function GET(req: NextRequest) {
         prisma.snag.count({
           where: { plot: { siteId: site.id }, status: { in: ["OPEN", "IN_PROGRESS"] } },
         }),
+        // (Jun 2026) Statutory/QA hold-points — overdue + due in the next 7
+        // days, so the emailed brief (the surface most managers read first)
+        // flags inspections, not just the in-app brief.
+        prisma.inspection.count({
+          where: { plot: { siteId: site.id }, status: "OVERDUE" },
+        }),
+        prisma.inspection.count({
+          where: {
+            plot: { siteId: site.id },
+            status: { in: ["SCHEDULED", "BOOKED"] },
+            scheduledDate: { gte: todayStart, lt: new Date(todayStart.getTime() + 7 * 86400000) },
+          },
+        }),
       ]);
 
       return {
@@ -109,7 +124,9 @@ export async function GET(req: NextRequest) {
         overdueDeliveries,
         ordersToPlace,
         openSnags,
-        hasAlerts: overdueJobs > 0 || lateStarts > 0 || overdueDeliveries > 0 || ordersToPlace > 0,
+        inspectionsOverdue,
+        inspectionsDueWeek,
+        hasAlerts: overdueJobs > 0 || lateStarts > 0 || overdueDeliveries > 0 || ordersToPlace > 0 || inspectionsOverdue > 0,
       };
     })
   );
@@ -230,8 +247,23 @@ export async function GET(req: NextRequest) {
             `${baseUrl}/orders?status=PENDING&site=${d.site.id}`,
           ),
         );
+      if (d.inspectionsOverdue > 0)
+        alerts.push(
+          linkAlert(
+            `${d.inspectionsOverdue} inspection${d.inspectionsOverdue !== 1 ? "s" : ""} overdue`,
+            "#dc2626",
+            `${baseUrl}/inspections`,
+          ),
+        );
 
       const statusPills = [
+        d.inspectionsDueWeek > 0
+          ? linkChip(
+              `${d.inspectionsDueWeek} inspection${d.inspectionsDueWeek !== 1 ? "s" : ""} this week`,
+              { bg: "#fef3c7", fg: "#b45309" },
+              `${baseUrl}/inspections`,
+            )
+          : null,
         d.activeJobs > 0
           ? linkChip(
               `${d.activeJobs} active`,
@@ -335,7 +367,7 @@ export async function GET(req: NextRequest) {
           return;
         }
         const myAlerts = myDigests.reduce(
-          (sum, d) => sum + d.overdueJobs + d.lateStarts + d.overdueDeliveries + d.ordersToPlace,
+          (sum, d) => sum + d.overdueJobs + d.lateStarts + d.overdueDeliveries + d.ordersToPlace + d.inspectionsOverdue,
           0,
         );
         return sendEmail({

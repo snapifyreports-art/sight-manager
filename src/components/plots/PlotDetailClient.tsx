@@ -279,9 +279,11 @@ function AddJobDialog({
 function PlotOverview({
   plot,
   snagSummary,
+  inspections,
 }: {
   plot: PlotData;
   snagSummary: Record<string, number>;
+  inspections: Array<{ id: string; name: string; type: string; status: string; scheduledDate: string }>;
 }) {
   // Midnight-snap so SSR + hydration agree on today's date (prevents React #418).
   const today = getCurrentDateAtMidnight();
@@ -903,6 +905,59 @@ function PlotOverview({
         </Card>
       </div>
 
+      {/* (Jun 2026) Inspections — statutory/QA hold-points on this plot.
+          Open/overdue/failed are the actionable ones; click through to the
+          Inspections page to book / pass / fail. */}
+      {inspections.length > 0 && (() => {
+        const open = inspections.filter((i) => i.status === "SCHEDULED" || i.status === "BOOKED");
+        const overdue = inspections.filter((i) => i.status === "OVERDUE");
+        const failed = inspections.filter((i) => i.status === "FAILED");
+        const passed = inspections.filter((i) => i.status === "PASSED");
+        const pill = (s: string) => {
+          const c =
+            s === "PASSED" ? "bg-emerald-100 text-emerald-700"
+            : s === "FAILED" ? "bg-red-100 text-red-700"
+            : s === "OVERDUE" ? "bg-amber-100 text-amber-700"
+            : s === "BOOKED" ? "bg-blue-100 text-blue-700"
+            : "bg-slate-100 text-slate-600";
+          return `rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${c}`;
+        };
+        const actionable = [...overdue, ...failed, ...open].slice(0, 6);
+        return (
+          <Card className="mt-4">
+            <CardHeader className="flex-row items-center justify-between pb-3">
+              <CardTitle className="flex items-center gap-1.5 text-base">
+                <ClipboardCheck className="size-4 text-amber-600" /> Inspections
+              </CardTitle>
+              <Link href="/inspections" className="text-xs font-medium text-blue-600 hover:underline">View all →</Link>
+            </CardHeader>
+            <CardContent>
+              <div className="mb-3 flex flex-wrap gap-3 text-xs">
+                <span>{passed.length}/{inspections.length} passed</span>
+                {overdue.length > 0 && <span className="font-medium text-amber-600">{overdue.length} overdue</span>}
+                {failed.length > 0 && <span className="font-medium text-red-600">{failed.length} failed</span>}
+                {open.length > 0 && <span>{open.length} open</span>}
+              </div>
+              {actionable.length === 0 ? (
+                <p className="text-sm text-emerald-600">All inspections passed ✓</p>
+              ) : (
+                <ul className="space-y-1.5">
+                  {actionable.map((i) => (
+                    <li key={i.id} className="flex items-center justify-between gap-2 text-sm">
+                      <span className="min-w-0 truncate">{i.name}</span>
+                      <span className="flex shrink-0 items-center gap-2">
+                        <span className="text-xs text-muted-foreground">{format(new Date(i.scheduledDate), "d MMM")}</span>
+                        <span className={pill(i.status)}>{i.status.toLowerCase()}</span>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </CardContent>
+          </Card>
+        );
+      })()}
+
       {/* Centralised pre-start / early-start / order-conflict dialogs */}
       {jobActionDialogs}
       <PostCompletionDialog
@@ -1112,7 +1167,7 @@ export function PlotDetailClient({
 
   // Inspection hold-points for this plot → ! markers on the Gantt tab.
   const [inspections, setInspections] = useState<
-    Array<{ id: string; name: string; status: string; scheduledDate: string }>
+    Array<{ id: string; name: string; type: string; status: string; scheduledDate: string }>
   >([]);
   useEffect(() => {
     let cancelled = false;
@@ -1279,7 +1334,7 @@ export function PlotDetailClient({
 
         {/* Overview Tab */}
         <TabsContent value="overview">
-          <PlotOverview plot={plot} snagSummary={snagSummary} />
+          <PlotOverview plot={plot} snagSummary={snagSummary} inspections={inspections} />
         </TabsContent>
 
         {/* Gantt Chart Tab */}

@@ -62,6 +62,12 @@ export default async function JobDetailPage({
         },
         orderBy: { createdAt: "desc" },
       },
+      // (Jun 2026) Hold-points anchored to this job — closes the loop with
+      // the completion soft-gate so the manager can SEE what's outstanding.
+      anchoredInspections: {
+        select: { id: true, name: true, type: true, status: true, scheduledDate: true, isBlocking: true },
+        orderBy: { scheduledDate: "asc" as const },
+      },
     },
   });
 
@@ -121,6 +127,10 @@ export default async function JobDetailPage({
     photos: job.photos.map((photo) => ({
       ...photo,
       createdAt: photo.createdAt.toISOString(),
+    })),
+    anchoredInspections: job.anchoredInspections.map((i) => ({
+      ...i,
+      scheduledDate: i.scheduledDate.toISOString(),
     })),
   };
 
