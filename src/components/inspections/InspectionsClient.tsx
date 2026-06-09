@@ -57,6 +57,7 @@ export function InspectionsClient({ initial, canManage }: { initial: Insp[]; can
   const [items, setItems] = useState<Insp[]>(initial);
   const [filter, setFilter] = useState<Filter>("Upcoming");
   const [dialog, setDialog] = useState<{ kind: "pass" | "fail"; insp: Insp } | null>(null);
+  const [notify, setNotify] = useState<Insp | null>(null);
 
   const refetch = useCallback(async () => {
     const res = await fetch("/api/inspections");
@@ -207,6 +208,9 @@ export function InspectionsClient({ initial, canManage }: { initial: Insp[]; can
                     {i.status === "FAILED" && (
                       <Button size="sm" variant="outline" disabled={pending} onClick={() => action.reinspect(i.id)}>Re-inspect</Button>
                     )}
+                    {i.status !== "PASSED" && (
+                      <Button size="sm" variant="ghost" disabled={pending} onClick={() => setNotify(i)} title="Notify a contractor via Contractor Comms">Notify</Button>
+                    )}
                   </div>
                 )}
               </div>
@@ -223,7 +227,78 @@ export function InspectionsClient({ initial, canManage }: { initial: Insp[]; can
           onDone={() => { setDialog(null); refetch(); }}
         />
       )}
+      {notify && <NotifyContractorDialog insp={notify} onClose={() => setNotify(null)} />}
     </div>
+  );
+}
+
+// ---- Notify a contractor about an inspection (via Contractor Comms) ----
+function NotifyContractorDialog({ insp, onClose }: { insp: Insp; onClose: () => void }) {
+  const [contacts, setContacts] = useState<Array<{ id: string; name: string; company: string | null }>>([]);
+  const [contactId, setContactId] = useState("");
+  const [message, setMessage] = useState(
+    `${TYPE_LABEL[insp.type] ?? insp.type} inspection "${insp.name}" is scheduled for ${format(new Date(insp.scheduledDate), "EEE d MMM")} on Plot ${insp.plot.plotNumber ?? insp.plot.name}. Please make sure the area is ready and accessible.`,
+  );
+  const [busy, setBusy] = useState(false);
+  const [sent, setSent] = useState(false);
+
+  useEffect(() => {
+    fetch(`/api/contacts?type=CONTRACTOR`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((all) => setContacts((Array.isArray(all) ? all : []).map((c: { id: string; name: string; company: string | null }) => ({ id: c.id, name: c.name, company: c.company }))))
+      .catch(() => {});
+  }, []);
+
+  async function send() {
+    if (!contactId) return;
+    setBusy(true);
+    try {
+      const r = await fetch(`/api/sites/${insp.plot.siteId}/toolbox-talks`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          topic: `Inspection: ${insp.name} — Plot ${insp.plot.plotNumber ?? insp.plot.name}`,
+          notes: message.trim(),
+          contractorIds: [contactId],
+          mode: "request",
+          dueBy: insp.scheduledDate,
+          sendEmail: true,
+        }),
+      });
+      if (r.ok) { setSent(true); setTimeout(onClose, 1200); }
+    } finally { setBusy(false); }
+  }
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader><DialogTitle>Notify a contractor — {insp.name}</DialogTitle></DialogHeader>
+        {sent ? (
+          <p className="py-4 text-center text-sm text-emerald-600">Sent to Contractor Comms ✓</p>
+        ) : (
+          <div className="space-y-3 py-2">
+            <div>
+              <Label>Contractor</Label>
+              <select value={contactId} onChange={(e) => setContactId(e.target.value)} className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm">
+                <option value="">Select a contractor…</option>
+                {contacts.map((c) => <option key={c.id} value={c.id}>{c.company || c.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <Label>Message</Label>
+              <textarea value={message} onChange={(e) => setMessage(e.target.value)} rows={4} className="w-full resize-none rounded-md border border-input bg-transparent px-2 py-1.5 text-sm" />
+              <p className="mt-1 text-[11px] text-muted-foreground">Creates a Contractor Comms entry (due by the inspection date) and emails the contractor.</p>
+            </div>
+          </div>
+        )}
+        {!sent && (
+          <DialogFooter>
+            <Button variant="outline" onClick={onClose}>Cancel</Button>
+            <Button disabled={busy || !contactId} onClick={send}>{busy ? <Loader2 className="size-4 animate-spin" /> : "Send"}</Button>
+          </DialogFooter>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }
 

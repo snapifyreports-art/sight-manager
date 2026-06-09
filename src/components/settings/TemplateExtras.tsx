@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Package, FileText, Plus, Loader2, Trash2, Upload, ExternalLink, Download, ClipboardCheck } from "lucide-react";
+import { Package, FileText, Plus, Loader2, Trash2, Upload, ExternalLink, Download, ClipboardCheck, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -98,10 +98,12 @@ export function TemplateExtras({
   const [contacts, setContacts] = useState<ContactOption[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Inspection add dialog
+  // Inspection add/edit dialog (iEditingId set = editing an existing one)
   const [iOpen, setIOpen] = useState(false);
+  const [iEditingId, setIEditingId] = useState<string | null>(null);
   const [iName, setIName] = useState("");
   const [iType, setIType] = useState<string>("NHBC");
+  const [iDescription, setIDescription] = useState("");
   const [iAnchorJobId, setIAnchorJobId] = useState("");
   const [iAnchorEdge, setIAnchorEdge] = useState<"START" | "END">("END");
   const [iOffsetDays, setIOffsetDays] = useState("0");
@@ -261,30 +263,56 @@ export function TemplateExtras({
     load();
   }
 
+  function openAddInspection() {
+    setIEditingId(null);
+    setIName(""); setIType("NHBC"); setIDescription(""); setIAnchorJobId("");
+    setIAnchorEdge("END"); setIOffsetDays("0"); setIBookingLeadWeeks("");
+    setIInspectorId(""); setIIsBlocking(false);
+    setIOpen(true);
+  }
+
+  function openEditInspection(ins: TemplateInspectionRow) {
+    setIEditingId(ins.id);
+    setIName(ins.name); setIType(ins.type); setIDescription(ins.description ?? "");
+    setIAnchorJobId(ins.anchorTemplateJobId);
+    setIAnchorEdge(ins.anchorEdge === "END" ? "END" : "START");
+    setIOffsetDays(String(ins.offsetDays));
+    setIBookingLeadWeeks(ins.bookingLeadWeeks != null ? String(ins.bookingLeadWeeks) : "");
+    setIInspectorId(ins.defaultInspectorContactId ?? "");
+    setIIsBlocking(ins.isBlocking);
+    setIOpen(true);
+  }
+
   async function addInspection() {
     if (!iName || !iAnchorJobId) return;
     setISubmitting(true);
     try {
-      const res = await fetch(`/api/plot-templates/${templateId}/inspections${variantQ}`, {
-        method: "POST",
+      const editing = iEditingId != null;
+      const url = editing
+        ? `/api/plot-templates/${templateId}/inspections/${iEditingId}${variantQ}`
+        : `/api/plot-templates/${templateId}/inspections${variantQ}`;
+      const body = {
+        name: iName,
+        type: iType,
+        description: iDescription.trim() || null,
+        anchorTemplateJobId: iAnchorJobId,
+        anchorEdge: iAnchorEdge,
+        offsetDays: Number(iOffsetDays) || 0,
+        bookingLeadWeeks: iBookingLeadWeeks ? Number(iBookingLeadWeeks) : null,
+        defaultInspectorContactId: iInspectorId || null,
+        isBlocking: iIsBlocking,
+      };
+      const res = await fetch(url, {
+        method: editing ? "PUT" : "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: iName,
-          type: iType,
-          anchorTemplateJobId: iAnchorJobId,
-          anchorEdge: iAnchorEdge,
-          offsetDays: Number(iOffsetDays) || 0,
-          bookingLeadWeeks: iBookingLeadWeeks ? Number(iBookingLeadWeeks) : null,
-          defaultInspectorContactId: iInspectorId || null,
-          isBlocking: iIsBlocking,
-        }),
+        body: JSON.stringify(body),
       });
       if (!res.ok) {
-        toast.error(await fetchErrorMessage(res, "Failed to add inspection"));
+        toast.error(await fetchErrorMessage(res, `Failed to ${editing ? "update" : "add"} inspection`));
         return;
       }
       setIOpen(false);
-      setIName(""); setIAnchorJobId(""); setIOffsetDays("0"); setIBookingLeadWeeks(""); setIInspectorId(""); setIIsBlocking(false);
+      setIEditingId(null);
       load();
     } finally { setISubmitting(false); }
   }
@@ -563,7 +591,7 @@ export function TemplateExtras({
             <ClipboardCheck className="size-4 text-amber-600" />
             <h3 className="text-sm font-semibold">Inspections ({inspections.length})</h3>
           </div>
-          <Button size="sm" onClick={() => setIOpen(true)} disabled={anchorJobs.length === 0}>
+          <Button size="sm" onClick={openAddInspection} disabled={anchorJobs.length === 0}>
             <Plus className="size-3.5" /> Add
           </Button>
         </div>
@@ -606,9 +634,14 @@ export function TemplateExtras({
                     <td className="px-3 py-1.5 text-muted-foreground">{ins.defaultInspector?.name ?? "—"}</td>
                     <td className="px-3 py-1.5 text-muted-foreground">{ins.bookingLeadWeeks ? `${ins.bookingLeadWeeks} wk` : "—"}</td>
                     <td className="px-3 py-1.5 text-right">
-                      <button onClick={() => deleteInspection(ins.id)} className="text-muted-foreground hover:text-destructive">
-                        <Trash2 className="size-3.5" />
-                      </button>
+                      <div className="flex items-center justify-end gap-2">
+                        <button onClick={() => openEditInspection(ins)} className="text-muted-foreground hover:text-foreground" title="Edit inspection">
+                          <Pencil className="size-3.5" />
+                        </button>
+                        <button onClick={() => deleteInspection(ins.id)} className="text-muted-foreground hover:text-destructive" title="Delete inspection">
+                          <Trash2 className="size-3.5" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -725,11 +758,21 @@ export function TemplateExtras({
       {/* Add inspection dialog */}
       <Dialog open={iOpen} onOpenChange={setIOpen}>
         <DialogContent>
-          <DialogHeader><DialogTitle>Add inspection to template</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{iEditingId ? "Edit inspection" : "Add inspection to template"}</DialogTitle></DialogHeader>
           <div className="grid grid-cols-2 gap-3 py-2">
             <div className="col-span-2">
               <Label>Name</Label>
               <Input value={iName} onChange={(e) => setIName(e.target.value)} placeholder="e.g. NHBC Superstructure" />
+            </div>
+            <div className="col-span-2">
+              <Label>Notes / what to check (optional)</Label>
+              <textarea
+                value={iDescription}
+                onChange={(e) => setIDescription(e.target.value)}
+                rows={2}
+                placeholder="e.g. NHBC wants DPC + cavity trays exposed; book the structural engineer too"
+                className="w-full resize-none rounded-md border border-input bg-transparent px-2 py-1.5 text-sm"
+              />
             </div>
             <div>
               <Label>Type</Label>
@@ -822,10 +865,10 @@ export function TemplateExtras({
             </label>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIOpen(false)}>Cancel</Button>
+            <Button variant="outline" onClick={() => { setIOpen(false); setIEditingId(null); }}>Cancel</Button>
             <Button onClick={addInspection} disabled={iSubmitting || !iName || !iAnchorJobId}>
               {iSubmitting && <Loader2 className="size-4 animate-spin" />}
-              Add
+              {iEditingId ? "Save changes" : "Add"}
             </Button>
           </DialogFooter>
         </DialogContent>

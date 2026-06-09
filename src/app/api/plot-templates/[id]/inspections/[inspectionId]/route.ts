@@ -41,7 +41,7 @@ export async function PUT(
   }
 
   const body = await req.json();
-  const { name, type, description, anchorTemplateJobId, anchorEdge, offsetDays, bookingLeadWeeks, sortOrder, defaultInspectorContactId } = body;
+  const { name, type, description, anchorTemplateJobId, anchorEdge, offsetDays, bookingLeadWeeks, sortOrder, defaultInspectorContactId, isBlocking } = body;
 
   if (type !== undefined && !VALID_TYPES.includes(type)) {
     return NextResponse.json({ error: "type must be a valid InspectionType" }, { status: 400 });
@@ -82,6 +82,7 @@ export async function PUT(
         ...(defaultInspectorContactId !== undefined
           ? { defaultInspectorContactId: defaultInspectorContactId || null }
           : {}),
+        ...(isBlocking !== undefined ? { isBlocking: isBlocking === true } : {}),
       },
       include: {
         anchorJob: { select: { id: true, name: true, stageCode: true } },
