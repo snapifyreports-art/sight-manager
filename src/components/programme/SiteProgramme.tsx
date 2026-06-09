@@ -1096,7 +1096,58 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
   // "something shifted" but not what/from where. Two full-height labelled
   // rows make the before/after comparison obvious.
   const effectiveRowHeight = ganttMode === "overlay" ? ROW_HEIGHT * 2 : ROW_HEIGHT;
-  const totalHeight = processedPlots.length * effectiveRowHeight;
+
+  // (Jun 2026) Overlapping-job lanes. When two leaf jobs on a plot run
+  // concurrently (two trades started in unison, or one pulled early so its
+  // window overlaps a still-running job), stack them into separate
+  // sub-lanes so NEITHER is hidden behind the other. Greedy interval-
+  // partition by [start,end]. A plot with no overlaps stays one lane →
+  // pixel-identical to before. Disabled in overlay mode, which already
+  // uses a 2-row band for the current-vs-original comparison.
+  const stackingEnabled = ganttMode !== "overlay";
+  const { laneCountByPlot, laneByJob } = useMemo(() => {
+    const laneCountByPlot = new Map<string, number>();
+    const laneByJob = new Map<string, number>();
+    if (!stackingEnabled) {
+      for (const p of processedPlots) laneCountByPlot.set(p.id, 1);
+      return { laneCountByPlot, laneByJob };
+    }
+    for (const p of processedPlots) {
+      const dated = p.jobs
+        .map((j) => {
+          const s = ganttMode === "original" ? (j.originalStartDate || j.startDate) : (j.actualStartDate ?? j.startDate);
+          const e = ganttMode === "original" ? (j.originalEndDate || j.endDate) : (j.actualEndDate ?? j.endDate);
+          return s && e ? { id: j.id, s: new Date(s).getTime(), e: new Date(e).getTime() } : null;
+        })
+        .filter((v): v is { id: string; s: number; e: number } => v !== null)
+        .sort((a, b) => a.s - b.s);
+      const laneEnds: number[] = [];
+      for (const j of dated) {
+        // First lane whose last job ends strictly before this one starts
+        // (touching end/start = sequential, same lane).
+        let lane = laneEnds.findIndex((end) => end < j.s);
+        if (lane === -1) {
+          lane = laneEnds.length;
+          laneEnds.push(j.e);
+        } else {
+          laneEnds[lane] = j.e;
+        }
+        laneByJob.set(j.id, lane);
+      }
+      laneCountByPlot.set(p.id, Math.max(1, laneEnds.length));
+    }
+    return { laneCountByPlot, laneByJob };
+  }, [processedPlots, ganttMode, stackingEnabled]);
+
+  const laneHeight = ROW_HEIGHT;
+  const rowHeights = processedPlots.map((p) =>
+    stackingEnabled ? (laneCountByPlot.get(p.id) ?? 1) * laneHeight : effectiveRowHeight,
+  );
+  const rowTops = rowHeights.reduce<number[]>((acc, _h, i) => {
+    acc.push(i === 0 ? 0 : acc[i - 1] + rowHeights[i - 1]);
+    return acc;
+  }, []);
+  const totalHeight = rowHeights.reduce((a, b) => a + b, 0);
   const timelineWidth = columns.length * cellWidth;
 
   return (
@@ -1471,7 +1522,7 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                         ? "bg-blue-50"
                         : index % 2 === 0 ? "bg-white" : "bg-slate-50/50"
                     }`}
-                    style={{ height: effectiveRowHeight }}
+                    style={{ height: rowHeights[index] }}
                   >
                     {selectMode && (
                       <div className="flex w-[28px] items-center justify-center px-1">
@@ -1744,8 +1795,8 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                       plotIndex % 2 === 0 ? "bg-white" : "bg-slate-50/30"
                     }`}
                     style={{
-                      top: plotIndex * effectiveRowHeight,
-                      height: effectiveRowHeight,
+                      top: rowTops[plotIndex],
+                      height: rowHeights[plotIndex],
                     }}
                   >
                     {/* Overlay mode: dashed divider between Current (top half)
@@ -1778,6 +1829,10 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                         : getStageColor(job.status);
                       const hasPhotos = (job._count?.photos ?? 0) > 0;
                       const hasNotes = (job._count?.actions ?? 0) > 0;
+                      // Vertical lane offset — concurrent jobs stack into
+                      // separate sub-rows so neither is hidden (0 when this
+                      // plot has no overlaps, or in overlay mode).
+                      const laneOffset = stackingEnabled ? (laneByJob.get(job.id) ?? 0) * laneHeight : 0;
 
                       // Original dates for the second row in overlay mode.
                       // Fall back to current dates if no original was ever recorded
@@ -1877,7 +1932,7 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                             className="absolute flex cursor-pointer items-center justify-center"
                             style={{
                               left: colIdx * cellWidth,
-                              top: 0,
+                              top: laneOffset,
                               width: cellWidth,
                               height: ROW_HEIGHT,
                             }}
@@ -2082,7 +2137,7 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                       <div
                         key={`dots-${plot.id}-${col.key}`}
                         className="pointer-events-none absolute"
-                        style={{ left: colIdx * cellWidth, top: plotIndex * effectiveRowHeight, width: cellWidth, height: ROW_HEIGHT }}
+                        style={{ left: colIdx * cellWidth, top: rowTops[plotIndex], width: cellWidth, height: rowHeights[plotIndex] }}
                       >
                         <div className="absolute bottom-0 left-1/2 flex -translate-x-1/2 gap-0.5">
                           {orderInCell && (
@@ -2135,7 +2190,7 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                       <div
                         key={`insp-${plot.id}-${col.key}`}
                         className="pointer-events-none absolute"
-                        style={{ left: colIdx * cellWidth, top: plotIndex * effectiveRowHeight, width: cellWidth, height: ROW_HEIGHT }}
+                        style={{ left: colIdx * cellWidth, top: rowTops[plotIndex], width: cellWidth, height: ROW_HEIGHT }}
                       >
                         <div
                           title={inCell.map((i) => `${i.name} — ${i.status.toLowerCase()} (${format(new Date(i.scheduledDate), "d MMM")})`).join("\n")}
