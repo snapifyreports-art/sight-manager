@@ -4,6 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { canAccessSite } from "@/lib/site-access";
 import { verifyCalendarToken } from "@/lib/share-token";
 import { whereOrdersForSite } from "@/lib/order-scope";
+import { jobStatusLabel } from "@/lib/labels";
+import { inspectionStatusLabel } from "@/lib/inspection-doctype";
 
 export const dynamic = "force-dynamic";
 
@@ -194,7 +196,7 @@ export async function GET(
     const plotLabel = j.plot.plotNumber ? `Plot ${j.plot.plotNumber}` : j.plot.name;
     const summary = `${plotLabel} — ${j.name}`;
     const desc =
-      `${plotLabel} — ${j.name} (${j.status})\n` +
+      `${plotLabel} — ${j.name} (${jobStatusLabel(j.status)})\n` +
       `${site.name}`;
 
     lines.push("BEGIN:VEVENT");
@@ -253,7 +255,7 @@ export async function GET(
     const summary = `🔎 ${typeLabel}: ${insp.name} — ${plotLabel}${blockTag}`;
     const desc =
       `${typeLabel} inspection "${insp.name}" — ${plotLabel}\n` +
-      `Status: ${insp.status}${insp.bookedDate ? " (booked)" : ""}\n` +
+      `Status: ${inspectionStatusLabel(insp.status)}${insp.bookedDate ? " (booked)" : ""}\n` +
       `${insp.isBlocking ? "Hard hold-point — anchor job cannot complete until this passes.\n" : ""}` +
       `${site.name}`;
 

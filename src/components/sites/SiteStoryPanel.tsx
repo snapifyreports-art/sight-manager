@@ -1471,7 +1471,7 @@ function HighlightRow({
         <p className="text-slate-700">{highlight.description}</p>
         <p className="text-[10px] text-slate-400">
           {format(new Date(highlight.date), "dd MMM yyyy")}
-          {highlight.reason && ` · ${highlight.reason}`}
+          {highlight.reason && ` · ${REASON_LABELS[highlight.reason]?.label ?? highlight.reason}`}
         </p>
       </div>
     </li>

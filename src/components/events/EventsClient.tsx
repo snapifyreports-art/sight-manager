@@ -21,6 +21,12 @@ import {
   ChevronLeft,
   ChevronRight,
   LayoutGrid,
+  Truck,
+  Camera,
+  CloudRain,
+  Clock,
+  AlertTriangle,
+  ClipboardCheck,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -34,6 +40,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { fetchErrorMessage } from "@/components/ui/toast";
+import { titleCaseEnum } from "@/lib/labels";
 
 // ---------- Types ----------
 
@@ -109,6 +116,19 @@ const EVENT_TYPES = [
   "USER_ACTION",
   "NOTIFICATION",
   "SYSTEM",
+  "ORDER_SENT",
+  "DELIVERY_LATE",
+  "PLOT_COMPLETED",
+  "HANDOVER_COMPLETED",
+  "PHOTO_SHARED",
+  "WEATHER_IMPACT",
+  "LATENESS_OPENED",
+  "LATENESS_RESOLVED",
+  "INSPECTION_SCHEDULED",
+  "INSPECTION_BOOKED",
+  "INSPECTION_PASSED",
+  "INSPECTION_FAILED",
+  "INSPECTION_OVERDUE",
 ] as const;
 
 const EVENT_TYPE_CONFIG: Record<
@@ -261,12 +281,103 @@ const EVENT_TYPE_CONFIG: Record<
     iconBg: "bg-green-500/15",
     iconColor: "text-green-600 dark:text-green-400",
   },
+  ORDER_SENT: {
+    label: "Order Sent",
+    icon: Package,
+    badgeVariant: "outline",
+    iconBg: "bg-violet-500/15",
+    iconColor: "text-violet-600 dark:text-violet-400",
+  },
+  DELIVERY_LATE: {
+    label: "Delivery Late",
+    icon: Truck,
+    badgeVariant: "destructive",
+    iconBg: "bg-orange-500/15",
+    iconColor: "text-orange-600 dark:text-orange-400",
+  },
+  PLOT_COMPLETED: {
+    label: "Plot Completed",
+    icon: CheckCircle2,
+    badgeVariant: "default",
+    iconBg: "bg-emerald-500/15",
+    iconColor: "text-emerald-600 dark:text-emerald-400",
+  },
+  HANDOVER_COMPLETED: {
+    label: "Handover Completed",
+    icon: CheckCircle2,
+    badgeVariant: "default",
+    iconBg: "bg-emerald-500/15",
+    iconColor: "text-emerald-600 dark:text-emerald-400",
+  },
+  PHOTO_SHARED: {
+    label: "Photo Shared",
+    icon: Camera,
+    badgeVariant: "outline",
+    iconBg: "bg-pink-500/15",
+    iconColor: "text-pink-600 dark:text-pink-400",
+  },
+  WEATHER_IMPACT: {
+    label: "Weather Impact",
+    icon: CloudRain,
+    badgeVariant: "secondary",
+    iconBg: "bg-sky-500/15",
+    iconColor: "text-sky-600 dark:text-sky-400",
+  },
+  LATENESS_OPENED: {
+    label: "Lateness Opened",
+    icon: AlertTriangle,
+    badgeVariant: "destructive",
+    iconBg: "bg-red-500/15",
+    iconColor: "text-red-600 dark:text-red-400",
+  },
+  LATENESS_RESOLVED: {
+    label: "Lateness Resolved",
+    icon: Clock,
+    badgeVariant: "default",
+    iconBg: "bg-green-500/15",
+    iconColor: "text-green-600 dark:text-green-400",
+  },
+  INSPECTION_SCHEDULED: {
+    label: "Inspection Scheduled",
+    icon: ClipboardCheck,
+    badgeVariant: "outline",
+    iconBg: "bg-slate-500/15",
+    iconColor: "text-slate-600 dark:text-slate-400",
+  },
+  INSPECTION_BOOKED: {
+    label: "Inspection Booked",
+    icon: ClipboardCheck,
+    badgeVariant: "secondary",
+    iconBg: "bg-blue-500/15",
+    iconColor: "text-blue-600 dark:text-blue-400",
+  },
+  INSPECTION_PASSED: {
+    label: "Inspection Passed",
+    icon: CheckCircle2,
+    badgeVariant: "default",
+    iconBg: "bg-green-500/15",
+    iconColor: "text-green-600 dark:text-green-400",
+  },
+  INSPECTION_FAILED: {
+    label: "Inspection Failed",
+    icon: ClipboardCheck,
+    badgeVariant: "destructive",
+    iconBg: "bg-red-500/15",
+    iconColor: "text-red-600 dark:text-red-400",
+  },
+  INSPECTION_OVERDUE: {
+    label: "Inspection Overdue",
+    icon: AlertTriangle,
+    badgeVariant: "destructive",
+    iconBg: "bg-red-500/15",
+    iconColor: "text-red-600 dark:text-red-400",
+  },
 };
 
 function getEventConfig(type: string) {
   return (
     EVENT_TYPE_CONFIG[type] ?? {
-      label: type,
+      label: titleCaseEnum(type),
       icon: ScrollText,
       badgeVariant: "outline" as const,
       iconBg: "bg-slate-500/15",

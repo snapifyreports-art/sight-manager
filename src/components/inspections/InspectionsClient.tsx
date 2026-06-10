@@ -12,6 +12,7 @@ import { HelpTip } from "@/components/shared/HelpTip";
 import { InspectionStatusBadge, InspectionTypeBadge } from "@/components/shared/StatusBadge";
 import { SnagDialog } from "@/components/snags/SnagDialog";
 import { useInspectionAction, type InspectionFinding } from "@/hooks/useInspectionAction";
+import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 import { inspectionDisplayStatus, inspectionTypeLabel, INSPECTION_TYPE_META } from "@/lib/inspection-doctype";
 
 interface Insp {
@@ -454,6 +455,7 @@ function MoveDialog({ insp, onClose, onDone }: { insp: Insp; onClose: () => void
 
 // ---- Notify a contractor about an inspection (via Contractor Comms) ----
 function NotifyContractorDialog({ insp, onClose }: { insp: Insp; onClose: () => void }) {
+  const toast = useToast();
   const [contacts, setContacts] = useState<Array<{ id: string; name: string; company: string | null }>>([]);
   const [contactId, setContactId] = useState("");
   const [message, setMessage] = useState(
@@ -485,7 +487,12 @@ function NotifyContractorDialog({ insp, onClose }: { insp: Insp; onClose: () => 
           sendEmail: true,
         }),
       });
-      if (r.ok) { setSent(true); setTimeout(onClose, 1200); }
+      if (r.ok) {
+        setSent(true);
+        setTimeout(onClose, 1200);
+      } else {
+        toast.error(await fetchErrorMessage(r, "Failed to notify contractor"));
+      }
     } finally { setBusy(false); }
   }
 
@@ -524,6 +531,7 @@ function NotifyContractorDialog({ insp, onClose }: { insp: Insp; onClose: () => 
 
 // ---- Pass / Fail sign-off dialog with findings ----
 function SignOffDialog({ kind, insp, onClose, onDone }: { kind: "pass" | "fail"; insp: Insp; onClose: () => void; onDone: () => void }) {
+  const toast = useToast();
   const action = useInspectionAction({ silent: false });
   const [certId, setCertId] = useState(insp.certificateDocumentId ?? "");
   const [tickHandover, setTickHandover] = useState(true);
@@ -569,6 +577,8 @@ function SignOffDialog({ kind, insp, onClose, onDone }: { kind: "pass" | "fail";
         const created = await r.json().catch(() => null);
         await loadDocs();
         if (created?.id) setCertId(created.id);
+      } else {
+        toast.error(await fetchErrorMessage(r, "Certificate upload failed"));
       }
     } finally { setUploading(false); }
   }
@@ -612,6 +622,7 @@ function SignOffDialog({ kind, insp, onClose, onDone }: { kind: "pass" | "fail";
                   <input
                     ref={fileRef}
                     type="file"
+                    accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
                     className="hidden"
                     onChange={(e) => { const f = e.target.files?.[0]; if (f) void uploadCert(f); e.target.value = ""; }}
                   />

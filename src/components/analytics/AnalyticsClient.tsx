@@ -968,7 +968,7 @@ function DelayTrendsWidget() {
       <h3 className="font-semibold">Delay trends (last 12 weeks)</h3>
       <p className="text-xs text-muted-foreground">
         Cascade events per week. Top reasons:{" "}
-        {data.topReasons.slice(0, 3).map((r) => `${r.reason} (${r.count})`).join(", ") || "no delays"}
+        {data.topReasons.slice(0, 3).map((r) => `${REASON_DISPLAY[r.reason] ?? r.reason} (${r.count})`).join(", ") || "no delays"}
       </p>
       {totalEvents === 0 ? (
         <p className="mt-4 rounded-md border border-dashed bg-slate-50 px-3 py-6 text-center text-sm text-muted-foreground">

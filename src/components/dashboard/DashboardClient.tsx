@@ -42,6 +42,7 @@ import {
   type PieLabelRenderProps,
 } from "recharts";
 import { formatDistanceToNow } from "date-fns";
+import { inspectionTypeLabel } from "@/lib/inspection-doctype";
 
 // ---------- Types ----------
 
@@ -579,7 +580,7 @@ function AtRiskPanel({
                         {i.isBlocking && <span className="ml-1.5 rounded bg-red-100 px-1 text-[9px] font-semibold uppercase text-red-700">blocks</span>}
                       </p>
                       <p className="truncate text-[11px] text-slate-500">
-                        {i.plot.site.name} · {i.type.replace(/_/g, " ")}
+                        {i.plot.site.name} · {inspectionTypeLabel(i.type)}
                       </p>
                     </div>
                     <span className="shrink-0 rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-semibold text-red-700">

@@ -5,6 +5,7 @@ import { format, subDays, addDays } from "date-fns";
 import { checkCronAuth } from "@/lib/cron-auth";
 import { getServerCurrentDate, getServerStartOfDay } from "@/lib/dev-date";
 import { logEvent } from "@/lib/event-log";
+import { latenessReasonLabel } from "@/lib/labels";
 
 export const dynamic = "force-dynamic";
 
@@ -298,7 +299,7 @@ export async function GET(req: NextRequest) {
               // events that went late this week. Pre-fix the heading
               // implied this-week-only and a manager reading the email
               // alongside the in-app LatenessSummary couldn't reconcile.
-              `<div style="margin-top:8px;font-size:12px;color:#92400e;"><strong>${s.latenessDaysLost} working day${s.latenessDaysLost !== 1 ? "s" : ""} lost</strong> (open across the site)${s.latenessTopReason ? ` — top reason: ${s.latenessTopReason.replace(/_/g, " ").toLowerCase()}` : ""}</div>`
+              `<div style="margin-top:8px;font-size:12px;color:#92400e;"><strong>${s.latenessDaysLost} working day${s.latenessDaysLost !== 1 ? "s" : ""} lost</strong> (open across the site)${s.latenessTopReason ? ` — top reason: ${latenessReasonLabel(s.latenessTopReason)}` : ""}</div>`
             : "";
         if (!cells && !latenessFooter) return ""; // site had no activity — skip
         return `

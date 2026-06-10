@@ -4,7 +4,7 @@
     {
       "name": "sight-manager",
       "runtimeExecutable": "cmd",
-      "runtimeArgs": ["/c", "cd /d C:\\Users\\keith\\OneDrive\\Desktop\\sight-manager && node node_modules/next/dist/bin/next dev"],
+      "runtimeArgs": ["/c", "cd /d C:\\Users\\keith\\OneDrive\\Desktop\\sight-manager\\.claude\\worktrees\\nervous-lamport-b0b318 && node C:\\Users\\keith\\OneDrive\\Desktop\\sight-manager\\node_modules\\next\\dist\\bin\\next dev"],
       "port": 3002,
       "autoPort": true
     }

@@ -33,8 +33,8 @@ export function DocumentUpload({
       let successes = 0;
       try {
         for (const file of Array.from(files)) {
-          if (file.size > 10 * 1024 * 1024) {
-            failures.push(`${file.name}: exceeds 10MB limit`);
+          if (file.size > 50 * 1024 * 1024) {
+            failures.push(`${file.name}: exceeds 50MB limit`);
             continue;
           }
 

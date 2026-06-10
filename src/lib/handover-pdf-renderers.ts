@@ -1,6 +1,14 @@
 import { format } from "date-fns";
+import type { InspectionStatus } from "@prisma/client";
 import type { SiteStory, PlotStory, ContractorPerf } from "./site-story";
 import { loadJsPdf, pdfBuffer, safeDate } from "./pdf-builder";
+import {
+  titleCaseEnum,
+  latenessReasonLabel,
+  jobStatusLabel,
+  HANDOVER_DOC_TYPE_LABELS,
+} from "./labels";
+import { inspectionTypeLabel, inspectionStatusLabel } from "./inspection-doctype";
 
 /**
  * jsPDF renderers for each PDF inside the Handover ZIP.
@@ -124,7 +132,7 @@ export async function renderSiteStoryPdf(story: SiteStory): Promise<Buffer> {
     body: story.plotStories.map((p) => [
       p.plotNumber || p.name,
       p.houseType ?? "—",
-      p.status,
+      titleCaseEnum(p.status),
       `${Math.round(p.buildCompletePercent)}%`,
       p.daysVarianceWorking == null
         ? "—"
@@ -248,7 +256,7 @@ export async function renderPlotStoryPdf(
   autoTable(doc, {
     startY: 50,
     body: [
-      ["Status", plot.status],
+      ["Status", titleCaseEnum(plot.status)],
       ["Build completion", `${Math.round(plot.buildCompletePercent)}%`],
       ["Started", safeDate(plot.startedAt, "not yet")],
       ["Completed", safeDate(plot.completedAt, "not yet")],
@@ -287,9 +295,9 @@ export async function renderPlotStoryPdf(
       head: [["When", "Event", "Detail"]],
       body: plot.highlights.map((h) => [
         format(new Date(h.date), "dd MMM yy"),
-        h.type,
+        titleCaseEnum(h.type),
         h.reason
-          ? `${h.description} (${h.reason})`
+          ? `${h.description} (${latenessReasonLabel(h.reason)})`
           : h.description.length > 80
             ? `${h.description.slice(0, 80)}…`
             : h.description,
@@ -345,8 +353,8 @@ export async function renderPlotSnagLogPdf(
           ? `${s.description.slice(0, 60)}…`
           : s.description,
         s.location ?? "—",
-        s.priority,
-        s.status,
+        titleCaseEnum(s.priority),
+        titleCaseEnum(s.status),
         format(s.createdAt, "dd MMM yy"),
         s.resolvedAt ? format(s.resolvedAt, "dd MMM yy") : "—",
         s.raisedBy?.name ?? "—",
@@ -407,8 +415,8 @@ export async function renderPlotInspectionLogPdf(
         const resolved = i.passedAt ?? i.failedAt;
         return [
           i.name.length > 40 ? `${i.name.slice(0, 40)}…` : i.name,
-          i.type.replace(/_/g, " "),
-          i.status,
+          inspectionTypeLabel(i.type),
+          inspectionStatusLabel(i.status as InspectionStatus),
           format(i.scheduledDate, "dd MMM yy"),
           resolved ? format(resolved, "dd MMM yy") : "—",
           i.inspector ? `${i.inspector.name}${i.inspector.company ? ` (${i.inspector.company})` : ""}` : "—",
@@ -468,7 +476,7 @@ export async function renderPlotNcrLogPdf(
       body: ncrs.map((n) => [
         n.ref ?? "—",
         n.title.length > 50 ? `${n.title.slice(0, 50)}…` : n.title,
-        n.status,
+        titleCaseEnum(n.status),
         format(n.raisedAt, "dd MMM yy"),
         n.closedAt ? format(n.closedAt, "dd MMM yy") : "—",
         n.raisedBy?.name ?? "—",
@@ -560,7 +568,7 @@ export async function renderPlotDefectLogPdf(
         d.description.length > 60
           ? `${d.description.slice(0, 60)}…`
           : d.description,
-        d.status,
+        titleCaseEnum(d.status),
         format(d.reportedAt, "dd MMM yy"),
         d.resolvedAt ? format(d.resolvedAt, "dd MMM yy") : "—",
       ]),
@@ -615,7 +623,7 @@ export async function renderPlotVariationLogPdf(
         v.ref ?? "—",
         v.title.length > 40 ? `${v.title.slice(0, 40)}…` : v.title,
         v.requestedBy ?? "—",
-        v.status,
+        titleCaseEnum(v.status),
         v.costDelta != null
           ? `£${Math.round(v.costDelta).toLocaleString()}`
           : "—",
@@ -670,7 +678,7 @@ export async function renderPlotHandoverChecklistPdf(
       startY: 36,
       head: [["Document", "Required", "Status", "Signed off", "By", "File", "Notes"]],
       body: items.map((i) => [
-        i.docType.replace(/_/g, " "),
+        HANDOVER_DOC_TYPE_LABELS[i.docType] ?? titleCaseEnum(i.docType),
         i.required ? "Yes" : "No",
         i.checkedAt ? "✓ Signed" : "—",
         i.checkedAt ? format(i.checkedAt, "dd MMM yy") : "—",
@@ -781,7 +789,7 @@ export async function renderPlotDrawSchedulePdf(
         String(i + 1),
         d.name.length > 40 ? `${d.name.slice(0, 40)}…` : d.name,
         `£${Math.round(d.amount).toLocaleString()}`,
-        d.status,
+        titleCaseEnum(d.status),
         d.dueAt ? format(d.dueAt, "dd MMM yy") : "—",
         d.paidAt ? format(d.paidAt, "dd MMM yy") : "—",
         d.triggerJob?.name ?? "—",
@@ -897,7 +905,7 @@ export async function renderContractorDetailPdf(
     body: contractor.jobs.map((j) => [
       j.plotNumber ?? "—",
       j.jobName,
-      j.status,
+      jobStatusLabel(j.status),
       safeDate(j.plannedEnd),
       safeDate(j.actualEnd),
       j.daysLate == null ? "—" : `${j.daysLate}d`,
@@ -1027,7 +1035,7 @@ export async function renderSupplierDetailPdf(
       o.items.length > 40 ? `${o.items.slice(0, 40)}…` : o.items,
       o.plotNumber ?? "—",
       o.jobName ?? "—",
-      o.status,
+      titleCaseEnum(o.status),
       safeDate(o.expectedDelivery),
       safeDate(o.actualDelivery),
       o.daysLate == null ? "—" : `${o.daysLate}d`,
@@ -1423,7 +1431,7 @@ export async function renderDelayReportPdf(
         // row reads "needs attribution" rather than as a confident
         // "OTHER" answer.
         j.reasonCode && j.reasonCode !== "OTHER"
-          ? j.reasonCode.replace(/_/g, " ")
+          ? latenessReasonLabel(j.reasonCode)
           : "(needs attribution)",
         j.isWeatherExcused ? "Yes" : "No",
       ]),

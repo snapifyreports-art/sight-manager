@@ -76,7 +76,7 @@ export async function POST(
 
   const plot = await prisma.plot.findUnique({
     where: { id: plotId },
-    select: { id: true, plotNumber: true, siteId: true },
+    select: { id: true, plotNumber: true, name: true, siteId: true },
   });
   if (!plot) {
     return NextResponse.json({ error: "Plot not found" }, { status: 404 });
@@ -96,8 +96,8 @@ export async function POST(
       await logEvent(prisma, {
         type: "USER_ACTION",
         description: awaitingContractor
-          ? `Plot ${plot.plotNumber || plotId}: awaiting contractor confirmation`
-          : `Plot ${plot.plotNumber || plotId}: next job deferred — awaiting restart decision`,
+          ? `Plot ${plot.plotNumber || plot.name}: awaiting contractor confirmation`
+          : `Plot ${plot.plotNumber || plot.name}: next job deferred — awaiting restart decision`,
         siteId: plot.siteId,
         plotId,
         userId: session.user.id,
@@ -234,7 +234,7 @@ export async function POST(
     };
     await logEvent(tx, {
       type: decision === "start_today" ? "JOB_STARTED" : "SCHEDULE_CASCADED",
-      description: `Plot ${plot.plotNumber || plotId}: "${nextJob.name}" ${descMap[decision]}${delta !== 0 ? `, ${Math.abs(delta)}d ${delta < 0 ? "pulled forward" : "pushed back"}` : ""}`,
+      description: `Plot ${plot.plotNumber || plot.name}: "${nextJob.name}" ${descMap[decision]}${delta !== 0 ? `, ${Math.abs(delta)}d ${delta < 0 ? "pulled forward" : "pushed back"}` : ""}`,
       siteId: plot.siteId,
       plotId,
       jobId: nextJobId,

@@ -3,6 +3,7 @@ import { differenceInWorkingDays } from "./working-days";
 import { whereOrdersForSite } from "./order-scope";
 import { isJobEndOverdue, workingDaysEndOverdue } from "./lateness";
 import { deriveAggregateStatus } from "./parent-job";
+import { inspectionTypeLabel } from "./inspection-doctype";
 
 /**
  * Site Story synthesizer — single source of truth for "what actually
@@ -1526,7 +1527,7 @@ export async function buildSiteStory(
         source: "INSPECTION",
         date: (p.passedAt as Date).toISOString(),
         plotNumber: p.plot?.plotNumber ?? null,
-        body: `✓ ${p.name} passed${p.plot?.plotNumber ? ` on Plot ${p.plot.plotNumber}` : ""} (${String(p.type).replace(/_/g, " ")})`,
+        body: `✓ ${p.name} passed${p.plot?.plotNumber ? ` on Plot ${p.plot.plotNumber}` : ""} (${inspectionTypeLabel(p.type as string)})`,
       });
     }
   }

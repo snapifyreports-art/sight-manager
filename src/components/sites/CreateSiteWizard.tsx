@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { format } from "date-fns";
 import { addWorkingDays } from "@/lib/working-days";
 import { BatchProgrammePreviewDialog } from "./BatchProgrammePreviewDialog";
@@ -457,6 +457,12 @@ export function CreateSiteWizard({
 
   // Submission
   const [submitting, setSubmitting] = useState(false);
+  // (Jun 2026 sweep fix) Retry-after-partial-failure guards. The wizard
+  // stays open when some plot batches fail; pressing Create again used to
+  // re-POST /api/sites (duplicate site) and re-run EVERY batch (duplicate
+  // plots). Remember what already succeeded and skip it on resubmit.
+  const createdSiteIdRef = useRef<string | null>(null);
+  const succeededBatchesRef = useRef<Set<string>>(new Set());
   const [submitProgress, setSubmitProgress] = useState("");
   const [error, setError] = useState("");
 
@@ -519,6 +525,8 @@ export function CreateSiteWizard({
       setSubmitting(false);
       setSubmitProgress("");
       setError("");
+      createdSiteIdRef.current = null;
+      succeededBatchesRef.current = new Set();
     }
   }, [open]);
 
@@ -767,27 +775,37 @@ export function CreateSiteWizard({
     const busyKey = beginBusy("Creating site...");
 
     try {
-      // Phase 1: Create site
-      setSubmitProgress("Creating site...");
-      const siteRes = await fetch("/api/sites", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: siteName,
-          description: siteDescription || null,
-          location: siteLocation || null,
-          address: siteAddress || null,
-          postcode: sitePostcode || null,
-          assignedToId: siteManagerId || null,
-        }),
-      });
+      // Phase 1: Create site — or REUSE the one a previous partially-failed
+      // attempt already created (re-POSTing made a duplicate site).
+      let createdSite;
+      if (createdSiteIdRef.current) {
+        setSubmitProgress("Retrying failed plots on the existing site...");
+        const r = await fetch(`/api/sites/${createdSiteIdRef.current}`);
+        if (!r.ok) throw new Error("Couldn't reload the site created on the previous attempt");
+        createdSite = await r.json();
+      } else {
+        setSubmitProgress("Creating site...");
+        const siteRes = await fetch("/api/sites", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: siteName,
+            description: siteDescription || null,
+            location: siteLocation || null,
+            address: siteAddress || null,
+            postcode: sitePostcode || null,
+            assignedToId: siteManagerId || null,
+          }),
+        });
 
-      if (!siteRes.ok) {
-        const err = await siteRes.json();
-        throw new Error(err.error || "Failed to create site");
+        if (!siteRes.ok) {
+          const err = await siteRes.json();
+          throw new Error(err.error || "Failed to create site");
+        }
+
+        createdSite = await siteRes.json();
+        createdSiteIdRef.current = createdSite.id;
       }
-
-      const createdSite = await siteRes.json();
 
       // Phase 2: Create plot batches
       const batchErrors: string[] = [];
@@ -805,6 +823,10 @@ export function CreateSiteWizard({
         const batch = batches[i];
         const numbers = batch.plots.map((p) => p.plotNumber);
         const rangeLabel = batchLabel(numbers);
+        // Skip batches that already succeeded on a previous attempt —
+        // re-running them would duplicate the plots.
+        const batchKey = `${i}:${rangeLabel}`;
+        if (succeededBatchesRef.current.has(batchKey)) continue;
         setSubmitProgress(`Creating ${rangeLabel}...`);
 
         try {
@@ -846,6 +868,7 @@ export function CreateSiteWizard({
               }
             }
           }
+          succeededBatchesRef.current.add(batchKey);
         } catch (batchErr: unknown) {
           const msg =
             batchErr instanceof Error ? batchErr.message : "Unknown error";
@@ -865,7 +888,7 @@ export function CreateSiteWizard({
 
       if (batchErrors.length > 0) {
         setError(
-          `Site created, but some plots failed:\n${batchErrors.join("\n")}`
+          `Site created, but some plots failed:\n${batchErrors.join("\n")}\nPress Create again to retry just the failed plots — the site and the plots that worked won't be duplicated.`
         );
         onCreated(finalSite);
       } else {

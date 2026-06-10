@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { CheckCircle2, Circle, Hammer, Home as HomeIcon, AlertCircle, ShieldCheck } from "lucide-react";
 import { CustomerNotifyToggle } from "./CustomerNotifyToggle";
+import { inspectionTypeLabel } from "@/lib/inspection-doctype";
 
 export const dynamic = "force-dynamic";
 
@@ -328,7 +329,7 @@ export default async function ProgressPage({
                     <ShieldCheck className="size-5 shrink-0 text-emerald-600" />
                     <div>
                       <p className="text-sm font-medium text-slate-800">{ins.name}</p>
-                      <p className="text-xs text-slate-500">{String(ins.type).replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase())} inspection</p>
+                      <p className="text-xs text-slate-500">{inspectionTypeLabel(ins.type as never)} inspection</p>
                     </div>
                   </div>
                   {/* relativeWhen, not a hard date — this page's rule is

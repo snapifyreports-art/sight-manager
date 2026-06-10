@@ -88,7 +88,7 @@ export async function POST(
         endDate: { not: null },
       },
       orderBy: { sortOrder: "asc" },
-      include: { plot: { select: { plotNumber: true } } },
+      include: { plot: { select: { plotNumber: true, name: true } } },
     });
 
     if (!currentJob || !currentJob.endDate) {
@@ -182,7 +182,7 @@ export async function POST(
 
       await logEvent(tx, {
         type: "SCHEDULE_CASCADED",
-        description: `Bulk delay: "${currentJob.name}" on plot ${currentJob.plot.plotNumber || plotId} delayed ${days} day(s) — ${reasonLabel}${weatherStamp}`,
+        description: `Bulk delay: "${currentJob.name}" on plot ${currentJob.plot.plotNumber || currentJob.plot.name} delayed ${days} day(s) — ${reasonLabel}${weatherStamp}`,
         siteId,
         plotId,
         jobId: currentJob.id,

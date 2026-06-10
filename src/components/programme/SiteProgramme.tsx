@@ -23,6 +23,7 @@ import { Loader2, Columns3, ChevronRight, Download, FileText, Search, X, Camera,
 import Link from "next/link";
 import { getStageCode, getStageColor } from "@/lib/stage-codes";
 import { inspectionDisplayStatus } from "@/lib/inspection-doctype";
+import { jobStatusLabel } from "@/lib/labels";
 import { getCurrentStage } from "@/lib/plot-stage";
 import { deriveAggregateStatus } from "@/lib/parent-job";
 import type { JobStatus } from "@prisma/client";
@@ -1958,7 +1959,7 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                               width: cellWidth,
                               height: ROW_HEIGHT,
                             }}
-                            title={`${job.name} (${job.status}) — Click for details`}
+                            title={`${job.name} (${jobStatusLabel(job.status)}) — Click for details`}
                             onClick={() => {
                               let childJobIds: string[] | undefined;
                               if (job.id.startsWith("synth-")) {

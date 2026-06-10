@@ -237,7 +237,7 @@ export function SiteOnSiteToday({ siteId }: { siteId: string }) {
                     </Link>
                     <div className="flex items-center gap-2 text-muted-foreground">
                       <Link
-                        href={`/plots/${j.plot.id}`}
+                        href={`/sites/${siteId}/plots/${j.plot.id}`}
                         className="hover:text-blue-700 hover:underline"
                       >
                         {plotLbl}

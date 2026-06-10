@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { format, addDays, differenceInCalendarDays } from "date-fns";
 import { differenceInWorkingDays } from "@/lib/working-days";
+import { inspectionTypeLabel } from "@/lib/inspection-doctype";
 import { PostCompletionDialog } from "@/components/PostCompletionDialog";
 import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 import { getCurrentDate } from "@/lib/dev-date";
@@ -227,7 +228,6 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
     const newUrl = qs ? `?${qs}` : window.location.pathname;
     window.history.replaceState(null, "", newUrl);
   }, [date]);
-  const [calendarOpen, setCalendarOpen] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [upcomingOrdersOpen, setUpcomingOrdersOpen] = useState(false);
   const [openSections, setOpenSections] = useState<Set<string>>(new Set());
@@ -933,8 +933,18 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
         // don't attempt signoff on a still-incomplete job. The manager
         // overrides from that dialog (which retries the completion path).
         if (!completeRes.ok) {
-          setSignOffSubmitting(false);
-          return;
+          const blocked = (completeRes.data as { blocked?: boolean } | undefined)?.blocked;
+          // (Jun 2026 sweep fix) After an override completed the job, this
+          // dialog's stale status still says IN_PROGRESS — the silent
+          // re-complete then 400s ("already completed") and the button
+          // dead-ended, losing the typed notes/photos. Fall through to the
+          // signoff instead; only a genuine block or other error stops us.
+          const alreadyCompleted = /already completed/i.test(completeRes.error ?? "");
+          if (!alreadyCompleted) {
+            if (!blocked) showToast(completeRes.error || "Couldn't complete the job", "error");
+            setSignOffSubmitting(false);
+            return;
+          }
         }
       }
       const res = await runSimpleAction(signOffTarget.id, "signoff", {
@@ -1542,7 +1552,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                     <li key={i.id}>
                       <a
                         href={`/inspections?focus=${i.id}`}
-                        title={`${i.name} — ${i.type} · ${i.plotLabel} · ${format(new Date(i.scheduledDate), "d MMM")}${i.inspectorName ? ` · ${i.inspectorName}` : ""}`}
+                        title={`${i.name} — ${inspectionTypeLabel(i.type)} · ${i.plotLabel} · ${format(new Date(i.scheduledDate), "d MMM")}${i.inspectorName ? ` · ${i.inspectorName}` : ""}`}
                         className={cn("inline-block rounded border px-1.5 py-0.5 text-[11px] hover:brightness-95", tone)}
                       >
                         {i.plotLabel} · {i.name}
@@ -1929,7 +1939,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                               <Button variant="outline" size="sm" className="h-9 gap-1 border-orange-200 px-2 text-xs text-orange-700 hover:bg-orange-50" onClick={() => handleExtendOpen(j.id)}>
                                 <Clock className="size-2.5" /> Extend
                               </Button>
-                              <Button variant="outline" size="sm" className="h-9gap-1 border-amber-200 px-2 text-xs text-amber-700 hover:bg-amber-50" onClick={() => {
+                              <Button variant="outline" size="sm" className="h-9 gap-1 border-amber-200 px-2 text-xs text-amber-700 hover:bg-amber-50" onClick={() => {
                                 // In this branch the job row doesn't carry startDate/endDate
                                 // (it's the simplified "jobs starting today" view); the delay
                                 // endpoint fetches them server-side from the job record.
@@ -1937,12 +1947,12 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                               }}>
                                 <CalendarClock className="size-2.5" /> Delay
                               </Button>
-                              <Button variant="outline" size="sm" className="h-9gap-1 border-emerald-200 px-2 text-xs text-emerald-700 hover:bg-emerald-50" onClick={() => {
+                              <Button variant="outline" size="sm" className="h-9 gap-1 border-emerald-200 px-2 text-xs text-emerald-700 hover:bg-emerald-50" onClick={() => {
                                 openPullForwardDialog({ id: j.id, name: j.name, startDate: null, endDate: null });
                               }}>
                                 <CalendarClock className="size-2.5" /> Pull
                               </Button>
-                              <Button variant="outline" size="sm" className="h-9gap-1 px-2 text-xs" onClick={() => openNoteDialog({ id: j.id, name: j.name })}>
+                              <Button variant="outline" size="sm" className="h-9 gap-1 px-2 text-xs" onClick={() => openNoteDialog({ id: j.id, name: j.name })}>
                                 <StickyNote className="size-2.5" /> Note
                               </Button>
                             </>
@@ -1991,19 +2001,19 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                             <Button variant="outline" size="sm" className="h-9 gap-1 border-orange-200 px-2 text-xs text-orange-700 hover:bg-orange-50" onClick={() => handleExtendOpen(j.id)}>
                               <Clock className="size-2.5" /> Extend
                             </Button>
-                            <Button size="sm" className="h-9gap-1 bg-emerald-600 px-2 text-xs text-white hover:bg-emerald-700" onClick={() => handleJobAction(j.id, "complete")}>
+                            <Button size="sm" className="h-9 gap-1 bg-emerald-600 px-2 text-xs text-white hover:bg-emerald-700" onClick={() => handleJobAction(j.id, "complete")}>
                               <CheckCircle2 className="size-2.5" /> Complete
                             </Button>
-                            <Button size="sm" className="h-9gap-1 bg-emerald-700 px-2 text-xs text-white hover:bg-emerald-800" onClick={() => handleOpenSignOff(j)}>
+                            <Button size="sm" className="h-9 gap-1 bg-emerald-700 px-2 text-xs text-white hover:bg-emerald-800" onClick={() => handleOpenSignOff(j)}>
                               <FileCheck className="size-2.5" /> Sign Off
                             </Button>
-                            <Button variant="outline" size="sm" className="h-9gap-1 px-2 text-xs" onClick={() => setInlineSnagTarget({ jobId: j.id, plotId: j.plotId, contactId: (j as { contractors?: Array<{ contactId: string }> }).contractors?.[0]?.contactId })}>
+                            <Button variant="outline" size="sm" className="h-9 gap-1 px-2 text-xs" onClick={() => setInlineSnagTarget({ jobId: j.id, plotId: j.plotId, contactId: (j as { contractors?: Array<{ contactId: string }> }).contractors?.[0]?.contactId })}>
                               <AlertTriangle className="size-2.5" /> Snag
                             </Button>
-                            <Button variant="outline" size="sm" className="h-9gap-1 px-2 text-xs" onClick={() => openNoteDialog({ id: j.id, name: j.name })}>
+                            <Button variant="outline" size="sm" className="h-9 gap-1 px-2 text-xs" onClick={() => openNoteDialog({ id: j.id, name: j.name })}>
                               <StickyNote className="size-2.5" /> Note
                             </Button>
-                            <Button variant="outline" size="sm" className="h-9gap-1 px-2 text-xs" onClick={() => setPhotoTarget({ jobId: j.id, jobName: j.name })}>
+                            <Button variant="outline" size="sm" className="h-9 gap-1 px-2 text-xs" onClick={() => setPhotoTarget({ jobId: j.id, jobName: j.name })}>
                               <Camera className="size-2.5" /> Photos
                             </Button>
                           </>
@@ -2032,7 +2042,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                         <Button variant="outline" size="sm" className="h-9 gap-1 border-green-200 px-2 text-xs text-green-700 hover:bg-green-50" disabled={pendingActions.has(j.id)} onClick={() => triggerJobAction({ id: j.id, name: j.name, status: "NOT_STARTED", startDate: j.startDate, endDate: j.endDate ?? null }, "start")}>
                           <Play className="size-2.5" /> Start
                         </Button>
-                        <Button variant="outline" size="sm" className="h-9gap-1 border-amber-200 px-2 text-xs text-amber-700 hover:bg-amber-50" onClick={() => {
+                        <Button variant="outline" size="sm" className="h-9 gap-1 border-amber-200 px-2 text-xs text-amber-700 hover:bg-amber-50" onClick={() => {
                           // Pre-fill with the working-day gap between the original planned
                           // start and today, so the user just has to confirm the common case.
                           const planned = j.startDate ? new Date(j.startDate) : date;
@@ -2044,7 +2054,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                         }}>
                           <CalendarClock className="size-2.5" /> Delay
                         </Button>
-                        <Button variant="outline" size="sm" className="h-9gap-1 border-emerald-200 px-2 text-xs text-emerald-700 hover:bg-emerald-50" onClick={() => {
+                        <Button variant="outline" size="sm" className="h-9 gap-1 border-emerald-200 px-2 text-xs text-emerald-700 hover:bg-emerald-50" onClick={() => {
                           openPullForwardDialog({ id: j.id, name: j.name, startDate: j.startDate ?? null, endDate: j.endDate ?? null });
                         }}>
                           <CalendarClock className="size-2.5" /> Pull
@@ -2213,23 +2223,23 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                               {daysSince > 0 && ` · Completed ${daysSince} day${daysSince !== 1 ? "s" : ""} ago`}
                             </p>
                             <JobActionStrip>
-                              <Button size="sm" variant="outline" className="h-9gap-1 border-amber-300 px-2 text-xs text-amber-700 hover:bg-amber-100"
+                              <Button size="sm" variant="outline" className="h-9 gap-1 border-amber-300 px-2 text-xs text-amber-700 hover:bg-amber-100"
                                 onClick={() => setSignOffTarget({ id: j.id, name: j.name, status: "COMPLETED", plot: j.plot })}>
                                 <FileCheck className="size-2.5" /> Sign Off
                               </Button>
-                              <Button variant="outline" size="sm" className="h-9gap-1 px-2 text-xs" onClick={() => setInlineSnagTarget({ jobId: j.id, plotId: j.plotId, contactId: (j.contractors as Array<{ contactId?: string }>)?.[0]?.contactId })}>
+                              <Button variant="outline" size="sm" className="h-9 gap-1 px-2 text-xs" onClick={() => setInlineSnagTarget({ jobId: j.id, plotId: j.plotId, contactId: (j.contractors as Array<{ contactId?: string }>)?.[0]?.contactId })}>
                                 <AlertTriangle className="size-2.5" /> Snag
                               </Button>
-                              <Button variant="outline" size="sm" className="h-9gap-1 px-2 text-xs" onClick={() => openNoteDialog({ id: j.id, name: j.name })}>
+                              <Button variant="outline" size="sm" className="h-9 gap-1 px-2 text-xs" onClick={() => openNoteDialog({ id: j.id, name: j.name })}>
                                 <StickyNote className="size-2.5" /> Note
                               </Button>
-                              <Button variant="outline" size="sm" className="h-9gap-1 px-2 text-xs" onClick={() => setPhotoTarget({ jobId: j.id, jobName: j.name })}>
+                              <Button variant="outline" size="sm" className="h-9 gap-1 px-2 text-xs" onClick={() => setPhotoTarget({ jobId: j.id, jobName: j.name })}>
                                 <Camera className="size-2.5" /> Photos
                               </Button>
                               {pendingActions.has(j.id) ? (
                                 <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
                               ) : (
-                                <Button variant="outline" size="sm" className="h-9gap-1 border-slate-300 px-2 text-xs text-slate-600 hover:bg-slate-50" onClick={() => handleReopenJob(j.id, j.name)}>
+                                <Button variant="outline" size="sm" className="h-9 gap-1 border-slate-300 px-2 text-xs text-slate-600 hover:bg-slate-50" onClick={() => handleReopenJob(j.id, j.name)}>
                                   <RotateCcw className="size-2.5" /> Reopen
                                 </Button>
                               )}
@@ -2445,10 +2455,10 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                           <Button variant="outline" size="sm" className="h-9 gap-1 border-orange-200 px-2 text-xs text-orange-700 hover:bg-orange-50" onClick={() => handleExtendOpen(j.id)}>
                             <Clock className="size-2.5" /> Extend
                           </Button>
-                          <Button variant="outline" size="sm" className="h-9gap-1 px-2 text-xs" onClick={() => setInlineSnagTarget({ jobId: j.id, plotId: (j as { plotId?: string }).plotId || "", contactId: (j as { contractors?: Array<{ contactId?: string }> }).contractors?.[0]?.contactId })}>
+                          <Button variant="outline" size="sm" className="h-9 gap-1 px-2 text-xs" onClick={() => setInlineSnagTarget({ jobId: j.id, plotId: (j as { plotId?: string }).plotId || "", contactId: (j as { contractors?: Array<{ contactId?: string }> }).contractors?.[0]?.contactId })}>
                             <AlertTriangle className="size-2.5" /> Snag
                           </Button>
-                          <Button variant="outline" size="sm" className="h-9gap-1 px-2 text-xs" onClick={() => openNoteDialog({ id: j.id, name: j.name })}>
+                          <Button variant="outline" size="sm" className="h-9 gap-1 px-2 text-xs" onClick={() => openNoteDialog({ id: j.id, name: j.name })}>
                             <StickyNote className="size-2.5" /> Note
                           </Button>
                         </>
@@ -2514,12 +2524,12 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                         <Button variant="outline" size="sm" className="h-9 gap-1 border-green-200 px-2 text-xs text-green-700 hover:bg-green-50" onClick={() => triggerJobAction({ id: j.id, name: j.name, status: "NOT_STARTED", startDate: j.startDate, endDate: j.endDate }, "start")}>
                           <Play className="size-2.5" /> Start Now
                         </Button>
-                        <Button variant="outline" size="sm" className="h-9gap-1 border-purple-200 px-2 text-xs text-purple-700 hover:bg-purple-50" onClick={() => {
+                        <Button variant="outline" size="sm" className="h-9 gap-1 border-purple-200 px-2 text-xs text-purple-700 hover:bg-purple-50" onClick={() => {
                           openDelayDialog({ id: j.id, name: j.name, startDate: j.startDate, endDate: j.endDate });
                         }}>
                           <CalendarClock className="size-2.5" /> Delay Further
                         </Button>
-                        <Button variant="outline" size="sm" className="h-9gap-1 border-emerald-200 px-2 text-xs text-emerald-700 hover:bg-emerald-50" onClick={() => {
+                        <Button variant="outline" size="sm" className="h-9 gap-1 border-emerald-200 px-2 text-xs text-emerald-700 hover:bg-emerald-50" onClick={() => {
                           openPullForwardDialog({ id: j.id, name: j.name, startDate: j.startDate, endDate: j.endDate });
                         }}>
                           <CalendarClock className="size-2.5" /> Pull
@@ -2936,7 +2946,6 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                   type="file"
                   accept="image/*"
                   multiple
-                  capture="environment"
                   className="hidden"
                   onChange={(e) => handleSignOffPhotosChange(e.target.files)}
                 />

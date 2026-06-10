@@ -13,6 +13,24 @@ import { logEvent } from "@/lib/event-log";
 
 export const dynamic = "force-dynamic";
 
+function lateSendChoiceLabel(
+  choice: "CHANGE_DELIVERY" | "PUSH_PLOT" | "KEEP" | "NO_IMPACT",
+): string {
+  return choice === "CHANGE_DELIVERY"
+    ? "delivery date changed"
+    : choice === "PUSH_PLOT"
+      ? "delivery + plot pushed back"
+      : choice === "NO_IMPACT"
+        ? "no programme impact"
+        : "original delivery date kept";
+}
+
+const LATENESS_IMPACT_LABELS: Record<string, string> = {
+  PUSH_JOB: "job pushed back",
+  EXPAND_JOB: "job duration expanded",
+  LEAVE_AS_IS: "left as-is",
+};
+
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -378,7 +396,7 @@ export async function PUT(
             : "delivery confirmed"
           : body.status === "ORDERED"
             ? sentLate
-              ? `sent to supplier (late — ${lateSend?.choice ?? "no decision"})`
+              ? `sent to supplier (late — ${lateSend ? lateSendChoiceLabel(lateSend.choice) : "no decision"})`
               : "sent to supplier"
             : `status changed to ${body.status}`;
 
@@ -719,7 +737,7 @@ export async function PUT(
           // delivery") alongside the LATENESS_OPENED row above.
           await logEvent(prisma, {
             type: "ORDER_PLACED",
-            description: `Delivery date changed to ${newDelivery.toISOString().slice(0, 10)} (+${deltaWD} WD)${latenessImpact ? `. Impact: ${latenessImpact.choice}.` : "."}`,
+            description: `Delivery date changed to ${newDelivery.toISOString().slice(0, 10)} (+${deltaWD} WD)${latenessImpact ? `. Impact: ${LATENESS_IMPACT_LABELS[latenessImpact.choice] ?? latenessImpact.choice}.` : "."}`,
             siteId,
             plotId: existing.job?.plotId ?? existing.plotId ?? null,
             jobId: existing.jobId,
@@ -841,14 +859,7 @@ export async function PUT(
         );
 
         // Audit breadcrumb describing the manager's choice.
-        const choiceLabel =
-          lateSend.choice === "CHANGE_DELIVERY"
-            ? "delivery date changed"
-            : lateSend.choice === "PUSH_PLOT"
-              ? "delivery + plot pushed back"
-              : lateSend.choice === "NO_IMPACT"
-                ? "no programme impact"
-                : "original delivery date kept";
+        const choiceLabel = lateSendChoiceLabel(lateSend.choice);
         await logEvent(prisma, {
           type: "ORDER_SENT",
           description: `Order sent ${lateSendWorkingDays} working day${lateSendWorkingDays === 1 ? "" : "s"} late — ${choiceLabel}`,

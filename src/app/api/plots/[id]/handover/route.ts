@@ -6,6 +6,7 @@ import { canAccessSite } from "@/lib/site-access";
 import { apiError } from "@/lib/api-errors";
 import { loadJsPdf, pdfResponse } from "@/lib/pdf-builder";
 import { logEvent } from "@/lib/event-log";
+import { jobStatusLabel, titleCaseEnum, HANDOVER_DOC_TYPE_LABELS } from "@/lib/labels";
 
 async function guardPlotAccess(plotId: string, userId: string, role: string) {
   const plot = await prisma.plot.findUnique({ where: { id: plotId }, select: { siteId: true } });
@@ -28,18 +29,6 @@ const STANDARD_DOC_TYPES = [
   "FLOOR_PLAN",
   "SNAGGING_SIGNOFF",
 ] as const;
-
-const DOC_TYPE_LABELS: Record<string, string> = {
-  EPC: "Energy Performance Certificate",
-  GAS_SAFE_CERT: "Gas Safe Certificate",
-  ELECTRICAL_CERT: "Electrical Installation Certificate",
-  WARRANTY: "Warranty Documents",
-  NHBC_CERT: "NHBC Certificate",
-  BUILDING_REGS: "Building Regulations Approval",
-  USER_MANUAL: "Appliance / User Manuals",
-  FLOOR_PLAN: "Floor Plan",
-  SNAGGING_SIGNOFF: "Snagging Sign-Off",
-};
 
 // GET /api/plots/[id]/handover — get or auto-create handover checklist
 export async function GET(
@@ -97,7 +86,7 @@ export async function GET(
     items: items.map((i) => ({
       id: i.id,
       docType: i.docType,
-      label: DOC_TYPE_LABELS[i.docType] || i.docType,
+      label: HANDOVER_DOC_TYPE_LABELS[i.docType] || i.docType,
       required: i.required,
       document: i.document,
       checkedAt: i.checkedAt?.toISOString() || null,
@@ -287,7 +276,7 @@ export async function POST(
     startY: 28,
     head: [["Document", "Required", "Status", "Checked By"]],
     body: checklist.map((item) => [
-      DOC_TYPE_LABELS[item.docType] || item.docType,
+      HANDOVER_DOC_TYPE_LABELS[item.docType] || item.docType,
       item.required ? "Yes" : "No",
       item.checkedAt ? "Complete" : item.document ? "Linked" : "Missing",
       item.checkedBy?.name || "—",
@@ -306,7 +295,7 @@ export async function POST(
     head: [["Job", "Status", "Signed Off By"]],
     body: plot.jobs.map((j) => [
       j.name,
-      j.status.replace(/_/g, " "),
+      jobStatusLabel(j.status),
       j.signedOffBy?.name || "—",
     ]),
     styles: { fontSize: 9 },
@@ -325,8 +314,8 @@ export async function POST(
       body: plot.snags.map((s) => [
         s.description,
         s.location || "—",
-        s.priority,
-        s.status.replace(/_/g, " "),
+        titleCaseEnum(s.priority),
+        titleCaseEnum(s.status),
       ]),
       styles: { fontSize: 9 },
       headStyles: { fillColor: [220, 38, 38] },
