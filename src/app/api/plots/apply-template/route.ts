@@ -223,8 +223,12 @@ export async function POST(request: NextRequest) {
 
     // 2a. Create per-plot Inspections from the template defs, anchored to
     // the real jobs (inside the tx — partial failure rolls the plot back).
+    // (Jun 2026 S16) Skipped defs (anchor missing/undated) are surfaced to
+    // the caller — a silently-missing statutory hold-point is data loss.
+    let skippedInspections: string[] = [];
     if (scopedInspections.length > 0) {
-      await createInspectionsFromTemplate(tx, plot.id, scopedInspections, jobIdMap);
+      const inspResult = await createInspectionsFromTemplate(tx, plot.id, scopedInspections, jobIdMap);
+      skippedInspections = inspResult.skippedNames;
     }
 
     // 2b. Copy TemplateMaterial rows → PlotMaterial (sourceType=TEMPLATE, snapshot)
@@ -288,7 +292,7 @@ export async function POST(request: NextRequest) {
         },
       },
     });
-      return { plot: created, warnings };
+      return { plot: created, warnings, skippedInspections };
     }, { timeout: 60_000 }); // complex templates can have 20+ jobs + 10+ orders each
   } catch (err) {
     // (May 2026 audit #70 + #93) Route through the canonical apiError
@@ -297,5 +301,8 @@ export async function POST(request: NextRequest) {
     return apiError(err, "Failed to create plot");
   }
 
-  return NextResponse.json({ ...result.plot, _warnings: result.warnings }, { status: 201 });
+  return NextResponse.json(
+    { ...result.plot, _warnings: result.warnings, _inspectionWarnings: result.skippedInspections },
+    { status: 201 },
+  );
 }

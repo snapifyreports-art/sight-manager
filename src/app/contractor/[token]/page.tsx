@@ -1,5 +1,5 @@
 import { format, parseISO, addDays, startOfWeek, isWithinInterval } from "date-fns";
-import { HardHat, PlayCircle, Clock, AlertTriangle, CheckCircle2, Phone, Mail, Building2, Package, Truck, FileText, Download, ExternalLink, CalendarDays, Briefcase, LinkIcon } from "lucide-react";
+import { HardHat, PlayCircle, Clock, AlertTriangle, CheckCircle2, Phone, Mail, Building2, Package, Truck, FileText, Download, ExternalLink, CalendarDays, Briefcase, LinkIcon, ClipboardCheck } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { verifyContractorToken } from "@/lib/share-token";
 import { SnagSignOffCard } from "./SnagSignOffCard";
@@ -189,6 +189,30 @@ export default async function ContractorSharePage({
   });
   const toolboxRequests = toolboxTalksAll.filter((t) => t.status === "REQUESTED");
   const toolboxTalks = toolboxTalksAll.filter((t) => t.status === "COMPLETED");
+
+  // (Jun 2026 Q15) Upcoming inspection hold-points anchored to THIS
+  // contractor's jobs — the trade needs to know an inspector is coming
+  // (area ready, access clear) and that a hard hold blocks their job's
+  // sign-off until it passes. Read-only; results/certs stay internal.
+  const upcomingInspections = await prisma.inspection.findMany({
+    where: {
+      plot: { siteId },
+      status: { in: ["SCHEDULED", "BOOKED", "OVERDUE"] },
+      anchorJob: { contractors: { some: { contactId } } },
+    },
+    select: {
+      id: true,
+      name: true,
+      type: true,
+      status: true,
+      scheduledDate: true,
+      bookedDate: true,
+      isBlocking: true,
+      plot: { select: { plotNumber: true, name: true } },
+      anchorJob: { select: { name: true } },
+    },
+    orderBy: { scheduledDate: "asc" },
+  });
 
   const openSnagsRaw = await prisma.snag.findMany({
     where: { contactId, plot: { siteId }, status: { in: ["OPEN", "IN_PROGRESS"] } },
@@ -798,6 +822,49 @@ export default async function ContractorSharePage({
                         ))}
                       </div>
                     )}
+                  </div>
+                );
+              })}
+            </div>
+          </details>
+        )}
+
+        {/* (Jun 2026 Q15) Inspection hold-points on this contractor's
+            jobs — date, plot, and whether the hold blocks their job's
+            sign-off. Open by default: an inspector turning up to an
+            unready area is exactly what this section prevents. */}
+        {upcomingInspections.length > 0 && (
+          <details open className="group rounded-lg border bg-white shadow-sm">
+            <summary className="flex cursor-pointer items-center gap-2 px-4 py-3 font-semibold text-violet-700 [&::-webkit-details-marker]:hidden">
+              <ClipboardCheck className="size-5 text-violet-500" />
+              Inspections on your jobs ({upcomingInspections.length})
+              <svg className="ml-auto size-4 shrink-0 transition-transform group-open:rotate-180" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clipRule="evenodd" /></svg>
+            </summary>
+            <div className="space-y-1.5 border-t px-4 py-3">
+              <p className="mb-2 text-[11px] text-muted-foreground">
+                An inspector is due on these dates — please make sure the work area is finished, tidy and accessible.
+              </p>
+              {upcomingInspections.map((ins) => {
+                const when = ins.bookedDate ?? ins.scheduledDate;
+                return (
+                  <div key={ins.id} className="rounded-md bg-violet-50/60 px-3 py-2 text-sm">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="truncate font-medium text-slate-700">
+                        {ins.name}
+                        <span className="ml-2 text-[10px] font-semibold uppercase text-violet-600">{String(ins.type).replace(/_/g, " ")}</span>
+                      </span>
+                      <span className="shrink-0 text-xs text-muted-foreground">
+                        {when.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" })}
+                        {ins.bookedDate ? " (booked)" : ""}
+                      </span>
+                    </div>
+                    <div className="mt-0.5 text-xs text-muted-foreground">
+                      Plot {ins.plot.plotNumber ?? ins.plot.name}
+                      {ins.anchorJob ? ` · ${ins.anchorJob.name}` : ""}
+                      {ins.isBlocking ? (
+                        <span className="ml-2 font-medium text-red-600">Your job can&apos;t be signed off until this passes.</span>
+                      ) : null}
+                    </div>
                   </div>
                 );
               })}

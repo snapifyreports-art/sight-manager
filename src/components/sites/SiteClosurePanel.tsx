@@ -77,6 +77,8 @@ interface ClosureSummary {
     failed: number;
     open: number;
     overdue: number;
+    /** (Jun 2026 Q6/S13) PASSED but no certificate attached. */
+    certMissing?: number;
   };
   toolboxTalks?: {
     total: number;
@@ -277,6 +279,16 @@ export function SiteClosurePanel({ siteId }: { siteId: string }) {
               warnLabel={`${inspectionsUnresolved} inspection${inspectionsUnresolved !== 1 ? "s" : ""} not passed${inspectionsFailed > 0 ? ` (${inspectionsFailed} failed)` : ""}${inspectionsOpen > 0 ? ` (${inspectionsOpen} still open)` : ""} — NHBC / Building Control / warranty holds must clear before handover`}
             />
           )}
+          {/* (Jun 2026 Q6 + S13) Passed-without-certificate — the ZIP still
+              builds (warn, never block) but the evidence gap is called out
+              here AND in the bundle's 00_WARNINGS.txt. */}
+          {(data.inspections?.certMissing ?? 0) > 0 && (
+            <ChecklistRow
+              ok={false}
+              okLabel=""
+              warnLabel={`${data.inspections!.certMissing} passed inspection${data.inspections!.certMissing !== 1 ? "s" : ""} have no certificate attached — their evidence will be missing from the buyer pack (the ZIP will include a 00_WARNINGS.txt)`}
+            />
+          )}
           {data.evidence && preStartRequired > 0 && (
             <ChecklistRow
               ok={preStartReady}
@@ -342,7 +354,7 @@ export function SiteClosurePanel({ siteId }: { siteId: string }) {
               icon={ClipboardCheck}
               label="Inspections"
               value={`${data.inspections.passed}/${data.inspections.total}`}
-              sub={`passed · ${inspectionsUnresolved} outstanding`}
+              sub={`${Math.round((data.inspections.passed / data.inspections.total) * 100)}% passed · ${inspectionsUnresolved} outstanding${(data.inspections.certMissing ?? 0) > 0 ? ` · ${data.inspections.certMissing} cert${data.inspections.certMissing !== 1 ? "s" : ""} missing` : ""}`}
             />
           )}
         </div>

@@ -41,6 +41,9 @@ interface Props {
   openSnags: number;
   deliveriesToday: DeliveryRow[];
   overdueDeliveriesCount: number;
+  /** (Jun 2026 S2) Inspections tile on the stats panel. */
+  inspectionsDueWeek?: number;
+  inspectionsOverdue?: number;
 }
 
 const PANEL_MS = 12_000;
@@ -115,6 +118,8 @@ export function LiveCabinScreen(props: Props) {
             inProgress={props.jobsInProgress}
             overdue={props.overdueCount}
             snags={props.openSnags}
+            inspectionsDueWeek={props.inspectionsDueWeek ?? 0}
+            inspectionsOverdue={props.inspectionsOverdue ?? 0}
           />
         )}
       </section>
@@ -242,15 +247,22 @@ function StatsPanel({
   inProgress,
   overdue,
   snags,
+  inspectionsDueWeek,
+  inspectionsOverdue,
 }: {
   inProgress: number;
   overdue: number;
   snags: number;
+  inspectionsDueWeek: number;
+  inspectionsOverdue: number;
 }) {
+  // (Jun 2026 S2) Inspection tiles only when the site uses inspections —
+  // a 3-tile layout stays clean for sites that don't.
+  const showInspections = inspectionsDueWeek > 0 || inspectionsOverdue > 0;
   return (
     <div className="flex flex-1 flex-col">
       <PanelTitle label="Site at a glance" />
-      <div className="grid flex-1 grid-cols-3 items-center gap-6">
+      <div className={`grid flex-1 items-center gap-6 ${showInspections ? "grid-cols-2 md:grid-cols-4" : "grid-cols-3"}`}>
         <Stat label="Jobs in progress" value={inProgress} accent="text-blue-300" />
         <Stat
           label="Jobs overdue"
@@ -262,6 +274,13 @@ function StatsPanel({
           value={snags}
           accent={snags > 10 ? "text-amber-300" : "text-white"}
         />
+        {showInspections && (
+          <Stat
+            label={inspectionsOverdue > 0 ? "Inspections overdue" : "Inspections this week"}
+            value={inspectionsOverdue > 0 ? inspectionsOverdue : inspectionsDueWeek}
+            accent={inspectionsOverdue > 0 ? "text-red-300" : "text-violet-300"}
+          />
+        )}
       </div>
     </div>
   );

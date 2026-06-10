@@ -351,6 +351,8 @@ export interface BriefData {
    */
   inspections?: {
     overdue: BriefInspection[];
+    /** (Jun 2026 Q1) OVERDUE but a booking is held — amber, not red. */
+    overdueBooked?: BriefInspection[];
     dueToday: BriefInspection[];
     upcoming: BriefInspection[];
     bookingDue: BriefInspection[];

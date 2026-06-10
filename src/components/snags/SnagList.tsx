@@ -6,6 +6,7 @@ import {
   Camera,
   CheckCircle,
   CheckCircle2,
+  ClipboardCheck,
   Clock,
   HardHat,
   MapPin,
@@ -45,6 +46,8 @@ interface Snag {
   contact: { id: string; name: string; email: string; company?: string | null } | null;
   raisedBy: { id: string; name: string };
   job?: { id: string; name: string; parent?: { name: string } | null } | null;
+  /** (Jun 2026 S6) Set when raised as an inspection finding. */
+  inspection?: { id: string; name: string } | null;
   createdAt: string;
   resolvedAt: string | null;
   notes: string | null;
@@ -426,6 +429,19 @@ export function SnagList({ snags, onSelect, onRefresh, showPlot, highlightId, si
                       {snag.job && (
                         <Link href={`/jobs/${snag.job.id}`} className="flex items-center gap-1 text-blue-600 hover:underline" onClick={(e) => e.stopPropagation()}>
                           {snag.job.parent ? `${snag.job.parent.name} › ` : ""}{snag.job.name}
+                        </Link>
+                      )}
+                      {/* (Jun 2026 S6) Reverse-link to the inspection this
+                          snag was raised at — completes the findings loop. */}
+                      {snag.inspection && (
+                        <Link
+                          href={`/inspections?focus=${snag.inspection.id}`}
+                          className="flex items-center gap-1 text-violet-600 hover:underline"
+                          onClick={(e) => e.stopPropagation()}
+                          title="Raised as a finding at this inspection"
+                        >
+                          <ClipboardCheck className="size-2.5" />
+                          from inspection: {snag.inspection.name}
                         </Link>
                       )}
                       {snag.contact && (

@@ -1,5 +1,7 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
+import { auth } from "@/lib/auth";
+import { sessionHasPermission } from "@/lib/permissions";
 import { SiteDetailClient } from "@/components/sites/SiteDetailClient";
 
 export const dynamic = "force-dynamic";
@@ -31,6 +33,14 @@ export default async function SiteDetailPage({
 }) {
   const { siteId } = await params;
   const { tab: initialTab, snagId: initialSnagId } = await searchParams;
+
+  // (Jun 2026 review fix) Q8 boundary: hold-point chip counts are gated on
+  // VIEW_INSPECTIONS like every other inspection surface.
+  const session = await auth();
+  const canViewInspections = sessionHasPermission(
+    session?.user as { role?: string; permissions?: string[] } | undefined,
+    "VIEW_INSPECTIONS",
+  );
 
   const site = await prisma.site.findUnique({
     where: { id: siteId },
@@ -70,7 +80,15 @@ export default async function SiteDetailPage({
               jobs: { where: { children: { none: {} } } },
               // (May 2026 Keith request) Open-snag count for the plot cards.
               snags: { where: { status: { in: ["OPEN", "IN_PROGRESS"] } } },
+              // (Jun 2026 S1) Open hold-point counts for the plot cards.
+              inspections: { where: { status: { in: ["SCHEDULED", "BOOKED", "OVERDUE"] } } },
             },
+          },
+          // (Jun 2026 S1) Overdue subset — needs its own field because
+          // _count only allows one filter per relation.
+          inspections: {
+            where: { status: "OVERDUE", bookedDate: null },
+            select: { id: true },
           },
         },
       },
@@ -200,6 +218,12 @@ export default async function SiteDetailPage({
         nextOrderDate,
         awaitingDeliveryCount,
         openSnagCount: plot._count.snags,
+        // (Jun 2026 S1) Hold-point chips — open count + the truly-overdue
+        // subset (date passed, nothing booked — Q1 semantics). Zeroed when
+        // the viewer lacks VIEW_INSPECTIONS (review fix — Q8 boundary
+        // consistency; the chips simply don't render at 0).
+        openInspectionCount: canViewInspections ? plot._count.inspections : 0,
+        overdueInspectionCount: canViewInspections ? plot.inspections.length : 0,
       };
     }),
   };

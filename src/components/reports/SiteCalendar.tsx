@@ -444,7 +444,7 @@ export function SiteCalendar({ siteId }: SiteCalendarProps) {
                       <div
                         key={`i-${insp.id}`}
                         className={`truncate rounded px-1 text-[9px] leading-tight ${
-                          /OVERDUE/.test(insp.status)
+                          insp.status === "OVERDUE" && !insp.booked
                             ? "bg-red-100 text-red-700"
                             : "bg-violet-100 text-violet-700"
                         }`}
@@ -584,13 +584,13 @@ export function SiteCalendar({ siteId }: SiteCalendarProps) {
                           <div
                             key={`insp-${insp.id}`}
                             className={`flex items-center justify-between rounded border px-2 py-1.5 text-sm ${
-                              insp.status === "OVERDUE"
+                              insp.status === "OVERDUE" && !insp.booked
                                 ? "border-red-100 bg-red-50/30"
                                 : "border-violet-100 bg-violet-50/30"
                             }`}
                           >
                             <div className="min-w-0 flex-1">
-                              <Link href="/inspections" className="font-medium text-blue-600 hover:underline">
+                              <Link href={`/inspections?focus=${insp.id}`} className="font-medium text-blue-600 hover:underline">
                                 {insp.name}
                               </Link>
                               {insp.isBlocking && (
@@ -600,14 +600,18 @@ export function SiteCalendar({ siteId }: SiteCalendarProps) {
                                 {INSPECTION_TYPE_LABEL[insp.type] ?? insp.type} · {insp.plot.plotNumber ? `Plot ${insp.plot.plotNumber}` : insp.plot.name}
                               </span>
                             </div>
+                            {/* (Jun 2026 Q1) Overdue-but-booked reads amber, not red —
+                                the visit is arranged, the date just slipped past. */}
                             <span className={`ml-2 shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${
                               insp.status === "OVERDUE"
-                                ? "bg-red-100 text-red-700"
+                                ? insp.booked
+                                  ? "bg-amber-100 text-amber-700"
+                                  : "bg-red-100 text-red-700"
                                 : insp.booked
                                   ? "bg-violet-100 text-violet-700"
                                   : "bg-slate-100 text-slate-600"
                             }`}>
-                              {insp.status === "BOOKED" || insp.booked ? "BOOKED" : insp.status}
+                              {insp.status === "OVERDUE" && insp.booked ? "BOOKED (WAS OVERDUE)" : insp.status === "BOOKED" || insp.booked ? "BOOKED" : insp.status}
                             </span>
                           </div>
                         ))}

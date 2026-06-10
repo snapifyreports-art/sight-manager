@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/email";
-import { format, subDays } from "date-fns";
+import { format, subDays, addDays } from "date-fns";
 import { checkCronAuth } from "@/lib/cron-auth";
 import { getServerCurrentDate, getServerStartOfDay } from "@/lib/dev-date";
 import { logEvent } from "@/lib/event-log";
@@ -106,6 +106,11 @@ export async function GET(req: NextRequest) {
     latenessResolved: number;
     latenessDaysLost: number;
     latenessTopReason: string | null;
+    // (Jun 2026 Q2) Inspection hold-points in the weekly rhythm: results
+    // from last week, what's due in the coming week, what's gone red.
+    inspectionsPassed: number;
+    inspectionsDueNextWeek: number;
+    inspectionsOverdue: number;
   };
 
   const allSubscribedSiteIds = Array.from(
@@ -128,7 +133,7 @@ export async function GET(req: NextRequest) {
     });
     await Promise.all(
       sitesForSummaries.map(async (s) => {
-        const [jobsStarted, jobsCompleted, snagsRaised, snagsResolved, photos, delays, staleSnags, latenessOpenedThisWeek, latenessResolvedThisWeek, openLatenessForSite] =
+        const [jobsStarted, jobsCompleted, snagsRaised, snagsResolved, photos, delays, staleSnags, latenessOpenedThisWeek, latenessResolvedThisWeek, openLatenessForSite, inspectionsPassed, inspectionsDueNextWeek, inspectionsOverdue] =
           await Promise.all([
             prisma.job.count({
               where: { plot: { siteId: s.id }, actualStartDate: { gte: weekStart, lt: todayStart }, children: { none: {} } },
@@ -161,6 +166,21 @@ export async function GET(req: NextRequest) {
               where: { siteId: s.id, resolvedAt: null },
               select: { daysLate: true, reasonCode: true },
             }),
+            // (Jun 2026 Q2) Inspection pills — passed last week, due in the
+            // next 7 days, overdue now (excluding booked-overdue, Q1).
+            prisma.inspection.count({
+              where: { plot: { siteId: s.id }, status: "PASSED", passedAt: { gte: weekStart, lt: todayStart } },
+            }),
+            prisma.inspection.count({
+              where: {
+                plot: { siteId: s.id },
+                status: { in: ["SCHEDULED", "BOOKED"] },
+                scheduledDate: { gte: todayStart, lt: addDays(todayStart, 7) },
+              },
+            }),
+            prisma.inspection.count({
+              where: { plot: { siteId: s.id }, status: "OVERDUE", bookedDate: null },
+            }),
           ]);
 
         const latenessDaysLost = openLatenessForSite.reduce((sum, e) => sum + e.daysLate, 0);
@@ -185,6 +205,9 @@ export async function GET(req: NextRequest) {
           latenessResolved: latenessResolvedThisWeek,
           latenessDaysLost,
           latenessTopReason,
+          inspectionsPassed,
+          inspectionsDueNextWeek,
+          inspectionsOverdue,
         });
       }),
     );
@@ -213,7 +236,7 @@ export async function GET(req: NextRequest) {
 
     const totalActivity = summaries.reduce(
       (acc, s) =>
-        acc + s.jobsStarted + s.jobsCompleted + s.snagsRaised + s.snagsResolved + s.photos + s.delays + s.staleSnags + s.latenessOpened + s.latenessResolved,
+        acc + s.jobsStarted + s.jobsCompleted + s.snagsRaised + s.snagsResolved + s.photos + s.delays + s.staleSnags + s.latenessOpened + s.latenessResolved + s.inspectionsPassed + s.inspectionsDueNextWeek + s.inspectionsOverdue,
       0,
     );
 
@@ -254,6 +277,13 @@ export async function GET(req: NextRequest) {
             : "",
           s.latenessResolved > 0
             ? `<span style="background:#dcfce7;color:#166534;border-radius:9999px;padding:2px 8px;font-size:11px;margin-right:6px;">${s.latenessResolved} lateness resolved</span>`
+            : "",
+          // (Jun 2026 Q2) Inspection pills — passed (green), due next 7
+          // days (violet), overdue (red, bold — excludes booked-overdue).
+          stat("inspections passed", s.inspectionsPassed, "#dcfce7"),
+          stat("inspections due", s.inspectionsDueNextWeek, "#ede9fe"),
+          s.inspectionsOverdue > 0
+            ? `<span style="background:#fecaca;color:#b91c1c;border-radius:9999px;padding:2px 8px;font-size:11px;margin-right:6px;font-weight:600;">${s.inspectionsOverdue} inspection${s.inspectionsOverdue !== 1 ? "s" : ""} overdue</span>`
             : "",
         ]
           .filter(Boolean)

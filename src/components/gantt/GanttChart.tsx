@@ -21,7 +21,7 @@ import {
 import { GanttBar } from "./GanttBar";
 import { GanttOrderFlag } from "./GanttOrderFlag";
 import { TodayMarker } from "./TodayMarker";
-import { inspectionStatusColor, inspectionStatusLabel } from "@/lib/inspection-doctype";
+import { inspectionDisplayStatus } from "@/lib/inspection-doctype";
 import type { InspectionStatus } from "@prisma/client";
 
 interface GanttJob {
@@ -74,6 +74,8 @@ interface GanttInspection {
   name: string;
   status: string;
   scheduledDate: string;
+  /** Booked-overdue rows render amber, not red (Q1 display semantics). */
+  bookedDate?: string | null;
 }
 
 interface GanttChartProps {
@@ -778,7 +780,11 @@ export function GanttChart({ jobs, enableDateControls = false, inspections = [] 
               {inspections.map((ins) => {
                 const d = new Date(ins.scheduledDate);
                 const left = getPositionForDate(d, timelineStart, DAY_WIDTH);
-                const colour = inspectionStatusColor(ins.status as InspectionStatus);
+                // Display-status (not raw status) so a booked-overdue row is
+                // amber here exactly like the list/calendar — red on this
+                // chart must always mean "act now" (review fix).
+                const disp = inspectionDisplayStatus(ins.status as InspectionStatus, ins.bookedDate);
+                const colour = disp.hex;
                 return (
                   <div
                     key={`insp-${ins.id}`}
@@ -787,8 +793,8 @@ export function GanttChart({ jobs, enableDateControls = false, inspections = [] 
                   >
                     <div className="absolute top-0 h-full w-px opacity-60" style={{ backgroundColor: colour }} />
                     <a
-                      href="/inspections"
-                      title={`${ins.name} — ${inspectionStatusLabel(ins.status as InspectionStatus)} (${ins.scheduledDate.slice(0, 10)}) · click to manage`}
+                      href={`/inspections?focus=${ins.id}`}
+                      title={`${ins.name} — ${disp.label} (${ins.scheduledDate.slice(0, 10)}) · click to manage`}
                       className="pointer-events-auto absolute top-0 flex h-4 min-w-4 -translate-x-1/2 cursor-pointer items-center justify-center rounded-sm px-1 text-[10px] font-bold leading-none text-white shadow hover:brightness-110"
                       style={{ backgroundColor: colour }}
                     >

@@ -19,6 +19,7 @@ import {
   renderCompletionSummaryPdf,
   renderPlotStoryPdf,
   renderPlotSnagLogPdf,
+  renderPlotInspectionLogPdf,
   renderPlotNcrLogPdf,
   renderPlotDefectLogPdf,
   renderPlotVariationLogPdf,
@@ -63,6 +64,10 @@ interface BuildArgs {
   prisma: PrismaClient;
   siteId: string;
   triggeredByUserName: string;
+  /** (Jun 2026 Q8) False when the triggering user lacks VIEW_INSPECTIONS —
+   * skips the inspection-log PDFs + cert warnings so the ZIP honours the
+   * same permission boundary as every other inspection surface. */
+  includeInspections?: boolean;
 }
 
 // Sanitize any string used as a filename or folder. Keep it ASCII-safe
@@ -118,6 +123,7 @@ export async function buildHandoverArchive({
   prisma,
   siteId,
   triggeredByUserName,
+  includeInspections = true,
 }: BuildArgs): Promise<Archiver> {
   const archive = archiver("zip", { zlib: { level: 6 } });
 
@@ -133,6 +139,7 @@ export async function buildHandoverArchive({
   // per-plot PDFs + contractor section.
   const story = await buildSiteStory(prisma, siteId, {
     includeFullDetail: true,
+    includeInspections,
   });
 
   const safeSiteName = safeName(story.site.name);
@@ -163,6 +170,9 @@ export async function buildHandoverArchive({
   });
 
   // ─── 02_Plots ─────────────────────────────────────────────────────
+  // (Jun 2026 Q6 + S13) Certificate problems found while building plot
+  // folders — written to 00_WARNINGS.txt after the loop. Warn, not block.
+  const certWarnings: string[] = [];
   for (let i = 0; i < story.plotStories.length; i++) {
     const plot = story.plotStories[i];
     const folder = `02_Plots/${plotFolderNames[i]}`;
@@ -193,50 +203,50 @@ export async function buildHandoverArchive({
     );
     archive.append(snagPdf, { name: `${folder}/snag-log.pdf` });
 
-    // (Jun 2026 Inspections) Per-plot inspection register — statutory +
-    // QA hold-points with result, date, inspector and whether a
-    // certificate is attached. Plain text (no PDF renderer) to keep the
-    // handover build robust; the cert files themselves arrive via the
-    // certificates/ folder copied from SiteDocument below.
-    const plotInspections = await prisma.inspection.findMany({
-      where: { plotId: plot.id },
-      orderBy: { scheduledDate: "asc" },
-      select: {
-        name: true,
-        type: true,
-        status: true,
-        scheduledDate: true,
-        bookedDate: true,
-        passedAt: true,
-        failedAt: true,
-        notes: true,
-        inspector: { select: { name: true, company: true } },
-        certificate: { select: { name: true } },
-      },
-    });
+    // (Jun 2026 Q5 + S12) Per-plot inspection register — now a branded
+    // PDF like every other log in the pack, with the "X of Y passed"
+    // headline. The cert files themselves arrive via the certificates/
+    // folder copied from SiteDocument below.
+    // (Q6 + S13) Passed inspections whose certificate is missing — or
+    // attached to a document that is NOT plot-scoped (so it won't land in
+    // this plot's certificates/ folder) — are collected into certWarnings
+    // and shouted about in 00_WARNINGS.txt. Warn, never block.
+    const plotInspections = includeInspections
+      ? await prisma.inspection.findMany({
+          where: { plotId: plot.id },
+          orderBy: { scheduledDate: "asc" },
+          select: {
+            name: true,
+            type: true,
+            status: true,
+            scheduledDate: true,
+            bookedDate: true,
+            passedAt: true,
+            failedAt: true,
+            notes: true,
+            inspector: { select: { name: true, company: true } },
+            certificate: { select: { name: true, plotId: true } },
+          },
+        })
+      : [];
     if (plotInspections.length > 0) {
-      const lines: string[] = [
-        `INSPECTION REGISTER — Plot ${plot.plotNumber || plot.name}`,
-        `Generated ${format(new Date(), "d MMM yyyy")}`,
-        "",
-        `${plotInspections.filter((x) => x.status === "PASSED").length} of ${plotInspections.length} passed`,
-        "",
-      ];
+      const inspPdf = await renderPlotInspectionLogPdf(
+        `Plot ${plot.plotNumber || plot.name}`,
+        plotInspections,
+      );
+      archive.append(inspPdf, { name: `${folder}/inspection-log.pdf` });
       for (const ins of plotInspections) {
-        const resolved = ins.passedAt ?? ins.failedAt;
-        lines.push(`• ${ins.name}  [${ins.type}]`);
-        lines.push(`    Status:     ${ins.status}`);
-        lines.push(`    Scheduled:  ${format(ins.scheduledDate, "d MMM yyyy")}`);
-        if (ins.bookedDate) lines.push(`    Booked for: ${format(ins.bookedDate, "d MMM yyyy")}`);
-        if (resolved) lines.push(`    Result on:  ${format(resolved, "d MMM yyyy")}`);
-        if (ins.inspector) {
-          lines.push(`    Inspector:  ${ins.inspector.name}${ins.inspector.company ? ` (${ins.inspector.company})` : ""}`);
+        if (ins.status !== "PASSED") continue;
+        if (!ins.certificate) {
+          certWarnings.push(
+            `Plot ${plot.plotNumber || plot.name}: "${ins.name}" PASSED but no certificate is attached — the buyer pack has no evidence for this hold-point.`,
+          );
+        } else if (ins.certificate.plotId !== plot.id) {
+          certWarnings.push(
+            `Plot ${plot.plotNumber || plot.name}: "${ins.name}" certificate ("${ins.certificate.name}") is filed at site level, not against this plot — it is NOT inside this plot's certificates/ folder.`,
+          );
         }
-        lines.push(`    Certificate: ${ins.certificate ? ins.certificate.name : "— not attached —"}`);
-        if (ins.notes) lines.push(`    Notes:      ${ins.notes.replace(/\s+/g, " ").slice(0, 300)}`);
-        lines.push("");
       }
-      archive.append(lines.join("\n"), { name: `${folder}/inspection-log.txt` });
     }
 
     // (May 2026 Story-linkage audit) NCR / Defect / Variation logs per
@@ -678,6 +688,23 @@ export async function buildHandoverArchive({
         });
       });
     }
+  }
+
+  // (Jun 2026 Q6 + S13) Missing/mis-filed certificate warnings — top-level
+  // file so it can't be missed when the ZIP is opened. Sorted next to
+  // 00_README.txt by name.
+  if (certWarnings.length > 0) {
+    const warnLines = [
+      "⚠ CERTIFICATE WARNINGS — read before issuing this pack",
+      `Generated ${format(new Date(), "d MMM yyyy")}`,
+      "",
+      `${certWarnings.length} passed inspection${certWarnings.length === 1 ? "" : "s"} have certificate problems:`,
+      "",
+      ...certWarnings.map((w) => `• ${w}`),
+      "",
+      "Fix: open the plot's Overview tab → Inspections, attach/re-file the certificate, and regenerate this ZIP.",
+    ];
+    archive.append(warnLines.join("\n"), { name: "00_WARNINGS.txt" });
   }
 
   // ─── 03_Contractor_Analysis ──────────────────────────────────────

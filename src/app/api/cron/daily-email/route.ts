@@ -102,8 +102,10 @@ export async function GET(req: NextRequest) {
         // (Jun 2026) Statutory/QA hold-points — overdue + due in the next 7
         // days, so the emailed brief (the surface most managers read first)
         // flags inspections, not just the in-app brief.
+        // (Q1) bookedDate: null — an overdue row with a booking held is
+        // arranged, not actionable; it must not trip the red alert line.
         prisma.inspection.count({
-          where: { plot: { siteId: site.id }, status: "OVERDUE" },
+          where: { plot: { siteId: site.id }, status: "OVERDUE", bookedDate: null },
         }),
         prisma.inspection.count({
           where: {
@@ -366,8 +368,24 @@ export async function GET(req: NextRequest) {
           skippedNoAccess++;
           return;
         }
+        // (Jun 2026 Q4) Per-site mute: a WatchedSite row (the site-header
+        // watch toggle — same mute the push fan-out + weekly digest use)
+        // drops that site's INSPECTION alerts from this manager's action
+        // count. The site row still renders (informational), it just
+        // stops nagging in the subject line / red banner.
+        const mutedRows = await prisma.watchedSite.findMany({
+          where: { userId: m.id },
+          select: { siteId: true },
+        });
+        const mutedSiteIds = new Set(mutedRows.map((w) => w.siteId));
         const myAlerts = myDigests.reduce(
-          (sum, d) => sum + d.overdueJobs + d.lateStarts + d.overdueDeliveries + d.ordersToPlace + d.inspectionsOverdue,
+          (sum, d) =>
+            sum +
+            d.overdueJobs +
+            d.lateStarts +
+            d.overdueDeliveries +
+            d.ordersToPlace +
+            (mutedSiteIds.has(d.site.id) ? 0 : d.inspectionsOverdue),
           0,
         );
         return sendEmail({

@@ -54,6 +54,8 @@ export default async function LiveCabinPage({
     openSnags,
     deliveriesToday,
     overdueDeliveriesCount,
+    inspectionsDueWeek,
+    inspectionsOverdue,
   ] = await Promise.all([
     prisma.job.findMany({
       where: {
@@ -129,6 +131,18 @@ export default async function LiveCabinPage({
         expectedDeliveryDate: { lt: dayStart },
       },
     }),
+    // (Jun 2026 S2) Inspections tile — due in the next 7 days + truly
+    // overdue (date passed, nothing booked).
+    prisma.inspection.count({
+      where: {
+        plot: { siteId: site.id },
+        status: { in: ["SCHEDULED", "BOOKED"] },
+        scheduledDate: { gte: dayStart, lt: addDays(dayStart, 7) },
+      },
+    }),
+    prisma.inspection.count({
+      where: { plot: { siteId: site.id }, status: "OVERDUE", bookedDate: null },
+    }),
   ]);
 
   void whereJobStartOverdue; // imported for potential future use
@@ -159,6 +173,8 @@ export default async function LiveCabinPage({
         supplier: d.supplier.name,
       }))}
       overdueDeliveriesCount={overdueDeliveriesCount}
+      inspectionsDueWeek={inspectionsDueWeek}
+      inspectionsOverdue={inspectionsOverdue}
     />
   );
 }

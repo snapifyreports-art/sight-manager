@@ -172,6 +172,16 @@ export function usePlotCreation() {
           { ttlMs: 15000 },
         );
       }
+      // (Jun 2026 S16) Inspection defs that could not be instantiated
+      // (anchor stage missing or undated) — a silently-absent statutory
+      // hold-point is the worst kind of skip, so shout about it.
+      const inspWarnings = body?._inspectionWarnings;
+      if (Array.isArray(inspWarnings) && inspWarnings.length > 0 && !opts?.silent) {
+        toast.error(
+          `Plot created but ${inspWarnings.length} inspection${inspWarnings.length === 1 ? "" : "s"} could not be scheduled (anchor stage missing or undated): ${inspWarnings.slice(0, 4).join(", ")}${inspWarnings.length > 4 ? "…" : ""}. Add them manually from the plot's Overview tab.`,
+          { ttlMs: 15000 },
+        );
+      }
       return { ok: true };
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Failed to create plot from template";
@@ -220,6 +230,17 @@ export function usePlotCreation() {
       // even when `errors[]` lists failed plots. Pre-fix the hook
       // ignored the array entirely so the wizard showed "Site
       // created!" even though half the batch failed.
+      // (Jun 2026 S16, review fix) Inspection-skip warning fires BEFORE the
+      // per-plot-errors early return — the route returns 201 with BOTH
+      // populated when some plots succeeded, and the successful plots'
+      // silently-missing hold-points are exactly what this warns about.
+      const inspWarnings = body?.inspectionWarnings;
+      if (Array.isArray(inspWarnings) && inspWarnings.length > 0 && !opts?.silent) {
+        toast.error(
+          `Plots created but ${inspWarnings.length} inspection${inspWarnings.length === 1 ? "" : "s"} could not be scheduled (anchor stage missing or undated): ${inspWarnings.slice(0, 4).join(", ")}${inspWarnings.length > 4 ? "…" : ""}. Add them manually from each plot's Overview tab.`,
+          { ttlMs: 15000 },
+        );
+      }
       if (Array.isArray(body?.errors) && body.errors.length > 0) {
         if (!opts?.silent) {
           const preview = (body.errors as Array<{ plotNumber: string; error: string }>)

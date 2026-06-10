@@ -3,6 +3,7 @@
 import { useState, useMemo } from "react";
 import type { TemplateData, TemplateJobData, TemplateInspectionData } from "./types";
 import { computeInspectionMarkers } from "./template-inspection-markers";
+import { INSPECTION_TYPE_META } from "@/lib/inspection-doctype";
 
 /**
  * Mobile-only read-only programme preview. The desktop TemplateTimeline
@@ -137,19 +138,29 @@ export function TemplateMobileTimeline({
         </div>
       </div>
 
-      {/* Marker strip — "!" badges along the top, aligned to the bars below. */}
+      {/* Marker strip — "!" badges along the top, aligned to the bars below.
+          (Jun 2026 Q21) Coloured per inspection type — same shared palette
+          as the desktop preview + list badges. */}
       {markers.length > 0 && (
         <div className="relative mb-1 h-4">
-          {markers.map((mk) => (
-            <div
-              key={mk.id}
-              className="absolute top-0 -translate-x-1/2"
-              style={{ left: `${Math.min(100, Math.max(0, (mk.day / maxDay) * 100))}%` }}
-              title={`${mk.name} — ${mk.type} · anchored ${mk.edgeLabel}`}
-            >
-              <span className="flex size-4 items-center justify-center rounded-sm bg-amber-500 text-[10px] font-bold leading-none text-white shadow">!</span>
-            </div>
-          ))}
+          {markers.map((mk) => {
+            const meta = INSPECTION_TYPE_META[mk.type as keyof typeof INSPECTION_TYPE_META];
+            return (
+              <div
+                key={mk.id}
+                className="absolute top-0 -translate-x-1/2"
+                style={{ left: `${Math.min(100, Math.max(0, (mk.day / maxDay) * 100))}%` }}
+                title={`${mk.name} — ${meta?.label ?? mk.type} · anchored ${mk.edgeLabel}`}
+              >
+                <span
+                  className="flex size-4 items-center justify-center rounded-sm text-[10px] font-bold leading-none text-white shadow"
+                  style={{ backgroundColor: meta?.hex ?? "#d97706" }}
+                >
+                  !
+                </span>
+              </div>
+            );
+          })}
         </div>
       )}
 

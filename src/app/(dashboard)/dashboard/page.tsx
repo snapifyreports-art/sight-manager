@@ -5,6 +5,7 @@ import { getUserSiteIds } from "@/lib/site-access";
 import { DashboardClient, type DashboardData } from "@/components/dashboard/DashboardClient";
 import { whereJobEndOverdue } from "@/lib/lateness";
 import { differenceInWorkingDays } from "@/lib/working-days";
+import { sessionHasPermission } from "@/lib/permissions";
 import { cookies } from "next/headers";
 import { getServerCurrentDate } from "@/lib/dev-date";
 
@@ -55,6 +56,8 @@ export default async function DashboardPage() {
     // page. Skipped when session is null because we already auth-gate
     // higher up the layout chain.
     watchedSites,
+    // (Jun 2026 Q17) At-Risk: overdue inspections.
+    overdueInspections,
   ] = await Promise.all([
     // Total sites (filtered)
     prisma.site.count({ where: siteWhere }),
@@ -191,6 +194,41 @@ export default async function DashboardPage() {
           },
         })
       : Promise.resolve([]),
+
+    // (Jun 2026 Q17) At-Risk: statutory hold-points past their date with
+    // NOTHING booked (booked-overdue is arranged, not at risk — Q1).
+    // Gated on VIEW_INSPECTIONS so the panel matches the rest of the
+    // inspections permission boundary (Q8).
+    session &&
+    sessionHasPermission(
+      session.user as { role?: string; permissions?: string[] },
+      "VIEW_INSPECTIONS",
+    )
+      ? prisma.inspection.findMany({
+          take: 8,
+          where: {
+            status: "OVERDUE",
+            bookedDate: null,
+            ...(siteIds !== null ? { plot: { siteId: { in: siteIds } } } : {}),
+          },
+          orderBy: { scheduledDate: "asc" },
+          select: {
+            id: true,
+            name: true,
+            type: true,
+            scheduledDate: true,
+            isBlocking: true,
+            plot: {
+              select: {
+                id: true,
+                name: true,
+                plotNumber: true,
+                site: { select: { id: true, name: true } },
+              },
+            },
+          },
+        })
+      : Promise.resolve([]),
   ]);
 
   // Build the job status map with defaults
@@ -260,6 +298,16 @@ export default async function DashboardPage() {
       daysOpen: Math.max(0, differenceInWorkingDays(today, s.createdAt)),
       priority: s.priority,
       plot: s.plot,
+    })),
+    // (Jun 2026 Q17) At-Risk: overdue hold-points.
+    overdueInspections: overdueInspections.map((i) => ({
+      id: i.id,
+      name: i.name,
+      type: i.type,
+      scheduledDate: i.scheduledDate.toISOString(),
+      daysOverdue: Math.max(0, differenceInWorkingDays(today, i.scheduledDate)),
+      isBlocking: i.isBlocking,
+      plot: i.plot,
     })),
     watchedSites: watchedSites.map((w) => ({
       id: w.site.id,

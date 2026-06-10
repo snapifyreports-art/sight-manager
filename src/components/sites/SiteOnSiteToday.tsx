@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Loader2, Users, Phone, Mail } from "lucide-react";
+import { Loader2, Users, Phone, Mail, ClipboardCheck } from "lucide-react";
+import { getCurrentDate } from "@/lib/dev-date";
 
 /**
  * (May 2026 Keith request) Who's expected on site today.
@@ -41,9 +42,23 @@ interface OnSiteData {
   expected: OnSiteContractor[];
 }
 
+interface TodayInspection {
+  id: string;
+  name: string;
+  type: string;
+  status: string;
+  scheduledDate: string;
+  bookedDate: string | null;
+  plot: { plotNumber: string | null; name: string };
+  inspector: { name: string; company: string | null } | null;
+}
+
 export function SiteOnSiteToday({ siteId }: { siteId: string }) {
   const [data, setData] = useState<OnSiteData | null>(null);
   const [loading, setLoading] = useState(true);
+  // (Jun 2026 S4) Inspectors are on site too — list today's inspections
+  // next to the expected trades. 403 (no VIEW_INSPECTIONS) just hides it.
+  const [inspectionsToday, setInspectionsToday] = useState<TodayInspection[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -56,6 +71,22 @@ export function SiteOnSiteToday({ siteId }: { siteId: string }) {
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
+    fetch(`/api/inspections?siteId=${siteId}&open=1`, { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : []))
+      .then((rows: TodayInspection[]) => {
+        if (cancelled || !Array.isArray(rows)) return;
+        // Dev-date-aware LOCAL day key — toISOString() is UTC, which is
+        // yesterday between 00:00-01:00 BST and ignores date simulation.
+        const t = getCurrentDate();
+        const todayKey = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")}`;
+        setInspectionsToday(
+          rows.filter((i) => {
+            const day = (i.bookedDate ?? i.scheduledDate)?.slice(0, 10);
+            return day === todayKey;
+          }),
+        );
+      })
+      .catch(() => {});
     return () => {
       cancelled = true;
     };
@@ -87,10 +118,39 @@ export function SiteOnSiteToday({ siteId }: { siteId: string }) {
     );
   }
 
+  // (Jun 2026 S4) Inspectors due today — rendered in both the empty and
+  // populated states (an inspector can turn up on a day no trades do).
+  const inspectionsBlock =
+    inspectionsToday.length > 0 ? (
+      <div className="rounded-lg border border-violet-200 bg-violet-50/50 p-4">
+        <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-violet-800">
+          <ClipboardCheck className="size-4" />
+          Inspections today ({inspectionsToday.length})
+        </div>
+        <ul className="space-y-1 text-sm">
+          {inspectionsToday.map((i) => (
+            <li key={i.id}>
+              <Link href={`/inspections?focus=${i.id}`} className="text-blue-700 hover:underline">
+                {i.name}
+              </Link>
+              <span className="ml-2 text-xs text-muted-foreground">
+                Plot {i.plot.plotNumber ?? i.plot.name}
+                {i.inspector ? ` · ${i.inspector.company || i.inspector.name}` : " · no inspector set"}
+                {i.bookedDate ? " · booked" : ""}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    ) : null;
+
   if (data.expected.length === 0) {
     return (
-      <div className="rounded-lg border border-dashed bg-white p-6 text-center text-sm text-muted-foreground">
-        No contractors expected on site today. ✓
+      <div className="space-y-4">
+        {inspectionsBlock}
+        <div className="rounded-lg border border-dashed bg-white p-6 text-center text-sm text-muted-foreground">
+          No contractors expected on site today. ✓
+        </div>
       </div>
     );
   }
@@ -110,6 +170,8 @@ export function SiteOnSiteToday({ siteId }: { siteId: string }) {
           </p>
         </div>
       </div>
+
+      {inspectionsBlock}
 
       {/* v1 caveat banner — make it clear this is derived data so a
           manager doesn't mistake it for actual sign-ins. */}

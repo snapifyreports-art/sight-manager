@@ -97,13 +97,24 @@ export async function POST(
       if (!["SCHEDULED", "OVERDUE"].includes(insp.status)) {
         return NextResponse.json({ error: `Can't book an inspection that is ${insp.status}` }, { status: 400 });
       }
-      const bookedDate = body.bookedDate ? new Date(body.bookedDate) : new Date();
+      // (Jun 2026 review fix) bookedDate is the inspector's VISIT day, not
+      // the moment the manager clicked Book. With no explicit date, default
+      // to the scheduled date — surfaces like "Inspections today" and the
+      // contractor share page key off bookedDate ?? scheduledDate, and a
+      // click-timestamp here told the trade the visit was today.
+      const bookedDate = body.bookedDate ? new Date(body.bookedDate) : new Date(insp.scheduledDate);
       const updated = await prisma.inspection.update({ where: { id }, data: { status: "BOOKED", bookedDate } });
       await logEvent(prisma, { type: "INSPECTION_BOOKED", description: `Inspection "${insp.name}" booked`, siteId: insp.plot.siteId, plotId: insp.plotId, jobId: insp.anchorJobId, userId, detail: { inspectionId: id } }).catch(() => {});
       return NextResponse.json(updated);
     }
 
     if (action === "pass") {
+      // (Jun 2026 review fix) Guard like `book` does — re-passing an
+      // already-PASSED row (stale tab, double-click) would otherwise sweep
+      // the findings raised on the first pass via the Q12 auto-resolve.
+      if (insp.status === "PASSED") {
+        return NextResponse.json({ error: "This inspection has already passed" }, { status: 400 });
+      }
       // HARD GATE: certificate required to pass (server-enforced).
       const certId = body.certificateDocumentId ?? insp.certificateDocumentId;
       if (!certId) {
@@ -134,6 +145,23 @@ export async function POST(
           // exports that read failedAt would mis-classify it).
           data: { status: "PASSED", passedAt: passDate, failedAt: null, certificateDocumentId: certId },
         });
+        // (Jun 2026 Q12) A pass supersedes the findings an earlier FAIL on
+        // this same inspection raised — the inspector has re-checked the
+        // work and signed it off, so still-open linked snags/NCRs resolve
+        // automatically. Runs BEFORE createFindings so any findings logged
+        // on THIS pass stay open. Only on PASS — re-inspecting alone never
+        // touches them.
+        const autoSnags = await tx.snag.updateMany({
+          where: { inspectionId: id, status: { in: ["OPEN", "IN_PROGRESS"] } },
+          data: { status: "RESOLVED", resolvedAt: passDate, resolvedById: userId },
+        });
+        const autoNcrs = await tx.nCR.updateMany({
+          where: { inspectionId: id, status: { in: ["OPEN", "INVESTIGATING", "AWAITING_CORRECTION"] } },
+          // closedAt/closedById match the manual NCR route's RESOLVED
+          // transition — without them the handover QA register prints "—"
+          // for the closure date.
+          data: { status: "RESOLVED", closedAt: passDate, closedById: userId },
+        });
         // Handover tick is a CONFIRMED choice (tickHandover), never automatic.
         if (body.tickHandover && docType) {
           await tx.handoverChecklist.upsert({
@@ -143,7 +171,7 @@ export async function POST(
           });
         }
         const counts = await createFindings(tx as typeof prisma, (body.findings as Finding[]) ?? []);
-        return counts;
+        return { ...counts, autoResolvedSnags: autoSnags.count, autoResolvedNcrs: autoNcrs.count };
       });
       await logEvent(prisma, { type: "INSPECTION_PASSED", description: `Inspection "${insp.name}" passed`, siteId: insp.plot.siteId, plotId: insp.plotId, jobId: insp.anchorJobId, userId, detail: { inspectionId: id, certificateId: certId } }).catch(() => {});
       return NextResponse.json({ ok: true, ...result, handoverDocType: docType });

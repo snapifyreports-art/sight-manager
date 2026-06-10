@@ -166,6 +166,8 @@ export interface SiteStory {
     failed: number;
     open: number;
     overdue: number;
+    /** (Jun 2026 Q6/S13) PASSED but no certificate attached. */
+    certMissing: number;
     recent: {
       id: string;
       name: string;
@@ -352,7 +354,7 @@ export interface ContractorPerf {
 }
 
 export interface QuoteEntry {
-  source: "JOURNAL" | "JOB_NOTE" | "PHOTO_CAPTION";
+  source: "JOURNAL" | "JOB_NOTE" | "PHOTO_CAPTION" | "INSPECTION";
   date: string;
   plotNumber: string | null;
   body: string;
@@ -363,6 +365,13 @@ interface BuildOptions {
   /** When true, include heavier per-plot data (photos, full event lists)
    *  for the ZIP renderer. Default false keeps payload small for the UI. */
   includeFullDetail?: boolean;
+  /** (Jun 2026 Q8) When false, the inspections rollup + per-plot counters
+   *  + INSPECTION highlights are zeroed/omitted — the story route passes
+   *  the caller's VIEW_INSPECTIONS permission here so Story/Closure match
+   *  the Brief + API gating. Default true. NOTE: callers must pass the
+   *  triggering user's permission themselves — the handover-zip route does
+   *  (review fix); a new caller that forgets re-opens the boundary. */
+  includeInspections?: boolean;
 }
 
 // (May 2026 audit D-P1-7) Local `workingDaysBetween` removed. The
@@ -1162,8 +1171,11 @@ export async function buildSiteStory(
   // (Jun 2026) Load once; derive per-plot counters + the site-level
   // rollup + recent feed. Open = not yet PASSED and not FAILED-terminal —
   // i.e. SCHEDULED/BOOKED/OVERDUE still need action before closure.
+  // (Jun 2026 Q8) includeInspections=false (caller lacks VIEW_INSPECTIONS)
+  // zeroes the whole block — counters, feed, and highlights all derive
+  // from this one query.
   const inspectionRows =
-    plotIds.length === 0
+    plotIds.length === 0 || options.includeInspections === false
       ? []
       : await tx.inspection.findMany({
           where: { plotId: { in: plotIds } },
@@ -1176,6 +1188,7 @@ export async function buildSiteStory(
             passedAt: true,
             failedAt: true,
             plotId: true,
+            certificateDocumentId: true,
             plot: { select: { plotNumber: true } },
           },
           orderBy: { scheduledDate: "asc" },
@@ -1193,6 +1206,24 @@ export async function buildSiteStory(
     if (ins.status === "OVERDUE") { c.overdue++; siteInspections.overdue++; }
     inspectionByPlot.set(ins.plotId, c);
   }
+  // (Jun 2026 Q13) Inspection milestone — appears once the site HAS
+  // hold-points, achieved when every one of them is PASSED (date = the
+  // final pass). Inserted before "Site closed" so the milestone strip
+  // reads chronologically. Skipped entirely when the caller can't view
+  // inspections (Q8) or the site has none.
+  if (siteInspections.total > 0) {
+    const allCleared = siteInspections.open === 0 && siteInspections.failed === 0;
+    const lastPass = inspectionRows.reduce<Date | null>(
+      (max, i) => (i.passedAt && (!max || i.passedAt > max) ? i.passedAt : max),
+      null,
+    );
+    milestones.splice(milestones.length - 1, 0, {
+      key: "inspections-cleared",
+      label: "All inspection hold-points cleared",
+      date: allCleared && lastPass ? lastPass.toISOString() : null,
+    });
+  }
+
   // Recent feed = most-recently-resolved first, falling back to scheduled.
   // (Jun 2026 audit fix) "Recent" must show genuinely-recent RESULTS, not
   // future-dated SCHEDULED rows. Resolved (passed/failed) sort by their
@@ -1482,6 +1513,22 @@ export async function buildSiteStory(
         authorName: j.createdBy?.name,
       });
     }
+
+    // (Jun 2026 Q14) Recent inspection passes join the quote board — a
+    // cleared statutory hold is exactly the kind of moment the printable
+    // story should celebrate. Capped at 4 so journal voices still lead.
+    const recentPasses = inspectionRows
+      .filter((i) => i.status === "PASSED" && i.passedAt)
+      .sort((a, b) => (b.passedAt as Date).getTime() - (a.passedAt as Date).getTime())
+      .slice(0, 4);
+    for (const p of recentPasses) {
+      quoteBoard.push({
+        source: "INSPECTION",
+        date: (p.passedAt as Date).toISOString(),
+        plotNumber: p.plot?.plotNumber ?? null,
+        body: `✓ ${p.name} passed${p.plot?.plotNumber ? ` on Plot ${p.plot.plotNumber}` : ""} (${String(p.type).replace(/_/g, " ")})`,
+      });
+    }
   }
 
   return {
@@ -1566,6 +1613,9 @@ export async function buildSiteStory(
       failed: siteInspections.failed,
       open: siteInspections.open,
       overdue: siteInspections.overdue,
+      // (Jun 2026 Q6/S13/S14) Passed without a certificate attached —
+      // closure preview warns about these before the ZIP is built.
+      certMissing: inspectionRows.filter((i) => i.status === "PASSED" && !i.certificateDocumentId).length,
       recent: recentInspections,
     },
     toolboxTalks: {

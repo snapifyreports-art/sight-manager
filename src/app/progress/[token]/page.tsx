@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { CheckCircle2, Circle, Hammer, Home as HomeIcon, AlertCircle } from "lucide-react";
+import { CheckCircle2, Circle, Hammer, Home as HomeIcon, AlertCircle, ShieldCheck } from "lucide-react";
 import { CustomerNotifyToggle } from "./CustomerNotifyToggle";
 
 export const dynamic = "force-dynamic";
@@ -154,6 +154,15 @@ export default async function ProgressPage({
     select: { id: true, url: true, caption: true, createdAt: true },
   });
 
+  // (Jun 2026 Q16) PASSED inspections only — "Building Control: passed"
+  // is a strong reassurance signal for the buyer. Failed / upcoming /
+  // overdue rows NEVER reach this page; nor do inspector or cert details.
+  const passedInspections = await prisma.inspection.findMany({
+    where: { plotId: plot.id, status: "PASSED" },
+    orderBy: { passedAt: "asc" },
+    select: { id: true, name: true, type: true, passedAt: true },
+  });
+
   const milestones: Milestone[] = plot.jobs.map((j) => ({
     id: j.id,
     // (May 2026 audit O-11) Translate cryptic stage codes to buyer-
@@ -302,6 +311,38 @@ export default async function ProgressPage({
             ))}
           </ol>
         </section>
+
+        {/* ─── Quality checks (Jun 2026 Q16 — passed inspections only) ─── */}
+        {passedInspections.length > 0 && (
+          <section className="mb-8">
+            <h2 className="mb-4 text-lg font-semibold text-slate-900">
+              Quality checks passed
+            </h2>
+            <div className="space-y-2">
+              {passedInspections.map((ins) => (
+                <div
+                  key={ins.id}
+                  className="flex items-center justify-between gap-3 rounded-xl border border-emerald-100 bg-emerald-50/50 px-4 py-3"
+                >
+                  <div className="flex items-center gap-3">
+                    <ShieldCheck className="size-5 shrink-0 text-emerald-600" />
+                    <div>
+                      <p className="text-sm font-medium text-slate-800">{ins.name}</p>
+                      <p className="text-xs text-slate-500">{String(ins.type).replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase())} inspection</p>
+                    </div>
+                  </div>
+                  {/* relativeWhen, not a hard date — this page's rule is
+                      NO DATES rendered to the customer (see header). */}
+                  {ins.passedAt && (
+                    <span className="shrink-0 text-xs font-medium text-emerald-700">
+                      Passed {relativeWhen(ins.passedAt)}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
 
         {/* ─── Story feed ─── */}
         {plot.journalEntries.length > 0 && (

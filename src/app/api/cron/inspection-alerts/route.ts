@@ -56,15 +56,27 @@ export async function GET(req: NextRequest) {
       summary.flippedOverdue += toOverdue.length;
     }
 
-    // 2. Overdue alert (everything currently OVERDUE on the site).
+    // 2. Overdue alert — ESCALATE THEN STOP (Jun 2026 Q3). Forever-nagging
+    // trains the manager to mute the type, so: push daily for the first 3
+    // days an inspection is overdue, then drop to Mondays only. Stateless —
+    // derived from how long the scheduled date has been past, no
+    // sent-tracking table needed.
+    // (Q1) Rows with a booking held are excluded — the visit is arranged;
+    // they surface amber on the Brief instead of red pushes here.
     const overdueNow = await prisma.inspection.findMany({ where: { ...sw, status: "OVERDUE" }, include: inspInclude });
-    if (overdueNow.length > 0) {
+    const isMonday = dayStart.getDay() === 1;
+    const overdueToNag = overdueNow.filter((i) => {
+      if (i.bookedDate) return false;
+      const daysOverdue = Math.floor((dayStart.getTime() - new Date(i.scheduledDate).getTime()) / 86_400_000);
+      return daysOverdue <= 3 || isMonday;
+    });
+    if (overdueToNag.length > 0) {
       await sendPushToSiteAudience(site.id, "INSPECTION_OVERDUE", {
-        title: `⚠️ ${overdueNow.length} inspection${overdueNow.length === 1 ? "" : "s"} overdue`,
-        body: listing(overdueNow),
-        url: "/inspections",
+        title: `⚠️ ${overdueToNag.length} inspection${overdueToNag.length === 1 ? "" : "s"} overdue`,
+        body: listing(overdueToNag),
+        url: overdueToNag.length === 1 ? `/inspections?focus=${overdueToNag[0].id}` : "/inspections",
       });
-      summary.overdueAlerts += overdueNow.length;
+      summary.overdueAlerts += overdueToNag.length;
     }
 
     // 3. Booking-due (book it now — N weeks ahead).
@@ -74,7 +86,8 @@ export async function GET(req: NextRequest) {
       await sendPushToSiteAudience(site.id, "INSPECTION_BOOKING_DUE", {
         title: `📋 Book ${bookingDue.length} inspection${bookingDue.length === 1 ? "" : "s"} now`,
         body: listing(bookingDue),
-        url: "/inspections",
+        // (Jun 2026 S11) Single item → land on the exact row.
+        url: bookingDue.length === 1 ? `/inspections?focus=${bookingDue[0].id}` : "/inspections",
       });
       summary.bookingDue += bookingDue.length;
     }
@@ -85,7 +98,7 @@ export async function GET(req: NextRequest) {
       await sendPushToSiteAudience(site.id, "INSPECTION_WEEK_BEFORE", {
         title: `📅 Inspection${weekBefore.length === 1 ? "" : "s"} due next week`,
         body: `Final checks: ${listing(weekBefore)}`,
-        url: "/inspections",
+        url: weekBefore.length === 1 ? `/inspections?focus=${weekBefore[0].id}` : "/inspections",
       });
       summary.weekBefore += weekBefore.length;
     }
@@ -96,7 +109,7 @@ export async function GET(req: NextRequest) {
       await sendPushToSiteAudience(site.id, "INSPECTION_DAY_OF", {
         title: `🔍 Inspection${dayOf.length === 1 ? "" : "s"} today`,
         body: listing(dayOf),
-        url: "/inspections",
+        url: dayOf.length === 1 ? `/inspections?focus=${dayOf[0].id}` : "/inspections",
       });
       summary.dayOf += dayOf.length;
     }

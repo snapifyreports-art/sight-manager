@@ -14,6 +14,8 @@ import {
 } from "@/components/ui/dialog";
 import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 import { useConfirm } from "@/hooks/useConfirm";
+import { useSession } from "next-auth/react";
+import { sessionHasPermission } from "@/lib/permissions";
 
 /**
  * Compact Materials + Drawings sections for a PlotTemplate.
@@ -68,6 +70,10 @@ interface AnchorJobRow {
   stageCode: string | null;
   parentId: string | null;
   sortOrder: number;
+  /** (Jun 2026 Q19) Programme weeks — used to warn when the inspection's
+   *  anchor+offset lands outside the anchor's stage window. */
+  startWeek?: number | null;
+  endWeek?: number | null;
 }
 
 const INSPECTION_TYPES = [
@@ -135,6 +141,15 @@ export function TemplateExtras({
 
   const toast = useToast();
   const { confirm, dialog: confirmDialog } = useConfirm();
+  // (Jun 2026 review fix) Q7 moved the inspection routes to
+  // MANAGE_INSPECTIONS while the rest of the template stays
+  // EDIT_PROGRAMME — hide the mutation controls from a custom-permission
+  // user who'd only hit a 403 toast after filling the form.
+  const { data: sessionData } = useSession();
+  const canManageInspections = sessionHasPermission(
+    (sessionData?.user ?? undefined) as { role?: string; permissions?: string[] } | undefined,
+    "MANAGE_INSPECTIONS",
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -591,9 +606,11 @@ export function TemplateExtras({
             <ClipboardCheck className="size-4 text-amber-600" />
             <h3 className="text-sm font-semibold">Inspections ({inspections.length})</h3>
           </div>
-          <Button size="sm" onClick={openAddInspection} disabled={anchorJobs.length === 0}>
-            <Plus className="size-3.5" /> Add
-          </Button>
+          {canManageInspections && (
+            <Button size="sm" onClick={openAddInspection} disabled={anchorJobs.length === 0}>
+              <Plus className="size-3.5" /> Add
+            </Button>
+          )}
         </div>
         {inspections.length === 0 ? (
           <p className="rounded border border-dashed p-3 text-xs text-muted-foreground">
@@ -634,14 +651,16 @@ export function TemplateExtras({
                     <td className="px-3 py-1.5 text-muted-foreground">{ins.defaultInspector?.name ?? "—"}</td>
                     <td className="px-3 py-1.5 text-muted-foreground">{ins.bookingLeadWeeks ? `${ins.bookingLeadWeeks} wk` : "—"}</td>
                     <td className="px-3 py-1.5 text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        <button onClick={() => openEditInspection(ins)} className="text-muted-foreground hover:text-foreground" title="Edit inspection">
-                          <Pencil className="size-3.5" />
-                        </button>
-                        <button onClick={() => deleteInspection(ins.id)} className="text-muted-foreground hover:text-destructive" title="Delete inspection">
-                          <Trash2 className="size-3.5" />
-                        </button>
-                      </div>
+                      {canManageInspections && (
+                        <div className="flex items-center justify-end gap-2">
+                          <button onClick={() => openEditInspection(ins)} className="text-muted-foreground hover:text-foreground" title="Edit inspection">
+                            <Pencil className="size-3.5" />
+                          </button>
+                          <button onClick={() => deleteInspection(ins.id)} className="text-muted-foreground hover:text-destructive" title="Delete inspection">
+                            <Trash2 className="size-3.5" />
+                          </button>
+                        </div>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -849,6 +868,26 @@ export function TemplateExtras({
                 ))}
               </select>
             </div>
+            {/* (Jun 2026 Q19) Window check — warn when anchor edge + offset
+                lands outside the anchor's stage. Allowed (lead-in checks can
+                be legit) but usually a typo'd offset. */}
+            {(() => {
+              const anchor = anchorJobs.find((j) => j.id === iAnchorJobId);
+              if (!anchor || anchor.startWeek == null || anchor.endWeek == null) return null;
+              const stage = anchor.parentId
+                ? anchorJobs.find((j) => j.id === anchor.parentId) ?? anchor
+                : anchor;
+              if (stage.startWeek == null || stage.endWeek == null) return null;
+              const offset = Math.trunc(Number(iOffsetDays) || 0);
+              const edgeWeek = iAnchorEdge === "END" ? anchor.endWeek : anchor.startWeek;
+              const markerWeek = edgeWeek + Math.round(offset / 5);
+              if (markerWeek >= stage.startWeek && markerWeek <= stage.endWeek) return null;
+              return (
+                <p className="col-span-2 rounded-md border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-800">
+                  ⚠ This lands around <strong>week {markerWeek}</strong> — outside {stage.name}&apos;s window (weeks {stage.startWeek}–{stage.endWeek}). That&apos;s allowed, but double-check the offset isn&apos;t a typo.
+                </p>
+              );
+            })()}
             <label className="col-span-2 flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50/50 p-2.5 text-sm">
               <input
                 type="checkbox"

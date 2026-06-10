@@ -400,7 +400,9 @@ export async function createJobsFromTemplate(
  * anchorTemplateJobId → the real Job via `jobIdMap`, reads that job's
  * dates, and derives scheduledDate. Runs inside the apply transaction so
  * a partial failure rolls the whole plot back (no jobs-without-inspections).
- * Returns the number of inspections created.
+ * Returns the created count plus the names of any defs that could NOT be
+ * instantiated (anchor missing / undated) so the caller can surface them —
+ * a silent skip here means a statutory hold-point quietly never exists.
  */
 export async function createInspectionsFromTemplate(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -418,8 +420,8 @@ export async function createInspectionsFromTemplate(
     isBlocking?: boolean;
   }>,
   jobIdMap: Map<string, string>,
-): Promise<number> {
-  if (templateInspections.length === 0) return 0;
+): Promise<{ created: number; skippedNames: string[] }> {
+  if (templateInspections.length === 0) return { created: 0, skippedNames: [] };
 
   // Real anchor job ids + their dates (one query).
   const anchorJobIds = Array.from(
@@ -439,16 +441,23 @@ export async function createInspectionsFromTemplate(
   const jobDate = new Map(jobs.map((j) => [j.id, j]));
 
   let created = 0;
+  const skippedNames: string[] = [];
   for (const ti of templateInspections) {
     const realJobId = jobIdMap.get(ti.anchorTemplateJobId);
     const job = realJobId ? jobDate.get(realJobId) : null;
-    if (!job) continue; // anchor not found (shouldn't happen) — skip
+    if (!job) {
+      skippedNames.push(ti.name); // anchor not found (shouldn't happen)
+      continue;
+    }
     const scheduledDate = computeInspectionScheduledDate(
       job,
       ti.anchorEdge === "END" ? "END" : "START",
       ti.offsetDays,
     );
-    if (!scheduledDate) continue; // anchor undated — skip
+    if (!scheduledDate) {
+      skippedNames.push(ti.name); // anchor undated
+      continue;
+    }
     await tx.inspection.create({
       data: {
         plotId,
@@ -467,7 +476,7 @@ export async function createInspectionsFromTemplate(
     });
     created++;
   }
-  return created;
+  return { created, skippedNames };
 }
 
 /**

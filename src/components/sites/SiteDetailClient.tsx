@@ -6,6 +6,7 @@ import { useRefreshOnFocus } from "@/hooks/useRefreshOnFocus";
 import { format, addWeeks, addDays } from "date-fns";
 import {
   AlertTriangle,
+  ClipboardCheck,
   ArrowLeft,
   CheckCircle,
   CheckCircle2,
@@ -131,6 +132,9 @@ interface PlotItem {
   nextOrderDate: string | null;
   awaitingDeliveryCount: number;
   openSnagCount: number;
+  // (Jun 2026 S1) Hold-point chips.
+  openInspectionCount: number;
+  overdueInspectionCount: number;
   // (May 2026 Surfacing audit) House value on plot cards — stored on
   // Plot but only ever read by the Budget Report pre-this. Inline so
   // the margin is visible without drilling.
@@ -2346,7 +2350,8 @@ export function SiteDetailClient({
 
                         {(plot.pendingOrderCount > 0 ||
                           plot.awaitingDeliveryCount > 0 ||
-                          plot.openSnagCount > 0) && (
+                          plot.openSnagCount > 0 ||
+                          plot.openInspectionCount > 0) && (
                           <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
                             {plot.pendingOrderCount > 0 && (
                               <span
@@ -2381,6 +2386,26 @@ export function SiteDetailClient({
                                 <AlertTriangle className="size-3" />
                                 {plot.openSnagCount} snag
                                 {plot.openSnagCount === 1 ? "" : "s"}
+                              </span>
+                            )}
+                            {/* (Jun 2026 S1) Hold-point chip — red when any
+                                are truly overdue (date passed, nothing
+                                booked), violet otherwise. */}
+                            {plot.openInspectionCount > 0 && (
+                              <span
+                                className={`flex items-center gap-1 ${plot.overdueInspectionCount > 0 ? "text-red-600" : "text-violet-600"}`}
+                                title={
+                                  plot.overdueInspectionCount > 0
+                                    ? `${plot.overdueInspectionCount} inspection${plot.overdueInspectionCount === 1 ? "" : "s"} overdue`
+                                    : "Open inspection hold-points"
+                                }
+                              >
+                                <ClipboardCheck className="size-3" />
+                                {plot.openInspectionCount} hold
+                                {plot.openInspectionCount === 1 ? "" : "s"}
+                                {plot.overdueInspectionCount > 0
+                                  ? ` (${plot.overdueInspectionCount} overdue)`
+                                  : ""}
                               </span>
                             )}
                           </div>

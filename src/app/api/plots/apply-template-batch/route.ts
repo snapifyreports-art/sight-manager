@@ -212,6 +212,9 @@ export async function POST(request: NextRequest) {
   const createdPlots: string[] = [];
   const errors: Array<{ plotNumber: string; error: string }> = [];
   const warningsByPlot: Record<string, { templateJobName: string; itemsDescription: string | null }[]> = {};
+  // (Jun 2026 S16) Inspection defs skipped at apply (anchor missing/undated).
+  // Identical for every plot in the batch, so a single list suffices.
+  let inspectionWarnings: string[] = [];
 
   for (const plotInput of plots) {
     // Per-plot start date (May 2026): each plot row may carry its own
@@ -222,7 +225,7 @@ export async function POST(request: NextRequest) {
       ? new Date(plotInput.startDate)
       : fallbackStartDate;
     try {
-      const { plotId, warnings } = await prisma.$transaction(async (tx) => {
+      const { plotId, warnings, skippedInsp } = await prisma.$transaction(async (tx) => {
         const plot = await tx.plot.create({
           data: {
             name: plotInput.plotName.trim(),
@@ -253,9 +256,13 @@ export async function POST(request: NextRequest) {
           site.assignedToId
         );
 
-        // Create per-plot Inspections from template defs (same tx)
+        // Create per-plot Inspections from template defs (same tx).
+        // (Jun 2026 S16) Surface skipped defs — same defs apply to every
+        // plot in the batch, so the skip list is identical per plot.
+        let skippedInsp: string[] = [];
         if (scopedInspections.length > 0) {
-          await createInspectionsFromTemplate(tx, plot.id, scopedInspections, jobIdMap);
+          const inspResult = await createInspectionsFromTemplate(tx, plot.id, scopedInspections, jobIdMap);
+          skippedInsp = inspResult.skippedNames;
         }
 
         // Copy TemplateMaterial rows → PlotMaterial snapshot
@@ -300,7 +307,7 @@ export async function POST(request: NextRequest) {
           userId: session.user.id,
         });
 
-        return { plotId: plot.id, warnings: w };
+        return { plotId: plot.id, warnings: w, skippedInsp };
       }, { timeout: 60_000 }); // complex templates can have 20+ jobs + 10+ orders each
       createdPlots.push(plotId);
       if (warnings.length > 0) {
@@ -308,6 +315,7 @@ export async function POST(request: NextRequest) {
           ({ templateJobName, itemsDescription }) => ({ templateJobName, itemsDescription })
         );
       }
+      if (skippedInsp.length > 0) inspectionWarnings = skippedInsp;
     } catch (err) {
       // (May 2026 audit #70) Per-plot error messages go through the
       // friendly-message formatter — hides raw Prisma details in prod
@@ -334,7 +342,13 @@ export async function POST(request: NextRequest) {
   }
 
   return NextResponse.json(
-    { created: createdPlots.length, plotIds: createdPlots, errors, warnings: warningsByPlot },
+    {
+      created: createdPlots.length,
+      plotIds: createdPlots,
+      errors,
+      warnings: warningsByPlot,
+      inspectionWarnings,
+    },
     { status: 201 }
   );
 }

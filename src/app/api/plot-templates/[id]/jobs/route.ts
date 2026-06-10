@@ -21,7 +21,9 @@ export async function GET(
   const jobs = await prisma.templateJob.findMany({
     where: { templateId: id, variantId },
     orderBy: { sortOrder: "asc" },
-    select: { id: true, name: true, stageCode: true, parentId: true, sortOrder: true },
+    // (Jun 2026 Q19) startWeek/endWeek included so the inspection dialog
+    // can warn when an offset lands outside the anchor's stage window.
+    select: { id: true, name: true, stageCode: true, parentId: true, sortOrder: true, startWeek: true, endWeek: true },
   });
   return NextResponse.json(jobs);
 }

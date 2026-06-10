@@ -85,6 +85,7 @@ const CATEGORIES = [
   { value: "jobs", label: "Jobs" },
   { value: "orders", label: "Orders & Deliveries" },
   { value: "snags", label: "Snags" },
+  { value: "inspections", label: "Inspections" },
   { value: "photos", label: "Photos" },
   { value: "weather", label: "Weather" },
   { value: "notes", label: "Notes" },
@@ -121,6 +122,12 @@ function EventIcon({ type, description }: { type: string; description: string })
     case "PLOT_UPDATED":     return <Home className={cls} />;
     case "USER_ACTION":      return <MessageSquare className={cls} />;
     case "NOTIFICATION":     return <Bell className={cls} />;
+    // (Jun 2026 S7) Inspection lifecycle.
+    case "INSPECTION_SCHEDULED":
+    case "INSPECTION_BOOKED":  return <CalendarClock className={cls} />;
+    case "INSPECTION_PASSED":  return <CheckCircle2 className={cls} />;
+    case "INSPECTION_FAILED":
+    case "INSPECTION_OVERDUE": return <AlertTriangle className={cls} />;
     default:                 return <Server className={cls} />;
   }
 }
@@ -144,6 +151,12 @@ function eventColour(type: string, description: string): string {
     case "SNAG_CREATED":     return "text-red-600 bg-red-50 dark:bg-red-950/30";
     case "SNAG_RESOLVED":    return "text-emerald-600 bg-emerald-50 dark:bg-emerald-950/30";
     case "USER_ACTION":      return "text-blue-600 bg-blue-50 dark:bg-blue-950/30";
+    // (Jun 2026 S7) Inspection lifecycle.
+    case "INSPECTION_SCHEDULED":
+    case "INSPECTION_BOOKED":  return "text-violet-600 bg-violet-50 dark:bg-violet-950/30";
+    case "INSPECTION_PASSED":  return "text-emerald-600 bg-emerald-50 dark:bg-emerald-950/30";
+    case "INSPECTION_FAILED":
+    case "INSPECTION_OVERDUE": return "text-red-600 bg-red-50 dark:bg-red-950/30";
     default:                 return "text-slate-600 bg-slate-50 dark:bg-slate-950/30";
   }
 }

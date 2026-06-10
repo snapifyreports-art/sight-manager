@@ -1530,7 +1530,8 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
             Chips link to /inspections where they book / pass / fail. */}
         {data.inspections && (() => {
           const ins = data.inspections;
-          const total = ins.overdue.length + ins.bookingDue.length + ins.dueToday.length + ins.upcoming.length;
+          const overdueBooked = ins.overdueBooked ?? [];
+          const total = ins.overdue.length + overdueBooked.length + ins.bookingDue.length + ins.dueToday.length + ins.upcoming.length;
           if (total === 0) return null;
           const InspGroup = ({ label, items, tone }: { label: string; items: typeof ins.overdue; tone: string }) =>
             items.length === 0 ? null : (
@@ -1540,7 +1541,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                   {items.slice(0, 10).map((i) => (
                     <li key={i.id}>
                       <a
-                        href="/inspections"
+                        href={`/inspections?focus=${i.id}`}
                         title={`${i.name} — ${i.type} · ${i.plotLabel} · ${format(new Date(i.scheduledDate), "d MMM")}${i.inspectorName ? ` · ${i.inspectorName}` : ""}`}
                         className={cn("inline-block rounded border px-1.5 py-0.5 text-[11px] hover:brightness-95", tone)}
                       >
@@ -1560,6 +1561,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
               </div>
               <div className="space-y-2">
                 <InspGroup label="Overdue" items={ins.overdue} tone="border-red-200 bg-red-50 text-red-800" />
+                <InspGroup label="Booked (was overdue)" items={overdueBooked} tone="border-amber-300 bg-amber-50 text-amber-800" />
                 <InspGroup label="Book now" items={ins.bookingDue} tone="border-amber-300 bg-amber-100 text-amber-900" />
                 <InspGroup label="Due today" items={ins.dueToday} tone="border-blue-200 bg-blue-50 text-blue-800" />
                 <InspGroup label="Next 7 days" items={ins.upcoming} tone="border-slate-200 bg-white text-slate-700" />

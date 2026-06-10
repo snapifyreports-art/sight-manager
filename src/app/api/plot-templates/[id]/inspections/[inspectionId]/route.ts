@@ -19,8 +19,10 @@ function gate(
   session: { user?: { role?: string; permissions?: string[] } } | null,
 ) {
   if (!session) return { error: "Unauthorized", status: 401 };
-  if (!sessionHasPermission(session.user, "EDIT_PROGRAMME")) {
-    return { error: "You do not have permission to manage templates", status: 403 };
+  // (Jun 2026 Q7) Template inspections are an inspections concern — gate
+  // on MANAGE_INSPECTIONS, not the broader programme-editing permission.
+  if (!sessionHasPermission(session.user, "MANAGE_INSPECTIONS")) {
+    return { error: "You do not have permission to manage inspections", status: 403 };
   }
   return null;
 }

@@ -45,14 +45,16 @@ export async function POST(
 ) {
   const session = await auth();
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // (Jun 2026 Q7) Template inspections are an inspections concern — gate
+  // on MANAGE_INSPECTIONS, not the broader programme-editing permission.
   if (
     !sessionHasPermission(
       session.user as { role?: string; permissions?: string[] },
-      "EDIT_PROGRAMME",
+      "MANAGE_INSPECTIONS",
     )
   ) {
     return NextResponse.json(
-      { error: "You do not have permission to manage templates" },
+      { error: "You do not have permission to manage inspections" },
       { status: 403 },
     );
   }

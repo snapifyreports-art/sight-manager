@@ -15,6 +15,8 @@ const CATEGORY_TYPES: Record<string, EventType[]> = {
   weather: ["SYSTEM"],
   notes: ["USER_ACTION"],
   schedule: ["SCHEDULE_CASCADED"],
+  // (Jun 2026 S7) Inspection lifecycle events in their own filter.
+  inspections: ["INSPECTION_SCHEDULED", "INSPECTION_BOOKED", "INSPECTION_PASSED", "INSPECTION_FAILED", "INSPECTION_OVERDUE"],
   system: ["SITE_CREATED", "SITE_UPDATED", "PLOT_CREATED", "PLOT_UPDATED", "NOTIFICATION"],
 };
 

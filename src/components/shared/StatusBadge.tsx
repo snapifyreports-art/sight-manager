@@ -17,8 +17,10 @@
  * (px-3 py-1 text-sm) for detail-page headers.
  */
 
-import { CircleDot, AlertTriangle, CircleDashed, CircleCheck } from "lucide-react";
+import { CircleDot, AlertTriangle, CircleDashed, CircleCheck, Clock, CalendarCheck, CheckCircle2, XCircle, CalendarClock } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { inspectionDisplayStatus, INSPECTION_TYPE_META } from "@/lib/inspection-doctype";
+import type { InspectionStatus, InspectionType } from "@prisma/client";
 
 type BadgeSize = "sm" | "md";
 
@@ -184,6 +186,64 @@ export function SnagPriorityBadge({ priority, size = "sm" }: { priority: string;
       )}
     >
       {config.label}
+    </span>
+  );
+}
+
+// ─── Inspections (Jun 2026 Q10 + S10) ────────────────────────────────────
+// Colours + labels come from src/lib/inspection-doctype.ts so the list,
+// Gantt markers, calendars and template previews all agree.
+
+const INSPECTION_STATUS_ICON: Record<string, typeof Clock> = {
+  SCHEDULED: Clock,
+  BOOKED: CalendarCheck,
+  PASSED: CheckCircle2,
+  FAILED: XCircle,
+  OVERDUE: CalendarClock,
+};
+
+/**
+ * Status pill. Pass `bookedDate` so an OVERDUE row with a booking held
+ * renders as the amber "Booked (was overdue)" state (Q1) instead of red.
+ */
+export function InspectionStatusBadge({
+  status,
+  bookedDate,
+  size = "sm",
+}: {
+  status: InspectionStatus | string;
+  bookedDate?: Date | string | null;
+  size?: BadgeSize;
+}) {
+  const display = inspectionDisplayStatus(status as InspectionStatus, bookedDate);
+  const Icon = display.bookedOverdue ? CalendarCheck : (INSPECTION_STATUS_ICON[status] ?? Clock);
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 rounded-full font-medium text-white",
+        size === "md" ? "px-3 py-1 text-sm" : "px-2 py-0.5 text-[11px]"
+      )}
+      style={{ backgroundColor: display.hex }}
+    >
+      <Icon className="size-3" />
+      {display.label}
+    </span>
+  );
+}
+
+/** Type chip (NHBC / Building Control / …) with the shared per-type colour. */
+export function InspectionTypeBadge({ type, size = "sm" }: { type: InspectionType | string; size?: BadgeSize }) {
+  const meta = INSPECTION_TYPE_META[type as InspectionType];
+  return (
+    <span
+      title={meta?.hint ?? type}
+      className={cn(
+        "inline-flex items-center rounded font-medium uppercase",
+        meta ? cn(meta.bg, meta.text) : "bg-muted text-muted-foreground",
+        size === "md" ? "px-2 py-0.5 text-xs" : "px-1.5 py-0.5 text-[10px]"
+      )}
+    >
+      {meta?.label ?? type}
     </span>
   );
 }

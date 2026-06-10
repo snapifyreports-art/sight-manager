@@ -360,6 +360,70 @@ export async function renderPlotSnagLogPdf(
 }
 
 // ──────────────────────────────────────────────────────────────────────
+// 02_Plots/Plot_<N>/inspection-log.pdf
+// (Jun 2026 Q5 + S12) Branded inspection register — replaces the plain
+// inspection-log.txt so the statutory hold-point record matches the rest
+// of the buyer pack. Headline "X of Y passed" + per-row cert presence.
+// ──────────────────────────────────────────────────────────────────────
+export async function renderPlotInspectionLogPdf(
+  plotName: string,
+  inspections: Array<{
+    name: string;
+    type: string;
+    status: string;
+    scheduledDate: Date;
+    bookedDate: Date | null;
+    passedAt: Date | null;
+    failedAt: Date | null;
+    notes: string | null;
+    inspector: { name: string; company: string | null } | null;
+    certificate: { name: string } | null;
+  }>,
+): Promise<Buffer> {
+  const { jsPDF, autoTable } = await loadJsPdf();
+  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+
+  const passed = inspections.filter((i) => i.status === "PASSED").length;
+
+  doc.setFontSize(16);
+  doc.text(`Inspection register — ${plotName}`, 14, 22);
+  doc.setFontSize(9);
+  doc.setTextColor(120);
+  doc.text(
+    `${inspections.length} hold-point${inspections.length === 1 ? "" : "s"} · ${passed} of ${inspections.length} passed`,
+    14,
+    28,
+  );
+  doc.setTextColor(0);
+
+  if (inspections.length === 0) {
+    doc.setFontSize(10);
+    doc.text("No inspections recorded for this plot.", 14, 40);
+  } else {
+    autoTable(doc, {
+      startY: 36,
+      head: [["Inspection", "Type", "Status", "Scheduled", "Result", "Inspector", "Certificate"]],
+      body: inspections.map((i) => {
+        const resolved = i.passedAt ?? i.failedAt;
+        return [
+          i.name.length > 40 ? `${i.name.slice(0, 40)}…` : i.name,
+          i.type.replace(/_/g, " "),
+          i.status,
+          format(i.scheduledDate, "dd MMM yy"),
+          resolved ? format(resolved, "dd MMM yy") : "—",
+          i.inspector ? `${i.inspector.name}${i.inspector.company ? ` (${i.inspector.company})` : ""}` : "—",
+          i.certificate ? i.certificate.name : "NOT ATTACHED",
+        ];
+      }),
+      styles: { fontSize: 8, cellPadding: 1 },
+      headStyles: { fillColor: [241, 245, 249], textColor: [51, 65, 85] },
+    });
+  }
+
+  return pdfBuffer(doc);
+}
+
+// ──────────────────────────────────────────────────────────────────────
 // (May 2026 Story-linkage audit) Per-plot NCR / Defect / Variation
 // log PDFs. Modelled after renderPlotSnagLogPdf so the layout, fonts
 // and table styling match the rest of the handover pack.
@@ -1005,7 +1069,7 @@ export function renderReadmeTxt(
     lines.push(`    ${f}/`);
     lines.push("        plot-story.pdf");
     lines.push("        snag-log.pdf");
-    lines.push("        inspection-log.txt     (statutory + QA hold-point register, when inspections exist)");
+    lines.push("        inspection-log.pdf     (statutory + QA hold-point register, when inspections exist)");
     lines.push("        ncr-log.pdf            (when NCRs recorded)");
     lines.push("        defect-log.pdf         (when warranty defects recorded)");
     lines.push("        variation-log.pdf      (when variations recorded)");

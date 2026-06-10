@@ -147,6 +147,16 @@ export function SiteCompliance({ siteId }: { siteId: string }) {
         </Button>
       </div>
 
+      {/* (Jun 2026 S3) Statutory inspections are compliance too — point
+          at the dedicated tab so nobody hunts for them here. */}
+      <a
+        href={`/sites/${siteId}?tab=inspections`}
+        className="block rounded-md border border-violet-200 bg-violet-50/60 px-3 py-2 text-xs text-violet-800 hover:bg-violet-50"
+      >
+        Looking for NHBC / Building Control / warranty <strong>inspections</strong>? They live in the{" "}
+        <span className="font-semibold underline">Inspections tab</span> — statutory hold-points with booking, certificates and findings.
+      </a>
+
       {loading ? (
         <div className="rounded-lg border bg-white p-8 text-center text-sm text-muted-foreground">
           <Loader2 className="mx-auto size-5 animate-spin" />

@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { canAccessSite } from "@/lib/site-access";
 import { buildHandoverArchive } from "@/lib/handover-zip";
 import { logEvent } from "@/lib/event-log";
+import { sessionHasPermission } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -73,6 +74,14 @@ export async function POST(
     prisma,
     siteId: id,
     triggeredByUserName,
+    // (Jun 2026 Q8) The ZIP honours the same inspection permission
+    // boundary as the story/brief/dashboard — without this, a user the
+    // story API zeroes inspections for could still download the full
+    // register (inspector names + notes) via the inspection-log PDFs.
+    includeInspections: sessionHasPermission(
+      session.user as { role?: string; permissions?: string[] },
+      "VIEW_INSPECTIONS",
+    ),
   });
 
   // archiver implements Readable. Bridge to a web ReadableStream so we

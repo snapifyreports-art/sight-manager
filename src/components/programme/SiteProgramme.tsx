@@ -22,7 +22,7 @@ import { differenceInWorkingDays } from "@/lib/working-days";
 import { Loader2, Columns3, ChevronRight, Download, FileText, Search, X, Camera, StickyNote, CalendarDays, Calendar, Layers, List, CheckSquare, Check, Clock, ZoomIn, ZoomOut, Maximize2, Minimize2, Play } from "lucide-react";
 import Link from "next/link";
 import { getStageCode, getStageColor } from "@/lib/stage-codes";
-import { inspectionStatusColor } from "@/lib/inspection-doctype";
+import { inspectionDisplayStatus } from "@/lib/inspection-doctype";
 import { getCurrentStage } from "@/lib/plot-stage";
 import { deriveAggregateStatus } from "@/lib/parent-job";
 import type { JobStatus } from "@prisma/client";
@@ -146,7 +146,7 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
 
   // (Jun 2026) Inspections per plot → the ! warning markers on the grid.
   const [inspections, setInspections] = useState<
-    Array<{ id: string; name: string; type: string; status: string; scheduledDate: string; plotId: string }>
+    Array<{ id: string; name: string; type: string; status: string; scheduledDate: string; bookedDate: string | null; plotId: string }>
   >([]);
   useEffect(() => {
     let cancelled = false;
@@ -1563,6 +1563,17 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                           {plot.plotNumber || plot.name}
                         </Link>
                       </div>
+                      {/* (Jun 2026 S5) Concurrency badge — this plot's row is
+                          stacked into N lanes because jobs overlap. Explains
+                          the taller row at a glance. */}
+                      {ganttMode !== "overlay" && (laneCountByPlot.get(plot.id) ?? 1) > 1 && (
+                        <span
+                          className="rounded bg-blue-100 px-1 text-[8px] font-semibold leading-3 text-blue-700"
+                          title={`${laneCountByPlot.get(plot.id)} jobs running at the same time — row is stacked into lanes`}
+                        >
+                          {laneCountByPlot.get(plot.id)}× running
+                        </span>
+                      )}
                       {/* Overlay mode: mini labels identifying which sub-row is
                           Current vs Original. Sits in the plot-metadata column
                           so it never overlaps the timeline bars. */}
@@ -2194,9 +2205,13 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                       return ds >= colDateStr && ds < colEndStr;
                     });
                     if (inCell.length === 0) return null;
-                    const colour = inspectionStatusColor(
-                      inCell[0].status as Parameters<typeof inspectionStatusColor>[0],
+                    // Display-status so booked-overdue renders amber like
+                    // the list/calendar — red must mean "act now" (review fix).
+                    const disp0 = inspectionDisplayStatus(
+                      inCell[0].status as Parameters<typeof inspectionDisplayStatus>[0],
+                      inCell[0].bookedDate,
                     );
+                    const colour = disp0.hex;
                     return (
                       <div
                         key={`insp-${plot.id}-${col.key}`}
@@ -2204,7 +2219,7 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                         style={{ left: colIdx * cellWidth, top: rowTops[plotIndex], width: cellWidth, height: ROW_HEIGHT }}
                       >
                         <div
-                          title={inCell.map((i) => `${i.name} — ${i.status.toLowerCase()} (${format(new Date(i.scheduledDate), "d MMM")})`).join("\n")}
+                          title={inCell.map((i) => `${i.name} — ${inspectionDisplayStatus(i.status as Parameters<typeof inspectionDisplayStatus>[0], i.bookedDate).label} (${format(new Date(i.scheduledDate), "d MMM")})`).join("\n")}
                           className="absolute left-1/2 top-0 flex h-4 min-w-4 -translate-x-1/2 items-center justify-center rounded-sm px-0.5 text-[10px] font-bold leading-none text-white shadow"
                           style={{ backgroundColor: colour }}
                         >

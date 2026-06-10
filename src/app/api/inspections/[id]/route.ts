@@ -4,6 +4,9 @@ import { prisma } from "@/lib/prisma";
 import { apiError } from "@/lib/api-errors";
 import { sessionHasPermission } from "@/lib/permissions";
 import { canAccessSite } from "@/lib/site-access";
+import { computeInspectionScheduledDate } from "@/lib/inspection-dates";
+import { logEvent } from "@/lib/event-log";
+import { getServerStartOfDay } from "@/lib/dev-date";
 
 export const dynamic = "force-dynamic";
 
@@ -53,7 +56,13 @@ export async function PATCH(
   const { id } = await params;
   const existing = await prisma.inspection.findUnique({
     where: { id },
-    select: { plot: { select: { siteId: true } } },
+    select: {
+      plotId: true,
+      name: true,
+      status: true,
+      bookedDate: true,
+      plot: { select: { siteId: true } },
+    },
   });
   if (!existing) return NextResponse.json({ error: "Inspection not found" }, { status: 404 });
   if (!(await canAccessSite(session.user.id, (session.user as { role: string }).role, existing.plot.siteId))) {
@@ -61,7 +70,62 @@ export async function PATCH(
   }
 
   const body = await req.json();
-  const { inspectorContactId, notes, certificateDocumentId } = body;
+  const { inspectorContactId, notes, certificateDocumentId, anchorJobId, anchorEdge, offsetDays } = body;
+
+  // (Jun 2026 S15+S17) Re-attach (or detach) the anchor job in-app — the
+  // reschedule action detaches the anchor to hold a manual date, and until
+  // now the only way back was via the template. PASSED/FAILED are frozen
+  // facts; their dates never re-derive.
+  let anchorData: {
+    anchorJobId?: string | null;
+    anchorEdge?: "START" | "END";
+    offsetDays?: number;
+    scheduledDate?: Date;
+    status?: "SCHEDULED" | "BOOKED";
+  } = {};
+  if (anchorJobId !== undefined) {
+    if (existing.status === "PASSED" || existing.status === "FAILED") {
+      return NextResponse.json(
+        { error: `Can't re-anchor an inspection that is ${existing.status} — its result is frozen` },
+        { status: 400 },
+      );
+    }
+    if (anchorJobId === null || anchorJobId === "") {
+      anchorData = { anchorJobId: null };
+    } else {
+      const job = await prisma.job.findUnique({
+        where: { id: anchorJobId },
+        select: { id: true, plotId: true, startDate: true, endDate: true },
+      });
+      // Anchor must be a job on the SAME plot — a cross-plot anchor would
+      // silently drive this hold-point off another plot's programme.
+      if (!job || job.plotId !== existing.plotId) {
+        return NextResponse.json(
+          { error: "The anchor job must belong to the same plot as the inspection" },
+          { status: 400 },
+        );
+      }
+      const edge: "START" | "END" = anchorEdge === "START" ? "START" : "END";
+      const offset = Number.isFinite(Number(offsetDays)) ? Math.trunc(Number(offsetDays)) : 0;
+      const newDate = computeInspectionScheduledDate(job, edge, offset);
+      if (!newDate) {
+        return NextResponse.json(
+          { error: "That job has no dates yet — give it a start/end date first or pick another anchor" },
+          { status: 400 },
+        );
+      }
+      anchorData = { anchorJobId: job.id, anchorEdge: edge, offsetDays: offset, scheduledDate: newDate };
+      // Mirror recomputeInspectionDates: an OVERDUE row whose new derived
+      // date is today-or-later is no longer overdue. Dev-date-aware so QA
+      // date simulation agrees with the cron/dashboard surfaces.
+      if (existing.status === "OVERDUE") {
+        const todayStart = getServerStartOfDay(req);
+        if (newDate.getTime() >= todayStart.getTime()) {
+          anchorData.status = existing.bookedDate ? "BOOKED" : "SCHEDULED";
+        }
+      }
+    }
+  }
 
   try {
     const updated = await prisma.inspection.update({
@@ -70,8 +134,22 @@ export async function PATCH(
         ...(inspectorContactId !== undefined ? { inspectorContactId: inspectorContactId || null } : {}),
         ...(notes !== undefined ? { notes: notes?.trim() || null } : {}),
         ...(certificateDocumentId !== undefined ? { certificateDocumentId: certificateDocumentId || null } : {}),
+        ...anchorData,
       },
     });
+    if (anchorData.anchorJobId !== undefined) {
+      await logEvent(prisma, {
+        type: "INSPECTION_SCHEDULED",
+        description: anchorData.anchorJobId
+          ? `Inspection "${existing.name}" re-anchored to a job`
+          : `Inspection "${existing.name}" detached from its anchor job`,
+        siteId: existing.plot.siteId,
+        plotId: existing.plotId,
+        jobId: anchorData.anchorJobId ?? undefined,
+        userId: session.user.id,
+        detail: { inspectionId: id },
+      }).catch(() => {});
+    }
     return NextResponse.json(updated);
   } catch (err) {
     return apiError(err, "Failed to update inspection");

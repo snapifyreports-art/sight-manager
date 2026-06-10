@@ -39,6 +39,8 @@ interface NCR {
   plot: { id: string; name: string; plotNumber: string | null } | null;
   job: { id: string; name: string } | null;
   contact: { id: string; name: string; company: string | null } | null;
+  /** (Jun 2026 S6) Set when raised as an inspection finding. */
+  inspection?: { id: string; name: string } | null;
 }
 
 const STATUS_CLASS: Record<Status, string> = {
@@ -194,6 +196,16 @@ export function SiteNCRs({ siteId }: { siteId: string }) {
                         <span>
                           Contractor: {n.contact.company || n.contact.name}
                         </span>
+                      )}
+                      {/* (Jun 2026 S6) Reverse-link to the source inspection. */}
+                      {n.inspection && (
+                        <a
+                          href={`/inspections?focus=${n.inspection.id}`}
+                          className="text-violet-600 hover:underline"
+                          title="Raised as a finding at this inspection"
+                        >
+                          From inspection: {n.inspection.name}
+                        </a>
                       )}
                     </div>
                     <div className="flex items-center gap-2">

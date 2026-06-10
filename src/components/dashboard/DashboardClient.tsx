@@ -18,6 +18,7 @@ import {
   Bug,
   Star,
   MapPin,
+  ClipboardCheck,
 } from "lucide-react";
 import {
   Card,
@@ -119,6 +120,22 @@ interface WatchedSite {
   plotCount: number;
 }
 
+/** (Jun 2026 Q17) At-Risk: overdue statutory/QA hold-points. */
+interface OverdueInspection {
+  id: string;
+  name: string;
+  type: string;
+  scheduledDate: string;
+  daysOverdue: number;
+  isBlocking: boolean;
+  plot: {
+    id: string;
+    name: string;
+    plotNumber: string | null;
+    site: { id: string; name: string };
+  };
+}
+
 interface PlotOverBudget {
   id: string;
   name: string;
@@ -137,6 +154,7 @@ export interface DashboardData {
   trafficLightJobs: TrafficLightJob[];
   overdueJobs: OverdueJob[];
   staleSnags: StaleSnag[];
+  overdueInspections: OverdueInspection[];
   watchedSites: WatchedSite[];
   plotsOverBudget: PlotOverBudget[];
 }
@@ -449,11 +467,13 @@ function WatchedSitesPanel({ sites }: { sites: WatchedSite[] }) {
 function AtRiskPanel({
   overdueJobs,
   staleSnags,
+  overdueInspections = [],
 }: {
   overdueJobs: OverdueJob[];
   staleSnags: StaleSnag[];
+  overdueInspections?: OverdueInspection[];
 }) {
-  if (overdueJobs.length === 0 && staleSnags.length === 0) return null;
+  if (overdueJobs.length === 0 && staleSnags.length === 0 && overdueInspections.length === 0) return null;
 
   // (May 2026 audit D-P1-1) `daysLate` / `daysOpen` are now pre-computed
   // server-side using working-day arithmetic. The old client-side
@@ -530,6 +550,40 @@ function AtRiskPanel({
                     </div>
                     <span className="shrink-0 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
                       {s.daysOpen} WD open
+                    </span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* (Jun 2026 Q17) Overdue statutory/QA hold-points — date passed,
+            nothing booked. Each row deep-links to the exact inspection. */}
+        {overdueInspections.length > 0 && (
+          <div>
+            <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-red-700">
+              <ClipboardCheck className="size-3.5" aria-hidden="true" />
+              Overdue inspections ({overdueInspections.length})
+            </p>
+            <ul className="space-y-1.5">
+              {overdueInspections.map((i) => (
+                <li key={i.id}>
+                  <Link
+                    href={`/inspections?focus=${i.id}`}
+                    className="flex items-center justify-between gap-2 rounded-md bg-white px-3 py-2 text-xs ring-1 ring-red-100 hover:ring-red-300"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-medium text-slate-900">
+                        {i.plot.plotNumber ? `Plot ${i.plot.plotNumber}` : i.plot.name} · {i.name}
+                        {i.isBlocking && <span className="ml-1.5 rounded bg-red-100 px-1 text-[9px] font-semibold uppercase text-red-700">blocks</span>}
+                      </p>
+                      <p className="truncate text-[11px] text-slate-500">
+                        {i.plot.site.name} · {i.type.replace(/_/g, " ")}
+                      </p>
+                    </div>
+                    <span className="shrink-0 rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-semibold text-red-700">
+                      {i.daysOverdue} WD overdue
                     </span>
                   </Link>
                 </li>
@@ -933,7 +987,7 @@ export function DashboardClient({ data }: { data: DashboardData }) {
           manager should worry about right now: overdue jobs (end
           date passed, not COMPLETED) and stale snags (open >30 days).
           Hidden when there's nothing to show — no noise in calm weeks. */}
-      <AtRiskPanel overdueJobs={data.overdueJobs} staleSnags={data.staleSnags} />
+      <AtRiskPanel overdueJobs={data.overdueJobs} staleSnags={data.staleSnags} overdueInspections={data.overdueInspections} />
 
       {/* (May 2026 audit #168) Plots over budget. Hidden when none. */}
       {data.plotsOverBudget.length > 0 && (

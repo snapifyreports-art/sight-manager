@@ -4,6 +4,7 @@ import { useState, useRef, useCallback, useMemo } from "react";
 import { ChevronRight, ChevronDown, Package } from "lucide-react";
 import type { TemplateJobData, TemplateInspectionData } from "./types";
 import { computeInspectionMarkers } from "./template-inspection-markers";
+import { INSPECTION_TYPE_META } from "@/lib/inspection-doctype";
 import { formatWeekRange } from "@/lib/week-format";
 
 const WEEK_WIDTH = 48;
@@ -565,24 +566,34 @@ export function TemplateTimeline({ jobs, inspections = [], onJobUpdate, expanded
               ))}
 
               {/* (Jun 2026) Inspection "!" hold-point markers — a faint
-                  amber line down the chart at the marker week + a flag at
-                  the top, so authors see WHERE each NHBC/Building-Control
-                  hold-point lands before applying. */}
-              {inspectionMarkers.map((mk) => (
-                <div
-                  key={`insp-${mk.id}`}
-                  className="pointer-events-none absolute top-0 z-20"
-                  style={{ left: weekToLeft(mk.week) + weekPixels / 2, height: totalHeight }}
-                >
-                  <div className="absolute top-0 h-full w-px bg-amber-400/60" />
+                  line down the chart at the marker week + a flag at the
+                  top, so authors see WHERE each NHBC/Building-Control
+                  hold-point lands before applying.
+                  (Q21) Coloured per inspection TYPE via the shared
+                  INSPECTION_TYPE_META so NHBC always reads emerald,
+                  Building Control blue, etc — same key as the list badges.
+                  (Q20) Markers render at full chart height independent of
+                  stage collapse, so a hold anchored inside a collapsed
+                  stage is never lost. */}
+              {inspectionMarkers.map((mk) => {
+                const hex = INSPECTION_TYPE_META[mk.type as keyof typeof INSPECTION_TYPE_META]?.hex ?? "#d97706";
+                return (
                   <div
-                    className="pointer-events-auto absolute top-0 flex h-4 min-w-4 -translate-x-1/2 items-center justify-center rounded-sm bg-amber-500 px-1 text-[10px] font-bold leading-none text-white shadow"
-                    title={`${mk.name} — ${mk.type} · anchored ${mk.edgeLabel}`}
+                    key={`insp-${mk.id}`}
+                    className="pointer-events-none absolute top-0 z-20"
+                    style={{ left: weekToLeft(mk.week) + weekPixels / 2, height: totalHeight }}
                   >
-                    !
+                    <div className="absolute top-0 h-full w-px opacity-60" style={{ backgroundColor: hex }} />
+                    <div
+                      className="pointer-events-auto absolute top-0 flex h-4 min-w-4 -translate-x-1/2 items-center justify-center rounded-sm px-1 text-[10px] font-bold leading-none text-white shadow"
+                      style={{ backgroundColor: hex }}
+                      title={`${mk.name} — ${INSPECTION_TYPE_META[mk.type as keyof typeof INSPECTION_TYPE_META]?.label ?? mk.type} · anchored ${mk.edgeLabel}`}
+                    >
+                      !
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
 
               {/* Row backgrounds */}
               {rows.map((row, idx) => {
@@ -820,12 +831,23 @@ export function TemplateTimeline({ jobs, inspections = [], onJobUpdate, expanded
                 <div className="size-3 rounded-full bg-green-500 ring-2 ring-white shadow-sm" />
                 Delivery week
               </div>
-              {inspectionMarkers.length > 0 && (
-                <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
-                  <div className="flex size-3 items-center justify-center rounded-sm bg-amber-500 text-[8px] font-bold leading-none text-white">!</div>
-                  Inspection hold-point
-                </div>
-              )}
+              {/* (Jun 2026 Q21) Per-type legend chips — only the types this
+                  template actually uses. */}
+              {inspectionMarkers.length > 0 &&
+                Array.from(new Set(inspectionMarkers.map((mk) => mk.type))).map((t) => {
+                  const meta = INSPECTION_TYPE_META[t as keyof typeof INSPECTION_TYPE_META];
+                  return (
+                    <div key={`leg-${t}`} className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                      <div
+                        className="flex size-3 items-center justify-center rounded-sm text-[8px] font-bold leading-none text-white"
+                        style={{ backgroundColor: meta?.hex ?? "#d97706" }}
+                      >
+                        !
+                      </div>
+                      {meta?.label ?? t}
+                    </div>
+                  );
+                })}
               {interactive && (
                 <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
                   <div className="h-3 w-0.5 rounded bg-slate-400" />

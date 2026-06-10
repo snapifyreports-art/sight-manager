@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { canAccessSite } from "@/lib/site-access";
 import { buildSiteStory } from "@/lib/site-story";
 import { apiError } from "@/lib/api-errors";
+import { sessionHasPermission } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -48,6 +49,12 @@ export async function GET(
   try {
     const story = await buildSiteStory(prisma, id, {
       includeFullDetail: detail,
+      // (Jun 2026 Q8) Story + Closure inspection blocks follow the same
+      // permission boundary as the Brief and the inspections API.
+      includeInspections: sessionHasPermission(
+        session.user as { role?: string; permissions?: string[] },
+        "VIEW_INSPECTIONS",
+      ),
     });
     return NextResponse.json(story);
   } catch (err) {

@@ -820,7 +820,11 @@ export async function GET(
     plotLabel: i.plot.plotNumber ? `Plot ${i.plot.plotNumber}` : i.plot.name,
     inspectorName: i.inspector?.name ?? null,
   });
-  const inspOverdue = briefInspections.filter((i) => i.status === "OVERDUE").map(mapInsp);
+  // (Jun 2026 Q1) Overdue-but-BOOKED is its own (amber) bucket — the visit
+  // is arranged, the date just slipped past. Red is reserved for
+  // date-passed-nothing-booked, so the manager's red list is all action.
+  const inspOverdue = briefInspections.filter((i) => i.status === "OVERDUE" && !i.bookedDate).map(mapInsp);
+  const inspOverdueBooked = briefInspections.filter((i) => i.status === "OVERDUE" && i.bookedDate).map(mapInsp);
   const inspDueToday = briefInspections
     .filter((i) => i.status !== "OVERDUE" && i.scheduledDate >= dayStart && i.scheduledDate < inspTomorrowStart)
     .map(mapInsp);
@@ -952,6 +956,7 @@ export async function GET(
     weatherAtRisk,
     inspections: {
       overdue: inspOverdue,
+      overdueBooked: inspOverdueBooked,
       dueToday: inspDueToday,
       upcoming: inspUpcoming,
       bookingDue: inspBookingDue,

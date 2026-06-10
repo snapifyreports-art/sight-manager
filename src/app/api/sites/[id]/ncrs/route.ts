@@ -59,6 +59,9 @@ export async function GET(
       plot: { select: { id: true, name: true, plotNumber: true } },
       job: { select: { id: true, name: true } },
       contact: { select: { id: true, name: true, company: true } },
+      // (Jun 2026 S6) Reverse-link — NCRs raised at an inspection
+      // sign-off show a "from inspection" chip back to the source.
+      inspection: { select: { id: true, name: true } },
     },
   });
   return NextResponse.json(ncrs);
