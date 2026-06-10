@@ -28,13 +28,18 @@ import { createHmac, timingSafeEqual } from "crypto";
 // each domain string. Tracked but out of scope for this batch — would
 // invalidate every in-flight token at deploy.
 function requireSecret(): string {
-  const v = process.env.NEXTAUTH_SECRET;
+  // (Jun 2026 Keith bug report — contractor View button HTTP 500) NextAuth
+  // v5 renamed the env var to AUTH_SECRET; this deployment sets AUTH_SECRET
+  // (auth itself works) but NOT the legacy NEXTAUTH_SECRET, so every
+  // token-signing route threw in production. Accept either name —
+  // NEXTAUTH_SECRET first so an explicit legacy override still wins.
+  const v = process.env.NEXTAUTH_SECRET || process.env.AUTH_SECRET;
   if (v && v.length > 0) return v;
   if (process.env.NODE_ENV === "production") {
     throw new Error(
-      "NEXTAUTH_SECRET is missing. The app refuses to operate in production " +
-        "without it because share-link tokens become forgeable. Set it in " +
-        "Vercel project env vars and redeploy.",
+      "AUTH_SECRET (or NEXTAUTH_SECRET) is missing. The app refuses to " +
+        "operate in production without it because share-link tokens become " +
+        "forgeable. Set it in Vercel project env vars and redeploy.",
     );
   }
   // Dev: log loudly the first time, then quiet to avoid spam.

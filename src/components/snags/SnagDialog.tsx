@@ -90,6 +90,10 @@ interface SnagDialogProps {
   initialJobId?: string;
   /** Pre-fill contractor when raising from a sub-job context */
   initialContactId?: string;
+  /** (Jun 2026 SSoT flows) Link the created snag to an inspection — set
+   * when raised as a finding from the inspection sign-off dialog so the
+   * full-form path keeps the same finding↔inspection link as quick entry. */
+  inspectionId?: string;
 }
 
 const TAG_COLORS: Record<string, string> = {
@@ -107,6 +111,7 @@ export function SnagDialog({
   initialPhotos,
   initialJobId,
   initialContactId,
+  inspectionId,
 }: SnagDialogProps) {
   const toast = useToast();
   const { confirm, dialog: confirmDialog } = useConfirm();
@@ -363,6 +368,7 @@ export function SnagDialog({
             contactId: form.contactId || null,
             jobId: form.jobId || null,
             notes: form.notes || null,
+            inspectionId: inspectionId || null,
           }),
         });
         if (!res.ok) {

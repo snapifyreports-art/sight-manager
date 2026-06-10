@@ -3,13 +3,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { format } from "date-fns";
-import { ClipboardCheck, Plus, Trash2, Loader2, ExternalLink, ShieldAlert, CalendarRange, Search } from "lucide-react";
+import { ClipboardCheck, Plus, Trash2, Loader2, ExternalLink, ShieldAlert, CalendarRange, Search, Camera } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { HelpTip } from "@/components/shared/HelpTip";
 import { InspectionStatusBadge, InspectionTypeBadge } from "@/components/shared/StatusBadge";
+import { SnagDialog } from "@/components/snags/SnagDialog";
 import { useInspectionAction, type InspectionFinding } from "@/hooks/useInspectionAction";
 import { inspectionDisplayStatus, inspectionTypeLabel, INSPECTION_TYPE_META } from "@/lib/inspection-doctype";
 
@@ -528,6 +529,12 @@ function SignOffDialog({ kind, insp, onClose, onDone }: { kind: "pass" | "fail";
   const [tickHandover, setTickHandover] = useState(true);
   const [findings, setFindings] = useState<InspectionFinding[]>([]);
   const [busy, setBusy] = useState(false);
+  // (Jun 2026 Keith SSoT-flows report) The quick rows below are for speed;
+  // the FULL snag form (photos, location, assignee — the same SnagDialog
+  // used everywhere else) opens from here, creating the snag immediately
+  // and already linked to this inspection via inspectionId.
+  const [fullSnagOpen, setFullSnagOpen] = useState(false);
+  const [fullSnagsRaised, setFullSnagsRaised] = useState(0);
   // (Jun 2026) Certificate picker — list this plot's documents so the
   // manager SELECTS the cert instead of pasting an opaque ID, or uploads
   // one inline (posted to the plot with category CERT so it lands in the
@@ -623,10 +630,20 @@ function SignOffDialog({ kind, insp, onClose, onDone }: { kind: "pass" | "fail";
           <div>
             <div className="mb-1 flex items-center justify-between">
               <Label>Findings (optional)</Label>
-              <Button size="sm" variant="outline" onClick={addFinding}><Plus className="size-3.5" /> Add finding</Button>
+              <div className="flex items-center gap-1.5">
+                <Button size="sm" variant="outline" onClick={() => setFullSnagOpen(true)} title="Open the full snag form — photos, location, assignee">
+                  <Camera className="size-3.5" /> Snag + photos
+                </Button>
+                <Button size="sm" variant="outline" onClick={addFinding}><Plus className="size-3.5" /> Quick finding</Button>
+              </div>
             </div>
+            {fullSnagsRaised > 0 && (
+              <p className="mb-1 text-[11px] text-emerald-700">
+                {fullSnagsRaised} snag{fullSnagsRaised === 1 ? "" : "s"} raised with the full form — already linked to this inspection.
+              </p>
+            )}
             {findings.length === 0 ? (
-              <p className="text-[11px] text-muted-foreground">No findings. Add any defects raised at this inspection — each becomes a snag or NCR for the responsible contractor.</p>
+              <p className="text-[11px] text-muted-foreground">No findings. Use <strong>Snag + photos</strong> for the full snag form, or add quick text-only findings — each becomes a snag or NCR for the responsible contractor.</p>
             ) : (
               <div className="space-y-2">
                 {findings.map((f, idx) => (
@@ -668,6 +685,18 @@ function SignOffDialog({ kind, insp, onClose, onDone }: { kind: "pass" | "fail";
           </Button>
         </DialogFooter>
       </DialogContent>
+      {/* The ONE TRUE snag form (photos, location, assignee) — creates the
+          snag immediately, linked to this inspection via inspectionId. */}
+      {fullSnagOpen && (
+        <SnagDialog
+          open={fullSnagOpen}
+          onOpenChange={setFullSnagOpen}
+          plotId={insp.plot.id}
+          initialJobId={insp.anchorJobId ?? undefined}
+          inspectionId={insp.id}
+          onSaved={() => setFullSnagsRaised((n) => n + 1)}
+        />
+      )}
     </Dialog>
   );
 }

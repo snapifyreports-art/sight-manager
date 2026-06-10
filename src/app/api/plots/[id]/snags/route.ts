@@ -78,7 +78,7 @@ export async function POST(
 
   const { id } = await params;
   const body = await req.json();
-  const { description, location, priority, assignedToId, contactId, jobId, notes } = body;
+  const { description, location, priority, assignedToId, contactId, jobId, notes, inspectionId } = body;
 
   if (!description?.trim()) {
     return NextResponse.json({ error: "Description required" }, { status: 400 });
@@ -110,6 +110,23 @@ export async function POST(
       { error: `Invalid priority. Must be one of: ${validPriorities.join(", ")}` },
       { status: 400 }
     );
+  }
+
+  // (Jun 2026 SSoT flows) A snag raised through the full SnagDialog from an
+  // inspection sign-off carries inspectionId so the finding↔inspection link
+  // matches the quick-findings path. Validate it's an inspection on THIS
+  // plot — a cross-plot link would corrupt the findings register.
+  if (inspectionId) {
+    const insp = await prisma.inspection.findUnique({
+      where: { id: inspectionId },
+      select: { plotId: true },
+    });
+    if (!insp || insp.plotId !== id) {
+      return NextResponse.json(
+        { error: "inspectionId must reference an inspection on this plot" },
+        { status: 400 },
+      );
+    }
   }
 
   // Get plot's siteId for event logging
@@ -159,6 +176,7 @@ export async function POST(
         contactId: resolvedContactId,
         raisedById: session.user.id,
         notes: notes || null,
+        inspectionId: inspectionId || null,
         createdAt: getServerCurrentDate(req),
       },
       include: {

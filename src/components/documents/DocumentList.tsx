@@ -117,6 +117,10 @@ export function DocumentList({ documents, onDelete, level = "site" }: DocumentLi
 
     return (
       <div className="space-y-4">
+        {/* (Jun 2026 Keith bug report) confirmDialog was only mounted on the
+            plot/job return path — at site level the delete button awaited a
+            confirm dialog that never rendered, so it silently did nothing. */}
+        {confirmDialog}
         {siteDocs.length > 0 && (
           <div>
             <h4 className="mb-2 text-xs font-semibold uppercase text-muted-foreground">
