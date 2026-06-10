@@ -42,6 +42,27 @@ const eslintConfig = defineConfig([
       "@next/next/no-img-element": "off",
     },
   },
+  // (Jun 2026 guardrail) Raw enum codes must not reach users. An app-wide
+  // sweep found 18 surfaces printing things like AWAITING_CORRECTION or
+  // "Plot cmb3x9..." — the recurring pattern was `.replace(/_/g, " ")`
+  // half-fixes instead of the shared label maps (src/lib/labels.ts,
+  // src/lib/inspection-doctype.ts). Warn on the pattern so new code gets
+  // flagged in dev/PRs. Flip to "error" once the 12 remaining cosmetic
+  // chip surfaces are converted (decision D9 in docs/app-audit-tickboxes).
+  {
+    files: ["src/**/*.{ts,tsx}"],
+    rules: {
+      "no-restricted-syntax": [
+        "warn",
+        {
+          selector:
+            "CallExpression[callee.property.name='replace'] > Literal.arguments:first-child[regex.pattern='_']",
+          message:
+            "Don't humanize enum codes with .replace(/_/g, ...) — use titleCaseEnum()/labels from src/lib/labels.ts or inspection-doctype.ts so every surface shows the same wording.",
+        },
+      ],
+    },
+  },
 ]);
 
 export default eslintConfig;

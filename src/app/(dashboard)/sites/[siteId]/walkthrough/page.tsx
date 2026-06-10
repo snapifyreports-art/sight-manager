@@ -10,7 +10,9 @@ export default async function WalkthroughPage({
   params: Promise<{ siteId: string }>;
 }) {
   const session = await auth();
-  if (!session) redirect("/auth/signin");
+  // (Jun 2026 guardrail catch) The sign-in page is /login (auth.ts
+  // pages.signIn) — /auth/signin doesn't exist and 404'd logged-out users.
+  if (!session) redirect("/login");
 
   const { siteId } = await params;
 
