@@ -49,10 +49,13 @@ export async function POST(req: NextRequest) {
   const exp = Date.now() + ONE_DAY_MS;
   const token = signResetToken({ userId: user.id, email: user.email, exp });
 
-  const baseUrl =
-    req.headers.get("origin") ??
-    process.env.NEXTAUTH_URL ??
-    "https://sight-manager.vercel.app";
+  // (Jun 2026 security audit — BLOCKER) NEVER build this link from the
+  // request's Origin header. This endpoint is public and emails the link
+  // to a DIFFERENT person: an attacker POSTing {email: victim} with
+  // Origin: https://evil.com would get a live reset token delivered to
+  // the victim pointing at evil.com (classic reset-link host poisoning →
+  // account takeover). Server-trusted constants only.
+  const baseUrl = process.env.NEXTAUTH_URL ?? "https://sight-manager.vercel.app";
   const url = `${baseUrl}/reset-password/${token}`;
 
   try {

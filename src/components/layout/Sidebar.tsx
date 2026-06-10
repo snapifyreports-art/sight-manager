@@ -78,7 +78,8 @@ const SITE_TAB_GROUPS = [
       { label: "Documents",      tab: "documents" },
       { label: "Photos",         tab: "photos" },
       { label: "Critical Path",  tab: "critical-path" },
-      { label: "QR Codes",       tab: "qr-codes" },
+      // (Jun 2026 Keith request) QR Codes moved to a sub-tab of Plots —
+      // ?tab=qr-codes still works for old links.
       { label: "Customer Pages", tab: "customer-pages" },
       { label: "Compliance",     tab: "compliance" },
       { label: "Inspections",    tab: "inspections" },
@@ -107,7 +108,8 @@ const navItems = [
   { label: "Suppliers",     href: "/suppliers?tab=suppliers",   icon: FileBox },
   { label: "Contractors",   href: "/suppliers?tab=contractors", icon: HardHat },
   { label: "Inspections",   href: "/inspections", icon: ClipboardCheck },
-  { label: "Templates",     href: "/settings?tab=templates", icon: Layers },
+  // (Jun 2026 Keith request) Templates main-menu entry removed — it lives
+  // as a tab under Settings (bottom nav); /settings?tab=templates still works.
   { label: "Analytics",     href: "/analytics",   icon: BarChart3 },
   { label: "Events Log",    href: "/events-log",  icon: Scroll },
 ];
@@ -270,7 +272,16 @@ function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: boolean; on
     const toStore = siteIdFromPath || siteFromQuery;
     if (!toStore) return;
     try { localStorage.setItem("sight-manager-last-site", toStore); } catch {}
+    // (Jun 2026 Keith bug report — "loses what site I have selected")
+    // localStorage was updated but the in-memory fallback wasn't, so after
+    // CLIENT-side navigation to a no-site page (e.g. Suppliers) the picker
+    // reverted to the site remembered at first page load, not the site just
+    // visited. The guarded functional update keeps re-renders to the one
+    // genuine change per navigation.
+    // eslint-disable-next-line
+    setFallbackSiteId((prev) => (prev === toStore ? prev : toStore));
   }, [siteIdFromPath, siteFromQuery]);
+
 
   // (May 2026 Keith request) Pinned recents — top 3 most-recently
   // visited sites bubble to the top of the dropdown.
@@ -336,12 +347,22 @@ function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: boolean; on
                 // on-site behaviour and matches Keith's request.
                 window.location.href = `/sites`;
               } else {
-                // Off-site context, specific site picked — update
-                // ?site= in-place so the current page's view re-
-                // scopes (dashboard, daily-brief, etc.).
-                const params = new URLSearchParams(searchParams.toString());
-                params.set("site", id);
-                router.push(`${pathname}?${params.toString()}`);
+                // Off-site context, specific site picked. Only the pages
+                // that actually READ ?site= re-scope in place — everywhere
+                // else (Suppliers, Settings, Portfolio…) updating the query
+                // did nothing visible (Jun 2026 Keith bug report — "lack of
+                // action when a site's selected"). Those now navigate to
+                // the picked site's Daily Brief.
+                const rescopes = ["/daily-brief", "/dashboard", "/analytics", "/events-log"].some(
+                  (p) => pathname.startsWith(p),
+                );
+                if (rescopes) {
+                  const params = new URLSearchParams(searchParams.toString());
+                  params.set("site", id);
+                  router.push(`${pathname}?${params.toString()}`);
+                } else {
+                  window.location.href = `/sites/${id}?tab=daily-brief`;
+                }
               }
             }}
             className="w-full rounded-md border border-border/60 bg-background px-2.5 py-2 text-sm text-foreground shadow-sm focus:outline-none focus:ring-1 focus:ring-blue-500"

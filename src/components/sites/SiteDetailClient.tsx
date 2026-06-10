@@ -2084,6 +2084,18 @@ export function SiteDetailClient({
               <span className="text-sm text-muted-foreground">
                 ({site.plots.length})
               </span>
+              {/* (Jun 2026 Keith request) QR codes moved out of Site Admin
+                  into a sub-tab here — same content, old ?tab=qr-codes links
+                  still work. */}
+              <div className="ml-2 flex overflow-hidden rounded-md border text-xs">
+                <span className="bg-blue-600 px-2.5 py-1 font-medium text-white">Plot cards</span>
+                <button
+                  onClick={() => handleTabChange("qr-codes")}
+                  className="px-2.5 py-1 text-muted-foreground hover:bg-slate-50"
+                >
+                  QR codes
+                </button>
+              </div>
             </div>
 
             <div className="ml-auto flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center">
@@ -2651,6 +2663,20 @@ export function SiteDetailClient({
 
           <div className={activeTab !== "qr-codes" ? "hidden" : undefined}>
             {visitedTabs.has("qr-codes") && (
+              <div className="space-y-4">
+              <div className="flex items-center gap-2">
+                <Grid3X3 className="size-4 text-muted-foreground" />
+                <h2 className="text-lg font-semibold">Plots</h2>
+                <div className="ml-2 flex overflow-hidden rounded-md border text-xs">
+                  <button
+                    onClick={() => handleTabChange("plots")}
+                    className="px-2.5 py-1 text-muted-foreground hover:bg-slate-50"
+                  >
+                    Plot cards
+                  </button>
+                  <span className="bg-blue-600 px-2.5 py-1 font-medium text-white">QR codes</span>
+                </div>
+              </div>
               <BatchPlotQR
                 siteId={site.id}
                 siteName={site.name}
@@ -2661,6 +2687,7 @@ export function SiteDetailClient({
                   houseType: p.houseType ?? null,
                 }))}
               />
+              </div>
             )}
           </div>
 
