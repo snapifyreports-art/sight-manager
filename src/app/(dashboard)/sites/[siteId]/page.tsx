@@ -1,7 +1,8 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/lib/auth";
 import { sessionHasPermission } from "@/lib/permissions";
+import { canAccessSite } from "@/lib/site-access";
 import { SiteDetailClient } from "@/components/sites/SiteDetailClient";
 
 export const dynamic = "force-dynamic";
@@ -34,9 +35,24 @@ export default async function SiteDetailPage({
   const { siteId } = await params;
   const { tab: initialTab, snagId: initialSnagId } = await searchParams;
 
+  // (Jun 2026 audit BLOCKER) Per-site access gate — the (dashboard) layout
+  // only enforces login, so without this ANY logged-in user could read any
+  // site's full detail (incl. plot budgets/margins) by typing the URL.
+  // Mirrors the sibling plot page: redirect anonymous, 404 unauthorised.
+  const session = await auth();
+  if (!session) redirect("/login");
+  if (
+    !(await canAccessSite(
+      session.user.id,
+      (session.user as { role: string }).role,
+      siteId,
+    ))
+  ) {
+    notFound();
+  }
+
   // (Jun 2026 review fix) Q8 boundary: hold-point chip counts are gated on
   // VIEW_INSPECTIONS like every other inspection surface.
-  const session = await auth();
   const canViewInspections = sessionHasPermission(
     session?.user as { role?: string; permissions?: string[] } | undefined,
     "VIEW_INSPECTIONS",

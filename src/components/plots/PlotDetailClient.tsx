@@ -1341,6 +1341,10 @@ export function PlotDetailClient({
         "history",
         "materials",
         "drawings",
+        // (Jun 2026 audit BLOCKER) "quality" was missing — the trigger
+        // existed but activeTab snapped back to overview, leaving pre-start
+        // checks, variations, defects and the draw schedule unreachable.
+        "quality",
         "handover",
         "customer",
       ]),
