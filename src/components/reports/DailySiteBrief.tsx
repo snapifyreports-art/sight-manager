@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { format, addDays, differenceInCalendarDays } from "date-fns";
+import { format, addDays, subDays, differenceInCalendarDays } from "date-fns";
 import { differenceInWorkingDays } from "@/lib/working-days";
 import { inspectionTypeLabel } from "@/lib/inspection-doctype";
 import { PostCompletionDialog } from "@/components/PostCompletionDialog";
@@ -101,6 +101,7 @@ import { Label } from "@/components/ui/label";
 // the GET /api/sites/[id]/daily-brief response and is shared with
 // every section module so they can render strongly-typed slices.
 import type { BriefData, DailySiteBriefProps } from "./daily-brief/types";
+import { orderGroupKey } from "./daily-brief/types";
 
 // (May 2026 sprint 7a) Extracted to ./daily-brief/. WeatherIcon and
 // JobActionButton both used to live in this file but were causing
@@ -229,7 +230,9 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
     window.history.replaceState(null, "", newUrl);
   }, [date]);
   const [refreshKey, setRefreshKey] = useState(0);
-  const [upcomingOrdersOpen, setUpcomingOrdersOpen] = useState(false);
+  // (Jun 2026 audit) Calendar popover on the date heading — part of the
+  // restored prev/today/next navigation (mirrors ContractorDaySheets).
+  const [calendarOpen, setCalendarOpen] = useState(false);
   const [openSections, setOpenSections] = useState<Set<string>>(new Set());
 
   // Centralised job action hook for late-start / early-start dialogs
@@ -267,6 +270,10 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
     "section-starting-tomorrow": "starting-tomorrow",
     "section-orders": "materials",
     "section-deliveries": "materials",
+    // (Jun 2026 audit) Upcoming Orders now lives on the shared
+    // openSections mechanism so the violet "Scheduled" pill can
+    // auto-expand it like every other pill target.
+    "section-upcoming-orders": "upcoming-orders",
     "section-upcoming-deliveries": "upcoming-deliveries",
     "section-snags": "snags",
     "section-inactive-plots": "inactive-plots",
@@ -393,14 +400,23 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
   const [signOffSubmitting, setSignOffSubmitting] = useState(false);
 
   // Post-completion decision dialog state
-  const [completionContext, setCompletionContext] = useState<{
+  type CompletionContext = {
     completedJobName: string;
     daysDeviation: number;
     nextJob: { id: string; name: string; contractorName: string | null; assignedToName: string | null } | null;
     plotId: string;
     signOffNotes?: string;
     openInspections?: Array<{ id: string; name: string; type: string; status: string; scheduledDate: string }>;
-  } | null>(null);
+  };
+  const [completionContext, setCompletionContext] = useState<CompletionContext | null>(null);
+  // (Jun 2026 D3) Persist post-completion contexts past the toast,
+  // keyed by jobId — the "Review next steps" toast only lives a few
+  // seconds, and once it's gone the decision sheet was unreachable.
+  // Each entry renders a chip near the date heading that reopens the
+  // same dialog; the chip clears when a decision is made (or is
+  // dismissed manually). The toast itself is unchanged.
+  const [pendingCompletionReviews, setPendingCompletionReviews] = useState<Record<string, CompletionContext>>({});
+  const [activeReviewJobId, setActiveReviewJobId] = useState<string | null>(null);
 
   // Contractor quick-assign state
   const [contractorAssignTarget, setContractorAssignTarget] = useState<{ jobId: string; jobName: string } | null>(null);
@@ -508,8 +524,11 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
     });
   }, []);
 
-  const prevDay = () => setDate((d) => new Date(d.getTime() - 86400000));
-  const nextDay = () => setDate((d) => new Date(d.getTime() + 86400000));
+  // (Jun 2026 review) date-fns calendar arithmetic, not raw ±86400000ms
+  // — the calendar popover sets local-midnight dates, so a ms step
+  // across a DST boundary lands at 23:00/01:00 and skips/repeats a day.
+  const prevDay = () => setDate((d) => subDays(d, 1));
+  const nextDay = () => setDate((d) => addDays(d, 1));
   const goToday = () => setDate(getCurrentDate());
 
   // Quick job action handler (UX #1) — uses runSimpleAction for non-start paths.
@@ -666,9 +685,18 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
         showToast(await fetchErrorMessage(res, "Failed to mark rained off"));
         return;
       }
+      // (Jun 2026 review) The route skips the 1-WD shift when the day
+      // was already recorded (re-mark guard) — tell the user instead of
+      // silently dropping their "Delay jobs" instruction.
+      const result = (await res.json().catch(() => null)) as
+        | { delaySkipped?: boolean }
+        | null;
       setRainedOffDialogOpen(false);
       setRainedOffNote("");
       setRefreshKey((k) => k + 1);
+      if (result?.delaySkipped) {
+        showToast("Day already marked — jobs were not shifted again");
+      }
     } catch {
       showToast("Failed to mark rained off — please try again");
     } finally {
@@ -869,7 +897,9 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
     if (!data) return [];
     const map = new Map<string, typeof data.ordersToPlace>();
     for (const o of data.ordersToPlace) {
-      const key = `${o.supplier.id}__${o.job.name}`;
+      // orderGroupKey: one-off orders have job=null — keying on the
+      // plot/site attachment instead of crashing (Jun 2026 blocker fix).
+      const key = orderGroupKey(o);
       const existing = map.get(key) ?? [];
       existing.push(o);
       map.set(key, existing);
@@ -881,7 +911,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
     if (!data) return [];
     const map = new Map<string, typeof data.upcomingOrders>();
     for (const o of data.upcomingOrders) {
-      const key = `${o.supplier.id}__${o.job.name}`;
+      const key = orderGroupKey(o);
       const existing = map.get(key) ?? [];
       existing.push(o);
       map.set(key, existing);
@@ -976,6 +1006,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
           };
         } | undefined;
         signOffPreviews.forEach((url) => URL.revokeObjectURL(url));
+        const signedOffJobId = signOffTarget.id;
         const signedOffJobName = signOffTarget.name;
         const signedOffNotesCopy = signOffNotes.trim() || undefined;
         setSignOffTarget(null);
@@ -993,16 +1024,25 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
             : dev > 0
               ? `${signedOffJobName} finished ${dev} day${dev !== 1 ? "s" : ""} early`
               : `${signedOffJobName} finished ${Math.abs(dev)} day${Math.abs(dev) !== 1 ? "s" : ""} late`;
-          if (dev !== 0 || ctx.nextJob) {
+          // (Jun 2026 review) Chip only when there's a NEXT JOB to
+          // decide on. With nextJob null the dialog has no actionable
+          // step (onDecisionMade is unreachable — its Done button only
+          // closes), so a chip could never be retired by reviewing.
+          if (ctx.nextJob) {
+            const fullCtx: CompletionContext = {
+              completedJobName: signedOffJobName,
+              signOffNotes: signedOffNotesCopy,
+              ...ctx,
+            };
+            // (Jun 2026 D3) Keep the context past the toast — a chip by
+            // the date heading reopens the dialog until a decision lands.
+            setPendingCompletionReviews((prev) => ({ ...prev, [signedOffJobId]: fullCtx }));
             toast.success(summary, {
               action: {
                 label: "Review next steps",
                 onClick: () => {
-                  setCompletionContext({
-                    completedJobName: signedOffJobName,
-                    signOffNotes: signedOffNotesCopy,
-                    ...ctx,
-                  });
+                  setActiveReviewJobId(signedOffJobId);
+                  setCompletionContext(fullCtx);
                 },
               },
             });
@@ -1240,27 +1280,123 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
 
   return (
     <div className="space-y-4">
-      {/* Date + print.
+      {/* Date nav + print.
           (May 2026 audit UX-P2) Promoted the date from <p> to <h1> so
           assistive tech has a top-level landmark for the page. The
           Daily Brief is the most-touched reporting view; previously
           screen readers landed on the chrome header "Dashboard" and
-          had to hunt for the actual page heading. */}
+          had to hunt for the actual page heading.
+          (Jun 2026 audit) Prev / calendar / next / Today controls
+          restored — the handlers and imports survived a refactor but
+          nothing rendered them, so "Pre-mark tomorrow rained off"
+          stranded the user on tomorrow's brief with no way back.
+          Mirrors the ContractorDaySheets date nav. */}
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h1 className="text-sm font-semibold sm:text-lg">
-          {format(date, "EEEE, d MMMM yyyy")}
-        </h1>
-        <Button
-          variant="outline"
-          size="sm"
-          className="no-print print:hidden"
-          onClick={() => window.print()}
-          title="Print daily brief"
-        >
-          <Printer className="size-3.5" />
-          <span className="hidden sm:inline ml-1">Print</span>
-        </Button>
+        <div className="flex items-center gap-1.5">
+          <Button
+            variant="outline"
+            size="icon"
+            className="size-8 print:hidden"
+            onClick={prevDay}
+            aria-label="Previous day"
+          >
+            <ChevronLeft className="size-4" />
+          </Button>
+          <h1 className="text-sm font-semibold sm:text-lg">
+            <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
+              <PopoverTrigger className="cursor-pointer underline-offset-4 transition-colors hover:text-primary hover:underline">
+                {format(date, "EEEE, d MMMM yyyy")}
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="center">
+                <Calendar
+                  mode="single"
+                  selected={date}
+                  onSelect={(d) => {
+                    if (d) {
+                      setDate(d);
+                      setCalendarOpen(false);
+                    }
+                  }}
+                  autoFocus
+                />
+              </PopoverContent>
+            </Popover>
+          </h1>
+          <Button
+            variant="outline"
+            size="icon"
+            className="size-8 print:hidden"
+            onClick={nextDay}
+            aria-label="Next day"
+          >
+            <ChevronRight className="size-4" />
+          </Button>
+        </div>
+        <div className="flex items-center gap-2">
+          {format(date, "yyyy-MM-dd") !== format(getCurrentDate(), "yyyy-MM-dd") && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="no-print print:hidden"
+              onClick={goToday}
+            >
+              <CalendarDays className="size-3.5" />
+              <span className="ml-1">Today</span>
+            </Button>
+          )}
+          <Button
+            variant="outline"
+            size="sm"
+            className="no-print print:hidden"
+            onClick={() => window.print()}
+            title="Print daily brief"
+          >
+            <Printer className="size-3.5" />
+            <span className="hidden sm:inline ml-1">Print</span>
+          </Button>
+        </div>
       </div>
+
+      {/* (Jun 2026 D3) Pending "Review next steps" chips — one per job
+          signed off this session whose decision sheet hasn't been
+          actioned yet. The toast offers the same action but vanishes
+          after a few seconds; these stick until reviewed or dismissed. */}
+      {Object.keys(pendingCompletionReviews).length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5 print:hidden">
+          {Object.entries(pendingCompletionReviews).map(([jobId, ctx]) => (
+            <span
+              key={jobId}
+              className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs text-emerald-800"
+            >
+              <button
+                type="button"
+                className="inline-flex items-center gap-1 hover:underline"
+                onClick={() => {
+                  setActiveReviewJobId(jobId);
+                  setCompletionContext(ctx);
+                }}
+              >
+                <FileCheck className="size-3" aria-hidden />
+                Review next steps — {ctx.completedJobName}
+              </button>
+              <button
+                type="button"
+                className="rounded-full p-0.5 hover:bg-emerald-100"
+                aria-label={`Dismiss next-steps review for ${ctx.completedJobName}`}
+                onClick={() => {
+                  setPendingCompletionReviews((prev) => {
+                    const next = { ...prev };
+                    delete next[jobId];
+                    return next;
+                  });
+                }}
+              >
+                <X className="size-3" aria-hidden />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
 
       {/* Bulk action floating bar (UX #3) */}
       {bulkMode && selectedJobIds.size > 0 && (
@@ -1697,12 +1833,12 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
         const recalcJobCount = startingCount + data.jobsDueToday.length + data.lateStartJobs.length + data.overdueJobs.length + (data.awaitingSignOff?.length || 0);
         if (recalcJobCount > 0) lines.push({ href: "#section-starting-today", color: "text-blue-700", icon: <Briefcase className="size-3" />, text: `${recalcJobCount} job${recalcJobCount !== 1 ? "s" : ""} today — ${startingCount} starting, ${data.jobsDueToday.length} finishing${data.lateStartJobs.length > 0 ? `, ${data.lateStartJobs.length} late` : ""}${data.overdueJobs.length > 0 ? `, ${data.overdueJobs.length} overdue` : ""}${(data.awaitingSignOff?.length || 0) > 0 ? `, ${data.awaitingSignOff!.length} sign off` : ""}` });
         if (snagCount > 0) lines.push({ href: "#section-snags", color: "text-orange-700", icon: <Bug className="size-3" />, text: `${snagCount} open snag${snagCount !== 1 ? "s" : ""}` });
-        if (inactiveCount > 0) lines.push({ href: "#section-inactive-plots", color: "text-amber-700", icon: <PauseCircle className="size-3" />, text: `${inactiveCount} inactive plot${inactiveCount !== 1 ? "s" : ""} need decisions` });
+        if (inactiveCount > 0) lines.push({ href: "#section-inactive-plots", color: "text-amber-700", icon: <PauseCircle className="size-3" />, text: `${inactiveCount} inactive plot${inactiveCount !== 1 ? "s" : ""} need${inactiveCount === 1 ? "s" : ""} decisions` });
 
         // Issue alerts
         if (data.overdueDeliveries.length > 0) lines.push({ href: "#section-overdue", color: "text-red-700", icon: <Package className="size-3" />, text: `${data.overdueDeliveries.length} overdue deliver${data.overdueDeliveries.length !== 1 ? "ies" : "y"}` });
         if (contractorPending > 0) lines.push({ href: "#section-contractor-confirmations", color: "text-amber-700", icon: <HardHat className="size-3" />, text: `${contractorPending} contractor confirmation${contractorPending !== 1 ? "s" : ""} pending` });
-        if (attentionCount > 0) lines.push({ href: "#section-needs-attention", color: "text-amber-700", icon: <AlertTriangle className="size-3" />, text: `${attentionCount} item${attentionCount !== 1 ? "s" : ""} need attention (missing info)` });
+        if (attentionCount > 0) lines.push({ href: "#section-needs-attention", color: "text-amber-700", icon: <AlertTriangle className="size-3" />, text: `${attentionCount} item${attentionCount !== 1 ? "s" : ""} need${attentionCount === 1 ? "s" : ""} attention (missing info)` });
 
         if (lines.length === 0) return null;
         return (
@@ -1998,14 +2134,18 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                           <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
                         ) : (
                           <>
-                            <Button variant="outline" size="sm" className="h-9 gap-1 border-orange-200 px-2 text-xs text-orange-700 hover:bg-orange-50" onClick={() => handleExtendOpen(j.id)}>
-                              <Clock className="size-2.5" /> Extend
+                            {/* (Jun 2026 review) Order matters: JobActionStrip
+                                Mode A keeps only the FIRST child inline on
+                                mobile — Sign Off (the D3 completion-review
+                                entry point) must lead, never Extend. */}
+                            <Button size="sm" className="h-9 gap-1 bg-emerald-700 px-2 text-xs text-white hover:bg-emerald-800" onClick={() => handleOpenSignOff(j)}>
+                              <FileCheck className="size-2.5" /> Sign Off
                             </Button>
                             <Button size="sm" className="h-9 gap-1 bg-emerald-600 px-2 text-xs text-white hover:bg-emerald-700" onClick={() => handleJobAction(j.id, "complete")}>
                               <CheckCircle2 className="size-2.5" /> Complete
                             </Button>
-                            <Button size="sm" className="h-9 gap-1 bg-emerald-700 px-2 text-xs text-white hover:bg-emerald-800" onClick={() => handleOpenSignOff(j)}>
-                              <FileCheck className="size-2.5" /> Sign Off
+                            <Button variant="outline" size="sm" className="h-9 gap-1 border-orange-200 px-2 text-xs text-orange-700 hover:bg-orange-50" onClick={() => handleExtendOpen(j.id)}>
+                              <Clock className="size-2.5" /> Extend
                             </Button>
                             <Button variant="outline" size="sm" className="h-9 gap-1 px-2 text-xs" onClick={() => setInlineSnagTarget({ jobId: j.id, plotId: j.plotId, contactId: (j as { contractors?: Array<{ contactId: string }> }).contractors?.[0]?.contactId })}>
                               <AlertTriangle className="size-2.5" /> Snag
@@ -2116,12 +2256,12 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                               {j.blockedById ? (
                                 <Link
                                   href={`/jobs/${j.blockedById}`}
-                                  className="inline-flex h-9 items-center gap-1 rounded-md border border-blue-200 bg-blue-50 px-2 text-xs text-blue-700 hover:bg-blue-100sm:text-[10px]"
+                                  className="inline-flex h-9 items-center gap-1 rounded-md border border-blue-200 bg-blue-50 px-2 text-xs text-blue-700 hover:bg-blue-100 sm:text-[10px]"
                                 >
                                   <Briefcase className="size-2.5" /> Open {j.blockedBy}
                                 </Link>
                               ) : null}
-                              <Link href={`/jobs/${j.id}`} className="inline-flex h-9 items-center gap-1 rounded-md border px-2 text-xs text-slate-600 hover:bg-slate-100sm:text-[10px]">
+                              <Link href={`/jobs/${j.id}`} className="inline-flex h-9 items-center gap-1 rounded-md border px-2 text-xs text-slate-600 hover:bg-slate-100 sm:text-[10px]">
                                 <Briefcase className="size-2.5" /> View this job
                               </Link>
                             </JobActionStrip>
@@ -2167,8 +2307,12 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                             </div>
                             <p className="text-xs text-muted-foreground">{d.itemsDescription || "—"}</p>
                             <p className="text-xs text-muted-foreground">
-                              <Link href={`/jobs/${d.job.id}`} className="hover:underline hover:text-blue-600">{d.job.name}</Link>
-                              {" · "}{d.job.plot.plotNumber ? `Plot ${d.job.plot.plotNumber}` : d.job.plot.name}
+                              {d.job ? (
+                                <Link href={`/jobs/${d.job.id}`} className="hover:underline hover:text-blue-600">{d.job.name}</Link>
+                              ) : (
+                                <span>One-off order</span>
+                              )}
+                              {" · "}{(() => { const p = d.job?.plot ?? d.plot; return p ? (p.plotNumber ? `Plot ${p.plotNumber}` : p.name) : "Site-wide"; })()}
                               {d.expectedDeliveryDate && (
                                 <span className="ml-1 font-medium text-red-600">
                                   · Due {format(new Date(d.expectedDeliveryDate), "dd MMM")}
@@ -2279,8 +2423,12 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                       <Link href={`/suppliers/${d.supplier.id}`} className="font-medium text-blue-600 hover:underline">{d.supplier.name}</Link>
                       <p className="text-xs text-muted-foreground">{d.itemsDescription || "—"}</p>
                       <p className="text-xs text-muted-foreground">
-                        <Link href={`/jobs/${d.job.id}`} className="hover:underline hover:text-blue-600">{d.job.name}</Link>
-                        {" · "}{d.job.plot.plotNumber ? `Plot ${d.job.plot.plotNumber}` : d.job.plot.name}
+                        {d.job ? (
+                          <Link href={`/jobs/${d.job.id}`} className="hover:underline hover:text-blue-600">{d.job.name}</Link>
+                        ) : (
+                          <span>One-off order</span>
+                        )}
+                        {" · "}{(() => { const p = d.job?.plot ?? d.plot; return p ? (p.plotNumber ? `Plot ${p.plotNumber}` : p.name) : "Site-wide"; })()}
                       </p>
                       <JobActionStrip>
                         <Button
@@ -2319,12 +2467,17 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                       siteNames: [data.site.name],
                       orders: group.map((g) => ({
                         id: g.id,
+                        // One-off orders (job=null): the email composer still
+                        // needs a label-shaped job — fall back to the order's
+                        // own plot/site attachment. No id when there's no
+                        // real job: a fabricated order-id-as-job-id made the
+                        // /api/events audit POST 500 on the Job FK.
                         job: {
-                          id: g.job.id,
-                          name: g.job.name,
+                          id: g.job?.id,
+                          name: g.job?.name ?? "One-off order",
                           plot: {
-                            name: g.job.plot.name,
-                            plotNumber: g.job.plot.plotNumber,
+                            name: g.job?.plot.name ?? g.plot?.name ?? "Site-wide",
+                            plotNumber: g.job?.plot.plotNumber ?? g.plot?.plotNumber ?? null,
                             site: {
                               id: siteId,
                               name: data.site.name,
@@ -2345,7 +2498,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                       })),
                     });
                     return (
-                      <div key={`${o.supplier.id}__${o.job.name}`} className="rounded border p-2 text-sm">
+                      <div key={orderGroupKey(o)} className="rounded border p-2 text-sm">
                         <div className="flex flex-wrap items-center gap-1.5">
                           <Link href={`/suppliers/${o.supplier.id}`} className="truncate font-medium text-blue-600 hover:underline">
                             {o.supplier.name}
@@ -2361,11 +2514,15 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                           )}
                         </div>
                         <div className="flex flex-wrap items-center gap-1 pt-0.5">
-                          <Link href={`/jobs/${o.job.id}`} className="text-xs hover:underline hover:text-blue-600">{o.job.name}</Link>
+                          {o.job ? (
+                            <Link href={`/jobs/${o.job.id}`} className="text-xs hover:underline hover:text-blue-600">{o.job.name}</Link>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">One-off order</span>
+                          )}
                           <span className="text-xs text-muted-foreground">·</span>
                           {group.slice(0, 5).map((g) => (
                             <span key={g.id} className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600">
-                              {g.job.plot.plotNumber ? `Plot ${g.job.plot.plotNumber}` : g.job.plot.name}
+                              {(() => { const p = g.job?.plot ?? g.plot; return p ? (p.plotNumber ? `Plot ${p.plotNumber}` : p.name) : "Site-wide"; })()}
                             </span>
                           ))}
                           {group.length > 5 && (
@@ -2597,37 +2754,49 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                           <div className="flex flex-wrap gap-1.5">
                             {item.missing.map((m) => {
                               const mLower = m.toLowerCase();
-                              if (mLower.includes("sign-off") || mLower.includes("signoff") || mLower.includes("sign off")) {
-                                return (
-                                  <Button key={m} variant="outline" size="sm" className="h-9 gap-1 border-amber-300 px-2.5 text-xs text-amber-700 hover:bg-amber-100"
-                                    onClick={() => setSignOffTarget({ id: item.id, name: item.title, status: "COMPLETED", plot: undefined })}>
-                                    <FileCheck className="size-3" /> Add Sign-Off Notes
-                                  </Button>
-                                );
-                              }
-                              if (mLower.includes("photo")) {
-                                return (
-                                  <Button key={m} variant="outline" size="sm" className="h-9 gap-1 border-amber-300 px-2.5 text-xs text-amber-700 hover:bg-amber-100"
-                                    onClick={() => setPhotoTarget({ jobId: item.id, jobName: item.title })}>
-                                    <Camera className="size-3" /> Upload Photos
-                                  </Button>
-                                );
-                              }
-                              if (mLower.includes("assignee") || mLower.includes("assigned")) {
-                                return (
-                                  <Button key={m} variant="outline" size="sm" className="h-9 gap-1 border-amber-300 px-2.5 text-xs text-amber-700 hover:bg-amber-100"
-                                    onClick={() => { setChecklistExpand({ jobId: item.id, item: "assignee" }); }}>
-                                    <UserPlus className="size-3" /> Assign Team Member
-                                  </Button>
-                                );
-                              }
-                              if (mLower.includes("contractor")) {
-                                return (
-                                  <Button key={m} variant="outline" size="sm" className="h-9 gap-1 border-amber-300 px-2.5 text-xs text-amber-700 hover:bg-amber-100"
-                                    onClick={() => handleContractorAssignOpen(item.id, item.title)}>
-                                    <HardHat className="size-3" /> Assign Contractor
-                                  </Button>
-                                );
+                              // (Jun 2026 audit) Job-flavoured fix buttons ONLY
+                              // for job rows. These chips matched on text alone,
+                              // so a snag's "No contractor" PUT
+                              // /api/jobs/{snagId}/contractors (wrong entity,
+                              // 404), "No photos" posted to the JOB photo
+                              // endpoint, and "No assignee" set a checklist
+                              // expand that's gated on type==="job" — a dead
+                              // button. Snag rows fall through to the generic
+                              // deep-link below, which opens the snag in the
+                              // Snags tab where the full form lives.
+                              if (item.type === "job") {
+                                if (mLower.includes("sign-off") || mLower.includes("signoff") || mLower.includes("sign off")) {
+                                  return (
+                                    <Button key={m} variant="outline" size="sm" className="h-9 gap-1 border-amber-300 px-2.5 text-xs text-amber-700 hover:bg-amber-100"
+                                      onClick={() => setSignOffTarget({ id: item.id, name: item.title, status: "COMPLETED", plot: undefined })}>
+                                      <FileCheck className="size-3" /> Add Sign-Off Notes
+                                    </Button>
+                                  );
+                                }
+                                if (mLower.includes("photo")) {
+                                  return (
+                                    <Button key={m} variant="outline" size="sm" className="h-9 gap-1 border-amber-300 px-2.5 text-xs text-amber-700 hover:bg-amber-100"
+                                      onClick={() => setPhotoTarget({ jobId: item.id, jobName: item.title })}>
+                                      <Camera className="size-3" /> Upload Photos
+                                    </Button>
+                                  );
+                                }
+                                if (mLower.includes("assignee") || mLower.includes("assigned")) {
+                                  return (
+                                    <Button key={m} variant="outline" size="sm" className="h-9 gap-1 border-amber-300 px-2.5 text-xs text-amber-700 hover:bg-amber-100"
+                                      onClick={() => handleAssigneeOpen(item.id)}>
+                                      <UserPlus className="size-3" /> Assign Team Member
+                                    </Button>
+                                  );
+                                }
+                                if (mLower.includes("contractor")) {
+                                  return (
+                                    <Button key={m} variant="outline" size="sm" className="h-9 gap-1 border-amber-300 px-2.5 text-xs text-amber-700 hover:bg-amber-100"
+                                      onClick={() => handleContractorAssignOpen(item.id, item.title)}>
+                                      <HardHat className="size-3" /> Assign Contractor
+                                    </Button>
+                                  );
+                                }
                               }
                               return (
                                 <Link key={m} href={item.type === "snag" ? `/sites/${siteId}?tab=snags&snagId=${item.id}` : item.type === "job" ? `/jobs/${item.id}` : `/orders`}
@@ -2738,12 +2907,15 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
           onRefresh={() => setRefreshKey((k) => k + 1)}
         />
 
-      {/* Upcoming Orders — extracted to UpcomingOrdersSection. */}
+      {/* Upcoming Orders — extracted to UpcomingOrdersSection.
+          (Jun 2026 audit) Collapse state moved onto the shared
+          openSections/toggleSection mechanism so the "Scheduled"
+          summary pill can auto-expand the card via SECTION_TO_TOGGLE. */}
       <UpcomingOrdersSection
         data={data}
         siteId={siteId}
-        open={upcomingOrdersOpen}
-        onToggle={() => setUpcomingOrdersOpen((o) => !o)}
+        open={openSections.has("upcoming-orders")}
+        onToggle={() => toggleSection("upcoming-orders")}
         groupedUpcomingOrders={groupedUpcomingOrders}
         isOrderPending={isOrderPending}
         onGroupOrderAction={handleGroupOrderAction}
@@ -2758,12 +2930,16 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
             siteNames: [data.site.name],
             orders: group.map((g) => ({
               id: g.id,
+              // One-off orders (job=null): email composer needs a label-shaped
+              // job — fall back to the order's own plot/site attachment. No
+              // id when there's no real job: a fabricated order-id-as-job-id
+              // made the /api/events audit POST 500 on the Job FK.
               job: {
-                id: g.job.id,
-                name: g.job.name,
+                id: g.job?.id,
+                name: g.job?.name ?? "One-off order",
                 plot: {
-                  name: g.job.plot.name,
-                  plotNumber: g.job.plot.plotNumber,
+                  name: g.job?.plot.name ?? g.plot?.name ?? "Site-wide",
+                  plotNumber: g.job?.plot.plotNumber ?? g.plot?.plotNumber ?? null,
                   site: {
                     id: siteId,
                     name: data.site.name,
@@ -2919,8 +3095,14 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
             </DialogTitle>
             <DialogDescription>
               <span className="font-medium text-foreground">{signOffTarget?.name}</span>
-              {" — "}
-              {signOffTarget?.plot?.plotNumber ? `Plot ${signOffTarget.plot.plotNumber}` : signOffTarget?.plot?.name}
+              {/* (Jun 2026 audit) Needs Attention opens this dialog with
+                  plot: undefined — guard so it doesn't render "Name — " */}
+              {signOffTarget?.plot && (
+                <>
+                  {" — "}
+                  {signOffTarget.plot.plotNumber ? `Plot ${signOffTarget.plot.plotNumber}` : signOffTarget.plot.name}
+                </>
+              )}
               {signOffTarget?.assignedTo && ` · ${signOffTarget.assignedTo.name}`}
             </DialogDescription>
           </DialogHeader>
@@ -3004,8 +3186,22 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
         plotId={completionContext?.plotId ?? ""}
         signOffNotes={completionContext?.signOffNotes}
         openInspections={completionContext?.openInspections ?? []}
-        onClose={() => setCompletionContext(null)}
-        onDecisionMade={() => setRefreshKey((k) => k + 1)}
+        onClose={() => {
+          setCompletionContext(null);
+          setActiveReviewJobId(null);
+        }}
+        onDecisionMade={() => {
+          // (Jun 2026 D3) Decision made — retire the "Review next steps"
+          // chip for this job. Closing without deciding keeps the chip.
+          if (activeReviewJobId) {
+            setPendingCompletionReviews((prev) => {
+              const next = { ...prev };
+              delete next[activeReviewJobId];
+              return next;
+            });
+          }
+          setRefreshKey((k) => k + 1);
+        }}
       />
 
       {/* Snag Resolve Dialog (P5) */}
@@ -3045,7 +3241,6 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                   type="file"
                   accept="image/*"
                   multiple
-                  capture="environment"
                   className="hidden"
                   onChange={(e) => handleSnagResolvePhotosChange(e.target.files)}
                 />

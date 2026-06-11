@@ -182,6 +182,15 @@ export function usePlotCreation() {
           { ttlMs: 15000 },
         );
       }
+      // (Jun 2026 audit) Placeholder drawings (cloned templates) are not
+      // copied — tell the user which ones need re-uploading on the template.
+      const docWarnings = body?._documentWarnings;
+      if (Array.isArray(docWarnings) && docWarnings.length > 0 && !opts?.silent) {
+        toast.error(
+          `Plot created but ${docWarnings.length} drawing${docWarnings.length === 1 ? "" : "s"} were not copied (placeholder — file never re-uploaded after clone): ${docWarnings.slice(0, 4).join(", ")}${docWarnings.length > 4 ? "…" : ""}. Re-upload them in Settings → Templates.`,
+          { ttlMs: 15000 },
+        );
+      }
       return { ok: true };
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Failed to create plot from template";
@@ -238,6 +247,15 @@ export function usePlotCreation() {
       if (Array.isArray(inspWarnings) && inspWarnings.length > 0 && !opts?.silent) {
         toast.error(
           `Plots created but ${inspWarnings.length} inspection${inspWarnings.length === 1 ? "" : "s"} could not be scheduled (anchor stage missing or undated): ${inspWarnings.slice(0, 4).join(", ")}${inspWarnings.length > 4 ? "…" : ""}. Add them manually from each plot's Overview tab.`,
+          { ttlMs: 15000 },
+        );
+      }
+      // (Jun 2026 audit) Placeholder drawings (cloned templates) are not
+      // copied — same warning as the single-plot path, once per batch.
+      const docWarnings = body?.documentWarnings;
+      if (Array.isArray(docWarnings) && docWarnings.length > 0 && !opts?.silent) {
+        toast.error(
+          `Plots created but ${docWarnings.length} drawing${docWarnings.length === 1 ? "" : "s"} were not copied (placeholder — file never re-uploaded after clone): ${docWarnings.slice(0, 4).join(", ")}${docWarnings.length > 4 ? "…" : ""}. Re-upload them in Settings → Templates.`,
           { ttlMs: 15000 },
         );
       }

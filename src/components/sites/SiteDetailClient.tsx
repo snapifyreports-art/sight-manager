@@ -337,9 +337,17 @@ function SiteSnags({ siteId, plots, initialSnagId }: { siteId: string; plots: Ar
   const actionParam = searchParams.get("action");
   const plotIdParam = searchParams.get("plotId");
   useEffect(() => {
-    if (actionParam === "new" && !createDialogOpen) {
-      setSelectedPlotId(plotIdParam ?? plots[0]?.id ?? "");
-      setCreateDialogOpen(true);
+    if (actionParam === "new" && !createDialogOpen && !snagCreateOpen) {
+      // (Jun 2026 W1) When the deep-link already names the plot, skip the
+      // plot-picker step and open the create-snag form directly — the
+      // picker was a redundant confirm of a choice already made.
+      if (plotIdParam && plots.some((p) => p.id === plotIdParam)) {
+        setSelectedPlotId(plotIdParam);
+        setSnagCreateOpen(true);
+      } else {
+        setSelectedPlotId(plotIdParam ?? plots[0]?.id ?? "");
+        setCreateDialogOpen(true);
+      }
     }
     // Only run when the param appears — explicitly NOT a deps list with
     // plots so a re-render doesn't re-open after the user has dismissed.

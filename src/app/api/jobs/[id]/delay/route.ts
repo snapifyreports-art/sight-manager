@@ -152,6 +152,10 @@ export async function POST(
       endDate: j.endDate,
       sortOrder: j.sortOrder,
       status: j.status,
+      // (Jun 2026 audit) Pass parentId so parent stages are treated as
+      // aggregates (re-derived from children, orders shifted via the
+      // engine's parent path) — same as /cascade and order-push.
+      parentId: j.parentId ?? null,
     })),
     allOrders.map((o) => ({
       id: o.id,
@@ -161,6 +165,23 @@ export async function POST(
       status: o.status,
     }))
   );
+
+  // (Jun 2026 audit) ON_HOLD trigger jobs are excluded from allPlotJobs,
+  // so calculateCascade can't find them and returns an empty result.
+  // Pre-fix we still wrote the "Delayed N days" JobAction note + a
+  // SCHEDULE_CASCADED event and returned 200 with jobsShifted: 0 — the
+  // job's timeline and the Site Log claimed a delay that never happened.
+  if (cascade.jobUpdates.length === 0) {
+    return NextResponse.json(
+      {
+        error:
+          job.status === "ON_HOLD"
+            ? "Job is on hold — take it off hold before delaying it"
+            : "Nothing to delay — the job has no scheduled dates to shift",
+      },
+      { status: 409 },
+    );
+  }
 
   const reasonLabel =
     delayReasonType === "WEATHER_RAIN"

@@ -188,8 +188,9 @@ export function TemplateVariantsSection({
       description: (
         <>
           Delete <span className="font-medium text-foreground">{v.name}</span>?
-          All its stages, orders, materials and documents are removed. Plots
-          already created using this variant keep their snapshots.
+          All its stages, orders, materials, documents and inspections are
+          removed. Plots already created using this variant keep their
+          snapshots.
         </>
       ),
       confirmLabel: "Delete",
@@ -246,10 +247,24 @@ export function TemplateVariantsSection({
               key={v.id}
               className="overflow-hidden rounded-lg border bg-white transition-all hover:shadow-sm"
             >
-              <button
-                type="button"
+              {/* (Jun 2026 audit) role=button div, NOT a <button> — the
+                  delete control nested inside was a button-in-button
+                  (invalid HTML, React validateDOMNesting warning, and
+                  Enter on the card could trigger the inner delete). */}
+              <div
+                role="button"
+                tabIndex={0}
                 onClick={() => onOpenVariant(v.id)}
-                className="group flex w-full items-center gap-3 p-3 text-left"
+                onKeyDown={(e) => {
+                  // Keydown bubbles up from the nested delete button — only
+                  // open when the card itself is focused (review fix).
+                  if (e.target !== e.currentTarget) return;
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    onOpenVariant(v.id);
+                  }
+                }}
+                className="group flex w-full cursor-pointer items-center gap-3 p-3 text-left"
               >
                 <Layers className="size-4 shrink-0 text-blue-600" />
                 <div className="min-w-0 flex-1">
@@ -273,7 +288,7 @@ export function TemplateVariantsSection({
                   <Trash2 className="size-3.5" />
                 </button>
                 <ChevronRight className="size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
-              </button>
+              </div>
               {/* (May 2026 Keith request) Per-variant house value —
                   variants are different sizes, so each carries its own
                   build budget + sale price. Required before the
@@ -379,6 +394,9 @@ interface VariantSummary {
   orders: number;
   materials: number;
   documents: number;
+  /** (Jun 2026 audit) Hold-point defs — a variant carrying 5 NHBC
+   *  inspections used to read identically to one with none. */
+  inspections: number;
   totalDays: number;
 }
 
@@ -397,6 +415,7 @@ async function fetchSummary(
         orders: 0,
         materials: 0,
         documents: 0,
+        inspections: 0,
         totalDays: 0,
       };
     const data = await res.json();
@@ -424,8 +443,8 @@ async function fetchSummary(
       if (j.children) j.children.forEach(walk);
     }
     if (data?.jobs) data.jobs.forEach(walk);
-    // Material + document counts via the parallel endpoints
-    const [matRes, docRes] = await Promise.all([
+    // Material + document + inspection counts via the parallel endpoints
+    const [matRes, docRes, inspRes] = await Promise.all([
       fetch(
         `/api/plot-templates/${templateId}/materials?variantId=${variantId}`,
         { cache: "no-store" },
@@ -434,12 +453,17 @@ async function fetchSummary(
         `/api/plot-templates/${templateId}/documents?variantId=${variantId}`,
         { cache: "no-store" },
       ),
+      fetch(
+        `/api/plot-templates/${templateId}/inspections?variantId=${variantId}`,
+        { cache: "no-store" },
+      ),
     ]);
     const materials = matRes.ok ? (await matRes.json()).length : 0;
     const documents = docRes.ok ? (await docRes.json()).length : 0;
-    return { jobs, orders, materials, documents, totalDays };
+    const inspections = inspRes.ok ? (await inspRes.json()).length : 0;
+    return { jobs, orders, materials, documents, inspections, totalDays };
   } catch {
-    return { jobs: 0, orders: 0, materials: 0, documents: 0, totalDays: 0 };
+    return { jobs: 0, orders: 0, materials: 0, documents: 0, inspections: 0, totalDays: 0 };
   }
 }
 
@@ -547,6 +571,8 @@ function SummaryLine({ summary }: { summary?: VariantSummary }) {
   if (summary.orders > 0) parts.push(`${summary.orders} orders`);
   if (summary.materials > 0) parts.push(`${summary.materials} materials`);
   if (summary.documents > 0) parts.push(`${summary.documents} drawings`);
+  if (summary.inspections > 0)
+    parts.push(`${summary.inspections} inspection${summary.inspections === 1 ? "" : "s"}`);
   if (parts.length === 0) parts.push("empty — start setting up");
   return (
     <p className="mt-0.5 text-[10px] text-muted-foreground">{parts.join(" · ")}</p>

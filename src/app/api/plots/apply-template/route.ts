@@ -98,6 +98,16 @@ export async function POST(request: NextRequest) {
       { status: 400 },
     );
   }
+  // (Jun 2026 audit) Same defence-in-depth for drafts — the schema's
+  // stated purpose of isDraft is that a half-built template can't be
+  // applied to a live site. The picker filters liveOnly=true, but the
+  // same stale-tab / deep-link vector as archived applies here.
+  if (template.isDraft) {
+    return NextResponse.json(
+      { error: "Template is a draft — mark it live before applying" },
+      { status: 400 },
+    );
+  }
 
   let resolvedVariantId: string | null = null;
   // (May 2026 Keith request) Capture the chosen variant's house-value
@@ -182,6 +192,17 @@ export async function POST(request: NextRequest) {
 
   const plotStartDate = new Date(startDate);
 
+  // (Jun 2026 audit) Placeholder documents (clone copies with url="")
+  // must NOT be copied onto plots — SiteDocument has no isPlaceholder
+  // concept, so they rendered as official-looking drawings whose Open/
+  // Download links went nowhere (and flowed into the Handover ZIP).
+  // Skipped names are surfaced as warnings so the user knows which
+  // drawings need re-uploading on the template.
+  const copyableDocuments = scopedDocuments.filter((d) => !d.isPlaceholder && d.url);
+  const skippedDocuments = scopedDocuments
+    .filter((d) => d.isPlaceholder || !d.url)
+    .map((d) => d.name);
+
   // Create everything in a transaction — complex templates can have 20+ jobs + many orders,
   // so extend the default 5s timeout to 60s to match apply-template-batch
   let result;
@@ -248,10 +269,11 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // 2c. Copy TemplateDocument rows → SiteDocument (plot-scoped snapshot)
-    if (scopedDocuments.length > 0) {
+    // 2c. Copy TemplateDocument rows → SiteDocument (plot-scoped snapshot).
+    // Placeholders filtered out above — dead links must not reach plots.
+    if (copyableDocuments.length > 0) {
       await tx.siteDocument.createMany({
-        data: scopedDocuments.map((d) => ({
+        data: copyableDocuments.map((d) => ({
           name: d.name,
           url: d.url,
           fileName: d.fileName,
@@ -302,7 +324,12 @@ export async function POST(request: NextRequest) {
   }
 
   return NextResponse.json(
-    { ...result.plot, _warnings: result.warnings, _inspectionWarnings: result.skippedInspections },
+    {
+      ...result.plot,
+      _warnings: result.warnings,
+      _inspectionWarnings: result.skippedInspections,
+      _documentWarnings: skippedDocuments,
+    },
     { status: 201 },
   );
 }

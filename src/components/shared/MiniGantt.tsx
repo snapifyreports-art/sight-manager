@@ -63,9 +63,24 @@ export function MiniGantt({
   // Monday on/before the earliest job (or today, whichever is sooner) to
   // the latest job end, with a 12-week minimum so a single-job
   // contractor isn't cramped.
-  const datedJobs = jobs.filter((j) => j.startDate && j.endDate);
-  const jobStartMs = datedJobs.map((j) => new Date(j.startDate!).getTime());
-  const jobEndMs = datedJobs.map((j) => new Date(j.endDate!).getTime());
+  // (Jun 2026 Keith bug report — frozen contractor pages) The window is
+  // sized from the jobs' own dates, so ONE corrupt far-future endDate
+  // (e.g. a mistyped year) exploded WEEKS_TO_SHOW into hundreds of
+  // thousands of columns and froze the renderer on BOTH consumers.
+  // Guard rails: invalid dates are ignored, window-sizing dates are
+  // clamped to [today-1y, today+2y], and the grid is hard-capped at 120
+  // weeks. Bars beyond the window still render clamped to its edges.
+  const VALID_MIN = today.getTime() - 365 * DAY_MS;
+  const VALID_MAX = today.getTime() + 2 * 365 * DAY_MS;
+  const clampMs = (ms: number) => Math.min(Math.max(ms, VALID_MIN), VALID_MAX);
+  const datedJobs = jobs.filter((j) => {
+    if (!j.startDate || !j.endDate) return false;
+    const s = new Date(j.startDate).getTime();
+    const e = new Date(j.endDate).getTime();
+    return Number.isFinite(s) && Number.isFinite(e);
+  });
+  const jobStartMs = datedJobs.map((j) => clampMs(new Date(j.startDate!).getTime()));
+  const jobEndMs = datedJobs.map((j) => clampMs(new Date(j.endDate!).getTime()));
   const earliest = jobStartMs.length ? Math.min(...jobStartMs) : today.getTime();
   const latest = jobEndMs.length ? Math.max(...jobEndMs) : today.getTime();
 
@@ -78,7 +93,7 @@ export function MiniGantt({
   const spanWeeks = Math.ceil(
     (Math.max(latest, today.getTime()) - startMonday.getTime()) / DAY_MS / 7,
   );
-  const WEEKS_TO_SHOW = Math.max(12, spanWeeks + 1);
+  const WEEKS_TO_SHOW = Math.min(120, Math.max(12, spanWeeks + 1));
 
   const weekCols: Date[] = [];
   for (let i = 0; i < WEEKS_TO_SHOW; i++) {

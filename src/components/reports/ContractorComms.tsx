@@ -236,13 +236,26 @@ function ShareDialog({
                   rows={6}
                   className="w-full rounded-lg border border-border bg-background px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
                 />
-                <a
-                  href={`mailto:${contractor.email || ""}?subject=${encodeURIComponent(`Your worksheets — ${contractor.company || contractor.name}`)}&body=${encodeURIComponent(emailBody)}`}
-                  className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
-                >
-                  <Send className="size-3.5" />
-                  Open in Email App
-                </a>
+                {/* (Jun 2026 D11) No email → a real disabled button, not an
+                    anchor with an empty mailto: that opens a blank draft. */}
+                {contractor.email ? (
+                  <a
+                    href={`mailto:${contractor.email}?subject=${encodeURIComponent(`Your worksheets — ${contractor.company || contractor.name}`)}&body=${encodeURIComponent(emailBody)}`}
+                    className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+                  >
+                    <Send className="size-3.5" />
+                    Open in Email App
+                  </a>
+                ) : (
+                  <button
+                    type="button"
+                    disabled
+                    className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white opacity-65"
+                  >
+                    <Send className="size-3.5" />
+                    Open in Email App
+                  </button>
+                )}
                 {!contractor.email && (
                   <p className="text-[11px] text-amber-600">No email on file — add one in Contacts first.</p>
                 )}
@@ -409,7 +422,7 @@ function SnagCard({ snag, siteId }: { snag: Snag; siteId: string }) {
             <label className="flex cursor-pointer items-center gap-1 rounded border bg-white px-2 py-1 text-[10px] text-muted-foreground hover:bg-slate-50">
               <Camera className="size-3" />
               {photos.length > 0 ? `${photos.length} photo${photos.length > 1 ? "s" : ""}` : "Add Photos"}
-              <input type="file" accept="image/*" multiple capture="environment" className="hidden"
+              <input type="file" accept="image/*" multiple className="hidden"
                 onChange={(e) => setPhotos(Array.from(e.target.files || []))} />
             </label>
             <div className="flex-1" />

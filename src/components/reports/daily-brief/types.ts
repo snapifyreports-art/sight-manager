@@ -169,11 +169,16 @@ export interface BriefData {
     itemsDescription: string | null;
     status: string;
     supplier: { id: string; name: string };
+    // (Jun 2026 audit) MaterialOrder.jobId is nullable — one-off orders
+    // attach directly to a plot or the site instead. Consumers must
+    // null-check `job` and fall back to the plot/site attachment.
     job: {
       id: string;
       name: string;
       plot: { plotNumber: string | null; name: string };
-    };
+    } | null;
+    plot: { plotNumber: string | null; name: string } | null;
+    site: { name: string } | null;
   }>;
   overdueDeliveries: Array<{
     id: string;
@@ -184,7 +189,9 @@ export interface BriefData {
       id: string;
       name: string;
       plot: { plotNumber: string | null; name: string };
-    };
+    } | null;
+    plot: { plotNumber: string | null; name: string } | null;
+    site: { name: string } | null;
   }>;
   recentEvents: Array<{
     id: string;
@@ -222,7 +229,9 @@ export interface BriefData {
       id: string;
       name: string;
       plot: { plotNumber: string | null; name: string };
-    };
+    } | null;
+    plot: { plotNumber: string | null; name: string } | null;
+    site: { name: string } | null;
     orderItems: Array<{
       id: string;
       name: string;
@@ -249,7 +258,9 @@ export interface BriefData {
       id: string;
       name: string;
       plot: { plotNumber: string | null; name: string };
-    };
+    } | null;
+    plot: { plotNumber: string | null; name: string } | null;
+    site: { name: string } | null;
     orderItems: Array<{
       id: string;
       name: string;
@@ -270,7 +281,9 @@ export interface BriefData {
       id: string;
       name: string;
       plot: { plotNumber: string | null; name: string };
-    };
+    } | null;
+    plot: { plotNumber: string | null; name: string } | null;
+    site: { name: string } | null;
   }>;
   jobsStartingTomorrow: Array<{
     id: string;
@@ -395,3 +408,31 @@ export type StartingTomorrowJob = BriefData["jobsStartingTomorrow"][number];
 export type NeedsAttentionItem = BriefData["needsAttention"][number];
 export type PendingSignOffJob = NonNullable<BriefData["pendingSignOffs"]>[number];
 export type RecentEvent = BriefData["recentEvents"][number];
+
+/**
+ * (Jun 2026 audit blocker fix) Labels for orders whose `job` is null —
+ * one-off orders attach straight to a plot or the site. Shared by every
+ * Brief section so a job-less order renders "One-off · Plot 3" instead
+ * of crashing on `o.job.name`.
+ */
+type OrderAttachment = {
+  job: { id?: string; name: string; plot: { plotNumber: string | null; name: string } } | null;
+  plot?: { plotNumber: string | null; name: string } | null;
+  site?: { name: string } | null;
+};
+
+export function orderJobLabel(o: OrderAttachment): string {
+  if (o.job) return o.job.name;
+  return "One-off order";
+}
+
+export function orderPlotLabel(o: OrderAttachment): string {
+  const plot = o.job?.plot ?? o.plot;
+  if (plot) return plot.plotNumber ? `Plot ${plot.plotNumber}` : plot.name;
+  return o.site ? "Site-wide" : "—";
+}
+
+/** Stable grouping key for supplier+target grouping when job may be null. */
+export function orderGroupKey(o: OrderAttachment & { supplier: { id: string }; id: string }): string {
+  return `${o.supplier.id}__${o.job?.name ?? `oneoff-${o.plot?.name ?? o.site?.name ?? o.id}`}`;
+}

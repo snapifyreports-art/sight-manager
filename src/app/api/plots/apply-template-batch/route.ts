@@ -96,6 +96,15 @@ export async function POST(request: NextRequest) {
       { status: 400 },
     );
   }
+  // (Jun 2026 audit) Same defence-in-depth for drafts — isDraft exists
+  // so a half-built template can't be applied to a live site; the
+  // picker filters liveOnly=true but stale tabs / deep-links bypass it.
+  if (template.isDraft) {
+    return NextResponse.json(
+      { error: "Template is a draft — mark it live before applying" },
+      { status: 400 },
+    );
+  }
 
   // Variant resolution (May 2026 full-fat variants rework). Same flow
   // as apply-template (single): variants own full data; null = base.
@@ -208,6 +217,15 @@ export async function POST(request: NextRequest) {
 
   const fallbackStartDate = new Date(startDate);
 
+  // (Jun 2026 audit) Placeholder documents (clone copies with url="")
+  // must NOT be copied onto plots — they render as dead drawing links
+  // and flow into the Handover ZIP. Same filter as apply-template
+  // (single); skipped names surfaced once (identical for every plot).
+  const copyableDocuments = scopedDocuments.filter((d) => !d.isPlaceholder && d.url);
+  const documentWarnings = scopedDocuments
+    .filter((d) => d.isPlaceholder || !d.url)
+    .map((d) => d.name);
+
   // Create each plot in its own transaction to avoid timeout on large batches
   const createdPlots: string[] = [];
   const errors: Array<{ plotNumber: string; error: string }> = [];
@@ -282,10 +300,11 @@ export async function POST(request: NextRequest) {
           });
         }
 
-        // Copy TemplateDocument rows → SiteDocument (plot-scoped) snapshot
-        if (scopedDocuments.length > 0) {
+        // Copy TemplateDocument rows → SiteDocument (plot-scoped) snapshot.
+        // Placeholders filtered out above — dead links must not reach plots.
+        if (copyableDocuments.length > 0) {
           await tx.siteDocument.createMany({
-            data: scopedDocuments.map((d) => ({
+            data: copyableDocuments.map((d) => ({
               name: d.name,
               url: d.url,
               fileName: d.fileName,
@@ -348,6 +367,7 @@ export async function POST(request: NextRequest) {
       errors,
       warnings: warningsByPlot,
       inspectionWarnings,
+      documentWarnings,
     },
     { status: 201 }
   );

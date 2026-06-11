@@ -13,6 +13,18 @@ interface DocumentUploadProps {
 
 const ACCEPTED = ".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.gif,.csv,.txt";
 
+// (Jun 2026 W7) Optional category — the same vocabulary the handover ZIP
+// sorts into folders (certificates / drawings / specs / rams / handover).
+const CATEGORIES: Array<[string, string]> = [
+  ["", "Uncategorised"],
+  ["DRAWING", "Drawing"],
+  ["CERT", "Certificate"],
+  ["SPEC", "Spec"],
+  ["RAMS", "RAMS"],
+  ["HANDOVER", "Handover"],
+  ["OTHER", "Other"],
+];
+
 export function DocumentUpload({
   siteId,
   plotId,
@@ -21,6 +33,7 @@ export function DocumentUpload({
 }: DocumentUploadProps) {
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [category, setCategory] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const toast = useToast();
 
@@ -43,6 +56,7 @@ export function DocumentUpload({
           formData.append("name", file.name);
           if (plotId) formData.append("plotId", plotId);
           if (jobId) formData.append("jobId", jobId);
+          if (category) formData.append("category", category);
 
           try {
             const res = await fetch(`/api/sites/${siteId}/documents`, {
@@ -74,7 +88,7 @@ export function DocumentUpload({
         if (fileInputRef.current) fileInputRef.current.value = "";
       }
     },
-    [siteId, plotId, jobId, onUploaded, toast]
+    [siteId, plotId, jobId, category, onUploaded, toast]
   );
 
   return (
@@ -110,18 +124,34 @@ export function DocumentUpload({
           <span className="text-sm text-muted-foreground">Uploading...</span>
         </div>
       ) : (
-        <button
-          className="flex w-full flex-col items-center gap-1 py-2"
-          onClick={() => fileInputRef.current?.click()}
-        >
-          <Upload className="size-5 text-muted-foreground" />
-          <span className="text-xs text-muted-foreground">
-            Drop files here or click to browse
-          </span>
-          <span className="text-[10px] text-muted-foreground/70">
-            PDF, Word, Excel, Images — max 50MB
-          </span>
-        </button>
+        <>
+          <button
+            className="flex w-full flex-col items-center gap-1 py-2"
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <Upload className="size-5 text-muted-foreground" />
+            <span className="text-xs text-muted-foreground">
+              Drop files here or click to browse
+            </span>
+            <span className="text-[10px] text-muted-foreground/70">
+              PDF, Word, Excel, Images — max 50MB
+            </span>
+          </button>
+          {/* (Jun 2026 W7) Optional category — drives the handover-pack
+              folder the file lands in. Applies to every file in the batch. */}
+          <div className="mt-1 flex items-center justify-center gap-1.5 text-[10px] text-muted-foreground">
+            <span>Category</span>
+            <select
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+              className="rounded border border-input bg-white px-1.5 py-0.5 text-[10px]"
+            >
+              {CATEGORIES.map(([v, l]) => (
+                <option key={v} value={v}>{l}</option>
+              ))}
+            </select>
+          </div>
+        </>
       )}
     </div>
   );

@@ -112,6 +112,36 @@ export async function POST(
       // Prevent completing a job that was never started (matches /api/jobs/[id]/actions)
       if (action === "complete" && job.status === "NOT_STARTED") continue;
 
+      // (Jun 2026 audit) Hard-blocker inspection gate — same query as
+      // the /api/jobs/[id]/actions 409 contract. Pre-fix one click of
+      // Complete All silently completed AND signed off jobs with open
+      // hard hold-points, with no override reason in the audit trail.
+      // Bulk has no per-job override UI, so blocked jobs are skipped
+      // into failed[] with the hold-point names — the client toast
+      // tells the manager exactly what to clear (or to override from
+      // the job page).
+      if (action === "complete") {
+        const blocking = await prisma.inspection.findMany({
+          where: {
+            anchorJobId: jobId,
+            isBlocking: true,
+            status: { in: ["SCHEDULED", "BOOKED", "OVERDUE", "FAILED"] },
+          },
+          select: { name: true },
+          orderBy: { scheduledDate: "asc" },
+        });
+        if (blocking.length > 0) {
+          failed.push({
+            jobId,
+            jobName: job.name,
+            error: `Blocked by open hold-point${blocking.length > 1 ? "s" : ""}: ${blocking
+              .map((b) => b.name)
+              .join(", ")} — pass it or override with a reason from the job page`,
+          });
+          continue;
+        }
+      }
+
       // Build update data
       const updateData: Record<string, unknown> = { status: newStatus };
 

@@ -25,6 +25,7 @@
 import type { PrismaClient } from "@prisma/client";
 import { calculateCascade } from "@/lib/cascade";
 import { recomputeParentFromChildren } from "@/lib/parent-job";
+import { recomputeInspectionDates } from "@/lib/inspection-dates";
 import { logEvent } from "@/lib/event-log";
 
 export interface JobPushCascadeArgs {
@@ -149,6 +150,11 @@ export async function applyJobPushCascade(
   await Promise.all(
     Array.from(parentIds).map((pid) => recomputeParentFromChildren(db, pid)),
   );
+
+  // (Jun 2026 audit) Anchored inspections shift with their jobs —
+  // inspection-dates.ts: "MUST be called by every code path that moves
+  // a job's start/end date". This helper was the one mover that forgot.
+  await recomputeInspectionDates(db, args.plotId);
 
   await logEvent(db, {
     type: "SCHEDULE_CASCADED",

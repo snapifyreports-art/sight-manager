@@ -31,7 +31,12 @@ export async function GET(
     return NextResponse.json({ error: "You do not have access to this site" }, { status: 403 });
   }
   const dateParam = req.nextUrl.searchParams.get("date");
-  const targetDate = dateParam ? new Date(dateParam) : getServerCurrentDate(req);
+  // (Jun 2026 audit) Invalid ?date= propagated NaN into the day bounds
+  // and 500'd on the first Prisma query — fall back to today, matching
+  // the client component's own URL-param guard.
+  const parsedDate = dateParam ? new Date(dateParam) : null;
+  const targetDate =
+    parsedDate && !isNaN(parsedDate.getTime()) ? parsedDate : getServerCurrentDate(req);
   const dayStart = startOfDay(targetDate);
   const dayEnd = endOfDay(targetDate);
 
@@ -183,6 +188,9 @@ export async function GET(
         id: true, itemsDescription: true, status: true,
         supplier: { select: { id: true, name: true } },
         job: { select: { id: true, name: true, plot: { select: { plotNumber: true, name: true } } } },
+        // One-off orders (job=null) attach to a plot or the site directly.
+        plot: { select: { plotNumber: true, name: true } },
+        site: { select: { name: true } },
       },
     }),
   ]);
@@ -204,10 +212,16 @@ export async function GET(
     // Fetch all incomplete predecessor jobs for those plots in one query.
     // (#187) Include status so the UI can show whether the blocker is
     // IN_PROGRESS (almost done) or NOT_STARTED (won't unblock soon).
+    // (Jun 2026 audit) Leaf-only — parent roll-up stages (sortOrder*100)
+    // always sit "before" their own children and are never COMPLETED
+    // while a child runs, so without this filter every late start on a
+    // hierarchical template was mis-bucketed as Blocked, "waiting for"
+    // its own containing stage.
     const predecessorJobs = await prisma.job.findMany({
       where: {
         plotId: { in: plotIds },
         status: { not: "COMPLETED" },
+        children: { none: {} },
       },
       select: { id: true, name: true, sortOrder: true, plotId: true, status: true },
     });
@@ -256,6 +270,9 @@ export async function GET(
         id: true, itemsDescription: true, expectedDeliveryDate: true,
         supplier: { select: { id: true, name: true } },
         job: { select: { id: true, name: true, plot: { select: { plotNumber: true, name: true } } } },
+        // One-off orders (job=null) attach to a plot or the site directly.
+        plot: { select: { plotNumber: true, name: true } },
+        site: { select: { name: true } },
       },
     }),
     prisma.snag.count({
@@ -312,6 +329,9 @@ export async function GET(
         id: true, itemsDescription: true, status: true, expectedDeliveryDate: true, dateOfOrder: true,
         supplier: { select: { id: true, name: true, contactEmail: true, contactName: true, accountNumber: true } },
         job: { select: { id: true, name: true, plot: { select: { plotNumber: true, name: true } } } },
+        // One-off orders (job=null) attach to a plot or the site directly.
+        plot: { select: { plotNumber: true, name: true } },
+        site: { select: { name: true } },
         orderItems: { select: { id: true, name: true, quantity: true, unit: true, unitCost: true, totalCost: true } },
       },
       orderBy: { dateOfOrder: "asc" },
@@ -328,6 +348,9 @@ export async function GET(
         id: true, itemsDescription: true, status: true, expectedDeliveryDate: true, dateOfOrder: true,
         supplier: { select: { id: true, name: true, contactEmail: true, contactName: true, accountNumber: true } },
         job: { select: { id: true, name: true, plot: { select: { plotNumber: true, name: true } } } },
+        // One-off orders (job=null) attach to a plot or the site directly.
+        plot: { select: { plotNumber: true, name: true } },
+        site: { select: { name: true } },
         orderItems: { select: { id: true, name: true, quantity: true, unit: true, unitCost: true, totalCost: true } },
       },
       orderBy: { dateOfOrder: "asc" },
@@ -345,6 +368,9 @@ export async function GET(
         id: true, itemsDescription: true, status: true, expectedDeliveryDate: true, dateOfOrder: true,
         supplier: { select: { id: true, name: true } },
         job: { select: { id: true, name: true, plot: { select: { plotNumber: true, name: true } } } },
+        // One-off orders (job=null) attach to a plot or the site directly.
+        plot: { select: { plotNumber: true, name: true } },
+        site: { select: { name: true } },
       },
       orderBy: { expectedDeliveryDate: "asc" },
       take: 30,
@@ -546,8 +572,12 @@ export async function GET(
     // Only count leaf jobs — parent stages are derived roll-ups, counting them would double-count progress
     prisma.job.count({ where: { plot: { siteId: id }, children: { none: {} } } }),
     // IN_PROGRESS jobs where a later job on the same plot has already been started
+    // (Jun 2026 audit) Leaf-only on BOTH levels — parent roll-up stages
+    // are derived and never signed off, so without the filter a running
+    // stage (sortOrder 100) with any running child (101) listed itself
+    // as "still open while subsequent work has started".
     prisma.job.findMany({
-      where: { plot: { siteId: id }, status: "IN_PROGRESS" },
+      where: { plot: { siteId: id }, status: "IN_PROGRESS", children: { none: {} } },
       select: {
         id: true,
         name: true,
@@ -558,7 +588,7 @@ export async function GET(
             plotNumber: true,
             name: true,
             jobs: {
-              where: { status: { in: ["IN_PROGRESS", "COMPLETED"] } },
+              where: { status: { in: ["IN_PROGRESS", "COMPLETED"] }, children: { none: {} } },
               select: { sortOrder: true },
             },
           },
@@ -571,7 +601,11 @@ export async function GET(
     prisma.plot.findMany({
       where: {
         siteId: id,
-        jobs: { none: { status: "IN_PROGRESS" } },
+        // (Jun 2026 audit) Only running LEAF jobs make a plot "active" —
+        // a parent roll-up stays IN_PROGRESS mid-stage even when nothing
+        // is actually running, which hid exactly the stalled plots this
+        // section exists to catch.
+        jobs: { none: { status: "IN_PROGRESS", children: { none: {} } } },
         // Exclude fully completed plots
         NOT: { jobs: { every: { status: "COMPLETED" } } },
       },

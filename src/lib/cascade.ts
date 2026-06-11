@@ -174,43 +174,14 @@ export function calculateCascade(
   const orderUpdates: CascadeOrderUpdate[] = [];
   const conflicts: CascadeConflict[] = [];
 
-  // Track every child's new position for later parent re-derivation.
-  const newPositionsById = new Map<string, { newStart: Date; newEnd: Date }>();
-
-  for (const job of jobsToShift) {
-    if (!job.startDate || !job.endDate) continue;
-
-    // Same working-day shift to BOTH start and end. Duration preserved.
-    const newStart = addWorkingDays(job.startDate, deltaDays);
-    const newEnd = addWorkingDays(job.endDate, deltaDays);
-
-    // I7 conflict: NOT_STARTED job would land in the past.
-    if (
-      newStart < today &&
-      job.status !== "IN_PROGRESS" &&
-      job.status !== "COMPLETED"
-    ) {
-      conflicts.push({
-        kind: "job_in_past",
-        jobId: job.id,
-        jobName: job.name,
-        proposedDate: newStart,
-        today,
-      });
-    }
-
-    newPositionsById.set(job.id, { newStart, newEnd });
-    jobUpdates.push({
-      jobId: job.id,
-      jobName: job.name,
-      originalStart: job.startDate,
-      originalEnd: job.endDate,
-      newStart,
-      newEnd,
-    });
-
-    // Shift every non-historical order on this job by the same delta.
-    const jobOrders = allOrders.filter((o) => o.jobId === job.id);
+  // Shift every non-historical order on a moved job by the delta. Shared
+  // between the leaf loop and the parent re-derivation loop below —
+  // (Jun 2026 audit, I3) orders attached directly to a PARENT stage job
+  // (apply-template attaches parent-stage template orders to the parent
+  // row) were silently skipped because the order shift only ran inside
+  // the leaf jobsToShift loop.
+  const shiftOrdersForJob = (jobId: string) => {
+    const jobOrders = allOrders.filter((o) => o.jobId === jobId);
     for (const order of jobOrders) {
       // I4: historical/cancelled orders never move.
       if (order.status === "DELIVERED" || order.status === "CANCELLED") continue;
@@ -252,6 +223,45 @@ export function calculateCascade(
         newDeliveryDate,
       });
     }
+  };
+
+  // Track every child's new position for later parent re-derivation.
+  const newPositionsById = new Map<string, { newStart: Date; newEnd: Date }>();
+
+  for (const job of jobsToShift) {
+    if (!job.startDate || !job.endDate) continue;
+
+    // Same working-day shift to BOTH start and end. Duration preserved.
+    const newStart = addWorkingDays(job.startDate, deltaDays);
+    const newEnd = addWorkingDays(job.endDate, deltaDays);
+
+    // I7 conflict: NOT_STARTED job would land in the past.
+    if (
+      newStart < today &&
+      job.status !== "IN_PROGRESS" &&
+      job.status !== "COMPLETED"
+    ) {
+      conflicts.push({
+        kind: "job_in_past",
+        jobId: job.id,
+        jobName: job.name,
+        proposedDate: newStart,
+        today,
+      });
+    }
+
+    newPositionsById.set(job.id, { newStart, newEnd });
+    jobUpdates.push({
+      jobId: job.id,
+      jobName: job.name,
+      originalStart: job.startDate,
+      originalEnd: job.endDate,
+      newStart,
+      newEnd,
+    });
+
+    // Shift every non-historical order on this job by the same delta.
+    shiftOrdersForJob(job.id);
   }
 
   // Re-derive parent dates from their (moved) children. A parent's new
@@ -282,6 +292,10 @@ export function calculateCascade(
       newStart,
       newEnd,
     });
+
+    // (Jun 2026 audit, I3) PENDING orders attached directly to the
+    // parent stage job ride with it — same code path as leaf orders.
+    shiftOrdersForJob(parent.id);
   }
 
   return { deltaDays, jobUpdates, orderUpdates, conflicts };

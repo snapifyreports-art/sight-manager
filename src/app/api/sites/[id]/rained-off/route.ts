@@ -4,8 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { format } from "date-fns";
 import { canAccessSite } from "@/lib/site-access";
 import { apiError } from "@/lib/api-errors";
-import { addWorkingDays, snapToWorkingDay } from "@/lib/working-days";
-import { getServerCurrentDate } from "@/lib/dev-date";
+import { addWorkingDays } from "@/lib/working-days";
+import { calculateCascade } from "@/lib/cascade";
 import { logEvent } from "@/lib/event-log";
 
 export const dynamic = "force-dynamic";
@@ -61,7 +61,9 @@ export async function POST(
      *  the server dropped it on the floor — the "Delay jobs by 1 day"
      *  checkbox on the Mark Rained Off dialog did nothing. Now honoured:
      *  every weather-affected job overlapping the day gets its endDate
-     *  (and downstream chain) pushed by 1 working day. */
+     *  (and downstream chain) pushed by 1 working day. The trigger job
+     *  keeps its startDate — a rain day EXTENDS the in-progress job,
+     *  it doesn't slide it. */
     delayJobs?: boolean;
   };
 
@@ -76,6 +78,17 @@ export async function POST(
   const impactLabel = type === "TEMPERATURE" ? "Temperature impact" : "Rain day";
 
   try {
+    // (Jun 2026 audit) Re-marking an already-recorded day must NOT
+    // double-apply the 1-WD shift — check existence before the upsert
+    // and only delay jobs when the row is genuinely new.
+    const existingDay = await prisma.rainedOffDay.findUnique({
+      where: {
+        siteId_date_type: { siteId, date: dateObj, type },
+      },
+      select: { id: true },
+    });
+    const alreadyMarked = !!existingDay;
+
     // Upsert the weather impact day record (unique by siteId + date + type)
     const day = await prisma.rainedOffDay.upsert({
       where: {
@@ -96,7 +109,7 @@ export async function POST(
       select: { id: true },
     });
 
-    const affectedJobs: Array<{ id: string }> = [];
+    const affectedJobs: Array<{ id: string; plotId: string }> = [];
 
     for (const plot of plots) {
       const jobs = await prisma.job.findMany({
@@ -112,7 +125,7 @@ export async function POST(
           startDate: { lte: dateObj },
           endDate: { gte: dateObj },
         },
-        select: { id: true },
+        select: { id: true, plotId: true },
       });
       affectedJobs.push(...jobs);
     }
@@ -148,78 +161,145 @@ export async function POST(
     }
 
     // (May 2026 critical bug) Honour the `delayJobs` flag. Pre-fix
-    // the client sent it but the server ignored it. For each weather-
-    // affected job overlapping the day: push endDate (+ subsequent
-    // jobs in the same plot) by 1 working day. We use working-day
-    // arithmetic since construction crews don't work weekends — same
-    // semantics as every other delay path.
+    // the client sent it but the server ignored it.
+    //
+    // (Jun 2026 audit) The shift now routes through calculateCascade
+    // instead of a bespoke loop. The old loop shifted COMPLETED /
+    // ON_HOLD leaf jobs (I4 violation) and never moved PENDING orders
+    // (I3 violation), so materials fell a day behind their jobs after
+    // every rain delay. Trigger = first weather-affected active job in
+    // the plot, newEnd = end + 1 WD — same apply contract as /delay,
+    // EXCEPT the trigger keeps its startDate (a rain day extends the
+    // in-progress job by 1 WD rather than sliding it; see the override
+    // after calculateCascade below). The `alreadyMarked` guard stops a
+    // re-marked day double-applying the 1-WD shift.
     let totalShifted = 0;
-    if (delayJobs && affectedJobs.length > 0) {
-      const now = getServerCurrentDate(req);
+    if (delayJobs && !alreadyMarked && affectedJobs.length > 0) {
       const delayReasonType =
         type === "TEMPERATURE" ? "WEATHER_TEMPERATURE" : "WEATHER_RAIN";
 
-      // Group affected jobs by plot so we can extend each plot's
-      // downstream chain by 1 working day. We re-fetch the full job
-      // list per plot because plots typically share weather (a rain
-      // day delays the entire plot's active stage's downstream).
+      const { recomputeParentFromChildren } = await import("@/lib/parent-job");
+      const { recomputePlotPercent } = await import("@/lib/plot-percent");
+      const { recomputeInspectionDates } = await import("@/lib/inspection-dates");
+
       const affectedPlotIds = Array.from(
-        new Set(
-          await Promise.all(
-            affectedJobs.map((j) =>
-              prisma.job
-                .findUnique({ where: { id: j.id }, select: { plotId: true } })
-                .then((row) => row?.plotId ?? null),
-            ),
-          ).then((ids) => ids.filter((id): id is string => id !== null)),
-        ),
+        new Set(affectedJobs.map((j) => j.plotId)),
       );
 
       for (const plotId of affectedPlotIds) {
-        const plotJobs = await prisma.job.findMany({
-          where: { plotId, children: { none: {} } },
+        const allPlotJobs = await prisma.job.findMany({
+          where: { plotId, status: { not: "ON_HOLD" } },
           orderBy: { sortOrder: "asc" },
         });
-        // Find the earliest weather-affected job in this plot. Its
-        // endDate and every subsequent job's start/end shift by 1WD.
-        const firstAffected = plotJobs.find(
+
+        // Trigger = earliest weather-affected job overlapping the day
+        // that is still active (COMPLETED jobs are immovable per I4).
+        const affectedIdsInPlot = new Set(
+          affectedJobs.filter((j) => j.plotId === plotId).map((j) => j.id),
+        );
+        const trigger = allPlotJobs.find(
           (j) =>
-            j.weatherAffected &&
+            affectedIdsInPlot.has(j.id) &&
+            j.status !== "COMPLETED" &&
             j.startDate &&
-            j.endDate &&
-            j.startDate <= dateObj &&
-            j.endDate >= dateObj,
+            j.endDate,
         );
-        if (!firstAffected) continue;
-        const shiftFrom = firstAffected.sortOrder;
-        for (const j of plotJobs) {
-          if (j.sortOrder < shiftFrom) continue;
-          if (!j.startDate || !j.endDate) continue;
-          const newStart =
-            j.sortOrder === shiftFrom
-              ? j.startDate // first affected: keep start, extend end only
-              : snapToWorkingDay(addWorkingDays(j.startDate, 1), "forward");
-          const newEnd = snapToWorkingDay(
-            addWorkingDays(j.endDate, 1),
-            "forward",
-          );
-          await prisma.job.update({
-            where: { id: j.id },
-            data: { startDate: newStart, endDate: newEnd },
-          });
-          totalShifted++;
-        }
-        // Recompute any parent rollups whose children just shifted.
-        const parentIds = new Set<string>();
-        for (const j of plotJobs) {
-          if (j.sortOrder >= shiftFrom && j.parentId) parentIds.add(j.parentId);
-        }
-        const { recomputeParentFromChildren } = await import("@/lib/parent-job");
-        await Promise.all(
-          Array.from(parentIds).map((pid) =>
-            recomputeParentFromChildren(prisma, pid),
-          ),
+        if (!trigger || !trigger.endDate) continue;
+
+        const allOrders = await prisma.materialOrder.findMany({
+          where: { jobId: { in: allPlotJobs.map((j) => j.id) } },
+        });
+
+        const cascade = calculateCascade(
+          trigger.id,
+          addWorkingDays(trigger.endDate, 1),
+          allPlotJobs.map((j) => ({
+            id: j.id,
+            name: j.name,
+            startDate: j.startDate,
+            endDate: j.endDate,
+            sortOrder: j.sortOrder,
+            status: j.status,
+            // parentId so parent stages re-derive from children and
+            // their attached orders shift — same as /delay.
+            parentId: j.parentId ?? null,
+          })),
+          allOrders.map((o) => ({
+            id: o.id,
+            jobId: o.jobId,
+            dateOfOrder: o.dateOfOrder,
+            expectedDeliveryDate: o.expectedDeliveryDate,
+            status: o.status,
+          })),
         );
+        if (cascade.jobUpdates.length === 0) continue;
+
+        // (Jun 2026 review) Rain-day contract for the TRIGGER only:
+        // calculateCascade slides BOTH edges, but the trigger is
+        // mid-flight on the lost day — keep its startDate and let the
+        // engine's newEnd grow its duration by the lost day. Downstream
+        // jobs/orders keep the uniform +1 WD shift.
+        const triggerUpdate = cascade.jobUpdates.find(
+          (u) => u.jobId === trigger.id,
+        );
+        if (triggerUpdate && trigger.startDate) {
+          triggerUpdate.newStart = trigger.startDate;
+        }
+
+        const jobMap = new Map(allPlotJobs.map((j) => [j.id, j]));
+
+        await prisma.$transaction(
+          async (tx) => {
+            for (const update of cascade.jobUpdates) {
+              const current = jobMap.get(update.jobId);
+              await tx.job.update({
+                where: { id: update.jobId },
+                data: {
+                  startDate: update.newStart,
+                  endDate: update.newEnd,
+                  ...(!current?.originalStartDate && current?.startDate
+                    ? { originalStartDate: current.startDate }
+                    : {}),
+                  ...(!current?.originalEndDate && current?.endDate
+                    ? { originalEndDate: current.endDate }
+                    : {}),
+                },
+              });
+            }
+
+            for (const update of cascade.orderUpdates) {
+              await tx.materialOrder.update({
+                where: { id: update.orderId },
+                data: {
+                  dateOfOrder: update.newOrderDate,
+                  expectedDeliveryDate: update.newDeliveryDate,
+                },
+              });
+            }
+
+            // Recompute any parent rollups whose children just shifted.
+            const parentIds = new Set<string>();
+            for (const update of cascade.jobUpdates) {
+              const j = jobMap.get(update.jobId);
+              if (j?.parentId) parentIds.add(j.parentId);
+            }
+            await Promise.all(
+              Array.from(parentIds).map((pid) =>
+                recomputeParentFromChildren(tx, pid),
+              ),
+            );
+          },
+          // Same envelope as /delay and /bulk-delay.
+          { timeout: 30_000, maxWait: 10_000 },
+        );
+
+        // (#1/#2) Defensive percent recompute, plus (Jun 2026 audit)
+        // anchored inspection dates MUST follow their moved jobs —
+        // every other date-mutation route already calls this.
+        await recomputePlotPercent(prisma, plotId);
+        await recomputeInspectionDates(prisma, plotId);
+
+        totalShifted += cascade.jobUpdates.length;
       }
 
       await logEvent(prisma, {
@@ -234,7 +314,6 @@ export async function POST(
           jobsShifted: totalShifted,
         },
       });
-      void now;
     }
 
     await logEvent(prisma, {
@@ -251,7 +330,15 @@ export async function POST(
     });
 
     return NextResponse.json(
-      { day, affectedJobs: affectedJobs.length, shifted: totalShifted },
+      {
+        day,
+        affectedJobs: affectedJobs.length,
+        shifted: totalShifted,
+        // (Jun 2026 review) Surface the re-mark no-op: the user asked
+        // for a delay but the day was already recorded, so no shift
+        // was applied. Client toasts this instead of silently closing.
+        delaySkipped: delayJobs && alreadyMarked,
+      },
       { status: 201 }
     );
   } catch (err) {

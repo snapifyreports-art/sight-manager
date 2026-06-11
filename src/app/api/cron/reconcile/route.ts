@@ -22,7 +22,7 @@ export const dynamic = "force-dynamic";
  * Logged drift so we can spot if a new code path is introducing it
  * regularly — pattern that says "go fix that mutation site".
  *
- * Scheduled in vercel.json (5am UTC alongside the other crons).
+ * Scheduled in vercel.json (04:00 UTC — first of the morning crons).
  */
 export async function GET(req: NextRequest) {
   const { checkCronAuth } = await import("@/lib/cron-auth");
@@ -53,9 +53,11 @@ export async function GET(req: NextRequest) {
   // ---- Plot percent reconcile ----
   // Active plots only — completed plots don't move and we don't care
   // if their cache drifts past the point of completion.
+  // (Jun 2026 audit) ARCHIVED sites excluded — no point reconciling
+  // (or alerting on) sites someone deliberately shelved.
   const activePlots = await prisma.plot.findMany({
     where: {
-      site: { status: { not: "COMPLETED" } },
+      site: { status: { notIn: ["COMPLETED", "ARCHIVED"] } },
     },
     select: { id: true, buildCompletePercent: true },
   });
@@ -102,7 +104,7 @@ export async function GET(req: NextRequest) {
   const parentJobs = await prisma.job.findMany({
     where: {
       children: { some: {} },
-      plot: { site: { status: { not: "COMPLETED" } } },
+      plot: { site: { status: { notIn: ["COMPLETED", "ARCHIVED"] } } },
     },
     select: {
       id: true,
@@ -177,7 +179,7 @@ export async function GET(req: NextRequest) {
     const todayMidnight = getServerCurrentDate(req);
     todayMidnight.setHours(0, 0, 0, 0);
     const overlapPlots = await prisma.plot.findMany({
-      where: { site: { status: { not: "COMPLETED" } } },
+      where: { site: { status: { notIn: ["COMPLETED", "ARCHIVED"] } } },
       select: { id: true, name: true, plotNumber: true, siteId: true },
     });
     for (const plot of overlapPlots) {

@@ -29,6 +29,7 @@ import {
 } from "@/components/ui/card";
 import { JobActionStrip } from "@/components/reports/JobActionStrip";
 import { useToast, fetchErrorMessage } from "@/components/ui/toast";
+import { orderGroupKey, orderJobLabel } from "./types";
 import type { BriefData, UpcomingDelivery } from "./types";
 
 export interface UpcomingDeliveriesSectionProps {
@@ -99,7 +100,7 @@ export function UpcomingDeliveriesSection({
                       : format(new Date(dateKey), "EEE d MMM");
                   const subGrouped = new Map<string, UpcomingDelivery[]>();
                   for (const d of deliveries) {
-                    const key = `${d.supplier.id}__${d.job.name}`;
+                    const key = orderGroupKey(d);
                     const existing = subGrouped.get(key) ?? [];
                     existing.push(d);
                     subGrouped.set(key, existing);
@@ -126,18 +127,21 @@ export function UpcomingDeliveriesSection({
                       <div className="space-y-1.5 border-t bg-white px-2 py-2">
                         {subGroups.map((group) => {
                           const first = group[0];
-                          const plotLabels = group.map((d) =>
-                            d.job.plot.plotNumber
-                              ? `P${d.job.plot.plotNumber}`
-                              : d.job.plot.name,
-                          );
+                          const plotLabels = group.map((d) => {
+                            const plot = d.job?.plot ?? d.plot;
+                            return plot
+                              ? plot.plotNumber
+                                ? `P${plot.plotNumber}`
+                                : plot.name
+                              : "Site-wide";
+                          });
                           const allIds = group.map((d) => d.id);
                           const anyPending = allIds.some((id) =>
                             isOrderPending(id),
                           );
                           return (
                             <div
-                              key={`${first.supplier.id}__${first.job.name}`}
+                              key={orderGroupKey(first)}
                               className="rounded border p-2 text-sm"
                             >
                               <div className="flex items-center gap-2">
@@ -160,10 +164,10 @@ export function UpcomingDeliveriesSection({
                                 )}
                               </div>
                               <p className="text-xs text-muted-foreground">
-                                {first.itemsDescription || first.job.name}
+                                {first.itemsDescription || orderJobLabel(first)}
                               </p>
                               <p className="text-[11px] text-muted-foreground">
-                                {first.job.name} · {plotLabels.join(", ")}
+                                {orderJobLabel(first)} · {plotLabels.join(", ")}
                                 {group.length > 1
                                   ? ` (${group.length} plots)`
                                   : ""}

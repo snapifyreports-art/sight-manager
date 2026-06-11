@@ -60,8 +60,45 @@ export function SiteNCRs({ siteId }: { siteId: string }) {
   const [description, setDescription] = useState("");
   const [rootCause, setRootCause] = useState("");
   const [correctiveAction, setCorrectiveAction] = useState("");
+  // (Jun 2026 D6) Optional plot / job / contractor links on create —
+  // the POST always accepted them but the dialog never offered them, so
+  // manually-raised NCRs lost the where/who that inspection-raised ones
+  // carry. Plots + their jobs come from the existing site GET (fetched
+  // once, on first dialog open); contractors from the contacts API.
+  const [plotId, setPlotId] = useState("");
+  const [jobId, setJobId] = useState("");
+  const [contactId, setContactId] = useState("");
+  const [pickerPlots, setPickerPlots] = useState<Array<{ id: string; name: string; plotNumber: string | null; jobs: Array<{ id: string; name: string; parentId: string | null }> }>>([]);
+  const [contacts, setContacts] = useState<Array<{ id: string; name: string; company: string | null }>>([]);
+  const [pickersLoaded, setPickersLoaded] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
   const toast = useToast();
+
+  useEffect(() => {
+    if (!open || pickersLoaded) return;
+    setPickersLoaded(true);
+    fetch(`/api/sites/${siteId}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((site: { plots?: Array<{ id: string; name: string; plotNumber: string | null; jobs?: Array<{ id: string; name: string; parentId: string | null; sortOrder: number }> }> } | null) => {
+        if (!site?.plots) return;
+        setPickerPlots(site.plots.map((p) => ({
+          id: p.id,
+          name: p.name,
+          plotNumber: p.plotNumber,
+          jobs: (p.jobs ?? [])
+            .slice()
+            .sort((a, b) => a.sortOrder - b.sortOrder)
+            .map((j) => ({ id: j.id, name: j.name, parentId: j.parentId })),
+        })));
+      })
+      .catch(() => {});
+    fetch(`/api/contacts?type=CONTRACTOR`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((all) => setContacts((Array.isArray(all) ? all : []).map((c: { id: string; name: string; company: string | null }) => ({ id: c.id, name: c.name, company: c.company }))))
+      .catch(() => {});
+  }, [open, pickersLoaded, siteId]);
+
+  const selectedPlot = pickerPlots.find((p) => p.id === plotId);
 
   const refresh = async () => {
     setLoading(true);
@@ -97,6 +134,9 @@ export function SiteNCRs({ siteId }: { siteId: string }) {
           description: description.trim(),
           rootCause: rootCause || null,
           correctiveAction: correctiveAction || null,
+          plotId: plotId || null,
+          jobId: jobId || null,
+          contactId: contactId || null,
         }),
       });
       if (!res.ok) {
@@ -108,6 +148,9 @@ export function SiteNCRs({ siteId }: { siteId: string }) {
       setDescription("");
       setRootCause("");
       setCorrectiveAction("");
+      setPlotId("");
+      setJobId("");
+      setContactId("");
       void refresh();
     } finally {
       setSubmitting(false);
@@ -259,6 +302,53 @@ export function SiteNCRs({ siteId }: { siteId: string }) {
                 rows={3}
                 placeholder="What's wrong, where, what extent…"
               />
+            </div>
+            {/* (Jun 2026 D6) Optional where/who links — same fields an
+                inspection-raised NCR gets automatically. */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label htmlFor="ncr-plot">Plot (optional)</Label>
+                <select
+                  id="ncr-plot"
+                  value={plotId}
+                  onChange={(e) => { setPlotId(e.target.value); setJobId(""); }}
+                  className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm"
+                >
+                  <option value="">Site-wide</option>
+                  {pickerPlots.map((p) => (
+                    <option key={p.id} value={p.id}>{p.plotNumber ? `Plot ${p.plotNumber}` : p.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <Label htmlFor="ncr-job">Job (optional)</Label>
+                <select
+                  id="ncr-job"
+                  value={jobId}
+                  onChange={(e) => setJobId(e.target.value)}
+                  disabled={!plotId}
+                  className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm disabled:opacity-65"
+                >
+                  <option value="">{plotId ? "No specific job" : "Pick a plot first"}</option>
+                  {(selectedPlot?.jobs ?? []).map((j) => (
+                    <option key={j.id} value={j.id}>{j.parentId ? `— ${j.name}` : j.name}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div>
+              <Label htmlFor="ncr-contact">Contractor (optional)</Label>
+              <select
+                id="ncr-contact"
+                value={contactId}
+                onChange={(e) => setContactId(e.target.value)}
+                className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm"
+              >
+                <option value="">None</option>
+                {contacts.map((c) => (
+                  <option key={c.id} value={c.id}>{c.company || c.name}</option>
+                ))}
+              </select>
             </div>
             <div>
               <Label htmlFor="ncr-rc">Root cause (optional)</Label>

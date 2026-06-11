@@ -52,6 +52,9 @@ export function InspectionsClient({ initial, canManage, siteId, embedded }: { in
   const [dialog, setDialog] = useState<{ kind: "pass" | "fail"; insp: Insp } | null>(null);
   const [notify, setNotify] = useState<Insp | null>(null);
   const [move, setMove] = useState<Insp | null>(null);
+  // (Jun 2026 D8) Book opens a one-field date dialog (prefilled with the
+  // scheduled date) instead of booking blind on click.
+  const [book, setBook] = useState<Insp | null>(null);
   // (Jun 2026 Q9) Site / type / text filters — the cross-site list gets
   // unusable past ~20 rows without them. Site filter hidden when embedded.
   const [siteFilter, setSiteFilter] = useState("");
@@ -307,7 +310,7 @@ export function InspectionsClient({ initial, canManage, siteId, embedded }: { in
                       </Button>
                     )}
                     {(i.status === "SCHEDULED" || i.status === "OVERDUE") && (
-                      <Button size="sm" variant="outline" disabled={pending} onClick={() => action.book(i.id)}>Book</Button>
+                      <Button size="sm" variant="outline" disabled={pending} onClick={() => setBook(i)}>Book</Button>
                     )}
                     {i.status !== "PASSED" && i.status !== "FAILED" && (
                       <>
@@ -345,7 +348,59 @@ export function InspectionsClient({ initial, canManage, siteId, embedded }: { in
           onDone={() => { setMove(null); void refetch(); }}
         />
       )}
+      {book && (
+        <BookDialog
+          insp={book}
+          onClose={() => setBook(null)}
+          onDone={() => { setBook(null); void refetch(); }}
+        />
+      )}
     </div>
+  );
+}
+
+// ---- Book dialog: confirm the inspector's visit date (D8) ----
+function BookDialog({ insp, onClose, onDone }: { insp: Insp; onClose: () => void; onDone: () => void }) {
+  const action = useInspectionAction({ silent: false });
+  const [date, setDate] = useState(() => format(new Date(insp.scheduledDate), "yyyy-MM-dd"));
+  const [busy, setBusy] = useState(false);
+
+  async function submit() {
+    if (!date) return;
+    setBusy(true);
+    try {
+      const r = await action.book(insp.id, date);
+      if (r.ok) onDone();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-sm">
+        <DialogHeader><DialogTitle>Book — {insp.name}</DialogTitle></DialogHeader>
+        <div className="space-y-1 py-2">
+          <Label>Visit date</Label>
+          <Input
+            type="date"
+            value={date}
+            autoFocus
+            onChange={(e) => setDate(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" && date && !busy) void submit(); }}
+          />
+          <p className="text-[11px] text-muted-foreground">
+            The day the inspector is visiting — defaults to the scheduled date.
+          </p>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button onClick={submit} disabled={busy || !date}>
+            {busy && <Loader2 className="size-4 animate-spin" />} Book
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -456,7 +511,9 @@ function MoveDialog({ insp, onClose, onDone }: { insp: Insp; onClose: () => void
 // ---- Notify a contractor about an inspection (via Contractor Comms) ----
 function NotifyContractorDialog({ insp, onClose }: { insp: Insp; onClose: () => void }) {
   const toast = useToast();
-  const [contacts, setContacts] = useState<Array<{ id: string; name: string; company: string | null }>>([]);
+  // (Jun 2026 D7) Carry email so contractors without one are flagged
+  // "(no email)" and the send is blocked — the notification IS an email.
+  const [contacts, setContacts] = useState<Array<{ id: string; name: string; company: string | null; email: string | null }>>([]);
   const [contactId, setContactId] = useState("");
   const [message, setMessage] = useState(
     `${inspectionTypeLabel(insp.type)} inspection "${insp.name}" is scheduled for ${format(new Date(insp.scheduledDate), "EEE d MMM")} on Plot ${insp.plot.plotNumber ?? insp.plot.name}. Please make sure the area is ready and accessible.`,
@@ -467,12 +524,15 @@ function NotifyContractorDialog({ insp, onClose }: { insp: Insp; onClose: () => 
   useEffect(() => {
     fetch(`/api/contacts?type=CONTRACTOR`)
       .then((r) => (r.ok ? r.json() : []))
-      .then((all) => setContacts((Array.isArray(all) ? all : []).map((c: { id: string; name: string; company: string | null }) => ({ id: c.id, name: c.name, company: c.company }))))
+      .then((all) => setContacts((Array.isArray(all) ? all : []).map((c: { id: string; name: string; company: string | null; email: string | null }) => ({ id: c.id, name: c.name, company: c.company, email: c.email }))))
       .catch(() => {});
   }, []);
 
+  const selectedContact = contacts.find((c) => c.id === contactId);
+  const noEmail = !!selectedContact && !selectedContact.email;
+
   async function send() {
-    if (!contactId) return;
+    if (!contactId || noEmail) return;
     setBusy(true);
     try {
       const r = await fetch(`/api/sites/${insp.plot.siteId}/toolbox-talks`, {
@@ -508,8 +568,13 @@ function NotifyContractorDialog({ insp, onClose }: { insp: Insp; onClose: () => 
               <Label>Contractor</Label>
               <select value={contactId} onChange={(e) => setContactId(e.target.value)} className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm">
                 <option value="">Select a contractor…</option>
-                {contacts.map((c) => <option key={c.id} value={c.id}>{c.company || c.name}</option>)}
+                {contacts.map((c) => <option key={c.id} value={c.id}>{c.company || c.name}{c.email ? "" : " (no email)"}</option>)}
               </select>
+              {noEmail && (
+                <p className="mt-1 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 text-xs text-amber-900">
+                  No email on file — this contractor can&apos;t be notified. Add an email in Contacts first.
+                </p>
+              )}
             </div>
             <div>
               <Label>Message</Label>
@@ -521,7 +586,7 @@ function NotifyContractorDialog({ insp, onClose }: { insp: Insp; onClose: () => 
         {!sent && (
           <DialogFooter>
             <Button variant="outline" onClick={onClose}>Cancel</Button>
-            <Button disabled={busy || !contactId} onClick={send}>{busy ? <Loader2 className="size-4 animate-spin" /> : "Send"}</Button>
+            <Button disabled={busy || !contactId || noEmail} onClick={send}>{busy ? <Loader2 className="size-4 animate-spin" /> : "Send"}</Button>
           </DialogFooter>
         )}
       </DialogContent>
@@ -562,7 +627,14 @@ function SignOffDialog({ kind, insp, onClose, onDone }: { kind: "pass" | "fail";
   }, []);
   const loadDocs = useCallback(async () => {
     const r = await fetch(`/api/sites/${insp.plot.siteId}/documents?plotId=${insp.plot.id}`);
-    if (r.ok) setDocs(await r.json());
+    if (r.ok) {
+      const all: Array<{ id: string; name: string; category: string | null }> = await r.json();
+      // (Jun 2026 W5) Certificates first — the pass flow is nearly always
+      // picking a CERT doc, so don't bury them under drawings. Stable sort
+      // keeps the server order within each group.
+      all.sort((a, b) => Number(b.category === "CERT") - Number(a.category === "CERT"));
+      setDocs(all);
+    }
   }, [insp.plot.siteId, insp.plot.id]);
   useEffect(() => { if (kind === "pass") void loadDocs(); }, [kind, loadDocs]);
   async function uploadCert(file: File) {
@@ -665,14 +737,36 @@ function SignOffDialog({ kind, insp, onClose, onDone }: { kind: "pass" | "fail";
                         <option value="NCR">NCR</option>
                       </select>
                       <Input value={f.description} onChange={(e) => setFinding(idx, { description: e.target.value })} placeholder="Describe the defect" className="flex-1" />
-                      <select value={f.severity} onChange={(e) => setFinding(idx, { severity: e.target.value as InspectionFinding["severity"] })} className="h-9 rounded-md border border-input bg-transparent px-2 text-sm">
-                        <option value="LOW">Low</option>
-                        <option value="MEDIUM">Medium</option>
-                        <option value="HIGH">High</option>
-                        <option value="CRITICAL">Critical</option>
-                      </select>
+                      {/* (Jun 2026 D5) Severity is a snag concept — NCRs
+                          have a formal lifecycle instead, so hide it. */}
+                      {f.kind !== "NCR" && (
+                        <select value={f.severity} onChange={(e) => setFinding(idx, { severity: e.target.value as InspectionFinding["severity"] })} className="h-9 rounded-md border border-input bg-transparent px-2 text-sm">
+                          <option value="LOW">Low</option>
+                          <option value="MEDIUM">Medium</option>
+                          <option value="HIGH">High</option>
+                          <option value="CRITICAL">Critical</option>
+                        </select>
+                      )}
                       <button onClick={() => removeFinding(idx)} className="mt-2 text-muted-foreground hover:text-destructive"><Trash2 className="size-3.5" /></button>
                     </div>
+                    {/* (Jun 2026 D5) NCR-only formal QA fields — optional,
+                        same fields the manual Raise NCR dialog has. */}
+                    {f.kind === "NCR" && (
+                      <div className="flex gap-2">
+                        <Input
+                          value={f.rootCause ?? ""}
+                          onChange={(e) => setFinding(idx, { rootCause: e.target.value })}
+                          placeholder="Root cause (optional)"
+                          className="h-8 flex-1 text-xs"
+                        />
+                        <Input
+                          value={f.correctiveAction ?? ""}
+                          onChange={(e) => setFinding(idx, { correctiveAction: e.target.value })}
+                          placeholder="Corrective action (optional)"
+                          className="h-8 flex-1 text-xs"
+                        />
+                      </div>
+                    )}
                     <select
                       value={f.contactId ?? ""}
                       onChange={(e) => setFinding(idx, { contactId: e.target.value || undefined })}
@@ -688,9 +782,14 @@ function SignOffDialog({ kind, insp, onClose, onDone }: { kind: "pass" | "fail";
             )}
           </div>
         </div>
+        {/* (Jun 2026 W4) The server hard-rejects a pass without a cert —
+            disable Confirm up-front instead of letting the click bounce. */}
+        {kind === "pass" && !certId && (
+          <p className="text-[11px] text-amber-700">Select or upload the signed certificate above to enable Confirm pass.</p>
+        )}
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button onClick={submit} disabled={busy}>
+          <Button onClick={submit} disabled={busy || (kind === "pass" && !certId)}>
             {busy && <Loader2 className="size-4 animate-spin" />}
             {kind === "pass" ? "Confirm pass" : "Confirm fail"}
           </Button>

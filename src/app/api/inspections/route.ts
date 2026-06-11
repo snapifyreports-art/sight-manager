@@ -66,7 +66,7 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json();
-  const { plotId, type, name, anchorJobId, anchorEdge, offsetDays, bookingLeadWeeks, scheduledDate, inspectorContactId } = body;
+  const { plotId, type, name, anchorJobId, anchorEdge, offsetDays, bookingLeadWeeks, scheduledDate, inspectorContactId, isBlocking, notes } = body;
 
   if (!plotId || !name) return NextResponse.json({ error: "plotId and name are required" }, { status: 400 });
   if (!VALID_TYPES.includes(type)) return NextResponse.json({ error: "Invalid type" }, { status: 400 });
@@ -102,6 +102,10 @@ export async function POST(req: NextRequest) {
         bookingLeadWeeks: bookingLeadWeeks != null ? Math.trunc(Number(bookingLeadWeeks)) : null,
         scheduledDate: sched,
         inspectorContactId: inspectorContactId || null,
+        // (Jun 2026 D4) Manual-add parity with the template dialog —
+        // hard-blocker flag + "what to check" notes.
+        isBlocking: Boolean(isBlocking),
+        notes: typeof notes === "string" && notes.trim() ? notes.trim() : null,
       },
     });
     await logEvent(prisma, { type: "INSPECTION_SCHEDULED", description: `Inspection "${created.name}" added`, siteId: plot.siteId, plotId, jobId: anchorJobId || null, userId: session.user.id, detail: { inspectionId: created.id } }).catch(() => {});

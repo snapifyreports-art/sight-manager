@@ -194,6 +194,9 @@ export function PhotoUpload({
               ref={cameraInputRef}
               type="file"
               accept="image/*"
+              // This input backs the explicit "Camera" button — forcing the
+              // camera here IS the point. Only the Library input offers the
+              // OS chooser (D2 scope; review fix).
               capture="environment"
               className="hidden"
               onChange={(e) => handleUpload(e.target.files)}

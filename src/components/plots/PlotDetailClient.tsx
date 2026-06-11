@@ -295,7 +295,24 @@ function AddInspectionDialog({
   const [type, setType] = useState("NHBC");
   const [anchorJobId, setAnchorJobId] = useState("");
   const [scheduledDate, setScheduledDate] = useState("");
+  // (Jun 2026 D4) Parity with the template inspection dialog — edge,
+  // offset, book-ahead, inspector, notes and the hard-blocker flag were
+  // template-only, so manually-added holds were second-class.
+  const [anchorEdge, setAnchorEdge] = useState<"START" | "END">("END");
+  const [offsetDays, setOffsetDays] = useState("");
+  const [bookingLeadWeeks, setBookingLeadWeeks] = useState("");
+  const [inspectorContactId, setInspectorContactId] = useState("");
+  const [notes, setNotes] = useState("");
+  const [isBlocking, setIsBlocking] = useState(false);
+  const [contacts, setContacts] = useState<Array<{ id: string; name: string; company: string | null }>>([]);
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    fetch(`/api/contacts?type=CONTRACTOR`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((all) => setContacts((Array.isArray(all) ? all : []).map((c: { id: string; name: string; company: string | null }) => ({ id: c.id, name: c.name, company: c.company }))))
+      .catch(() => {});
+  }, []);
 
   async function submit() {
     if (!name.trim() || (!anchorJobId && !scheduledDate)) return;
@@ -308,8 +325,16 @@ function AddInspectionDialog({
           plotId,
           name: name.trim(),
           type,
-          ...(anchorJobId ? { anchorJobId, anchorEdge: "END" } : {}),
+          ...(anchorJobId
+            ? { anchorJobId, anchorEdge, offsetDays: Math.trunc(Number(offsetDays)) || 0 }
+            : {}),
           ...(!anchorJobId && scheduledDate ? { scheduledDate } : {}),
+          ...(bookingLeadWeeks !== "" ? { bookingLeadWeeks: Math.trunc(Number(bookingLeadWeeks)) } : {}),
+          ...(inspectorContactId ? { inspectorContactId } : {}),
+          ...(notes.trim() ? { notes: notes.trim() } : {}),
+          // Hard-blocker only bites on the anchor job, so don't send it
+          // for fixed-date holds (the checkbox is hidden then anyway).
+          isBlocking: anchorJobId ? isBlocking : false,
         }),
       });
       if (!res.ok) { toast.error(await fetchErrorMessage(res, "Failed to add inspection")); return; }
@@ -346,7 +371,65 @@ function AddInspectionDialog({
             </div>
           )}
           {anchorJobId && (
-            <p className="col-span-2 text-[11px] text-muted-foreground">Date derives from the job&apos;s end and moves with it.</p>
+            <>
+              <div>
+                <Label>When</Label>
+                <select
+                  value={anchorEdge}
+                  onChange={(e) => setAnchorEdge(e.target.value as "START" | "END")}
+                  className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm"
+                >
+                  <option value="END">At job end</option>
+                  <option value="START">At job start</option>
+                </select>
+              </div>
+              <div>
+                <Label>Offset (working days ±)</Label>
+                <Input type="number" value={offsetDays} onChange={(e) => setOffsetDays(e.target.value)} placeholder="0" />
+              </div>
+              <p className="col-span-2 text-[11px] text-muted-foreground">Date derives from the job and moves with it.</p>
+            </>
+          )}
+          <div>
+            <Label>Book ahead (weeks, optional)</Label>
+            <Input type="number" value={bookingLeadWeeks} onChange={(e) => setBookingLeadWeeks(e.target.value)} placeholder="e.g. 2" />
+          </div>
+          <div>
+            <Label>Inspector (optional)</Label>
+            <select
+              value={inspectorContactId}
+              onChange={(e) => setInspectorContactId(e.target.value)}
+              className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm"
+            >
+              <option value="">Unassigned</option>
+              {contacts.map((c) => <option key={c.id} value={c.id}>{c.company || c.name}</option>)}
+            </select>
+          </div>
+          <div className="col-span-2">
+            <Label>What to check (optional)</Label>
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              rows={2}
+              placeholder="e.g. NHBC wants DPC + cavity trays exposed; book the structural engineer too"
+              className="w-full resize-none rounded-md border border-input bg-transparent px-2 py-1.5 text-sm"
+            />
+          </div>
+          {anchorJobId && (
+            <label className="col-span-2 flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50/50 p-2.5 text-sm">
+              <input
+                type="checkbox"
+                checked={isBlocking}
+                onChange={(e) => setIsBlocking(e.target.checked)}
+                className="mt-0.5 size-4 accent-amber-600"
+              />
+              <span>
+                <span className="font-medium">Hard blocker</span>
+                <span className="block text-[11px] text-muted-foreground">
+                  Block completing the anchor job while this inspection is open (manager can override with a reason). Leave off for a reminder only.
+                </span>
+              </span>
+            </label>
           )}
         </div>
         <DialogFooter>
@@ -1018,7 +1101,9 @@ function PlotOverview({
               </CardTitle>
               <div className="flex items-center gap-3">
                 <button onClick={() => setAddInspectionOpen(true)} className="text-xs font-medium text-blue-600 hover:underline">+ Add</button>
-                {inspections.length > 0 && <Link href="/inspections" className="text-xs font-medium text-blue-600 hover:underline">View all →</Link>}
+                {/* (Jun 2026 W3) Land on this SITE's inspections tab, not the
+                    global cross-site list. */}
+                {inspections.length > 0 && <Link href={`/sites/${plot.site.id}?tab=inspections`} className="text-xs font-medium text-blue-600 hover:underline">View all →</Link>}
               </div>
             </CardHeader>
             <CardContent>
@@ -1036,13 +1121,17 @@ function PlotOverview({
                     <p className="text-sm text-emerald-600">All inspections passed ✓</p>
                   ) : (
                     <ul className="space-y-1.5">
+                      {/* (Jun 2026 W3) Each row deep-links to the focused
+                          inspection — book/pass/fail live there. */}
                       {actionable.map((i) => (
-                        <li key={i.id} className="flex items-center justify-between gap-2 text-sm">
-                          <span className="min-w-0 truncate">{i.name}</span>
-                          <span className="flex shrink-0 items-center gap-2">
-                            <span className="text-xs text-muted-foreground">{format(new Date(i.scheduledDate), "d MMM")}</span>
-                            <span className={pill(i.status)}>{i.status.toLowerCase()}</span>
-                          </span>
+                        <li key={i.id}>
+                          <Link href={`/inspections?focus=${i.id}`} className="flex items-center justify-between gap-2 rounded text-sm hover:bg-slate-50">
+                            <span className="min-w-0 truncate">{i.name}</span>
+                            <span className="flex shrink-0 items-center gap-2">
+                              <span className="text-xs text-muted-foreground">{format(new Date(i.scheduledDate), "d MMM")}</span>
+                              <span className={pill(i.status)}>{i.status.toLowerCase()}</span>
+                            </span>
+                          </Link>
                         </li>
                       ))}
                     </ul>

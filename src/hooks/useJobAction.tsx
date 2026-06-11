@@ -2039,9 +2039,11 @@ export function useJobAction(
         </DialogContent>
       </Dialog>
 
-      {/* (Jun 2026) Hard-blocker hold-point override. Completing this job is
-          blocked by an open inspection flagged as a hard hold-point. The
-          manager must type a reason to deliberately override the safeguard
+      {/* (Jun 2026, D1 redesign) Hard-blocker hold-point. Completing this
+          job is blocked by an open inspection flagged as a hard hold-point.
+          The RIGHT flow (primary) is to go record what failed and rebook
+          from the focused inspection; "Complete anyway" survives as a
+          smaller deliberate override that still demands a typed reason
           (captured in the audit trail). */}
       <Dialog
         open={!!inspectionBlock}
@@ -2054,7 +2056,7 @@ export function useJobAction(
               Hold-point blocks completion
             </DialogTitle>
             <DialogDescription>
-              <span className="font-medium">{inspectionBlock?.jobName}</span> can&apos;t be completed while these inspections are open. Pass them, or override with a reason.
+              <span className="font-medium">{inspectionBlock?.jobName}</span> can&apos;t be completed while these inspections are open. The job stays open until the inspection passes — record findings and rebook from the inspection.
             </DialogDescription>
           </DialogHeader>
           <ul className="space-y-1 rounded-lg border border-red-200 bg-red-50 p-2.5 text-sm">
@@ -2066,10 +2068,9 @@ export function useJobAction(
             ))}
           </ul>
           <div className="space-y-2 py-1">
-            <Label htmlFor="insp-override-reason" className="text-sm">Override reason</Label>
+            <Label htmlFor="insp-override-reason" className="text-sm">Override reason (required to complete anyway)</Label>
             <Textarea
               id="insp-override-reason"
-              autoFocus
               value={inspectionBlockReason}
               onChange={(e) => setInspectionBlockReason(e.target.value)}
               placeholder="e.g. Inspector signed off verbally — certificate to follow / completing under client instruction"
@@ -2077,18 +2078,14 @@ export function useJobAction(
               className="resize-none"
             />
           </div>
-          <DialogFooter className="flex-col-reverse gap-2 sm:flex-row">
+          <DialogFooter className="flex-col-reverse gap-2 sm:flex-row sm:items-center">
             <Button variant="outline" onClick={() => { setInspectionBlock(null); setInspectionBlockReason(""); }} disabled={isLoading}>
               Cancel
             </Button>
-            <a
-              href="/inspections"
-              className="inline-flex h-9 items-center justify-center rounded-md border px-3 text-sm font-medium hover:bg-accent"
-            >
-              Go to inspections
-            </a>
             <Button
-              variant="destructive"
+              variant="ghost"
+              size="sm"
+              className="text-destructive"
               disabled={isLoading || !inspectionBlockReason.trim()}
               onClick={async () => {
                 const r = inspectionBlock?.retry;
@@ -2098,8 +2095,18 @@ export function useJobAction(
                 if (r) await r(reason);
               }}
             >
-              {isLoading ? <><Loader2 className="size-3.5 animate-spin" /> Overriding…</> : "Override & complete"}
+              {isLoading ? <><Loader2 className="size-3.5 animate-spin" /> Completing…</> : "Complete anyway"}
             </Button>
+            <a
+              href={
+                inspectionBlock?.blockingInspections[0]
+                  ? `/inspections?focus=${inspectionBlock.blockingInspections[0].id}`
+                  : "/inspections"
+              }
+              className="inline-flex h-9 items-center justify-center rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/80"
+            >
+              Record what failed &amp; rebook
+            </a>
           </DialogFooter>
         </DialogContent>
       </Dialog>

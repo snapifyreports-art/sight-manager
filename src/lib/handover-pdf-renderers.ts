@@ -680,7 +680,10 @@ export async function renderPlotHandoverChecklistPdf(
       body: items.map((i) => [
         HANDOVER_DOC_TYPE_LABELS[i.docType] ?? titleCaseEnum(i.docType),
         i.required ? "Yes" : "No",
-        i.checkedAt ? "✓ Signed" : "—",
+        // (Jun 2026 audit) ASCII only — jsPDF's core Helvetica is
+        // WinAnsi-encoded, so U+2713 "✓" printed as a garbled glyph in
+        // the buyer-facing PDF. Matches the inspection log convention.
+        i.checkedAt ? "Signed" : "—",
         i.checkedAt ? format(i.checkedAt, "dd MMM yy") : "—",
         i.checkedBy?.name ?? "—",
         i.document?.name ?? "—",
@@ -732,7 +735,9 @@ export async function renderPlotPreStartChecksPdf(
       head: [["Item", "Status", "Checked", "By", "Notes"]],
       body: checks.map((c) => [
         c.label.length > 50 ? `${c.label.slice(0, 50)}…` : c.label,
-        c.checked ? "✓ Checked" : "—",
+        // (Jun 2026 audit) ASCII only — "✓" is outside jsPDF's WinAnsi
+        // codepage (see handover-checklist renderer above).
+        c.checked ? "Checked" : "—",
         c.checkedAt ? format(c.checkedAt, "dd MMM yy") : "—",
         c.checkedBy?.name ?? "—",
         c.notes ?? "",
@@ -1068,6 +1073,11 @@ export function renderReadmeTxt(
   lines.push("");
   lines.push("CONTENTS");
   lines.push("-".repeat(72));
+  // (Jun 2026 audit) README now lists EVERYTHING the builder can emit —
+  // it previously omitted 00_WARNINGS.txt and four per-plot folders,
+  // so the manifest disagreed with the pack it shipped inside.
+  lines.push("00_WARNINGS.txt           (present when passed inspections lack certificates)");
+  lines.push("");
   lines.push("01_Site_Overview/");
   lines.push("    site-story.pdf            internal warts-and-all retrospective");
   lines.push("    completion-summary.pdf    high-level handover summary");
@@ -1084,7 +1094,8 @@ export function renderReadmeTxt(
     lines.push("        pre-start-checks.pdf   (when pre-start checks defined)");
     lines.push("        draw-schedule.pdf      (when draw schedule defined)");
     lines.push("        handover-checklist.pdf (EPC / gas-safe / electrical / NHBC etc.)");
-    lines.push("        certificates/  drawings/  photos/");
+    lines.push("        certificates/  drawings/  specs/  rams/  handover-checklist/  other/");
+    lines.push("        photos/                (per stage; _annotations.txt when photos were marked up)");
     lines.push("        voice-notes/           (audio clips + _index.txt transcript summary)");
   }
   lines.push("");
@@ -1103,7 +1114,7 @@ export function renderReadmeTxt(
   lines.push("06_Reports/");
   lines.push("    delay-report-final.pdf");
   lines.push("");
-  lines.push("08_Toolbox_Talks/         (when toolbox talks logged on the site)");
+  lines.push("07_Toolbox_Talks/         (when toolbox talks logged on the site)");
   lines.push("    _register.txt         (every talk: topic, status, notes, attendees)");
   lines.push("    <yyyy-MM-dd>_<topic>/ (subfolder per talk with briefing docs)");
   lines.push("");
@@ -1446,7 +1457,10 @@ export async function renderDelayReportPdf(
     doc.text(`Delayed jobs (${data.delayedJobs.length})`, 14, lastY + 12);
     autoTable(doc, {
       startY: lastY + 16,
-      head: [["Plot", "Job", "Days late", "Weather?", "Reason"]],
+      // (Jun 2026 audit) "WD late" — delayDays is now working days
+      // against the originalEndDate baseline, same units as the
+      // currently-overdue table above.
+      head: [["Plot", "Job", "WD late", "Weather?", "Reason"]],
       body: data.delayedJobs.map((j) => [
         j.plotName,
         j.name,

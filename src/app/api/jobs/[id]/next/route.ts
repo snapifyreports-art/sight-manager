@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { canAccessSite } from "@/lib/site-access";
 import { calculateCascade } from "@/lib/cascade";
 import { differenceInWorkingDays } from "@/lib/working-days";
 
@@ -32,6 +33,23 @@ export async function GET(
 
   if (!job) {
     return NextResponse.json({ error: "Job not found" }, { status: 404 });
+  }
+
+  // (Jun 2026 security sweep) Site-access check — pre-fix any
+  // authenticated user could pass any job id and read cross-site
+  // contractor emails, supplier names and order details. Same gate as
+  // the sibling jobs/[id]/siblings route.
+  if (
+    !(await canAccessSite(
+      session.user.id,
+      (session.user as { role: string }).role,
+      job.plot.siteId,
+    ))
+  ) {
+    return NextResponse.json(
+      { error: "You do not have access to this site" },
+      { status: 403 },
+    );
   }
 
   // Fetch all jobs on the same plot

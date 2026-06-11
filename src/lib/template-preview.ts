@@ -46,7 +46,13 @@ export interface TemplatePreview {
 function jobDurationDays(job: TemplateJobData): number {
   if (job.durationDays && job.durationDays > 0) return job.durationDays;
   if (job.durationWeeks && job.durationWeeks > 0) return job.durationWeeks * 5;
-  return 0;
+  // (Jun 2026 audit) Match the real apply cascade — apply-template-
+  // helpers' computeTemplateDateMap defaults an un-set duration to 5
+  // working days. Pre-fix the preview returned 0 here, so a template
+  // with a few un-set durations previewed a shorter span and earlier
+  // finish than apply actually created. Keep the fallback chains of
+  // the two functions identical.
+  return 5;
 }
 
 function unitsToWeeks(

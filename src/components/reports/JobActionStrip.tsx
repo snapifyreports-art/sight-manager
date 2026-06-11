@@ -1,6 +1,6 @@
 "use client";
 
-import { Children, useState, type ReactNode } from "react";
+import { Children, Fragment, isValidElement, useState, type ReactNode } from "react";
 import { ChevronDown, MoreHorizontal } from "lucide-react";
 
 /**
@@ -49,7 +49,21 @@ export function JobActionStrip({
   // (first child) + secondary (rest) so the highest-priority action
   // is always visible on mobile. Desktop still renders everything
   // inline so power users don't lose the at-a-glance layout.
-  const childArray = isModeB ? [] : Children.toArray(children);
+  // (Jun 2026 audit) Children.toArray does NOT flatten fragments, and
+  // every Mode A caller passes a single `<>...</>` wrapper (usually
+  // behind a pending/status ternary) — so childArray.length was always
+  // 1, modeASecondary was empty, and the SM-P0-6 mobile collapse never
+  // fired anywhere. Unwrap a lone fragment before splitting.
+  let childArray = isModeB ? [] : Children.toArray(children);
+  if (
+    childArray.length === 1 &&
+    isValidElement(childArray[0]) &&
+    childArray[0].type === Fragment
+  ) {
+    childArray = Children.toArray(
+      (childArray[0].props as { children?: ReactNode }).children,
+    );
+  }
   const modeAPrimary = childArray[0];
   const modeASecondary = childArray.slice(1);
   const hasModeASecondary = modeASecondary.length > 0;

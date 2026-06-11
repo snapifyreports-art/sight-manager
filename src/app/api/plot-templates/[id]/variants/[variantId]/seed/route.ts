@@ -242,6 +242,11 @@ export async function POST(
               offsetDays: ins.offsetDays,
               bookingLeadWeeks: ins.bookingLeadWeeks,
               defaultInspectorContactId: ins.defaultInspectorContactId,
+              // (Jun 2026 audit) isBlocking was dropped (schema default
+              // false), so a HARD hold-point silently became soft on
+              // every seeded variant and the job-completion gate never
+              // fired for plots applied from the copy.
+              isBlocking: ins.isBlocking,
             },
           });
           inspectionCount += 1;

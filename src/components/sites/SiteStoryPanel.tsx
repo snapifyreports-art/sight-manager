@@ -24,6 +24,9 @@ import {
 } from "lucide-react";
 import { format } from "date-fns";
 import { LatenessSummary } from "@/components/lateness/LatenessSummary";
+import { Button } from "@/components/ui/button";
+import { fetchErrorMessage } from "@/components/ui/toast";
+import { latenessReasonLabel } from "@/lib/labels";
 
 /**
  * Site Story tab — internal retrospective view ("warts and all").
@@ -256,6 +259,10 @@ interface StoryData {
   };
 }
 
+// (Jun 2026 audit) Emoji accents for the three reasons that have one.
+// Labels for the other 11 LatenessEvent.reasonCode values come from
+// latenessReasonLabel (src/lib/labels.ts) — pre-fix the fallback was
+// the raw enum, so chips read "MATERIAL_LATE ×3 · 5d" on the Story tab.
 const REASON_LABELS: Record<string, { label: string; emoji: string }> = {
   WEATHER_RAIN: { label: "Rain", emoji: "☔" },
   WEATHER_TEMPERATURE: { label: "Temperature", emoji: "🌡️" },
@@ -265,30 +272,74 @@ const REASON_LABELS: Record<string, { label: string; emoji: string }> = {
 export function SiteStoryPanel({ siteId }: { siteId: string }) {
   const [data, setData] = useState<StoryData | null>(null);
   const [loading, setLoading] = useState(true);
+  // (Jun 2026 audit) Pre-fix a failed story fetch left loading=false +
+  // data=null — an infinite spinner with no message. Now an inline
+  // error card with Retry (wired to `refresh`, previously dead code).
+  const [error, setError] = useState<string | null>(null);
   const [expandedPlot, setExpandedPlot] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
-    const res = await fetch(`/api/sites/${siteId}/story?detail=full`, {
-      cache: "no-store",
-    });
-    if (res.ok) setData(await res.json());
-    setLoading(false);
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/sites/${siteId}/story?detail=full`, {
+        cache: "no-store",
+      });
+      if (!res.ok) {
+        setError(await fetchErrorMessage(res));
+        return;
+      }
+      setData(await res.json());
+    } catch {
+      setError("Network error — check your connection and try again.");
+    } finally {
+      setLoading(false);
+    }
   }, [siteId]);
 
   // (May 2026 pattern sweep) Cancellation flag for site-switch race.
   useEffect(() => {
     let cancelled = false;
+    setError(null);
     fetch(`/api/sites/${siteId}/story?detail=full`, { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => { if (d && !cancelled) setData(d); })
+      .then(async (r) => {
+        if (cancelled) return;
+        if (!r.ok) {
+          setError(await fetchErrorMessage(r));
+          return;
+        }
+        const d = await r.json();
+        if (!cancelled) setData(d);
+      })
+      .catch(() => {
+        if (!cancelled)
+          setError("Network error — check your connection and try again.");
+      })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [siteId]);
 
-  if (loading || !data) {
+  if (loading) {
     return (
       <div className="flex items-center justify-center py-16 text-slate-400">
         <Loader2 className="size-5 animate-spin" />
+      </div>
+    );
+  }
+
+  if (error || !data) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-amber-200 bg-amber-50/50 py-12 text-center">
+        <AlertCircle className="size-6 text-amber-600" />
+        <div>
+          <p className="text-sm font-medium text-slate-800">
+            Couldn&apos;t load the site story
+          </p>
+          {error && <p className="mt-0.5 text-xs text-slate-500">{error}</p>}
+        </div>
+        <Button variant="outline" size="sm" onClick={refresh}>
+          Try again
+        </Button>
       </div>
     );
   }
@@ -460,7 +511,7 @@ export function SiteStoryPanel({ siteId }: { siteId: string }) {
             <div className="flex flex-wrap gap-1.5">
               {data.variance.delayReasonBreakdown.slice(0, 8).map((r) => {
                 const meta = REASON_LABELS[r.reason] ?? {
-                  label: r.reason,
+                  label: latenessReasonLabel(r.reason),
                   emoji: "⏳",
                 };
                 return (
@@ -1471,7 +1522,7 @@ function HighlightRow({
         <p className="text-slate-700">{highlight.description}</p>
         <p className="text-[10px] text-slate-400">
           {format(new Date(highlight.date), "dd MMM yyyy")}
-          {highlight.reason && ` · ${REASON_LABELS[highlight.reason]?.label ?? highlight.reason}`}
+          {highlight.reason && ` · ${REASON_LABELS[highlight.reason]?.label ?? latenessReasonLabel(highlight.reason)}`}
         </p>
       </div>
     </li>

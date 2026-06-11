@@ -214,67 +214,74 @@ export async function PUT(
       (o) => overrideOrderIds.has(o.id) && o.status === "PENDING",
     );
 
-    // Run job + order updates concurrently (both resolve against the same
-    // plot, so there's no cross-write hazard worth a transaction).
-    await Promise.all([
-      ...result.jobUpdates.map((update) => {
-        const current = jobMap.get(update.jobId);
-        return prisma.job.update({
-          where: { id: update.jobId },
-          data: {
-            startDate: update.newStart,
-            endDate: update.newEnd,
-            ...(!current?.originalStartDate && current?.startDate
-              ? { originalStartDate: current.startDate }
-              : {}),
-            ...(!current?.originalEndDate && current?.endDate
-              ? { originalEndDate: current.endDate }
-              : {}),
-          },
-        });
-      }),
-      ...result.orderUpdates.map((update) =>
-        prisma.materialOrder.update({
-          where: { id: update.orderId },
-          data: {
-            dateOfOrder: update.newOrderDate,
-            expectedDeliveryDate: update.newDeliveryDate,
-          },
-        })
-      ),
-      // (May 2026 audit B-P1-14) For each "Start anyway" override
-      // order, also bring its expectedDeliveryDate forward to
-      // `today + leadTimeDays` via enforceOrderInvariants — pre-fix
-      // we flipped status to ORDERED with dateOfOrder=today but left
-      // expectedDeliveryDate untouched. On a pull-forward, that left
-      // the delivery date in the past relative to today and Daily
-      // Brief immediately flagged the order overdue. Manager
-      // triggered "Start anyway" expecting end-to-end fix.
-      ...overriddenOrders.map((o) => {
-        const patch = enforceOrderInvariants(
-          {
-            dateOfOrder: o.dateOfOrder,
-            expectedDeliveryDate: o.expectedDeliveryDate,
-            deliveredDate: o.deliveredDate,
-            leadTimeDays: o.leadTimeDays,
-          },
-          {
-            dateOfOrder: today,
-            status: "ORDERED",
-            leadTimeDays: o.leadTimeDays,
-          },
-          today,
-        );
-        return prisma.materialOrder.update({
-          where: { id: o.id },
-          data: {
-            status: "ORDERED",
-            dateOfOrder: today,
-            ...patch,
-          },
-        });
-      }),
-    ]);
+    // (Jun 2026 audit) Apply job + order updates + override flips inside a
+    // single transaction — a mid-flight failure (connection blip, pool
+    // exhaustion on a big plot) previously left the plot half-shifted
+    // with no rollback. Same 30s envelope as /delay and /bulk-delay.
+    await prisma.$transaction(
+      async (tx) => {
+        await Promise.all([
+          ...result.jobUpdates.map((update) => {
+            const current = jobMap.get(update.jobId);
+            return tx.job.update({
+              where: { id: update.jobId },
+              data: {
+                startDate: update.newStart,
+                endDate: update.newEnd,
+                ...(!current?.originalStartDate && current?.startDate
+                  ? { originalStartDate: current.startDate }
+                  : {}),
+                ...(!current?.originalEndDate && current?.endDate
+                  ? { originalEndDate: current.endDate }
+                  : {}),
+              },
+            });
+          }),
+          ...result.orderUpdates.map((update) =>
+            tx.materialOrder.update({
+              where: { id: update.orderId },
+              data: {
+                dateOfOrder: update.newOrderDate,
+                expectedDeliveryDate: update.newDeliveryDate,
+              },
+            })
+          ),
+          // (May 2026 audit B-P1-14) For each "Start anyway" override
+          // order, also bring its expectedDeliveryDate forward to
+          // `today + leadTimeDays` via enforceOrderInvariants — pre-fix
+          // we flipped status to ORDERED with dateOfOrder=today but left
+          // expectedDeliveryDate untouched. On a pull-forward, that left
+          // the delivery date in the past relative to today and Daily
+          // Brief immediately flagged the order overdue. Manager
+          // triggered "Start anyway" expecting end-to-end fix.
+          ...overriddenOrders.map((o) => {
+            const patch = enforceOrderInvariants(
+              {
+                dateOfOrder: o.dateOfOrder,
+                expectedDeliveryDate: o.expectedDeliveryDate,
+                deliveredDate: o.deliveredDate,
+                leadTimeDays: o.leadTimeDays,
+              },
+              {
+                dateOfOrder: today,
+                status: "ORDERED",
+                leadTimeDays: o.leadTimeDays,
+              },
+              today,
+            );
+            return tx.materialOrder.update({
+              where: { id: o.id },
+              data: {
+                status: "ORDERED",
+                dateOfOrder: today,
+                ...patch,
+              },
+            });
+          }),
+        ]);
+      },
+      { timeout: 30_000, maxWait: 10_000 },
+    );
 
     // I6: parent-stage rollup — recompute any parent whose children moved.
     // Pull parentIds from the already-loaded jobMap (no extra queries).

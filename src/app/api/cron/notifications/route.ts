@@ -240,10 +240,12 @@ export async function GET(req: NextRequest) {
 
   await Promise.allSettled(notifications);
 
-  // Log the notification event
+  // Log the notification event.
+  // (Jun 2026 audit) "N pushes dispatched", not "N notification types" —
+  // the array holds one entry per site (and per snag-site), not per type.
   await logEvent(prisma, {
     type: "NOTIFICATION",
-    description: `Daily notification cron: ${notifications.length} notification type${notifications.length !== 1 ? "s" : ""} sent`,
+    description: `Daily notification cron: ${notifications.length} push${notifications.length !== 1 ? "es" : ""} dispatched`,
   });
 
   return NextResponse.json({

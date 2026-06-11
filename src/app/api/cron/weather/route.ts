@@ -34,7 +34,7 @@ const CATEGORY_LABELS: Record<string, string> = {
 // will fold this into the next schema sprint.
 const WEATHER_DESC_PREFIX = "🌤 Weather:";
 
-// GET /api/cron/weather — called by Vercel Cron at 08:00 UTC daily
+// GET /api/cron/weather — called by Vercel Cron at 05:00 UTC daily
 export async function GET(req: NextRequest) {
   const { checkCronAuth } = await import("@/lib/cron-auth");
   const authCheck = checkCronAuth(req.headers.get("authorization"));
@@ -91,7 +91,9 @@ export async function GET(req: NextRequest) {
       }
 
       const today = forecast[0];
-      const desc = `${WEATHER_DESC_PREFIX} ${CATEGORY_LABELS[today.category] ?? today.category}, ${today.tempMin}°C–${today.tempMax}°C`;
+      // (Jun 2026 audit) Round — Open-Meteo returns decimals; the Brief
+      // UI rounds, but the push body / event log showed "8.4°C–14.2°C".
+      const desc = `${WEATHER_DESC_PREFIX} ${CATEGORY_LABELS[today.category] ?? today.category}, ${Math.round(today.tempMin)}°C–${Math.round(today.tempMax)}°C`;
 
       await logEvent(prisma, { type: "SYSTEM", description: desc, siteId: site.id });
 
@@ -100,7 +102,7 @@ export async function GET(req: NextRequest) {
       // Send daily weather summary push to this site's audience only.
       await sendPushToSiteAudience(site.id, "WEATHER_ALERT" as NotificationType, {
         title: `Weather — ${site.name}`,
-        body: `Today: ${CATEGORY_LABELS[today.category] ?? today.category}, ${today.tempMin}°C–${today.tempMax}°C`,
+        body: `Today: ${CATEGORY_LABELS[today.category] ?? today.category}, ${Math.round(today.tempMin)}°C–${Math.round(today.tempMax)}°C`,
         url: `/sites/${site.id}?tab=programme`,
         tag: `weather-daily-${site.id}`,
       });
@@ -128,7 +130,7 @@ export async function GET(req: NextRequest) {
           if (weatherSensitiveJobCount > 0) {
             const alertParts: string[] = [];
             if (isRainy) alertParts.push(CATEGORY_LABELS[tomorrow.category] ?? tomorrow.category);
-            if (isCold) alertParts.push(`${tomorrow.tempMin}°C low`);
+            if (isCold) alertParts.push(`${Math.round(tomorrow.tempMin)}°C low`);
 
             await sendPushToSiteAudience(site.id, "WEATHER_ALERT" as NotificationType, {
               title: `Weather Alert — ${site.name}`,

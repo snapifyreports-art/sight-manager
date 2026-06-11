@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { sendEmail } from "@/lib/email";
+import { sendEmail, escapeHtml } from "@/lib/email";
 import { format, subDays, addDays } from "date-fns";
 import { checkCronAuth } from "@/lib/cron-auth";
 import { getServerCurrentDate, getServerStartOfDay } from "@/lib/dev-date";
@@ -52,14 +52,16 @@ export async function GET(req: NextRequest) {
   // assignment. Previously this required a watch row — opt-in. Post-
   // flip, every user with site access gets the digest by default;
   // muted sites (presence of WatchedSite row) are subtracted below.
+  // (Jun 2026 audit) ARCHIVED sites excluded alongside COMPLETED — an
+  // archived site must not keep feeding the Monday digest.
   const users = await prisma.user.findMany({
     where: {
       email: { not: "" },
       // (May 2026 audit S-P0) Don't email archived (offboarded) users.
       archivedAt: null,
       OR: [
-        { siteAccess: { some: { site: { status: { not: "COMPLETED" } } } } },
-        { assignedSites: { some: { status: { not: "COMPLETED" } } } },
+        { siteAccess: { some: { site: { status: { notIn: ["COMPLETED", "ARCHIVED"] } } } } },
+        { assignedSites: { some: { status: { notIn: ["COMPLETED", "ARCHIVED"] } } } },
       ],
     },
     select: {
@@ -67,11 +69,11 @@ export async function GET(req: NextRequest) {
       name: true,
       email: true,
       siteAccess: {
-        where: { site: { status: { not: "COMPLETED" } } },
+        where: { site: { status: { notIn: ["COMPLETED", "ARCHIVED"] } } },
         select: { siteId: true },
       },
       assignedSites: {
-        where: { status: { not: "COMPLETED" } },
+        where: { status: { notIn: ["COMPLETED", "ARCHIVED"] } },
         select: { id: true },
       },
       // WatchedSite rows now mean MUTED — subtract from the audience.
@@ -129,7 +131,7 @@ export async function GET(req: NextRequest) {
   const summariesMap = new Map<string, SiteSummary>();
   if (allSubscribedSiteIds.length > 0) {
     const sitesForSummaries = await prisma.site.findMany({
-      where: { id: { in: allSubscribedSiteIds }, status: { not: "COMPLETED" } },
+      where: { id: { in: allSubscribedSiteIds }, status: { notIn: ["COMPLETED", "ARCHIVED"] } },
       select: { id: true, name: true },
     });
     await Promise.all(
@@ -250,22 +252,26 @@ export async function GET(req: NextRequest) {
 
     const siteRows = summaries
       .map((s) => {
-        const stat = (label: string, n: number, color: string) =>
+        // (Jun 2026 audit) Singular/plural label pair — "1 snags raised"
+        // / "1 photos" / "1 inspections passed" went out every Monday
+        // while the hand-rolled pills in this same block pluralised
+        // correctly. stat() now takes both forms.
+        const stat = (singular: string, plural: string, n: number, color: string) =>
           n > 0
-            ? `<span style="background:${color};border-radius:9999px;padding:2px 8px;font-size:11px;margin-right:6px;">${n} ${label}</span>`
+            ? `<span style="background:${color};border-radius:9999px;padding:2px 8px;font-size:11px;margin-right:6px;">${n} ${n === 1 ? singular : plural}</span>`
             : "";
         const cells = [
-          stat("started", s.jobsStarted, "#dcfce7"),
-          stat("completed", s.jobsCompleted, "#bfdbfe"),
-          stat("snags raised", s.snagsRaised, "#fee2e2"),
-          stat("snags resolved", s.snagsResolved, "#dcfce7"),
-          stat("photos", s.photos, "#e0e7ff"),
+          stat("started", "started", s.jobsStarted, "#dcfce7"),
+          stat("completed", "completed", s.jobsCompleted, "#bfdbfe"),
+          stat("snag raised", "snags raised", s.snagsRaised, "#fee2e2"),
+          stat("snag resolved", "snags resolved", s.snagsResolved, "#dcfce7"),
+          stat("photo", "photos", s.photos, "#e0e7ff"),
           // (May 2026 audit D-P1) Pill renamed to "delay events"
           // because each SCHEDULE_CASCADED row often represents N
           // shifted jobs but the count is rows, not jobs. Director
           // comparing "3 delays" against the in-app DelayReport
           // (which counts jobs) used to see contradictory figures.
-          stat("delay events", s.delays, "#fef3c7"),
+          stat("delay event", "delay events", s.delays, "#fef3c7"),
           // (May 2026 audit #145) Stale snag highlight in red. Catches
           // the eye in a sea of green / blue chips so a manager scrolling
           // past doesn't miss long-rotting snags.
@@ -281,8 +287,8 @@ export async function GET(req: NextRequest) {
             : "",
           // (Jun 2026 Q2) Inspection pills — passed (green), due next 7
           // days (violet), overdue (red, bold — excludes booked-overdue).
-          stat("inspections passed", s.inspectionsPassed, "#dcfce7"),
-          stat("inspections due", s.inspectionsDueNextWeek, "#ede9fe"),
+          stat("inspection passed", "inspections passed", s.inspectionsPassed, "#dcfce7"),
+          stat("inspection due", "inspections due", s.inspectionsDueNextWeek, "#ede9fe"),
           s.inspectionsOverdue > 0
             ? `<span style="background:#fecaca;color:#b91c1c;border-radius:9999px;padding:2px 8px;font-size:11px;margin-right:6px;font-weight:600;">${s.inspectionsOverdue} inspection${s.inspectionsOverdue !== 1 ? "s" : ""} overdue</span>`
             : "",
@@ -305,7 +311,7 @@ export async function GET(req: NextRequest) {
         return `
           <div style="border:1px solid #e2e8f0;border-radius:8px;padding:14px 16px;margin-bottom:12px;">
             <a href="${baseUrl}/sites/${s.siteId}?tab=story" style="text-decoration:none;color:#0f172a;">
-              <p style="margin:0 0 8px;font-weight:600;font-size:14px;">${s.siteName}</p>
+              <p style="margin:0 0 8px;font-weight:600;font-size:14px;">${escapeHtml(s.siteName)}</p>
             </a>
             <div style="font-size:12px;color:#475569;">${cells}</div>
             ${latenessFooter}
@@ -325,7 +331,7 @@ export async function GET(req: NextRequest) {
       <p style="margin:4px 0 0;color:#bfdbfe;font-size:13px;">Weekly digest — ${weekLabel}</p>
     </div>
     <div style="padding:32px;">
-      <p style="margin:0 0 24px;color:#475569;font-size:14px;">Hi ${u.name},</p>
+      <p style="margin:0 0 24px;color:#475569;font-size:14px;">Hi ${escapeHtml(u.name)},</p>
       <p style="margin:0 0 24px;color:#475569;font-size:14px;">Here's what happened on the sites you're watching this week.</p>
       ${siteRows}
       <div style="margin:24px 0 0;text-align:center;">

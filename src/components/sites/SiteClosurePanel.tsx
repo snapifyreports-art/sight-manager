@@ -59,7 +59,10 @@ interface ClosureSummary {
   compliance?: {
     ncrs: { total: number; open: number; closed: number };
     defects: { total: number; open: number; resolved: number };
-    variations: { total: number; approved: number };
+    /** (Jun 2026 audit) `rejected` is optional for old cached payloads —
+     *  REJECTED variations are finalised, so the gate below subtracts
+     *  them instead of counting them as outstanding forever. */
+    variations: { total: number; approved: number; rejected?: number };
   };
   evidence?: {
     preStartChecks: { total: number; checked: number };
@@ -94,22 +97,49 @@ export function SiteClosurePanel({ siteId }: { siteId: string }) {
   const toast = useToast();
   const [data, setData] = useState<ClosureSummary | null>(null);
   const [loading, setLoading] = useState(true);
+  // (Jun 2026 audit) Pre-fix a failed story fetch left loading=false +
+  // data=null — an infinite spinner with no message. Now an inline
+  // error card with Retry (wired to `refresh`, previously dead code).
+  const [error, setError] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
 
   const refresh = useCallback(async () => {
-    const res = await fetch(`/api/sites/${siteId}/story`, {
-      cache: "no-store",
-    });
-    if (res.ok) setData(await res.json());
-    setLoading(false);
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/sites/${siteId}/story`, {
+        cache: "no-store",
+      });
+      if (!res.ok) {
+        setError(await fetchErrorMessage(res));
+        return;
+      }
+      setData(await res.json());
+    } catch {
+      setError("Network error — check your connection and try again.");
+    } finally {
+      setLoading(false);
+    }
   }, [siteId]);
 
   // (May 2026 pattern sweep) Cancellation flag for site-switch race.
   useEffect(() => {
     let cancelled = false;
+    setError(null);
     fetch(`/api/sites/${siteId}/story`, { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => { if (d && !cancelled) setData(d); })
+      .then(async (r) => {
+        if (cancelled) return;
+        if (!r.ok) {
+          setError(await fetchErrorMessage(r));
+          return;
+        }
+        const d = await r.json();
+        if (!cancelled) setData(d);
+      })
+      .catch(() => {
+        if (!cancelled)
+          setError("Network error — check your connection and try again.");
+      })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [siteId]);
@@ -146,10 +176,27 @@ export function SiteClosurePanel({ siteId }: { siteId: string }) {
     }
   }
 
-  if (loading || !data) {
+  if (loading) {
     return (
       <div className="flex items-center justify-center py-16 text-slate-400">
         <Loader2 className="size-5 animate-spin" />
+      </div>
+    );
+  }
+
+  if (error || !data) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-amber-200 bg-amber-50/50 py-12 text-center">
+        <AlertTriangle className="size-6 text-amber-600" />
+        <div>
+          <p className="text-sm font-medium text-slate-800">
+            Couldn&apos;t load the closure summary
+          </p>
+          {error && <p className="mt-0.5 text-xs text-slate-500">{error}</p>}
+        </div>
+        <Button variant="outline" size="sm" onClick={refresh}>
+          Try again
+        </Button>
       </div>
     );
   }
@@ -169,10 +216,15 @@ export function SiteClosurePanel({ siteId }: { siteId: string }) {
   // the field (old caches / staging environments).
   const openNcrs = data.compliance?.ncrs.open ?? 0;
   const openDefects = data.compliance?.defects.open ?? 0;
+  // (Jun 2026 audit) Outstanding = not yet finalised. APPROVED /
+  // IMPLEMENTED and REJECTED are all terminal — pre-fix a single
+  // rejected variation blocked "ready" forever, contradicting the
+  // row's own "approved or rejected" label.
   const variationsOutstanding =
     data.compliance?.variations
       ? data.compliance.variations.total -
-        data.compliance.variations.approved
+        data.compliance.variations.approved -
+        (data.compliance.variations.rejected ?? 0)
       : 0;
   const handoverDocsRequired = data.handoverReadiness?.requiredTotal ?? 0;
   const handoverDocsSigned = data.handoverReadiness?.requiredChecked ?? 0;
@@ -261,7 +313,7 @@ export function SiteClosurePanel({ siteId }: { siteId: string }) {
               <ChecklistRow
                 ok={variationsOutstanding === 0}
                 okLabel="All variations approved or rejected"
-                warnLabel={`${variationsOutstanding} variation${variationsOutstanding !== 1 ? "s" : ""} not yet finalised (REQUESTED / IMPLEMENTED-pending)`}
+                warnLabel={`${variationsOutstanding} variation${variationsOutstanding !== 1 ? "s" : ""} still awaiting a decision`}
               />
             </>
           )}

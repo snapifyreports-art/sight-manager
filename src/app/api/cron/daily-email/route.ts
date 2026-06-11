@@ -1,17 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { sendEmail } from "@/lib/email";
+import { sendEmail, escapeHtml } from "@/lib/email";
 import { format } from "date-fns";
 import { getServerCurrentDate, getServerStartOfDay } from "@/lib/dev-date";
 import { getUserSiteIds } from "@/lib/site-access";
 import { whereJobEndOverdue, whereJobStartOverdue } from "@/lib/lateness";
+import { whereOrdersForSite } from "@/lib/order-scope";
 import { logEvent } from "@/lib/event-log";
 
 export const dynamic = "force-dynamic";
 
 // GET /api/cron/daily-email
 // Sends a daily morning brief email digest to managers (CEO, DIRECTOR, SITE_MANAGER)
-// Scheduled at 6am UTC in vercel.json
+// Scheduled at 05:00 UTC in vercel.json
 export async function GET(req: NextRequest) {
   const { checkCronAuth } = await import("@/lib/cron-auth");
   const authCheck = checkCronAuth(req.headers.get("authorization"));
@@ -32,8 +33,10 @@ export async function GET(req: NextRequest) {
   const todayStart = getServerStartOfDay(req);
 
   // Get all active sites
+  // (Jun 2026 audit) ARCHIVED is settable from the UI — an archived site
+  // must not keep raising ACTION NEEDED alerts in every morning email.
   const sites = await prisma.site.findMany({
-    where: { status: { not: "COMPLETED" } },
+    where: { status: { notIn: ["COMPLETED", "ARCHIVED"] } },
     select: { id: true, name: true, location: true },
   });
 
@@ -41,8 +44,11 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ sent: 0, reason: "No active sites" });
   }
 
-  // Get summary data for each site
-  const siteDigests = await Promise.all(
+  // Get summary data for each site.
+  // (Jun 2026 audit) Per-site failure isolation — one broken site's
+  // count queries used to reject the whole Promise.all and no manager
+  // got any email. Failed sites now drop out of the digest instead.
+  const siteDigestResults = await Promise.allSettled(
     sites.map(async (site) => {
       const [
         overdueJobs,
@@ -79,22 +85,34 @@ export async function GET(req: NextRequest) {
             status: { in: ["NOT_STARTED", "IN_PROGRESS"] },
           },
         }),
+        // (Jun 2026 audit) whereOrdersForSite is the order-scope SSoT —
+        // the old `job: { plot: { siteId } }` predicate silently dropped
+        // plot-/site-level one-off orders that the in-app Brief includes,
+        // so the email's numbers contradicted the Brief on click-through.
         prisma.materialOrder.count({
           where: {
-            job: { plot: { siteId: site.id } },
+            ...whereOrdersForSite(site.id),
             expectedDeliveryDate: { gte: todayStart, lt: new Date(todayStart.getTime() + 86400000) },
             status: "ORDERED",
           },
         }),
         prisma.materialOrder.count({
           where: {
-            job: { plot: { siteId: site.id } },
+            ...whereOrdersForSite(site.id),
             expectedDeliveryDate: { lt: todayStart },
             status: "ORDERED",
           },
         }),
+        // (Jun 2026 audit) Only PENDING orders actually DUE by today —
+        // the Brief splits future-scheduled orders into "Upcoming", so
+        // counting all PENDING here put a red "N orders to place" banner
+        // in the email that the Brief then contradicted.
         prisma.materialOrder.count({
-          where: { job: { plot: { siteId: site.id } }, status: "PENDING" },
+          where: {
+            ...whereOrdersForSite(site.id),
+            status: "PENDING",
+            dateOfOrder: { lt: new Date(todayStart.getTime() + 86400000) },
+          },
         }),
         prisma.snag.count({
           where: { plot: { siteId: site.id }, status: { in: ["OPEN", "IN_PROGRESS"] } },
@@ -132,6 +150,10 @@ export async function GET(req: NextRequest) {
       };
     })
   );
+  const siteDigests = siteDigestResults.flatMap((r) =>
+    r.status === "fulfilled" ? [r.value] : [],
+  );
+  const digestFailures = siteDigestResults.length - siteDigests.length;
 
   // (May 2026 audit B-11) Get managers to email. Pre-fix
   // `email: { not: undefined }` was a no-op Prisma filter — it didn't
@@ -303,9 +325,9 @@ export async function GET(req: NextRequest) {
           <div style="display:flex;justify-content:space-between;align-items:flex-start;margin:0 0 8px;">
             <div>
               <a href="${siteUrl}" style="text-decoration:none;color:#0f172a;">
-                <p style="margin:0;font-size:15px;font-weight:600;">${d.site.name}</p>
+                <p style="margin:0;font-size:15px;font-weight:600;">${escapeHtml(d.site.name)}</p>
               </a>
-              ${d.site.location ? `<p style="margin:2px 0 0;font-size:12px;color:#64748b;">${d.site.location}</p>` : ""}
+              ${d.site.location ? `<p style="margin:2px 0 0;font-size:12px;color:#64748b;">${escapeHtml(d.site.location)}</p>` : ""}
             </div>
             ${d.hasAlerts ? '<span style="background:#fee2e2;color:#dc2626;padding:2px 8px;border-radius:9999px;font-size:11px;font-weight:600;">ACTION NEEDED</span>' : '<span style="background:#dcfce7;color:#16a34a;padding:2px 8px;border-radius:9999px;font-size:11px;">All clear</span>'}
           </div>
@@ -340,7 +362,7 @@ export async function GET(req: NextRequest) {
       <h2 style="margin:0 0 16px;font-size:16px;color:#0f172a;">Site Overview</h2>
       ${buildSiteRows(digests)}
       <div style="margin:24px 0 0;text-align:center;">
-        <a href="${process.env.NEXTAUTH_URL || "https://sight-manager.vercel.app"}" style="background:#2563eb;color:#fff;padding:10px 24px;border-radius:8px;text-decoration:none;font-size:14px;font-weight:600;">Open Sight Manager</a>
+        <a href="${baseUrl}" style="background:#2563eb;color:#fff;padding:10px 24px;border-radius:8px;text-decoration:none;font-size:14px;font-weight:600;">Open Sight Manager</a>
       </div>
     </div>
     <div style="padding:16px 32px;background:#f8fafc;border-top:1px solid #e2e8f0;text-align:center;">
@@ -396,7 +418,10 @@ export async function GET(req: NextRequest) {
       }),
   );
 
-  const sent = results.filter((r) => r.status === "fulfilled").length;
+  // (Jun 2026 audit) Only count fulfilled promises with a truthy value —
+  // skipped managers (no accessible sites) fulfil with undefined and
+  // were inflating the "sent to N managers" event-log line.
+  const sent = results.filter((r) => r.status === "fulfilled" && r.value).length;
   const failedResults = results.filter(
     (r): r is PromiseRejectedResult => r.status === "rejected"
   );
@@ -423,6 +448,7 @@ export async function GET(req: NextRequest) {
     sent,
     failed,
     skippedNoAccess,
+    digestFailures,
     managers: managers.length,
     sites: sites.length,
     date: todayStr,

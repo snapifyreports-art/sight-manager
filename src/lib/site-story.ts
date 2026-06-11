@@ -130,6 +130,10 @@ export interface SiteStory {
     variations: {
       total: number;
       approved: number;
+      /** (Jun 2026 audit) REJECTED is a finalised state — Closure gates
+       *  on REQUESTED only (outstanding = total - approved - rejected),
+       *  so a rejected variation can't block "ready" forever. */
+      rejected: number;
       costDelta: number;
       daysDelta: number;
       recent: {
@@ -314,6 +318,11 @@ function highlightTypeForEvent(
     case "ORDER_SENT":
     case "DELIVERY_CONFIRMED":
     case "DELIVERY_LATE":
+    // (Jun 2026 audit) Legacy pre-May-2026 delivery events — the enum
+    // still carries ORDER_DELIVERED and the Site Log groups it under
+    // orders, but it was missing here so old deliveries vanished from
+    // the Story timeline.
+    case "ORDER_DELIVERED":
     case "ORDER_CANCELLED":
       return "ORDER";
     case "SNAG_CREATED":
@@ -496,12 +505,27 @@ export async function buildSiteStory(
 
   // ─── Site-level aggregates ──────────────────────────────────────────
   const allLeafJobs = plots.flatMap((p) => p.jobs);
+  // (Jun 2026 audit) Overview counts derive from the same
+  // deriveAggregateStatus the per-plot pills use. Pre-fix
+  // plotsInProgress counted only plots with a literally-IN_PROGRESS
+  // job, so a partial-done plot (some COMPLETED + rest NOT_STARTED)
+  // and an all-ON_HOLD plot both fell into plotsNotStarted while the
+  // same payload's plot pills said otherwise. ON_HOLD plots count as
+  // in-progress here — work has started, it's just paused.
+  const plotStatusById = new Map<string, JobStatus>();
+  for (const p of plots) {
+    plotStatusById.set(
+      p.id,
+      deriveAggregateStatus(p.jobs.map((j) => j.status as JobStatus)),
+    );
+  }
   const plotsCompleted = plots.filter(
-    (p) => p.jobs.length > 0 && p.jobs.every((j) => j.status === "COMPLETED"),
+    (p) => plotStatusById.get(p.id) === "COMPLETED",
   ).length;
-  const plotsInProgress = plots.filter((p) =>
-    p.jobs.some((j) => j.status === "IN_PROGRESS"),
-  ).length;
+  const plotsInProgress = plots.filter((p) => {
+    const s = plotStatusById.get(p.id);
+    return s === "IN_PROGRESS" || s === "ON_HOLD";
+  }).length;
   const plotsNotStarted = plots.length - plotsCompleted - plotsInProgress;
 
   const overallPercent =
@@ -563,12 +587,14 @@ export async function buildSiteStory(
 
   const halfwayPlotComplete =
     plotsCompleted >= Math.ceil(plots.length / 2) && plots.length > 0
-      ? // The completion date of the median completed plot
+      ? // (Jun 2026 audit) The completion date of the plot that CROSSED
+        // halfway — the ceil(n/2)-th completion, a fixed point that never
+        // moves once reached. Pre-fix this indexed the median of the
+        // currently-completed set, so the "Halfway" milestone date kept
+        // drifting every time another plot finished.
         (() => {
           const completed = plots
-            .filter((p) =>
-              p.jobs.every((j) => j.status === "COMPLETED"),
-            )
+            .filter((p) => plotStatusById.get(p.id) === "COMPLETED")
             .map((p) =>
               p.jobs
                 .map((j) => j.actualEndDate)
@@ -580,7 +606,7 @@ export async function buildSiteStory(
             )
             .filter((d): d is Date => !!d)
             .sort((a, b) => a.getTime() - b.getTime());
-          const mid = completed[Math.floor(completed.length / 2)];
+          const mid = completed[Math.ceil(plots.length / 2) - 1];
           return mid ?? null;
         })()
       : null;
@@ -836,10 +862,19 @@ export async function buildSiteStory(
     },
     orderBy: { raisedAt: "desc" },
   });
-  const ncrIsOpen = (s: string) => s === "OPEN" || s === "INVESTIGATING";
+  // (Jun 2026 audit) NCRStatus has five values — AWAITING_CORRECTION is
+  // still open (the inspections actions route treats it that way) and
+  // RESOLVED counts as closed alongside CLOSED, matching the snag
+  // RESOLVED-or-CLOSED convention above. Pre-fix an AWAITING_CORRECTION
+  // NCR sailed past the Closure "No open NCRs" gate and a RESOLVED one
+  // landed in neither bucket, so total ≠ open + closed.
+  const ncrIsOpen = (s: string) =>
+    s === "OPEN" || s === "INVESTIGATING" || s === "AWAITING_CORRECTION";
   const ncrsTotal = allNcrs.length;
   const ncrsOpen = allNcrs.filter((n) => ncrIsOpen(n.status)).length;
-  const ncrsClosed = allNcrs.filter((n) => n.status === "CLOSED").length;
+  const ncrsClosed = allNcrs.filter(
+    (n) => n.status === "RESOLVED" || n.status === "CLOSED",
+  ).length;
 
   const allDefects = await tx.defectReport.findMany({
     where: { plotId: { in: plotIds } },
@@ -878,6 +913,11 @@ export async function buildSiteStory(
   const variationsTotal = allVariations.length;
   const variationsApproved = allVariations.filter(
     (v) => v.status === "APPROVED" || v.status === "IMPLEMENTED",
+  ).length;
+  // (Jun 2026 audit) REJECTED is finalised too — exported so Closure can
+  // gate on REQUESTED only instead of counting rejections as outstanding.
+  const variationsRejected = allVariations.filter(
+    (v) => v.status === "REJECTED",
   ).length;
   const variationsCostDelta = allVariations.reduce(
     (sum, v) => sum + (v.costDelta ?? 0),
@@ -1255,9 +1295,9 @@ export async function buildSiteStory(
     // Pre-this the rule was inlined here as a 5-deep ternary —
     // correct, but a 3rd copy that would drift if status rules ever
     // changed. Plot 33's "Foundation" bug was the same class of issue.
-    const status = deriveAggregateStatus(
-      p.jobs.map((j) => j.status as JobStatus),
-    ) as PlotStory["status"];
+    // (Jun 2026 audit) Computed once up front (plotStatusById) so the
+    // overview counts and these pills can never disagree.
+    const status = plotStatusById.get(p.id) as PlotStory["status"];
 
     const plotEarliestActual = p.jobs
       .map((j) => j.actualStartDate)
@@ -1355,6 +1395,10 @@ export async function buildSiteStory(
             "ORDER_SENT",
             "DELIVERY_CONFIRMED",
             "DELIVERY_LATE",
+            // (Jun 2026 audit) Legacy delivery events — pre-May-2026
+            // rows still carry this type; Site Log shows them, the
+            // Story timeline was silently dropping them.
+            "ORDER_DELIVERED",
             "ORDER_CANCELLED",
             "SNAG_CREATED",
             "SNAG_RESOLVED",
@@ -1530,6 +1574,11 @@ export async function buildSiteStory(
         body: `✓ ${p.name} passed${p.plot?.plotNumber ? ` on Plot ${p.plot.plotNumber}` : ""} (${inspectionTypeLabel(p.type as string)})`,
       });
     }
+
+    // (Jun 2026 audit) Newest first — the panel renders slice(0, 6), so
+    // without a sort the inspection passes (appended after up to 30
+    // journals) could never reach the visible board on a busy site.
+    quoteBoard.sort((a, b) => b.date.localeCompare(a.date));
   }
 
   return {
@@ -1594,6 +1643,7 @@ export async function buildSiteStory(
       variations: {
         total: variationsTotal,
         approved: variationsApproved,
+        rejected: variationsRejected,
         costDelta: variationsCostDelta,
         daysDelta: variationsDaysDelta,
         recent: recentVariations,

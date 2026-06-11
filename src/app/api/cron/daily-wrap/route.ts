@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { sendEmail } from "@/lib/email";
+import { sendEmail, escapeHtml } from "@/lib/email";
 import { sendPushToSiteAudience } from "@/lib/push";
 import { format, addDays } from "date-fns";
 import { getServerCurrentDate, getServerStartOfDay } from "@/lib/dev-date";
 import { getUserSiteIds } from "@/lib/site-access";
+import { whereOrdersForSite } from "@/lib/order-scope";
 import { fetchWeatherForPostcode } from "@/lib/weather";
 import { logEvent } from "@/lib/event-log";
 import { checkCronAuth } from "@/lib/cron-auth";
@@ -60,7 +61,10 @@ export async function GET(req: NextRequest) {
 
   // Per-site digest. Each promise resolves to a single object — kept
   // independent so a failure on one site doesn't break the rest.
-  const siteDigests = await Promise.all(
+  // (Jun 2026 audit) That comment used to be a lie: Promise.all rejects
+  // wholesale on the first failure, so one broken site killed every
+  // push AND every manager email. allSettled + filter delivers it.
+  const siteDigestResults = await Promise.allSettled(
     sites.map(async (site) => {
       const [
         jobsCompletedToday,
@@ -85,9 +89,11 @@ export async function GET(req: NextRequest) {
             createdAt: { gte: dayStart, lt: dayEnd },
           },
         }),
+        // (Jun 2026 audit) whereOrdersForSite SSoT — the hand-rolled OR
+        // missed plot-attached one-off orders.
         prisma.materialOrder.count({
           where: {
-            OR: [{ siteId: site.id }, { job: { plot: { siteId: site.id } } }],
+            ...whereOrdersForSite(site.id),
             status: "DELIVERED",
             deliveredDate: { gte: dayStart, lt: dayEnd },
           },
@@ -143,6 +149,10 @@ export async function GET(req: NextRequest) {
       };
     }),
   );
+  const siteDigests = siteDigestResults.flatMap((r) =>
+    r.status === "fulfilled" ? [r.value] : [],
+  );
+  const digestFailures = siteDigestResults.length - siteDigests.length;
 
   const CATEGORY_LABELS: Record<string, string> = {
     clear: "Clear",
@@ -167,8 +177,10 @@ export async function GET(req: NextRequest) {
         );
       }
       if (d.tomorrowWeather) {
+        // (Jun 2026 audit) Round — Open-Meteo returns decimals and the
+        // Brief UI rounds; "8.4°–14.2°" looked untidy in the email.
         tomorrowParts.push(
-          `${CATEGORY_LABELS[d.tomorrowWeather.category] ?? d.tomorrowWeather.category} ${d.tomorrowWeather.tempMin}°–${d.tomorrowWeather.tempMax}°`,
+          `${CATEGORY_LABELS[d.tomorrowWeather.category] ?? d.tomorrowWeather.category} ${Math.round(d.tomorrowWeather.tempMin)}°–${Math.round(d.tomorrowWeather.tempMax)}°`,
         );
       }
       const tomorrowLine = tomorrowParts.length
@@ -176,7 +188,7 @@ export async function GET(req: NextRequest) {
         : "no jobs scheduled";
       lines.push(
         `<div style="font-family:system-ui,sans-serif;margin:0 0 16px;padding:12px;border:1px solid #e2e8f0;border-radius:8px;">
-          <div style="font-weight:600;color:#0f172a;margin-bottom:6px;">${d.site.name}</div>
+          <div style="font-weight:600;color:#0f172a;margin-bottom:6px;">${escapeHtml(d.site.name)}</div>
           <ul style="margin:0;padding-left:18px;font-size:13px;color:#334155;line-height:1.6;">
             <li>${d.jobsCompletedToday} job${d.jobsCompletedToday === 1 ? "" : "s"} completed</li>
             <li>${d.snagsRaisedToday} snag${d.snagsRaisedToday === 1 ? "" : "s"} raised</li>
@@ -225,9 +237,12 @@ export async function GET(req: NextRequest) {
   );
 
   // Per-manager email aggregating their accessible sites.
+  // (Jun 2026 audit) SUPER_ADMIN included — daily-email was explicitly
+  // fixed to include them (May 2026 B-11: "they bypass every permission
+  // elsewhere"); the evening wrap silently left them out.
   const managers = await prisma.user.findMany({
     where: {
-      role: { in: ["CEO", "DIRECTOR", "SITE_MANAGER"] },
+      role: { in: ["SUPER_ADMIN", "CEO", "DIRECTOR", "SITE_MANAGER"] },
       archivedAt: null,
     },
     select: { id: true, role: true, email: true, name: true },
@@ -257,7 +272,9 @@ export async function GET(req: NextRequest) {
       }),
   );
 
-  const sent = results.filter((r) => r.status === "fulfilled").length;
+  // (Jun 2026 audit) Truthy value only — skipped managers fulfil with
+  // undefined and were counted as "sent" in the event log.
+  const sent = results.filter((r) => r.status === "fulfilled" && r.value).length;
   const failed = results.filter((r) => r.status === "rejected").length;
 
   await logEvent(prisma, {
@@ -269,6 +286,7 @@ export async function GET(req: NextRequest) {
     sent,
     failed,
     skippedNoAccess,
+    digestFailures,
     sites: sites.length,
     date: todayStr,
   });

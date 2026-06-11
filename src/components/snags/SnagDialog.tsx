@@ -834,7 +834,6 @@ export function SnagDialog({
                   type="file"
                   accept="image/*"
                   multiple
-                  capture="environment"
                   className="hidden"
                   onChange={(e) => handlePhotoUpload(e.target.files)}
                 />
@@ -939,7 +938,6 @@ export function SnagDialog({
                             ref={closeFileRef}
                             type="file"
                             accept="image/*"
-                            capture="environment"
                             className="hidden"
                             onChange={(e) => {
                               const files = e.target.files;
@@ -1348,7 +1346,6 @@ export function SnagDialog({
                     ref={fileInputRef}
                     type="file"
                     accept="image/*"
-                    capture="environment"
                     multiple
                     className="hidden"
                     onChange={(e) => handlePhotoUpload(e.target.files)}

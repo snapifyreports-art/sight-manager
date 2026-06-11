@@ -66,169 +66,201 @@ export async function POST(
     });
     if (!source) return NextResponse.json({ error: "Template not found" }, { status: 404 });
 
-    // Create the new template shell. Clones start as drafts so the user
-    // has a chance to review (re-upload placeholder docs, tweak names,
-    // adjust durations) before exposing the copy in the apply-picker.
-    const clone = await prisma.plotTemplate.create({
-      data: {
-        name: newName || `${source.name} (copy)`,
-        description: source.description,
-        typeLabel: source.typeLabel,
-        isDraft: true,
-      },
-    });
-
-    // Map old-job-id → new-job-id so we can remap parentId + anchorJobId.
-    const jobIdMap = new Map<string, string>();
-
-    // First pass: create parents (jobs with parentId === null).
-    for (const job of source.jobs.filter((j) => j.parentId === null)) {
-      const created = await prisma.templateJob.create({
-        data: {
-          templateId: clone.id,
-          name: job.name,
-          description: job.description,
-          stageCode: job.stageCode,
-          startWeek: job.startWeek,
-          endWeek: job.endWeek,
-          durationWeeks: job.durationWeeks,
-          durationDays: job.durationDays,
-          sortOrder: job.sortOrder,
-          contactId: job.contactId,
-          parentId: null,
-        },
-      });
-      jobIdMap.set(job.id, created.id);
-    }
-
-    // Second pass: children, now that parent IDs are known.
-    for (const job of source.jobs.filter((j) => j.parentId !== null)) {
-      const newParentId = job.parentId ? jobIdMap.get(job.parentId) : null;
-      const created = await prisma.templateJob.create({
-        data: {
-          templateId: clone.id,
-          name: job.name,
-          description: job.description,
-          stageCode: job.stageCode,
-          startWeek: job.startWeek,
-          endWeek: job.endWeek,
-          durationWeeks: job.durationWeeks,
-          durationDays: job.durationDays,
-          sortOrder: job.sortOrder,
-          contactId: job.contactId,
-          parentId: newParentId ?? null,
-        },
-      });
-      jobIdMap.set(job.id, created.id);
-    }
-
-    // Third pass: orders (remap templateJobId + anchorJobId).
-    // SSOT note: anchor fields + lead-time fields are canonical for order
-    // timing — copy them all. Earlier this loop forgot leadTimeAmount /
-    // leadTimeUnit which meant cloned orders silently lost their lead
-    // time and apply-template fell back to the legacy deliveryWeekOffset
-    // fallback. Caught during the May 2026 SSOT-audit re-review.
-    for (const job of source.jobs) {
-      for (const order of job.orders) {
-        const newJobId = jobIdMap.get(order.templateJobId);
-        if (!newJobId) continue;
-        const newAnchorJobId = order.anchorJobId ? jobIdMap.get(order.anchorJobId) ?? null : null;
-        await prisma.templateOrder.create({
+    // (Jun 2026 audit) The whole clone runs in a single transaction —
+    // pre-fix a mid-clone failure (timeout, FK issue, deploy restart)
+    // left a half-built draft (e.g. jobs but no orders/inspections)
+    // that looked complete in the list. Same envelope + rationale as
+    // the sibling variant-seed route.
+    const clone = await prisma.$transaction(
+      async (tx) => {
+        // Create the new template shell. Clones start as drafts so the user
+        // has a chance to review (re-upload placeholder docs, tweak names,
+        // adjust durations) before exposing the copy in the apply-picker.
+        // (Jun 2026 audit) buildBudget/salePrice carry over — the go-live
+        // gate requires both, so dropping them blocked every clone of a
+        // priced template until the user re-keyed figures that already
+        // existed on the source.
+        const created = await tx.plotTemplate.create({
           data: {
-            templateJobId: newJobId,
-            supplierId: order.supplierId,
-            orderWeekOffset: order.orderWeekOffset,
-            deliveryWeekOffset: order.deliveryWeekOffset,
-            itemsDescription: order.itemsDescription,
-            anchorType: order.anchorType,
-            anchorAmount: order.anchorAmount,
-            anchorUnit: order.anchorUnit,
-            anchorDirection: order.anchorDirection,
-            anchorJobId: newAnchorJobId,
-            leadTimeAmount: order.leadTimeAmount,
-            leadTimeUnit: order.leadTimeUnit,
-            items: {
-              create: order.items.map((it) => ({
-                name: it.name,
-                quantity: it.quantity,
-                unit: it.unit,
-                unitCost: it.unitCost,
-              })),
-            },
+            name: newName || `${source.name} (copy)`,
+            description: source.description,
+            typeLabel: source.typeLabel,
+            buildBudget: source.buildBudget,
+            salePrice: source.salePrice,
+            isDraft: true,
           },
         });
-      }
-    }
 
-    // Fourth pass: materials (quants) — flat, no remap needed.
-    if (source.materials.length > 0) {
-      await prisma.templateMaterial.createMany({
-        data: source.materials.map((m) => ({
-          templateId: clone.id,
-          name: m.name,
-          quantity: m.quantity,
-          unit: m.unit,
-          unitCost: m.unitCost,
-          linkedStageCode: m.linkedStageCode,
-          category: m.category,
-          notes: m.notes,
-        })),
-      });
-    }
+        // Map old-job-id → new-job-id so we can remap parentId + anchorJobId.
+        const jobIdMap = new Map<string, string>();
 
-    // Documents — Supabase storage objects aren't duplicated (storage
-    // costs add up across clones). Instead we create placeholder rows
-    // carrying the original metadata so the user can see what was on
-    // the source template and re-upload deliberately. UI flags
-    // isPlaceholder=true rows with a "re-upload" affordance.
-    if (source.documents.length > 0) {
-      await prisma.templateDocument.createMany({
-        data: source.documents.map((d) => ({
-          templateId: clone.id,
-          name: d.name,
-          url: "", // empty for placeholders — UI uses isPlaceholder check
-          fileName: d.fileName,
-          fileSize: d.fileSize,
-          mimeType: d.mimeType,
-          category: d.category,
-          isPlaceholder: true,
-        })),
-      });
-    }
+        // First pass: create parents (jobs with parentId === null).
+        // (Jun 2026 audit) weatherAffected/weatherAffectedType carry over —
+        // the seed route copied both but clone dropped them, so plots
+        // applied from a cloned template never triggered weather alerting.
+        for (const job of source.jobs.filter((j) => j.parentId === null)) {
+          const createdJob = await tx.templateJob.create({
+            data: {
+              templateId: created.id,
+              name: job.name,
+              description: job.description,
+              stageCode: job.stageCode,
+              startWeek: job.startWeek,
+              endWeek: job.endWeek,
+              durationWeeks: job.durationWeeks,
+              durationDays: job.durationDays,
+              sortOrder: job.sortOrder,
+              weatherAffected: job.weatherAffected,
+              weatherAffectedType: job.weatherAffectedType,
+              contactId: job.contactId,
+              parentId: null,
+            },
+          });
+          jobIdMap.set(job.id, createdJob.id);
+        }
 
-    // Inspections (Jun 2026 audit fix — were silently dropped, so a
-    // cloned template lost every statutory/QA hold-point). Remap each
-    // anchor via jobIdMap; skip any whose anchor didn't clone.
-    for (const ins of source.inspections) {
-      const newAnchorId = jobIdMap.get(ins.anchorTemplateJobId);
-      if (!newAnchorId) continue;
-      await prisma.templateInspection.create({
-        data: {
-          templateId: clone.id,
-          name: ins.name,
-          type: ins.type,
-          description: ins.description,
-          sortOrder: ins.sortOrder,
-          anchorTemplateJobId: newAnchorId,
-          anchorEdge: ins.anchorEdge,
-          offsetDays: ins.offsetDays,
-          bookingLeadWeeks: ins.bookingLeadWeeks,
-          defaultInspectorContactId: ins.defaultInspectorContactId,
-        },
-      });
-    }
+        // Second pass: children, now that parent IDs are known.
+        for (const job of source.jobs.filter((j) => j.parentId !== null)) {
+          const newParentId = job.parentId ? jobIdMap.get(job.parentId) : null;
+          const createdJob = await tx.templateJob.create({
+            data: {
+              templateId: created.id,
+              name: job.name,
+              description: job.description,
+              stageCode: job.stageCode,
+              startWeek: job.startWeek,
+              endWeek: job.endWeek,
+              durationWeeks: job.durationWeeks,
+              durationDays: job.durationDays,
+              sortOrder: job.sortOrder,
+              weatherAffected: job.weatherAffected,
+              weatherAffectedType: job.weatherAffectedType,
+              contactId: job.contactId,
+              parentId: newParentId ?? null,
+            },
+          });
+          jobIdMap.set(job.id, createdJob.id);
+        }
 
-    // Audit log: capture the clone-from event so the change log on the
-    // new template starts with a clear origin point.
-    await prisma.templateAuditEvent.create({
-      data: {
-        templateId: clone.id,
-        userId: session.user?.id ?? null,
-        userName: session.user?.name ?? session.user?.email ?? null,
-        action: "cloned_from",
-        detail: `Cloned from "${source.name}"`,
+        // Third pass: orders (remap templateJobId + anchorJobId).
+        // SSOT note: anchor fields + lead-time fields are canonical for order
+        // timing — copy them all. Earlier this loop forgot leadTimeAmount /
+        // leadTimeUnit which meant cloned orders silently lost their lead
+        // time and apply-template fell back to the legacy deliveryWeekOffset
+        // fallback. Caught during the May 2026 SSOT-audit re-review.
+        for (const job of source.jobs) {
+          for (const order of job.orders) {
+            const newJobId = jobIdMap.get(order.templateJobId);
+            if (!newJobId) continue;
+            const newAnchorJobId = order.anchorJobId ? jobIdMap.get(order.anchorJobId) ?? null : null;
+            await tx.templateOrder.create({
+              data: {
+                templateJobId: newJobId,
+                supplierId: order.supplierId,
+                orderWeekOffset: order.orderWeekOffset,
+                deliveryWeekOffset: order.deliveryWeekOffset,
+                itemsDescription: order.itemsDescription,
+                anchorType: order.anchorType,
+                anchorAmount: order.anchorAmount,
+                anchorUnit: order.anchorUnit,
+                anchorDirection: order.anchorDirection,
+                anchorJobId: newAnchorJobId,
+                leadTimeAmount: order.leadTimeAmount,
+                leadTimeUnit: order.leadTimeUnit,
+                items: {
+                  create: order.items.map((it) => ({
+                    name: it.name,
+                    quantity: it.quantity,
+                    unit: it.unit,
+                    unitCost: it.unitCost,
+                  })),
+                },
+              },
+            });
+          }
+        }
+
+        // Fourth pass: materials (quants) — flat, no remap needed.
+        if (source.materials.length > 0) {
+          await tx.templateMaterial.createMany({
+            data: source.materials.map((m) => ({
+              templateId: created.id,
+              name: m.name,
+              quantity: m.quantity,
+              unit: m.unit,
+              unitCost: m.unitCost,
+              linkedStageCode: m.linkedStageCode,
+              category: m.category,
+              notes: m.notes,
+            })),
+          });
+        }
+
+        // Documents — Supabase storage objects aren't duplicated (storage
+        // costs add up across clones). Instead we create placeholder rows
+        // carrying the original metadata so the user can see what was on
+        // the source template and re-upload deliberately. UI flags
+        // isPlaceholder=true rows with a "re-upload" affordance.
+        if (source.documents.length > 0) {
+          await tx.templateDocument.createMany({
+            data: source.documents.map((d) => ({
+              templateId: created.id,
+              name: d.name,
+              url: "", // empty for placeholders — UI uses isPlaceholder check
+              fileName: d.fileName,
+              fileSize: d.fileSize,
+              mimeType: d.mimeType,
+              category: d.category,
+              isPlaceholder: true,
+            })),
+          });
+        }
+
+        // Inspections (Jun 2026 audit fix — were silently dropped, so a
+        // cloned template lost every statutory/QA hold-point). Remap each
+        // anchor via jobIdMap; skip any whose anchor didn't clone.
+        for (const ins of source.inspections) {
+          const newAnchorId = jobIdMap.get(ins.anchorTemplateJobId);
+          if (!newAnchorId) continue;
+          await tx.templateInspection.create({
+            data: {
+              templateId: created.id,
+              name: ins.name,
+              type: ins.type,
+              description: ins.description,
+              sortOrder: ins.sortOrder,
+              anchorTemplateJobId: newAnchorId,
+              anchorEdge: ins.anchorEdge,
+              offsetDays: ins.offsetDays,
+              bookingLeadWeeks: ins.bookingLeadWeeks,
+              defaultInspectorContactId: ins.defaultInspectorContactId,
+              // (Jun 2026 audit) isBlocking was dropped (schema default
+              // false), so a HARD hold-point silently became soft on
+              // every clone and the job-completion gate never fired for
+              // plots applied from the copy.
+              isBlocking: ins.isBlocking,
+            },
+          });
+        }
+
+        // Audit log: capture the clone-from event so the change log on the
+        // new template starts with a clear origin point.
+        await tx.templateAuditEvent.create({
+          data: {
+            templateId: created.id,
+            userId: session.user?.id ?? null,
+            userName: session.user?.name ?? session.user?.email ?? null,
+            action: "cloned_from",
+            detail: `Cloned from "${source.name}"`,
+          },
+        });
+
+        return created;
       },
-    });
+      // Complex templates can have 20+ stages each with 5+ orders and
+      // 10+ items — same envelope as the variant-seed route.
+      { timeout: 60_000, maxWait: 10_000 },
+    );
 
     return NextResponse.json({ id: clone.id, name: clone.name }, { status: 201 });
   } catch (err) {

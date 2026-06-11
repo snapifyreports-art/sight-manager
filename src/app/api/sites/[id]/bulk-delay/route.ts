@@ -117,6 +117,9 @@ export async function POST(
         endDate: j.endDate,
         sortOrder: j.sortOrder,
         status: j.status,
+        // (Jun 2026 audit) parentId so parent stages re-derive from
+        // children and their attached orders shift — same as /delay.
+        parentId: j.parentId ?? null,
       })),
       allOrders.map((o) => ({
         id: o.id,

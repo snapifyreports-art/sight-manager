@@ -192,6 +192,14 @@ export default function SiteWalkthrough({
   const [snagJobId, setSnagJobId] = useState<string | null>(null); // null = current job
   const [snagContactId, setSnagContactId] = useState<string | null>(null); // auto-filled from job
   const [snagPhotos, setSnagPhotos] = useState<File[]>([]);
+  // (Jun 2026 W6) Photo tag — a walkthrough snap is nearly always the
+  // "before" evidence shot, so default it; the close-out flow tags "after".
+  const [snagPhotoTag, setSnagPhotoTag] = useState<"before" | "after" | "">("before");
+  // (Jun 2026 W6) Optional assignee + notes — the create POST always
+  // accepted them; the walkthrough form just never offered them.
+  const [snagAssignedToId, setSnagAssignedToId] = useState<string | null>(null);
+  const [snagNotes, setSnagNotes] = useState("");
+  const [users, setUsers] = useState<Array<{ id: string; name: string }>>([]);
   const [showJobPicker, setShowJobPicker] = useState<"snag" | "note" | null>(null);
   const [snagEmailPrompt, setSnagEmailPrompt] = useState<{ snagId: string; contractorName: string; contractorEmail: string; description: string } | null>(null);
   const [plotJobs, setPlotJobs] = useState<Array<{ id: string; name: string; status: string; parentStage: string | null; contractor: { id: string; name: string; company: string | null; email: string | null } | null }>>([]);
@@ -329,6 +337,22 @@ export default function SiteWalkthrough({
     else toast.error(message);
   };
 
+  // (Jun 2026 W6) Assign-to options — fetched once, on first snag-modal
+  // open, so the walkthrough's initial load stays lean.
+  // (Jun 2026 review) GET /api/users 403s for anyone without the users
+  // permission (site managers included) — on !res.ok the list stays
+  // empty and the Assign-to field below is hidden entirely, so
+  // non-admins never see a dropdown that can only ever say Unassigned.
+  useEffect(() => {
+    if (activeModal !== "snag" || users.length > 0) return;
+    fetch("/api/users")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: Array<{ id: string; name: string }> | null) => {
+        if (data) setUsers(data.map((u) => ({ id: u.id, name: u.name })));
+      })
+      .catch(() => {});
+  }, [activeModal, users.length]);
+
   const closeModal = () => {
     setActiveModal(null);
     setNoteText("");
@@ -339,6 +363,9 @@ export default function SiteWalkthrough({
     setSnagJobId(null);
     setSnagContactId(null);
     setSnagPhotos([]);
+    setSnagPhotoTag("before");
+    setSnagAssignedToId(null);
+    setSnagNotes("");
     setShowJobPicker(null);
     setSignOffNotes("");
     setSignOffPhotos([]);
@@ -520,6 +547,9 @@ export default function SiteWalkthrough({
       if (targetJobId) body.jobId = targetJobId;
       // Include contractor
       if (snagContactId) body.contactId = snagContactId;
+      // (Jun 2026 W6) Optional assignee + notes.
+      if (snagAssignedToId) body.assignedToId = snagAssignedToId;
+      if (snagNotes.trim()) body.notes = snagNotes.trim();
 
       const res = await fetch(`/api/plots/${plot.id}/snags`, {
         method: "POST",
@@ -532,6 +562,9 @@ export default function SiteWalkthrough({
         if (snagPhotos.length > 0) {
           const fd = new FormData();
           snagPhotos.forEach((f) => fd.append("photos", f));
+          // (Jun 2026 W6) Before/After tag — same field the snag close-out
+          // flow writes, so the photo strip groups them correctly.
+          if (snagPhotoTag) fd.append("tag", snagPhotoTag);
           // (May 2026 pattern sweep) Pre-fix this bare fetch swallowed
           // failures and the snag-raised toast fired regardless — user
           // thought photos uploaded when they didn't.
@@ -1339,13 +1372,32 @@ export default function SiteWalkthrough({
                 <input
                   type="file"
                   accept="image/*"
-                  capture="environment"
                   multiple
                   className="hidden"
                   onChange={(e) => { if (e.target.files) setSnagPhotos(Array.from(e.target.files)); }}
                 />
               </label>
             </div>
+            {/* (Jun 2026 W6) Before/After tag for the photos — walkthrough
+                snaps are nearly always the "before" shot, so it's the
+                default. Only shown once photos are attached. */}
+            {snagPhotos.length > 0 && (
+              <div className="flex items-center gap-2 text-xs">
+                <span className="text-muted-foreground">Photo type</span>
+                <div className="flex overflow-hidden rounded-lg border border-border">
+                  {([["before", "Before"], ["after", "After"], ["", "None"]] as const).map(([v, l]) => (
+                    <button
+                      key={l}
+                      type="button"
+                      onClick={() => setSnagPhotoTag(v)}
+                      className={`px-3 py-1.5 font-medium transition-colors ${snagPhotoTag === v ? "bg-blue-600 text-white" : "bg-background hover:bg-accent"}`}
+                    >
+                      {l}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             <div>
               <label className="mb-1 block text-xs font-medium text-muted-foreground">
                 Description *
@@ -1441,6 +1493,36 @@ export default function SiteWalkthrough({
                   ));
                 })()}
               </select>
+            </div>
+            {/* (Jun 2026 W6) Optional assignee + notes — same fields the
+                full SnagDialog offers. Assign-to renders only when the
+                user list loaded (the fetch 403s for non-admins). */}
+            <div className={cn("grid grid-cols-1 gap-2", users.length > 0 && "sm:grid-cols-2")}>
+              {users.length > 0 && (
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-muted-foreground">Assign to (optional)</label>
+                  <select
+                    value={snagAssignedToId || ""}
+                    onChange={(e) => setSnagAssignedToId(e.target.value || null)}
+                    className="w-full rounded-lg border border-border bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 h-11"
+                  >
+                    <option value="">Unassigned</option>
+                    {users.map((u) => (
+                      <option key={u.id} value={u.id}>{u.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              <div>
+                <label className="mb-1 block text-xs font-medium text-muted-foreground">Notes (optional)</label>
+                <input
+                  type="text"
+                  value={snagNotes}
+                  onChange={(e) => setSnagNotes(e.target.value)}
+                  placeholder="e.g. access via rear, needs 2 visits"
+                  className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-blue-500 h-11"
+                />
+              </div>
             </div>
             <div className="flex gap-2 pt-1">
               <button onClick={closeModal} className="flex-1 rounded-xl border border-border py-2.5 text-sm font-medium hover:bg-accent">

@@ -27,8 +27,8 @@ export const dynamic = "force-dynamic";
  * Also resolves any open events whose target has reached a non-late
  * terminal state since last scan (job COMPLETED, order DELIVERED).
  *
- * Scheduled in vercel.json at 6am UTC alongside the daily-email and
- * notifications crons.
+ * Scheduled in vercel.json at 04:30 UTC — ahead of the 05:00
+ * daily-email and notifications crons so they read fresh events.
  */
 export async function GET(req: NextRequest) {
   const { checkCronAuth } = await import("@/lib/cron-auth");
@@ -52,8 +52,10 @@ export async function GET(req: NextRequest) {
   const errors: Array<{ target: string; error: string }> = [];
 
   // ----- Sweep all active sites' jobs -----
+  // (Jun 2026 audit) ARCHIVED sites excluded — they kept opening
+  // lateness events forever.
   const activeSiteIds = await prisma.site.findMany({
-    where: { status: { not: "COMPLETED" } },
+    where: { status: { notIn: ["COMPLETED", "ARCHIVED"] } },
     select: { id: true },
   });
   const siteIds = activeSiteIds.map((s) => s.id);

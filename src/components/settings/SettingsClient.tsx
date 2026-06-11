@@ -45,6 +45,10 @@ interface SettingsClientProps {
   currentUserId: string;
   sites: SiteData[];
   initialTab?: string;
+  /** (Jun 2026 audit) Whether the session holds VIEW_USERS — without it
+   *  the Users tab (and the user directory it renders) is hidden and the
+   *  server passes empty users/sites arrays. */
+  hasUsersAccess?: boolean;
 }
 
 function formatRole(role: string) {
@@ -54,7 +58,7 @@ function formatRole(role: string) {
     .join(" ");
 }
 
-export function SettingsClient({ user, templates, users, currentUserId, sites, initialTab }: SettingsClientProps) {
+export function SettingsClient({ user, templates, users, currentUserId, sites, initialTab, hasUsersAccess = false }: SettingsClientProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -64,11 +68,16 @@ export function SettingsClient({ user, templates, users, currentUserId, sites, i
   //      so they should land on that tab even if ?tab wasn't in the URL)
   //   3. The server-passed `initialTab` (legacy fallback, mirrors #1)
   //   4. "general" default
+  // (Jun 2026 review) A ?tab=users deep link from a session WITHOUT
+  // VIEW_USERS lands on a tab whose trigger + content are hidden —
+  // blank panel, no explanation. Map it back to General.
+  const sanitizeTab = (tab: string) =>
+    tab === "users" && !hasUsersAccess ? "general" : tab;
   const resolveInitialTab = () => {
     const fromUrl = searchParams?.get("tab");
-    if (fromUrl) return fromUrl;
+    if (fromUrl) return sanitizeTab(fromUrl);
     if (searchParams?.get("tpl")) return "templates";
-    return initialTab || "general";
+    return sanitizeTab(initialTab || "general");
   };
   const [activeTab, setActiveTab] = useState(resolveInitialTab);
 
@@ -76,7 +85,7 @@ export function SettingsClient({ user, templates, users, currentUserId, sites, i
   useEffect(() => {
     const fromUrl = searchParams?.get("tab");
     const wantTplTab = !!searchParams?.get("tpl");
-    const desired = fromUrl ?? (wantTplTab ? "templates" : null);
+    const desired = fromUrl ? sanitizeTab(fromUrl) : wantTplTab ? "templates" : null;
     if (desired && desired !== activeTab) {
       setActiveTab(desired);
     }
@@ -132,10 +141,15 @@ export function SettingsClient({ user, templates, users, currentUserId, sites, i
             <Shield className="size-4" />
             Security
           </TabsTrigger>
-          <TabsTrigger value="users">
-            <Users className="size-4" />
-            Users
-          </TabsTrigger>
+          {/* (Jun 2026 audit) Users tab gated on VIEW_USERS — every
+              VIEW_SETTINGS holder (contractors by default) could read
+              the full staff directory (emails, phones) otherwise. */}
+          {hasUsersAccess && (
+            <TabsTrigger value="users">
+              <Users className="size-4" />
+              Users
+            </TabsTrigger>
+          )}
           {/* (May 2026 audit #56) White-label branding. */}
           <TabsTrigger value="branding">
             <Palette className="size-4" />
@@ -209,9 +223,11 @@ export function SettingsClient({ user, templates, users, currentUserId, sites, i
         </TabsContent>
 
         {/* Users Tab */}
-        <TabsContent value="users">
-          <UsersClient users={users} currentUserId={currentUserId} sites={sites} />
-        </TabsContent>
+        {hasUsersAccess && (
+          <TabsContent value="users">
+            <UsersClient users={users} currentUserId={currentUserId} sites={sites} />
+          </TabsContent>
+        )}
 
         {/* (May 2026 audit #56) Branding Tab */}
         <TabsContent value="branding">

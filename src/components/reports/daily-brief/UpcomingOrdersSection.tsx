@@ -35,6 +35,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { JobActionStrip } from "@/components/reports/JobActionStrip";
+import { orderGroupKey, orderJobLabel, orderPlotLabel } from "./types";
 import type { BriefData, OrderToPlace } from "./types";
 
 export interface UpcomingOrdersSectionProps {
@@ -91,7 +92,7 @@ export function UpcomingOrdersSection({
               const hasEmail = !!o.supplier.contactEmail;
               return (
                 <div
-                  key={`${o.supplier.id}__${o.job.name}`}
+                  key={orderGroupKey(o)}
                   className="rounded border p-2 text-sm"
                 >
                   <div className="flex flex-wrap items-center gap-1.5">
@@ -124,21 +125,23 @@ export function UpcomingOrdersSection({
                     )}
                   </div>
                   <div className="flex flex-wrap items-center gap-1 pt-0.5">
-                    <Link
-                      href={`/jobs/${o.job.id}`}
-                      className="text-xs hover:text-blue-600 hover:underline"
-                    >
-                      {o.job.name}
-                    </Link>
+                    {o.job ? (
+                      <Link
+                        href={`/jobs/${o.job.id}`}
+                        className="text-xs hover:text-blue-600 hover:underline"
+                      >
+                        {o.job.name}
+                      </Link>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">{orderJobLabel(o)}</span>
+                    )}
                     <span className="text-xs text-muted-foreground">·</span>
                     {group.slice(0, 5).map((g) => (
                       <span
                         key={g.id}
                         className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600"
                       >
-                        {g.job.plot.plotNumber
-                          ? `Plot ${g.job.plot.plotNumber}`
-                          : g.job.plot.name}
+                        {orderPlotLabel(g)}
                       </span>
                     ))}
                     {group.length > 5 && (

@@ -14,6 +14,9 @@ export type InspectionFinding = {
   description: string;
   severity?: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
   contactId?: string | null;
+  /** (Jun 2026 D5) NCR-only formal QA fields — ignored for snags. */
+  rootCause?: string;
+  correctiveAction?: string;
 };
 
 interface Options {

@@ -32,6 +32,13 @@ export async function GET(
       plotNumber: true,
       awaitingRestart: true,
       jobs: {
+        // (Jun 2026 audit) Leaf jobs only. Parent stage rows sort before
+        // their children, so getPlotScheduleStatus's "first non-COMPLETED
+        // job" landed on the current stage's PARENT — whose startDate is
+        // min(children), so when the active sub-job slips but an earlier
+        // sibling started on time, daysDeviation read 0 and the traffic
+        // light showed "On track" for a plot genuinely behind.
+        where: { children: { none: {} } },
         select: {
           status: true,
           sortOrder: true,

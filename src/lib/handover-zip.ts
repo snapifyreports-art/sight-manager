@@ -14,6 +14,9 @@ const archiver = (
 ) as unknown as (...args: unknown[]) => Archiver;
 import { format } from "date-fns";
 import { buildSiteStory } from "./site-story";
+import { whereOrdersForSite } from "./order-scope";
+import { whereJobEndOverdue } from "./lateness";
+import { differenceInWorkingDays } from "./working-days";
 import {
   renderSiteStoryPdf,
   renderCompletionSummaryPdf,
@@ -48,12 +51,14 @@ import {
  * `C:\Users\keith\.claude\plans\playful-bouncing-stream.md`:
  *
  *   00_README.txt
+ *   00_WARNINGS.txt      (only when passed inspections lack certificates)
  *   01_Site_Overview/
  *   02_Plots/Plot_<N>_<HouseType>/...
  *   03_Contractor_Analysis/
  *   04_Supplier_Analysis/
  *   05_Cost_Analysis/    budget-vs-actual.pdf + cash-flow.pdf
  *   06_Reports/          delay-report-final.pdf
+ *   07_Toolbox_Talks/    (only when talks were logged on the site)
  *
  * Each Supabase-hosted document/photo is fetched via its public URL
  * and streamed into the ZIP — no service-role key needed because the
@@ -72,7 +77,9 @@ interface BuildArgs {
 
 // Sanitize any string used as a filename or folder. Keep it ASCII-safe
 // — Windows + macOS + Linux all happy.
-function safeName(input: string): string {
+// (Jun 2026 audit) Exported so the handover-zip route can reuse it for
+// the Content-Disposition filename instead of hand-rolling a weaker one.
+export function safeName(input: string): string {
   return (input || "")
     .replace(/[<>:"/\\|?*\x00-\x1f]/g, "")
     .replace(/\s+/g, "_")
@@ -91,7 +98,36 @@ function extractExtension(url: string, contentType: string | null): string {
   if (contentType?.includes("jpeg") || contentType?.includes("jpg"))
     return "jpg";
   if (contentType?.includes("webp")) return "webp";
+  // (Jun 2026 audit) Audio types — the voice-note loop passes an audio
+  // hint, which previously fell through to .bin for extension-less
+  // storage URLs because the sniff only knew pdf/image types.
+  if (contentType?.includes("m4a") || contentType?.includes("mp4"))
+    return "m4a";
+  if (contentType?.includes("mpeg") || contentType?.includes("mp3"))
+    return "mp3";
+  if (contentType?.includes("webm")) return "webm";
   return "bin";
+}
+
+// (Jun 2026 audit) Duplicate entry paths inside the archive (two docs
+// both named "EPC" on one plot, two photos sharing a caption + day)
+// silently overwrite or prompt in extractors. Suffix repeats with
+// -2, -3… — `used` tracks full entry paths so the rule is per-folder.
+function uniqueEntryName(used: Set<string>, name: string): string {
+  if (!used.has(name)) {
+    used.add(name);
+    return name;
+  }
+  const slash = name.lastIndexOf("/");
+  const dot = name.lastIndexOf(".");
+  const hasExt = dot > slash + 1;
+  const stem = hasExt ? name.slice(0, dot) : name;
+  const ext = hasExt ? name.slice(dot) : "";
+  let n = 2;
+  while (used.has(`${stem}-${n}${ext}`)) n++;
+  const result = `${stem}-${n}${ext}`;
+  used.add(result);
+  return result;
 }
 
 // Best-effort fetch — if a Supabase URL 404s (e.g. file deleted from
@@ -173,6 +209,10 @@ export async function buildHandoverArchive({
   // (Jun 2026 Q6 + S13) Certificate problems found while building plot
   // folders — written to 00_WARNINGS.txt after the loop. Warn, not block.
   const certWarnings: string[] = [];
+  // (Jun 2026 audit) Tracks every streamed-file entry path so
+  // uniqueEntryName can suffix collisions — paths include the plot
+  // folder, so de-duping is naturally per-folder.
+  const usedEntryNames = new Set<string>();
   for (let i = 0; i < story.plotStories.length; i++) {
     const plot = story.plotStories[i];
     const folder = `02_Plots/${plotFolderNames[i]}`;
@@ -529,7 +569,10 @@ export async function buildHandoverArchive({
             ? `_${safeName(v.caption).slice(0, 40)}`
             : "";
           archive.append(stream, {
-            name: `${folder}/voice-notes/${dateStr}${captionPart}.${ext}`,
+            name: uniqueEntryName(
+              usedEntryNames,
+              `${folder}/voice-notes/${dateStr}${captionPart}.${ext}`,
+            ),
           });
         });
       }
@@ -646,7 +689,10 @@ export async function buildHandoverArchive({
         const ext = extractExtension(doc.url, null);
         const name = safeName(doc.name);
         archive.append(stream, {
-          name: `${folder}/${folderForCat}/${name}.${ext}`,
+          name: uniqueEntryName(
+            usedEntryNames,
+            `${folder}/${folderForCat}/${name}.${ext}`,
+          ),
         });
       });
     }
@@ -684,7 +730,10 @@ export async function buildHandoverArchive({
         const ts = p.createdAt.toISOString().slice(0, 10);
         const filename = `${ts}_${safeName(p.caption || p.tag || p.id)}.${ext}`;
         archive.append(stream, {
-          name: `${folder}/photos/${stageFolder}/${filename}`,
+          name: uniqueEntryName(
+            usedEntryNames,
+            `${folder}/photos/${stageFolder}/${filename}`,
+          ),
         });
       });
     }
@@ -789,7 +838,6 @@ export async function buildHandoverArchive({
         // working-day helper so this matches the in-app contractor-
         // analysis route, which is the canonical "days attributed" for
         // each contractor.
-        const { differenceInWorkingDays } = await import("@/lib/working-days");
         daysLate = Math.max(
           0,
           differenceInWorkingDays(r.job.actualEndDate, r.job.originalEndDate),
@@ -835,13 +883,12 @@ export async function buildHandoverArchive({
   }
 
   // ─── 04_Supplier_Analysis ────────────────────────────────────────
+  // (Jun 2026 audit) whereOrdersForSite is the SSoT site-attachment
+  // predicate. The inline OR it replaces missed plot-level one-off
+  // orders, so supplier totals here disagreed with the story payload
+  // (built with the helper) inside the same pack.
   const orderRows = await prisma.materialOrder.findMany({
-    where: {
-      OR: [
-        { job: { plot: { siteId } } },
-        { siteId },
-      ],
-    },
+    where: whereOrdersForSite(siteId),
     select: {
       id: true,
       itemsDescription: true,
@@ -956,14 +1003,19 @@ export async function buildHandoverArchive({
   // remains in the in-app Reporting tabs; this PDF is the executive
   // summary that lives inside the handover pack.
 
+  // (Jun 2026 audit) Same SSoT predicate as 04 above — the inline OR
+  // dropped plot-level one-offs from the cost numbers. The direct
+  // `plot` relation is selected alongside `job.plot` so plot-attached
+  // one-offs can be attributed to their plot's budget row too.
   const allOrdersRaw = await prisma.materialOrder.findMany({
-    where: { OR: [{ siteId }, { job: { plot: { siteId } } }] },
+    where: whereOrdersForSite(siteId),
     select: {
       status: true,
       expectedDeliveryDate: true,
       deliveredDate: true,
       orderItems: { select: { quantity: true, unitCost: true } },
       job: { select: { plot: { select: { id: true, name: true, plotNumber: true } } } },
+      plot: { select: { id: true, name: true, plotNumber: true } },
     },
   });
   // Compute totalCost on the fly — there's no cached total on the model.
@@ -1021,11 +1073,15 @@ export async function buildHandoverArchive({
   }
   for (const o of allOrders) {
     if (o.status !== "DELIVERED") continue;
-    if (!o.job?.plot) continue;
-    const k = o.job.plot.id;
+    // (Jun 2026 audit) Job-attached orders resolve via job.plot;
+    // plot-level one-offs via the direct plot relation. Site-level
+    // one-offs have neither and stay in the site totals only.
+    const orderPlot = o.job?.plot ?? o.plot;
+    if (!orderPlot) continue;
+    const k = orderPlot.id;
     const cur = plotBudgetMap.get(k) ?? {
-      plotName: o.job.plot.name,
-      plotNumber: o.job.plot.plotNumber,
+      plotName: orderPlot.name,
+      plotNumber: orderPlot.plotNumber,
       budgeted: 0,
       actual: 0,
     };
@@ -1073,6 +1129,10 @@ export async function buildHandoverArchive({
     { forecast: number; actual: number; committed: number }
   >();
   for (const o of allOrders) {
+    // (Jun 2026 audit) Cancelled orders are not money that will be
+    // spent — pre-fix they inflated the forecast column forever while
+    // the actual/committed buckets correctly excluded them.
+    if (o.status === "CANCELLED") continue;
     const dateRef = o.deliveredDate ?? o.expectedDeliveryDate;
     if (!dateRef) continue;
     const ym = `${dateRef.getUTCFullYear()}-${String(dateRef.getUTCMonth() + 1).padStart(2, "0")}`;
@@ -1110,7 +1170,12 @@ export async function buildHandoverArchive({
     (r) => r.type === "TEMPERATURE",
   ).length;
 
-  // Delayed jobs: leaf jobs where actualEndDate > endDate (planned).
+  // Delayed jobs: leaf jobs that completed past their ORIGINAL planned
+  // end. (Jun 2026 audit) Mirrors the in-app delay report's SSoT
+  // baseline — pre-fix this compared against the CURRENT endDate in
+  // calendar days, so a cascaded/rescheduled job that slipped 10
+  // working days vanished from the buyer pack and day counts mixed
+  // calendar + working units within one PDF.
   const delayedJobsRaw = await prisma.job.findMany({
     where: {
       plot: { siteId },
@@ -1119,18 +1184,16 @@ export async function buildHandoverArchive({
     },
     select: {
       name: true,
-      endDate: true,
+      originalEndDate: true,
       actualEndDate: true,
       weatherAffected: true,
       plot: { select: { name: true, plotNumber: true } },
     },
   });
   const delayedJobs = delayedJobsRaw
-    .filter((j) => j.endDate && j.actualEndDate && j.actualEndDate > j.endDate)
+    .filter((j) => j.actualEndDate && j.actualEndDate > j.originalEndDate)
     .map((j) => {
-      const days = Math.ceil(
-        (j.actualEndDate!.getTime() - j.endDate!.getTime()) / (24 * 60 * 60 * 1000),
-      );
+      const days = differenceInWorkingDays(j.actualEndDate!, j.originalEndDate);
       return {
         plotName: j.plot.plotNumber ? `Plot ${j.plot.plotNumber}` : j.plot.name,
         name: j.name,
@@ -1143,16 +1206,19 @@ export async function buildHandoverArchive({
     .sort((a, b) => b.delayDays - a.delayDays);
 
   // (May 2026 audit D-P0-8) Currently-overdue jobs — NOT_STARTED or
-  // IN_PROGRESS past their endDate. Pre-fix the PDF omitted these
+  // IN_PROGRESS past their planned end. Pre-fix the PDF omitted these
   // entirely so the largest delay bucket was invisible in the buyer
   // pack. Now pulled and rendered above the completed-late table.
+  // (Jun 2026 audit) Overdue = past the immutable originalEndDate
+  // baseline via the SSoT whereJobEndOverdue clause — matching the
+  // story payload's overdueNow in this same ZIP. Pre-fix this used the
+  // current endDate, so rescheduled-but-slipped jobs disappeared.
   const todayForReport = new Date();
   todayForReport.setHours(0, 0, 0, 0);
   const overdueRaw = await prisma.job.findMany({
     where: {
       plot: { siteId },
-      endDate: { lt: todayForReport },
-      status: { not: "COMPLETED" },
+      ...whereJobEndOverdue(todayForReport),
       children: { none: {} },
     },
     select: {
@@ -1161,7 +1227,7 @@ export async function buildHandoverArchive({
       id: true,
       name: true,
       status: true,
-      endDate: true,
+      originalEndDate: true,
       weatherAffected: true,
       plot: { select: { name: true, plotNumber: true } },
       contractors: {
@@ -1169,9 +1235,8 @@ export async function buildHandoverArchive({
         take: 1,
       },
     },
-    orderBy: { endDate: "asc" },
+    orderBy: { originalEndDate: "asc" },
   });
-  const { differenceInWorkingDays } = await import("@/lib/working-days");
   // (May 2026 audit) Pull the open JOB_END_OVERDUE lateness rows for
   // these jobs so each row in the PDF carries the reason code. Single
   // batch query, then map by jobId. delayReason.label preferred over
@@ -1201,9 +1266,10 @@ export async function buildHandoverArchive({
     plotName: j.plot.plotNumber ? `Plot ${j.plot.plotNumber}` : j.plot.name,
     name: j.name,
     status: j.status,
-    daysLate: j.endDate
-      ? Math.max(0, differenceInWorkingDays(todayForReport, j.endDate))
-      : 0,
+    daysLate: Math.max(
+      0,
+      differenceInWorkingDays(todayForReport, j.originalEndDate),
+    ),
     isWeatherExcused: !!j.weatherAffected,
     contractor: j.contractors[0]?.contact
       ? j.contractors[0].contact.company || j.contractors[0].contact.name
@@ -1234,9 +1300,12 @@ export async function buildHandoverArchive({
     : undefined;
 
   // Overdue deliveries (open orders past expected date).
+  // (Jun 2026 audit) whereOrdersForSite again — the inline OR missed
+  // plot-level one-offs. Extra constraints sit as siblings, per the
+  // helper's doc.
   const overdueDeliveriesRaw = await prisma.materialOrder.findMany({
     where: {
-      OR: [{ siteId }, { job: { plot: { siteId } } }],
+      ...whereOrdersForSite(siteId),
       status: "ORDERED",
       expectedDeliveryDate: { lt: new Date() },
     },
@@ -1265,10 +1334,13 @@ export async function buildHandoverArchive({
   });
   archive.append(delayPdf, { name: "06_Reports/delay-report-final.pdf" });
 
-  // ─── 08_Toolbox_Talks ────────────────────────────────────────────
+  // ─── 07_Toolbox_Talks ────────────────────────────────────────────
   // (May 2026 Story-linkage audit) Site-wide TBT register +
   // attachments. Pre-this the ZIP didn't include any TBT data — the
-  // safety briefing audit trail was invisible at handover. Now:
+  // safety briefing audit trail was invisible at handover.
+  // (Jun 2026 audit) Renumbered 08 → 07 — the pack had no 07_* folder,
+  // so Explorer showed a visible gap that read as an assembly error.
+  // Now:
   // a register text file + per-talk subfolder for the briefing docs
   // / RAMS / incident photos that managers attached when raising
   // the request. Folder only created when there's at least one
@@ -1325,7 +1397,7 @@ export async function buildHandoverArchive({
       regLines.push("");
     }
     archive.append(regLines.join("\n"), {
-      name: "08_Toolbox_Talks/_register.txt",
+      name: "07_Toolbox_Talks/_register.txt",
     });
 
     // Per-talk subfolder for the attachments. Folder named with the
@@ -1344,7 +1416,7 @@ export async function buildHandoverArchive({
           const stream = streams[idx];
           if (!stream) return;
           archive.append(stream, {
-            name: `08_Toolbox_Talks/${folderName}/${safeName(a.fileName)}`,
+            name: `07_Toolbox_Talks/${folderName}/${safeName(a.fileName)}`,
           });
         });
       }

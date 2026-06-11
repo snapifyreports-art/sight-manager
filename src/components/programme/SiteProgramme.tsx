@@ -549,9 +549,16 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
         // sub-job (has a parentStage) PLUS any top-level stage that has
         // NO sub-jobs of its own. A leaf stage IS the work item — pre-fix
         // the filter dropped it entirely, so the plot row rendered empty
-        // for that stage. A stage "has children" when some job's
-        // parentStage matches its stageCode (the same parent↔child link
-        // the "jobs" view uses below).
+        // for that stage.
+        //
+        // (Jun 2026 audit) A child's `parentStage` holds the parent's
+        // NAME (apply-template-helpers writes `parentStage: templateJob
+        // .name`), not its stage code — so the stageCode-only check let
+        // every real parent row whose stageCode differs from its name
+        // (or is null) leak through next to its own children, doubling
+        // the stage as a full-span bar in its own lane. Same bug + fix
+        // as the jobs-view filter below: match on NAME, keep the
+        // stageCode check for legacy data where parentStage holds a code.
         const stagesWithChildren = new Set(
           plot.jobs.map((j) => j.parentStage).filter(Boolean),
         );
@@ -560,8 +567,8 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
           jobs: plot.jobs.filter(
             (j) =>
               !!j.parentStage || // an actual sub-job
-              !j.stageCode || // top-level, no stageCode — nothing can be keyed to it
-              !stagesWithChildren.has(j.stageCode), // top-level leaf stage
+              (!stagesWithChildren.has(j.name) && // not a parent of rendered sub-jobs
+                (!j.stageCode || !stagesWithChildren.has(j.stageCode))), // top-level leaf stage
           ),
         };
       }
@@ -2288,7 +2295,7 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
               </div>
 
               {/* Legend */}
-              <div className="flex items-center gap-4 border-t px-3 py-2">
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t px-3 py-2">
                 {Object.entries({
                   NOT_STARTED: "Not Started",
                   IN_PROGRESS: "In Progress",
@@ -2326,6 +2333,31 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                   <div className="size-[5px] rounded-full bg-teal-500" />
                   Delivery
                 </div>
+                {/* (Jun 2026 audit) The '!' hold-point markers and the
+                    weather column tints rendered with no legend entry —
+                    GanttChart got its inspection legend in the Jun 2026
+                    fix, the main Programme grid didn't. Conditional on
+                    the data existing, matching GanttChart. */}
+                {inspections.length > 0 && (
+                  <div className="ml-2 flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                    <div className="flex h-3.5 min-w-3.5 items-center justify-center rounded-sm bg-amber-500 px-0.5 text-[8px] font-bold leading-none text-white shadow">
+                      !
+                    </div>
+                    Inspection hold-point
+                  </div>
+                )}
+                {viewMode === "day" && weatherImpactMap.size > 0 && (
+                  <>
+                    <div className="ml-2 flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                      <div className="size-3 rounded bg-orange-100 ring-1 ring-inset ring-orange-200" />
+                      Rain day
+                    </div>
+                    <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                      <div className="size-3 rounded bg-cyan-100 ring-1 ring-inset ring-cyan-200" />
+                      Temperature day
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -2349,7 +2381,20 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                 for (const plotId of selectedPlots) {
                   const plot = site.plots.find((p) => p.id === plotId);
                   if (!plot) continue;
-                  const nextJob = plot.jobs.find((j) => j.status === "NOT_STARTED");
+                  // (Jun 2026 audit) Leaf jobs only — the raw plot.jobs
+                  // payload includes real parent stage rows, and parents
+                  // sort before their children, so for any plot whose
+                  // next stage has sub-jobs Start All flipped the PARENT
+                  // aggregate IN_PROGRESS (stamping actualStartDate +
+                  // auto-progressing parent-attached orders) while no
+                  // actual work item started. parent-job.ts: parents are
+                  // "INFRASTRUCTURE, not workflow targets".
+                  const parentIds = new Set(
+                    plot.jobs.map((j) => j.parentId).filter(Boolean),
+                  );
+                  const nextJob = plot.jobs.find(
+                    (j) => j.status === "NOT_STARTED" && !parentIds.has(j.id),
+                  );
                   if (nextJob) {
                     await triggerBulkStart(
                       { id: nextJob.id, name: nextJob.name, status: nextJob.status, startDate: nextJob.startDate ?? null, endDate: nextJob.endDate ?? null },

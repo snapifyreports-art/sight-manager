@@ -10,7 +10,15 @@ import { computeInspectionScheduledDate } from "@/lib/inspection-dates";
 
 export const dynamic = "force-dynamic";
 
-type Finding = { kind?: string; description?: string; severity?: string; contactId?: string | null };
+type Finding = {
+  kind?: string;
+  description?: string;
+  severity?: string;
+  contactId?: string | null;
+  // (Jun 2026 D5) NCR-only formal QA fields from the sign-off quick rows.
+  rootCause?: string;
+  correctiveAction?: string;
+};
 
 const PRIORITY: Record<string, "LOW" | "MEDIUM" | "HIGH" | "CRITICAL"> = {
   LOW: "LOW", MEDIUM: "MEDIUM", HIGH: "HIGH", CRITICAL: "CRITICAL",
@@ -67,6 +75,10 @@ export async function POST(
             ref: `NCR-${String(ncrSeq).padStart(3, "0")}`,
             title: `${insp!.name}: ${f.description.trim().slice(0, 80)}`,
             description: f.description.trim(),
+            // (Jun 2026 D5) Optional root cause / corrective action from
+            // the sign-off quick rows — same fields the manual NCR form has.
+            rootCause: f.rootCause?.trim() || null,
+            correctiveAction: f.correctiveAction?.trim() || null,
             status: "OPEN",
             raisedById: userId,
             inspectionId: insp!.id,

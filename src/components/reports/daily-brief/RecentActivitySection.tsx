@@ -8,7 +8,7 @@
  */
 
 import { cn } from "@/lib/utils";
-import { format } from "date-fns";
+import { format, isSameDay } from "date-fns";
 import { Activity, ChevronDown } from "lucide-react";
 import {
   Card,
@@ -54,7 +54,17 @@ export function RecentActivitySection({
             {data.recentEvents.map((e) => (
               <div key={e.id} className="flex items-start gap-2 text-sm">
                 <span className="shrink-0 text-xs text-muted-foreground">
-                  {format(new Date(e.createdAt), "HH:mm")}
+                  {/* (Jun 2026 audit) The feed spans two days (route
+                      fetches from yesterday 00:00) — prefix non-brief-day
+                      events with the day so 16:42 yesterday doesn't read
+                      as 16:42 today. */}
+                  {(() => {
+                    const created = new Date(e.createdAt);
+                    return format(
+                      created,
+                      isSameDay(created, new Date(data.date)) ? "HH:mm" : "EEE HH:mm",
+                    );
+                  })()}
                 </span>
                 <span className="flex-1 text-muted-foreground">
                   {e.description}

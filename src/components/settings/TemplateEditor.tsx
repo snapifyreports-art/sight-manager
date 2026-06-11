@@ -719,32 +719,51 @@ export function TemplateEditor({
   async function handleSaveMeta() {
     setSavingMeta(true);
     try {
-      const res = await fetch(apiUrl(""), {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: metaName,
-          description: metaDescription || null,
-          typeLabel: metaTypeLabel || null,
-          // (May 2026 Keith request) Base house value — only for the
-          // base template (variants carry their own, edited on the
-          // variant cards; the /full route has no meta PUT anyway).
-          ...(template.isVariant
-            ? {}
-            : {
-                buildBudget:
-                  metaBuildBudget === "" ? null : Number(metaBuildBudget),
-                salePrice:
-                  metaSalePrice === "" ? null : Number(metaSalePrice),
-              }),
-        }),
-      });
+      // (Jun 2026 audit) Variant mode: apiUrl("") resolves to the
+      // /variants/[variantId]/full route, which only exports GET — the
+      // old PUT always 405'd, so there was NO working way to rename a
+      // variant or edit its description from the editor. Route variant
+      // meta saves through the variant PATCH endpoint instead (name /
+      // description live on TemplateVariant; typeLabel + draft status
+      // belong to the base).
+      const res = template.isVariant
+        ? await fetch(`/api/plot-templates/${tplBaseId}/variants/${variantId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              name: metaName,
+              description: metaDescription || null,
+            }),
+          })
+        : await fetch(apiUrl(""), {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              name: metaName,
+              description: metaDescription || null,
+              typeLabel: metaTypeLabel || null,
+              // (May 2026 Keith request) Base house value — only for the
+              // base template (variants carry their own, edited on the
+              // variant cards).
+              buildBudget:
+                metaBuildBudget === "" ? null : Number(metaBuildBudget),
+              salePrice:
+                metaSalePrice === "" ? null : Number(metaSalePrice),
+            }),
+          });
       if (!res.ok) {
         toast.error(await fetchErrorMessage(res, "Failed to update template"));
         return;
       }
-      const updated = await res.json();
-      onUpdate(updated);
+      if (template.isVariant) {
+        // The variant PATCH returns the bare TemplateVariant row — refetch
+        // the full editor payload so onUpdate gets the shape it expects.
+        const fresh = await fetch(apiUrl(""), { cache: "no-store" });
+        if (fresh.ok) onUpdate(await fresh.json());
+      } else {
+        const updated = await res.json();
+        onUpdate(updated);
+      }
       setEditingMeta(false);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to update template");
@@ -1950,26 +1969,41 @@ export function TemplateEditor({
                 <Calendar className="size-3.5" />
                 Preview Apply
               </Button>
-              <Button
-                variant={template.isDraft ? "default" : "outline"}
-                size="sm"
-                onClick={handleToggleDraft}
-                disabled={togglingDraft}
-                title={
-                  template.isDraft
-                    ? "Mark this template as live so it shows up in the apply-to-plot picker"
-                    : "Send this template back to draft so it's hidden from the apply-to-plot picker"
-                }
-              >
-                {togglingDraft ? (
-                  <Loader2 className="size-3.5 animate-spin" />
-                ) : template.isDraft ? (
-                  <Check className="size-3.5" />
-                ) : (
-                  <AlertTriangle className="size-3.5" />
-                )}
-                {template.isDraft ? "Mark Live" : "Send to Draft"}
-              </Button>
+              {/* (Jun 2026 audit) Draft status lives on the BASE template
+                  only — in variant mode the toggle PUT hit the read-only
+                  /full route and 405'd every time, and wiring it to the
+                  base would let a variant edit silently pull the whole
+                  template group out of the apply picker. Show a read-only
+                  badge instead. */}
+              {template.isVariant ? (
+                <Badge
+                  variant="secondary"
+                  title="Draft/Live status belongs to the base template — change it from the base template editor"
+                >
+                  {template.isDraft ? "Draft" : "Live"} (follows base)
+                </Badge>
+              ) : (
+                <Button
+                  variant={template.isDraft ? "default" : "outline"}
+                  size="sm"
+                  onClick={handleToggleDraft}
+                  disabled={togglingDraft}
+                  title={
+                    template.isDraft
+                      ? "Mark this template as live so it shows up in the apply-to-plot picker"
+                      : "Send this template back to draft so it's hidden from the apply-to-plot picker"
+                  }
+                >
+                  {togglingDraft ? (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  ) : template.isDraft ? (
+                    <Check className="size-3.5" />
+                  ) : (
+                    <AlertTriangle className="size-3.5" />
+                  )}
+                  {template.isDraft ? "Mark Live" : "Send to Draft"}
+                </Button>
+              )}
               <Button
                 variant="outline"
                 size="sm"

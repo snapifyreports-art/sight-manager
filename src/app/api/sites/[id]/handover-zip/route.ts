@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canAccessSite } from "@/lib/site-access";
-import { buildHandoverArchive } from "@/lib/handover-zip";
+import { buildHandoverArchive, safeName } from "@/lib/handover-zip";
 import { logEvent } from "@/lib/event-log";
 import { sessionHasPermission } from "@/lib/permissions";
 
@@ -34,14 +34,10 @@ export async function POST(
 
   const { id } = await params;
 
-  const site = await prisma.site.findUnique({
-    where: { id },
-    select: { id: true, name: true, status: true },
-  });
-  if (!site) {
-    return NextResponse.json({ error: "Site not found" }, { status: 404 });
-  }
-
+  // (Jun 2026 audit) Access check FIRST — pre-fix the findUnique's 404
+  // ran before this, so an authenticated user with no site assignments
+  // could enumerate which site IDs exist by telling 404 from 403. Same
+  // oracle order as the story route.
   if (
     !(await canAccessSite(
       session.user.id,
@@ -53,6 +49,14 @@ export async function POST(
       { error: "You do not have access to this site" },
       { status: 403 },
     );
+  }
+
+  const site = await prisma.site.findUnique({
+    where: { id },
+    select: { id: true, name: true, status: true },
+  });
+  if (!site) {
+    return NextResponse.json({ error: "Site not found" }, { status: 404 });
   }
 
   const triggeredByUserName =
@@ -97,9 +101,13 @@ export async function POST(
     },
   });
 
-  const filename = `SiteHandover_${site.name.replace(/\s+/g, "_")}_${
+  // (Jun 2026 audit) safeName strips filesystem-hostile characters, but
+  // NOT non-ASCII (emoji/accents) — Node still throws "Invalid character
+  // in header content" for those → 500 after the whole build. Force the
+  // header value to printable ASCII as the final step.
+  const filename = `SiteHandover_${safeName(site.name)}_${
     new Date().toISOString().slice(0, 10)
-  }.zip`;
+  }.zip`.replace(/[^\x20-\x7E]/g, "_");
 
   return new NextResponse(stream, {
     headers: {

@@ -105,7 +105,10 @@ export async function POST(request: NextRequest) {
         userId: session.user?.id ?? null,
         userName: session.user?.name ?? session.user?.email ?? null,
         action: "created",
-        detail: `Created "${template.name}" (draft)`,
+        // (Jun 2026 audit) New templates are created LIVE (May 2026 fix
+        // above) — the audit detail still said "(draft)", so every
+        // template's change log started with a false statement.
+        detail: `Created "${template.name}" (live)`,
       },
     });
 

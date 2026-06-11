@@ -23,7 +23,10 @@ const FROM_ADDRESS =
 // onerror=...>` and CSS-based attacks vary by client. Cheaper to
 // escape on output than to trust every consumer is sanitising
 // at input.
-function escapeHtml(s: string | null | undefined): string {
+// (Jun 2026 audit) Exported so the cron routes that build their email
+// HTML locally (daily-email, daily-wrap, weekly-digest) follow the
+// same policy instead of interpolating site/user names raw.
+export function escapeHtml(s: string | null | undefined): string {
   if (s == null) return "";
   return String(s)
     .replace(/&/g, "&amp;")

@@ -70,7 +70,16 @@ export async function PATCH(
   }
 
   const body = await req.json();
-  const { inspectorContactId, notes, certificateDocumentId, anchorJobId, anchorEdge, offsetDays } = body;
+  const { inspectorContactId, notes, certificateDocumentId, anchorJobId, anchorEdge, offsetDays, isBlocking } = body;
+
+  // (Jun 2026 D4) Hard-blocker flag is editable while the inspection is
+  // still live — a PASSED/FAILED result is frozen, so the flag is too.
+  if (isBlocking !== undefined && (existing.status === "PASSED" || existing.status === "FAILED")) {
+    return NextResponse.json(
+      { error: `Can't change the hard-blocker flag on an inspection that is ${existing.status}` },
+      { status: 400 },
+    );
+  }
 
   // (Jun 2026 S15+S17) Re-attach (or detach) the anchor job in-app — the
   // reschedule action detaches the anchor to hold a manual date, and until
@@ -134,6 +143,7 @@ export async function PATCH(
         ...(inspectorContactId !== undefined ? { inspectorContactId: inspectorContactId || null } : {}),
         ...(notes !== undefined ? { notes: notes?.trim() || null } : {}),
         ...(certificateDocumentId !== undefined ? { certificateDocumentId: certificateDocumentId || null } : {}),
+        ...(isBlocking !== undefined ? { isBlocking: Boolean(isBlocking) } : {}),
         ...anchorData,
       },
     });

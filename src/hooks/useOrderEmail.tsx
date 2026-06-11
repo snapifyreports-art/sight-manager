@@ -81,7 +81,10 @@ export interface SendOrderGroupInput {
   orders: Array<{
     id: string;
     job: {
-      id: string;
+      /** Real Job id — OMIT for one-off orders (job=null upstream).
+       *  The audit event only carries a jobId when one truly exists;
+       *  fabricating one (e.g. the order id) 500s the Job FK. */
+      id?: string;
       name: string;
       plot: {
         name: string;
@@ -121,7 +124,8 @@ interface DraftState {
   recipient: string;
   eventDescription: string;
   eventSiteId: string;
-  eventJobId: string;
+  /** Optional — absent for one-off orders with no real job. */
+  eventJobId?: string;
   /** For send mode — order ids to mark as ORDERED after send. */
   orderIdsToMark?: string[];
 }
@@ -286,7 +290,9 @@ export function useOrderEmail(onSent?: (mode: Mode) => void): Result {
           type: "USER_ACTION",
           description: draft.eventDescription,
           siteId: draft.eventSiteId,
-          jobId: draft.eventJobId,
+          // Only attach a jobId when a real job exists — EventLog.jobId
+          // is a Job FK and a fabricated id makes the POST 500.
+          jobId: draft.eventJobId || undefined,
         }),
       }).catch(() => {});
 
