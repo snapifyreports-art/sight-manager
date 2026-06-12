@@ -65,7 +65,9 @@ export default async function JobDetailPage({
       // (Jun 2026) Hold-points anchored to this job — closes the loop with
       // the completion soft-gate so the manager can SEE what's outstanding.
       anchoredInspections: {
-        select: { id: true, name: true, type: true, status: true, scheduledDate: true, isBlocking: true },
+        // bookedDate feeds InspectionStatusBadge so a booked-but-overdue
+        // hold-point renders "Booked (was overdue)" instead of red.
+        select: { id: true, name: true, type: true, status: true, scheduledDate: true, bookedDate: true, isBlocking: true },
         orderBy: { scheduledDate: "asc" as const },
       },
     },
@@ -131,6 +133,7 @@ export default async function JobDetailPage({
     anchoredInspections: job.anchoredInspections.map((i) => ({
       ...i,
       scheduledDate: i.scheduledDate.toISOString(),
+      bookedDate: i.bookedDate?.toISOString() ?? null,
     })),
   };
 

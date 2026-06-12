@@ -37,7 +37,18 @@ export default async function DashboardPage() {
   // Build where clauses for site-filtered queries
   const siteWhere = siteIds !== null ? { id: { in: siteIds } } : {};
   const jobSiteWhere = siteIds !== null ? { plot: { siteId: { in: siteIds } } } : {};
-  const orderSiteWhere = siteIds !== null ? { job: { plot: { siteId: { in: siteIds } } } } : {};
+  // (Jun 2026 review) Job-attached orders ONLY — the four order count
+  // cards deep-link to /orders, and that page deliberately lists
+  // job-based orders ("One-off orders … live under the Quants tab", see
+  // orders/page.tsx). Counting one-offs here made the card number
+  // disagree with the list it opens — true for admins all along
+  // (unscoped where) and briefly for managers after the wave-2 OR
+  // predicate. jobId NOT NULL pins both audiences to the /orders
+  // contract; one-offs surface in their designed home, the Quants tab.
+  const orderSiteWhere = {
+    jobId: { not: null },
+    ...(siteIds !== null ? { job: { plot: { siteId: { in: siteIds } } } } : {}),
+  };
   const eventSiteWhere = siteIds !== null ? { siteId: { in: siteIds } } : {};
 
   // Run all queries in parallel for performance

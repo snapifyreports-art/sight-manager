@@ -37,6 +37,8 @@ async function authoriseByPlot(plotId: string, requiredPermission?: string) {
   return { session };
 }
 
+const VARIATION_STATUSES = ["REQUESTED", "APPROVED", "REJECTED", "IMPLEMENTED"];
+
 export async function PUT(
   req: NextRequest,
   { params }: { params: Promise<{ id: string; varId: string }> },
@@ -45,9 +47,35 @@ export async function PUT(
   const a = await authoriseByPlot(id, "EDIT_PROGRAMME");
   if ("error" in a) return a.error;
 
+  // (Jun 2026 audit IDOR) The child must belong to the plot in the URL.
+  // Pre-fix a caller with access to ANY site could pair their own plot
+  // id with a foreign varId and edit commercial sign-off records on
+  // sites they can't see.
+  const existing = await prisma.variation.findUnique({
+    where: { id: varId },
+    select: { plotId: true },
+  });
+  if (!existing || existing.plotId !== id) {
+    return NextResponse.json({ error: "Variation not found" }, { status: 404 });
+  }
+
   const body = await req.json();
+  // (Jun 2026 audit) Validate status against the enum up front — a
+  // typo'd client value previously reached Prisma and 500'd via apiError.
+  if ("status" in body && !VARIATION_STATUSES.includes(body.status)) {
+    return NextResponse.json(
+      { error: `status must be one of: ${VARIATION_STATUSES.join(", ")}` },
+      { status: 400 },
+    );
+  }
+
   const data: Record<string, unknown> = {};
-  for (const key of ["title", "description", "requestedBy"]) {
+  // (Jun 2026 audit) title is a required column — skip empty values
+  // instead of nulling them (`title: ""` previously 500'd in Prisma).
+  if ("title" in body && typeof body.title === "string" && body.title.trim()) {
+    data.title = body.title;
+  }
+  for (const key of ["description", "requestedBy"]) {
     if (key in body) data[key] = body[key] || null;
   }
   if ("costDelta" in body) data.costDelta = body.costDelta;
@@ -57,6 +85,14 @@ export async function PUT(
     if (body.status === "APPROVED") {
       data.approvedAt = new Date();
       data.approvedById = a.session.user.id;
+    } else if (body.status !== "IMPLEMENTED") {
+      // (Jun 2026 audit) Moving back to REQUESTED/REJECTED clears the
+      // approval stamp — pre-fix a rejected variation still showed
+      // "Approved by X on date" under a REJECTED badge (PlotQualityPanel
+      // renders the line whenever approvedAt is set). IMPLEMENTED keeps
+      // it: an implemented variation was approved.
+      data.approvedAt = null;
+      data.approvedById = null;
     }
   }
 
@@ -76,7 +112,15 @@ export async function DELETE(
   const a = await authoriseByPlot(id, "DELETE_ITEMS");
   if ("error" in a) return a.error;
   try {
-    await prisma.variation.delete({ where: { id: varId } });
+    // (Jun 2026 audit IDOR) deleteMany with both conditions — 404 when
+    // the variation doesn't belong to the plot in the URL, instead of
+    // hard-deleting another site's commercial record.
+    const deleted = await prisma.variation.deleteMany({
+      where: { id: varId, plotId: id },
+    });
+    if (deleted.count === 0) {
+      return NextResponse.json({ error: "Variation not found" }, { status: 404 });
+    }
     return NextResponse.json({ ok: true });
   } catch (err) {
     return apiError(err, "Failed to delete variation");

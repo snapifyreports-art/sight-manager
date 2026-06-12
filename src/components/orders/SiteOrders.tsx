@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { format, addDays } from "date-fns";
+import { getCurrentDate } from "@/lib/dev-date";
 import {
   Package,
   Loader2,
@@ -71,12 +72,35 @@ interface SiteOrder {
   // group so it can be re-dated independently.
   isSplit?: boolean;
   supplier: { id: string; name: string; contactEmail: string | null; contactName: string | null; accountNumber: string | null };
+  // (Jun 2026 audit blocker) MaterialOrder.jobId is nullable — one-off
+  // orders attach straight to a plot or the site instead. Consumers must
+  // null-check `job` and fall back to the plot/site attachment.
   job: {
     id: string;
     name: string;
     plot: { id: string; name: string; plotNumber: string | null };
-  };
+  } | null;
+  plot: { id: string; name: string; plotNumber: string | null } | null;
   orderItems: OrderItem[];
+}
+
+// (Jun 2026 audit blocker fix) Null-safe labels for one-off orders —
+// mirrors orderJobLabel/orderPlotLabel in
+// src/components/reports/daily-brief/types.ts (the Brief's fix for the
+// same bug class) so a job-less order renders "One-off order · Site-wide"
+// instead of crashing on `order.job.name`.
+function orderJobLabel(o: SiteOrder): string {
+  return o.job ? o.job.name : "One-off order";
+}
+
+function orderPlot(o: SiteOrder): { id: string; name: string; plotNumber: string | null } | null {
+  return o.job?.plot ?? o.plot ?? null;
+}
+
+function orderPlotLabel(o: SiteOrder): string {
+  const plot = orderPlot(o);
+  if (plot) return plot.plotNumber ? `P${plot.plotNumber}` : plot.name;
+  return "Site-wide";
 }
 
 interface WizardJob {
@@ -411,11 +435,13 @@ export function SiteOrders({ siteId }: SiteOrdersProps) {
     [reviewPerPlotCost, matchingJobs]
   );
 
-  // Calculate delivery date and warnings
+  // Calculate delivery date and warnings.
+  // (Jun 2026 audit) getCurrentDate() not raw new Date() — wizard-created
+  // orders must respect the dev-date override like every other surface.
   const deliveryDate = useMemo(() => {
     const days = parseInt(leadTimeDays, 10);
     if (isNaN(days) || days < 1) return null;
-    return addDays(new Date(), days);
+    return addDays(getCurrentDate(), days);
   }, [leadTimeDays]);
 
   const deliveryWarnings = useMemo(() => {
@@ -474,7 +500,9 @@ export function SiteOrders({ siteId }: SiteOrdersProps) {
     }
   };
 
-  const today = new Date();
+  // (Jun 2026 audit) Dev-date-aware "today" so the Overdue count here
+  // agrees with OrdersClient / OrderDetailSheet under simulation runs.
+  const today = getCurrentDate();
   today.setHours(0, 0, 0, 0);
 
   const filtered =
@@ -486,14 +514,21 @@ export function SiteOrders({ siteId }: SiteOrdersProps) {
       // (#169) Split orders fall into their own singleton group so they
       // can be acted on (re-dated, marked sent) independently of the
       // sibling orders they were extracted from.
+      // (Jun 2026 audit blocker) One-off orders (job=null) group by
+      // supplier + plot (or site) — keying on order.job.name threw
+      // inside this memo and white-screened the whole Orders tab.
       const key = order.isSplit
         ? `split__${order.id}`
-        : `${order.supplier.id}__${order.job.name}`;
+        : order.job
+          ? `${order.supplier.id}__${order.job.name}`
+          : `oneoff__${order.supplier.id}__${order.plot?.id ?? "site"}`;
       const existing = groupMap.get(key) ?? [];
       existing.push(order);
       groupMap.set(key, existing);
     }
-    return Array.from(groupMap.values());
+    // Entries, not values — the render needs the grouping key as the
+    // React key (re-deriving supplier+job there collided after a split).
+    return Array.from(groupMap.entries());
   }, [filtered]);
 
   if (loading) {
@@ -631,7 +666,7 @@ export function SiteOrders({ siteId }: SiteOrdersProps) {
         </div>
       ) : (
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-          {groupedOrders.map((group) => {
+          {groupedOrders.map(([groupKey, group]) => {
             const order = group[0]; // representative order
             const isGroupOverdue = group.some(
               (o) =>
@@ -664,37 +699,42 @@ export function SiteOrders({ siteId }: SiteOrdersProps) {
               contactEmail: order.supplier.contactEmail,
               accountNumber: order.supplier.accountNumber,
               siteNames: [siteInfo?.name || ""],
-              orders: group.map((g) => ({
-                id: g.id,
-                job: {
-                  id: g.job.id,
-                  name: g.job.name,
-                  plot: {
-                    name: g.job.plot.name,
-                    plotNumber: g.job.plot.plotNumber,
-                    site: {
-                      id: siteId,
-                      name: siteInfo?.name || "",
-                      address: siteInfo?.address ?? null,
-                      postcode: siteInfo?.postcode ?? null,
+              orders: group.map((g) => {
+                const plot = orderPlot(g);
+                return {
+                  id: g.id,
+                  job: {
+                    // Real Job id only — useOrderEmail omits the audit
+                    // jobId for one-offs (a fabricated id 500s the FK).
+                    ...(g.job ? { id: g.job.id } : {}),
+                    name: orderJobLabel(g),
+                    plot: {
+                      name: plot?.name ?? "Site-wide",
+                      plotNumber: plot?.plotNumber ?? null,
+                      site: {
+                        id: siteId,
+                        name: siteInfo?.name || "",
+                        address: siteInfo?.address ?? null,
+                        postcode: siteInfo?.postcode ?? null,
+                      },
                     },
                   },
-                },
-                expectedDeliveryDate: g.expectedDeliveryDate,
-                dateOfOrder: g.dateOfOrder,
-                itemsDescription: g.itemsDescription,
-                items: g.orderItems.map((i) => ({
-                  name: i.name,
-                  quantity: i.quantity,
-                  unit: i.unit,
-                  unitCost: i.unitCost,
-                })),
-              })),
+                  expectedDeliveryDate: g.expectedDeliveryDate,
+                  dateOfOrder: g.dateOfOrder,
+                  itemsDescription: g.itemsDescription,
+                  items: g.orderItems.map((i) => ({
+                    name: i.name,
+                    quantity: i.quantity,
+                    unit: i.unit,
+                    unitCost: i.unitCost,
+                  })),
+                };
+              }),
             });
 
             return (
               <Card
-                key={`${order.supplier.id}__${order.job.name}`}
+                key={groupKey}
                 className={`text-left ${isGroupOverdue ? "border-red-200" : ""}`}
               >
                 <CardHeader className="pb-2">
@@ -709,24 +749,38 @@ export function SiteOrders({ siteId }: SiteOrdersProps) {
                     </span>
                   </div>
                   <p className="text-xs font-medium text-foreground">
-                    <Link
-                      href={`/jobs/${order.job.id}`}
-                      className="hover:underline hover:text-blue-700"
-                    >
-                      {order.job.name}
-                    </Link>
+                    {order.job ? (
+                      <Link
+                        href={`/jobs/${order.job.id}`}
+                        className="hover:underline hover:text-blue-700"
+                      >
+                        {order.job.name}
+                      </Link>
+                    ) : (
+                      orderJobLabel(order)
+                    )}
                   </p>
                   {/* Plot badges */}
                   <div className="flex flex-wrap gap-1 pt-0.5">
-                    {group.slice(0, 6).map((o) => (
-                      <Link
-                        key={o.id}
-                        href={`/sites/${siteId}/plots/${o.job.plot.id}`}
-                        className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600 hover:bg-blue-100 hover:text-blue-700"
-                      >
-                        {o.job.plot.plotNumber ? `P${o.job.plot.plotNumber}` : o.job.plot.name}
-                      </Link>
-                    ))}
+                    {group.slice(0, 6).map((o) => {
+                      const plot = orderPlot(o);
+                      return plot ? (
+                        <Link
+                          key={o.id}
+                          href={`/sites/${siteId}/plots/${plot.id}`}
+                          className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600 hover:bg-blue-100 hover:text-blue-700"
+                        >
+                          {plot.plotNumber ? `P${plot.plotNumber}` : plot.name}
+                        </Link>
+                      ) : (
+                        <span
+                          key={o.id}
+                          className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600"
+                        >
+                          Site-wide
+                        </span>
+                      );
+                    })}
                     {group.length > 6 && (
                       <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500">
                         +{group.length - 6} more
@@ -1358,11 +1412,7 @@ export function SiteOrders({ siteId }: SiteOrdersProps) {
                 disabled={splittingId === o.id}
                 onClick={() => handleSplitOut(o.id)}
               >
-                <span>
-                  {o.job.plot.plotNumber
-                    ? `P${o.job.plot.plotNumber}`
-                    : o.job.plot.name}
-                </span>
+                <span>{orderPlotLabel(o)}</span>
                 {splittingId === o.id ? (
                   <Loader2 className="size-3 animate-spin" aria-hidden />
                 ) : (

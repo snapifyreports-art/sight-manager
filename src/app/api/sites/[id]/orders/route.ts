@@ -46,6 +46,16 @@ export async function GET(
           },
         },
       },
+      // (Jun 2026 audit blocker) Direct plot attachment for one-off
+      // orders (job=null) — whereOrdersForSite already returns them;
+      // the tab needs the plot to render "P3 · One-off order".
+      plot: {
+        select: {
+          id: true,
+          name: true,
+          plotNumber: true,
+        },
+      },
       orderItems: {
         select: {
           id: true,

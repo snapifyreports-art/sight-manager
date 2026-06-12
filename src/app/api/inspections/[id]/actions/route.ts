@@ -7,6 +7,7 @@ import { canAccessSite } from "@/lib/site-access";
 import { logEvent } from "@/lib/event-log";
 import { handoverDocTypeForInspection } from "@/lib/inspection-doctype";
 import { computeInspectionScheduledDate } from "@/lib/inspection-dates";
+import { maxRefNumber } from "@/lib/ref-sequence";
 
 export const dynamic = "force-dynamic";
 
@@ -60,7 +61,13 @@ export async function POST(
     // (Jun 2026 audit fix) NCRs raised from inspection findings must get a
     // sequential NCR-NNN ref like manually-raised ones, else the formal QA
     // register shows a raw cuid fragment. Seed the counter once, increment.
-    let ncrSeq = await tx.nCR.count({ where: { siteId: insp!.plot.siteId } });
+    // (Jun 2026 audit) Seed from the max existing suffix, not count —
+    // count mints duplicate refs as soon as any NCR is deleted.
+    const existingNcrRefs = await tx.nCR.findMany({
+      where: { siteId: insp!.plot.siteId },
+      select: { ref: true },
+    });
+    let ncrSeq = maxRefNumber("NCR", existingNcrRefs.map((r) => r.ref));
     for (const f of findings) {
       if (!f.description?.trim()) continue;
       const contactId = f.contactId !== undefined ? f.contactId : defaultContactId;
@@ -190,9 +197,20 @@ export async function POST(
     }
 
     if (action === "fail") {
+      // (Jun 2026 audit fix) Terminal-state guard like `pass` and `book`.
+      // A PASSED/FAILED result is an immutable fact (schema doc; the PATCH
+      // route refuses re-anchor edits for the same reason) — a stale tab /
+      // double submit must not flip PASSED→FAILED (keeping passedAt set)
+      // or duplicate findings on an already-failed row. Re-opening goes
+      // through `reinspect`.
+      if (insp.status === "PASSED" || insp.status === "FAILED") {
+        return NextResponse.json({ error: `This inspection has already ${insp.status === "PASSED" ? "passed" : "failed"}` }, { status: 400 });
+      }
       const failDate = body.failDate ? new Date(body.failDate) : new Date();
       const result = await prisma.$transaction(async (tx) => {
-        await tx.inspection.update({ where: { id }, data: { status: "FAILED", failedAt: failDate, notes: body.notes?.trim() || insp.notes } });
+        // passedAt: null mirrors pass clearing failedAt — no row may carry
+        // both result timestamps.
+        await tx.inspection.update({ where: { id }, data: { status: "FAILED", failedAt: failDate, passedAt: null, notes: body.notes?.trim() || insp.notes } });
         return createFindings(tx as typeof prisma, (body.findings as Finding[]) ?? []);
       });
       await logEvent(prisma, { type: "INSPECTION_FAILED", description: `Inspection "${insp.name}" failed`, siteId: insp.plot.siteId, plotId: insp.plotId, jobId: insp.anchorJobId, userId, detail: { inspectionId: id } }).catch(() => {});
@@ -201,12 +219,23 @@ export async function POST(
 
     if (action === "reschedule") {
       if (!body.newDate) return NextResponse.json({ error: "newDate required" }, { status: 400 });
+      // (Jun 2026 audit fix) PASSED/FAILED results are immutable facts —
+      // rescheduling one would rewrite its date and detach the anchor.
+      if (insp.status === "PASSED" || insp.status === "FAILED") {
+        return NextResponse.json({ error: `Can't reschedule an inspection that has already ${insp.status === "PASSED" ? "passed" : "failed"}` }, { status: 400 });
+      }
       // Manual reschedule detaches the anchor so the chosen date holds
       // (an anchored inspection would otherwise be recomputed on the next
       // job move). Re-anchoring is done via the template.
+      //
+      // (Jun 2026 audit fix) Status collapses to SCHEDULED for every
+      // remaining (non-terminal) state — bookedDate is cleared, so a row
+      // left BOOKED would show a blue "Booked" chip with no booking held
+      // and never re-enter the booking-due reminder pipeline (which
+      // targets status === "SCHEDULED" only).
       const updated = await prisma.inspection.update({
         where: { id },
-        data: { scheduledDate: new Date(body.newDate), anchorJobId: null, bookedDate: null, status: insp.status === "OVERDUE" ? "SCHEDULED" : insp.status },
+        data: { scheduledDate: new Date(body.newDate), anchorJobId: null, bookedDate: null, status: "SCHEDULED" },
       });
       await logEvent(prisma, { type: "INSPECTION_SCHEDULED", description: `Inspection "${insp.name}" rescheduled`, siteId: insp.plot.siteId, plotId: insp.plotId, userId, detail: { inspectionId: id } }).catch(() => {});
       return NextResponse.json(updated);

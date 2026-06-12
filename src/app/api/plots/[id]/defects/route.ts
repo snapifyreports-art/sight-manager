@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { canAccessSite } from "@/lib/site-access";
 import { apiError } from "@/lib/api-errors";
 import { sessionHasPermission } from "@/lib/permissions";
+import { nextRef } from "@/lib/ref-sequence";
 
 export const dynamic = "force-dynamic";
 
@@ -107,8 +108,13 @@ export async function POST(
       { status: 400 },
     );
   }
-  const count = await prisma.defectReport.count({ where: { plotId: id } });
-  const ref = `DEF-${String(count + 1).padStart(3, "0")}`;
+  // (Jun 2026 audit) Max existing suffix + 1, not count + 1 — count
+  // mints duplicate refs as soon as any defect is deleted.
+  const existingRefs = await prisma.defectReport.findMany({
+    where: { plotId: id },
+    select: { ref: true },
+  });
+  const ref = nextRef("DEF", existingRefs.map((r) => r.ref));
 
   try {
     const d = await prisma.defectReport.create({

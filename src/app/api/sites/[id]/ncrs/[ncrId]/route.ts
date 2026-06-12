@@ -32,6 +32,8 @@ async function authorise(siteId: string, requiredPermission?: string) {
   return { session };
 }
 
+const NCR_STATUSES = ["OPEN", "INVESTIGATING", "AWAITING_CORRECTION", "RESOLVED", "CLOSED"];
+
 export async function PUT(
   req: NextRequest,
   { params }: { params: Promise<{ id: string; ncrId: string }> },
@@ -40,19 +42,52 @@ export async function PUT(
   const a = await authorise(id, "EDIT_PROGRAMME");
   if ("error" in a) return a.error;
 
+  // (Jun 2026 audit IDOR) The child must belong to the site in the URL.
+  // Pre-fix a caller with access to ANY site could pair their own site
+  // id with a foreign ncrId and edit QA records on sites they can't see.
+  const existing = await prisma.nCR.findUnique({
+    where: { id: ncrId },
+    select: { siteId: true },
+  });
+  if (!existing || existing.siteId !== id) {
+    return NextResponse.json({ error: "NCR not found" }, { status: 404 });
+  }
+
   const body = await req.json();
+  // (Jun 2026 audit) Validate status against the enum up front — a
+  // typo'd client value previously reached Prisma and 500'd via apiError.
+  if ("status" in body && !NCR_STATUSES.includes(body.status)) {
+    return NextResponse.json(
+      { error: `status must be one of: ${NCR_STATUSES.join(", ")}` },
+      { status: 400 },
+    );
+  }
+
   const data: Record<string, unknown> = {};
-  for (const key of ["title", "description", "rootCause", "correctiveAction", "status"]) {
+  // (Jun 2026 audit) Required columns skip empty values instead of
+  // nulling them — `title: ""` previously wrote title=null → Prisma 500.
+  for (const key of ["title", "description"]) {
+    if (key in body && typeof body[key] === "string" && body[key].trim()) {
+      data[key] = body[key];
+    }
+  }
+  for (const key of ["rootCause", "correctiveAction"]) {
     if (key in body) data[key] = body[key] || null;
   }
+  if ("status" in body) data.status = body.status;
   if ("plotId" in body) data.plotId = body.plotId || null;
   if ("jobId" in body) data.jobId = body.jobId || null;
   if ("contactId" in body) data.contactId = body.contactId || null;
 
-  // Auto-set closedAt + closedById when transitioning to RESOLVED or CLOSED.
+  // Auto-set closedAt + closedById when transitioning to RESOLVED or
+  // CLOSED. (Jun 2026 audit) Reopening clears the closure stamp — a
+  // reopened NCR must not still show "closed on X" beside an OPEN badge.
   if (body.status === "RESOLVED" || body.status === "CLOSED") {
     data.closedAt = new Date();
     data.closedById = a.session.user.id;
+  } else if ("status" in body) {
+    data.closedAt = null;
+    data.closedById = null;
   }
 
   try {
@@ -72,7 +107,15 @@ export async function DELETE(
   if ("error" in a) return a.error;
 
   try {
-    await prisma.nCR.delete({ where: { id: ncrId } });
+    // (Jun 2026 audit IDOR) deleteMany with both conditions — 404 when
+    // the NCR doesn't belong to the site in the URL, instead of hard-
+    // deleting another site's QA record.
+    const deleted = await prisma.nCR.deleteMany({
+      where: { id: ncrId, siteId: id },
+    });
+    if (deleted.count === 0) {
+      return NextResponse.json({ error: "NCR not found" }, { status: 404 });
+    }
     return NextResponse.json({ ok: true });
   } catch (err) {
     return apiError(err, "Failed to delete NCR");

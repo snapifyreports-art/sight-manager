@@ -37,6 +37,8 @@ async function authoriseByPlot(plotId: string, requiredPermission?: string) {
   return { session };
 }
 
+const DEFECT_STATUSES = ["REPORTED", "IN_PROGRESS", "RESOLVED", "CLOSED"];
+
 export async function PUT(
   req: NextRequest,
   { params }: { params: Promise<{ id: string; defectId: string }> },
@@ -45,16 +47,47 @@ export async function PUT(
   const a = await authoriseByPlot(id, "EDIT_PROGRAMME");
   if ("error" in a) return a.error;
 
-  const body = await req.json();
-  const data: Record<string, unknown> = {};
-  for (const key of ["title", "description", "contractorId"]) {
-    if (key in body) data[key] = body[key] || null;
+  // (Jun 2026 audit IDOR) The child must belong to the plot in the URL.
+  // Pre-fix a caller with access to ANY site could pair their own plot
+  // id with a foreign defectId and edit QA records on sites they can't see.
+  const existing = await prisma.defectReport.findUnique({
+    where: { id: defectId },
+    select: { plotId: true },
+  });
+  if (!existing || existing.plotId !== id) {
+    return NextResponse.json({ error: "Defect not found" }, { status: 404 });
   }
+
+  const body = await req.json();
+  // (Jun 2026 audit) Validate status against the enum up front — a
+  // typo'd client value previously reached Prisma and 500'd via apiError.
+  if ("status" in body && !DEFECT_STATUSES.includes(body.status)) {
+    return NextResponse.json(
+      { error: `status must be one of: ${DEFECT_STATUSES.join(", ")}` },
+      { status: 400 },
+    );
+  }
+
+  const data: Record<string, unknown> = {};
+  // (Jun 2026 audit) Required columns skip empty values instead of
+  // nulling them — `title: ""` previously wrote title=null → Prisma 500.
+  for (const key of ["title", "description"]) {
+    if (key in body && typeof body[key] === "string" && body[key].trim()) {
+      data[key] = body[key];
+    }
+  }
+  if ("contractorId" in body) data.contractorId = body.contractorId || null;
   if ("status" in body) {
     data.status = body.status;
     if (body.status === "RESOLVED" || body.status === "CLOSED") {
       data.resolvedAt = new Date();
       data.resolvedById = a.session.user.id;
+    } else {
+      // (Jun 2026 audit) Reopening (→ REPORTED/IN_PROGRESS) must clear
+      // the resolution stamp, mirroring the NCR/variation routes —
+      // otherwise the UI shows "Resolved …" beside a reopened defect.
+      data.resolvedAt = null;
+      data.resolvedById = null;
     }
   }
 
@@ -77,7 +110,15 @@ export async function DELETE(
   const a = await authoriseByPlot(id, "DELETE_ITEMS");
   if ("error" in a) return a.error;
   try {
-    await prisma.defectReport.delete({ where: { id: defectId } });
+    // (Jun 2026 audit IDOR) deleteMany with both conditions — 404 when
+    // the defect doesn't belong to the plot in the URL, instead of hard-
+    // deleting another site's QA record.
+    const deleted = await prisma.defectReport.deleteMany({
+      where: { id: defectId, plotId: id },
+    });
+    if (deleted.count === 0) {
+      return NextResponse.json({ error: "Defect not found" }, { status: 404 });
+    }
     return NextResponse.json({ ok: true });
   } catch (err) {
     return apiError(err, "Failed to delete defect");

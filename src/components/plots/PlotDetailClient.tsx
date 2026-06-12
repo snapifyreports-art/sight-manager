@@ -72,7 +72,7 @@ import { HandoverChecklist } from "@/components/handover/HandoverChecklist";
 import { PlotMaterialsSection } from "@/components/plots/PlotMaterialsSection";
 import { PlotDrawingsSection } from "@/components/plots/PlotDrawingsSection";
 import { PlotCustomerViewTab } from "@/components/plots/PlotCustomerViewTab";
-import { JobStatusBadge, JOB_STATUS_CONFIG } from "@/components/shared/StatusBadge";
+import { JobStatusBadge, JOB_STATUS_CONFIG, InspectionStatusBadge } from "@/components/shared/StatusBadge";
 import { useCopyToClipboard } from "@/hooks/useCopyToClipboard";
 
 // ---------- Types ----------
@@ -451,7 +451,7 @@ function PlotOverview({
 }: {
   plot: PlotData;
   snagSummary: Record<string, number>;
-  inspections: Array<{ id: string; name: string; type: string; status: string; scheduledDate: string }>;
+  inspections: Array<{ id: string; name: string; type: string; status: string; scheduledDate: string; bookedDate: string | null }>;
   onInspectionsChange: () => void | Promise<void>;
 }) {
   const [addInspectionOpen, setAddInspectionOpen] = useState(false);
@@ -515,8 +515,22 @@ function PlotOverview({
     }
   }
 
+  // (Jun 2026 audit) Parent Jobs are derived rollups (parent-job.ts:
+  // "Views that list actionable jobs should filter out parents") — the
+  // Jobs tab and PlotTodoList already filter them, but Overview didn't:
+  // stage parents showed as 'Active' pills with their own Complete
+  // button, got Start buttons when overdue, and double-counted in the
+  // header % (which then disagreed with the leaf-only
+  // Plot.buildCompletePercent used by the heatmap/walkthrough).
+  const leafJobs = useMemo(() => {
+    const parentJobIds = new Set(
+      plot.jobs.filter((j) => j.parentId).map((j) => j.parentId!)
+    );
+    return plot.jobs.filter((j) => !parentJobIds.has(j.id));
+  }, [plot.jobs]);
+
   const stats = useMemo(() => {
-    const allJobs = plot.jobs;
+    const allJobs = leafJobs;
     const total = allJobs.length;
     const completed = allJobs.filter((j) => j.status === "COMPLETED").length;
     const inProgress = allJobs.filter((j) => j.status === "IN_PROGRESS").length;
@@ -524,7 +538,10 @@ function PlotOverview({
     const notStarted = allJobs.filter((j) => j.status === "NOT_STARTED").length;
     const progressPercent = total > 0 ? Math.round((completed / total) * 100) : 0;
 
-    const allOrders = allJobs.flatMap((j) => j.orders);
+    // Orders span ALL plot jobs, parents included — parent-stage orders
+    // attach to the parent Job directly (apply-template-helpers.ts), so a
+    // leaf-only sweep here would drop them from the Overview order cards.
+    const allOrders = plot.jobs.flatMap((j) => j.orders);
     const pendingOrders = allOrders.filter(
       (o) => o.status === "PENDING" || o.status === "ORDERED"
     );
@@ -535,6 +552,12 @@ function PlotOverview({
       return differenceInCalendarDays(new Date(o.expectedDeliveryDate), today) >= 0;
     });
     const overdueDeliveries = allOrders.filter((o) => {
+      // (Jun 2026 audit) Mirror the upcoming filter — a PENDING order was
+      // never sent, so a slipped planned date isn't an overdue DELIVERY
+      // (and "Mark Received" on it would record goods never ordered).
+      // Pending-late orders already surface via the Pending Orders stat
+      // and the To-Do tab's "Orders to Place" bucket.
+      if (o.status === "PENDING") return false; // not sent yet
       if (!o.expectedDeliveryDate || o.deliveredDate) return false;
       return differenceInCalendarDays(new Date(o.expectedDeliveryDate), today) < 0;
     });
@@ -554,7 +577,7 @@ function PlotOverview({
       overdueDeliveries,
       openSnags,
     };
-  }, [plot.jobs, snagSummary, today]);
+  }, [leafJobs, plot.jobs, snagSummary, today]);
 
   // Group jobs by parent stage
   const jobs = plot.jobs;
@@ -590,8 +613,8 @@ function PlotOverview({
   }, [jobs]);
 
   const activeJobs = useMemo(
-    () => plot.jobs.filter((j) => j.status === "IN_PROGRESS"),
-    [plot.jobs]
+    () => leafJobs.filter((j) => j.status === "IN_PROGRESS"),
+    [leafJobs]
   );
 
   // Current stage label — routed through the unified `getCurrentStage`
@@ -631,12 +654,12 @@ function PlotOverview({
 
   // Jobs that haven't started yet but are overdue (startDate < today)
   const overdueStartJobs = useMemo(
-    () => plot.jobs.filter((j) => {
+    () => leafJobs.filter((j) => {
       if (j.status !== "NOT_STARTED") return false;
       if (!j.startDate) return false;
       return new Date(j.startDate) < today;
     }),
-    [plot.jobs, today]
+    [leafJobs, today]
   );
 
   return (
@@ -1083,15 +1106,6 @@ function PlotOverview({
         const overdue = inspections.filter((i) => i.status === "OVERDUE");
         const failed = inspections.filter((i) => i.status === "FAILED");
         const passed = inspections.filter((i) => i.status === "PASSED");
-        const pill = (s: string) => {
-          const c =
-            s === "PASSED" ? "bg-emerald-100 text-emerald-700"
-            : s === "FAILED" ? "bg-red-100 text-red-700"
-            : s === "OVERDUE" ? "bg-amber-100 text-amber-700"
-            : s === "BOOKED" ? "bg-blue-100 text-blue-700"
-            : "bg-slate-100 text-slate-600";
-          return `rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${c}`;
-        };
         const actionable = [...overdue, ...failed, ...open].slice(0, 6);
         return (
           <Card className="mt-4">
@@ -1113,7 +1127,9 @@ function PlotOverview({
                 <>
                   <div className="mb-3 flex flex-wrap gap-3 text-xs">
                     <span>{passed.length}/{inspections.length} passed</span>
-                    {overdue.length > 0 && <span className="font-medium text-amber-600">{overdue.length} overdue</span>}
+                    {/* (Jun 2026 audit) Red, not amber — inspection-doctype.ts:
+                        "red always means act now" for overdue hold-points. */}
+                    {overdue.length > 0 && <span className="font-medium text-red-600">{overdue.length} overdue</span>}
                     {failed.length > 0 && <span className="font-medium text-red-600">{failed.length} failed</span>}
                     {open.length > 0 && <span>{open.length} open</span>}
                   </div>
@@ -1129,7 +1145,10 @@ function PlotOverview({
                             <span className="min-w-0 truncate">{i.name}</span>
                             <span className="flex shrink-0 items-center gap-2">
                               <span className="text-xs text-muted-foreground">{format(new Date(i.scheduledDate), "d MMM")}</span>
-                              <span className={pill(i.status)}>{i.status.toLowerCase()}</span>
+                              {/* Shared SSoT badge (inspection-doctype.ts) — the
+                                  local pill map showed OVERDUE amber and lost
+                                  the "Booked (was overdue)" distinction. */}
+                              <InspectionStatusBadge status={i.status} bookedDate={i.bookedDate} />
                             </span>
                           </Link>
                         </li>
@@ -1365,7 +1384,7 @@ export function PlotDetailClient({
 
   // Inspection hold-points for this plot → ! markers on the Gantt tab.
   const [inspections, setInspections] = useState<
-    Array<{ id: string; name: string; type: string; status: string; scheduledDate: string }>
+    Array<{ id: string; name: string; type: string; status: string; scheduledDate: string; bookedDate: string | null }>
   >([]);
   const refetchInspections = useCallback(async () => {
     const r = await fetch(`/api/inspections?plotId=${plot.id}`);

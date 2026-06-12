@@ -37,6 +37,10 @@ export default async function OrdersPage() {
       orderBy: { dateOfOrder: "desc" },
     }),
     prisma.supplier.findMany({
+      // (Jun 2026 audit) Archived suppliers must not be pickable for new
+      // orders — the site wizard's GET /api/suppliers already excludes
+      // them; this page's New Order dropdown didn't.
+      where: { archivedAt: null },
       orderBy: { name: "asc" },
     }),
     prisma.job.findMany({

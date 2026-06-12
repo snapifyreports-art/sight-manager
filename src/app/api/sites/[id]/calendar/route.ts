@@ -36,6 +36,12 @@ export async function GET(
     prisma.job.findMany({
       where: {
         plot: { siteId: id },
+        // (Jun 2026 review) Leaf jobs only — parent stage rollups carry
+        // derived dates that duplicate their children's, and the
+        // calendar's Start/action buttons would 400 on the actions
+        // route's new leaf guard. Matches day-sheets/daily-brief/
+        // calendar.ics, which all leaf-filter.
+        children: { none: {} },
         OR: [
           { startDate: { gte: rangeStart, lte: rangeEnd } },
           { endDate: { gte: rangeStart, lte: rangeEnd } },

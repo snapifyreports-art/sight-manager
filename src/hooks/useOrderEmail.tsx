@@ -58,7 +58,9 @@ export interface ChaseOrderInput {
   supplierContactName: string | null;
   supplierContactEmail: string | null;
   supplierAccountNumber?: string | null;
-  jobId: string;
+  /** Real Job id — OMIT/null for one-off orders (job=null upstream).
+   *  The audit event only carries a jobId when one truly exists. */
+  jobId?: string | null;
   jobName: string;
   plotName: string;
   plotNumber?: string | null;
@@ -187,7 +189,8 @@ export function useOrderEmail(onSent?: (mode: Mode) => void): Result {
       body,
       eventDescription: `Chased ${o.supplierName} for overdue delivery — ${o.jobName}`,
       eventSiteId: o.siteId,
-      eventJobId: o.jobId,
+      // One-off orders have no real Job FK — omit rather than fabricate.
+      eventJobId: o.jobId ?? undefined,
     });
   }, []);
 

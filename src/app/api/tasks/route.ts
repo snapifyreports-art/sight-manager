@@ -22,14 +22,23 @@ export async function GET(req: NextRequest) {
   // Site-access filter — non-admins only see tasks on sites they've been granted access to
   const accessibleSiteIds = await getUserSiteIds(session.user.id, (session.user as { role: string }).role);
   const siteAccess = accessibleSiteIds === null ? {} : { plot: { siteId: { in: accessibleSiteIds } } };
-  // (May 2026) For non-admins the `job.plot.siteId` filter already
-  // requires a live job, so orphans drop out. For admins the filter
-  // is empty — so fall back to the explicit orphan guard, otherwise
-  // contextless orders (job/site/plot all deleted) still surface as
-  // ghost tasks. Caught by Keith — wiped test sites left 160 orphans.
+  // (May 2026) For admins the site filter is empty — fall back to the
+  // explicit orphan guard, otherwise contextless orders (job/site/plot
+  // all deleted) still surface as ghost tasks. Caught by Keith — wiped
+  // test sites left 160 orphans.
+  // (Jun 2026 audit) For non-admins, match the whereOrdersForSite SSoT:
+  // an order belongs to an accessible site via its job's plot, its
+  // direct plot, OR its direct site. The old job-only predicate made
+  // one-off orders (jobId=null) invisible to every non-admin user.
   const siteAccessForOrder = accessibleSiteIds === null
     ? whereOrderNotOrphaned
-    : { job: { plot: { siteId: { in: accessibleSiteIds } } } };
+    : {
+        OR: [
+          { job: { plot: { siteId: { in: accessibleSiteIds } } } },
+          { plot: { siteId: { in: accessibleSiteIds } } },
+          { siteId: { in: accessibleSiteIds } },
+        ],
+      };
   const leafOnly = { children: { none: {} } };
 
   const now = getServerCurrentDate(req);
@@ -40,6 +49,9 @@ export async function GET(req: NextRequest) {
   // Shared include shape for "rich" order responses — supplier + site
   // address/postcode + plot number so the email template has everything
   // it needs without a second round-trip.
+  // (Jun 2026 audit) Direct plot/site attachments included too — one-off
+  // orders (jobId=null) carry their context there, and TasksClient
+  // renders "{plot/site} one-off" rows from these fields.
   const richOrderInclude = {
     supplier: { select: { id: true, name: true, contactEmail: true, contactName: true, accountNumber: true } },
     job: {
@@ -54,6 +66,15 @@ export async function GET(req: NextRequest) {
         },
       },
     },
+    plot: {
+      select: {
+        id: true,
+        name: true,
+        plotNumber: true,
+        site: { select: { id: true, name: true, address: true, postcode: true } },
+      },
+    },
+    site: { select: { id: true, name: true, address: true, postcode: true } },
     orderItems: true,
   } as const;
 
@@ -139,6 +160,8 @@ export async function GET(req: NextRequest) {
       include: {
         supplier: { select: { id: true, name: true } },
         job: { include: { plot: { include: { site: { select: { id: true, name: true } } } } } },
+        plot: { select: { id: true, name: true, plotNumber: true, site: { select: { id: true, name: true } } } },
+        site: { select: { id: true, name: true } },
       },
       orderBy: { expectedDeliveryDate: "asc" },
       take: 20,

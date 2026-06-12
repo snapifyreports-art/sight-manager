@@ -86,18 +86,32 @@ export async function POST(
         orderDetails: orderDetails || null,
         orderType: orderType || null,
         expectedDeliveryDate: expectedDeliveryDate ? new Date(expectedDeliveryDate) : null,
-        leadTimeDays: leadTimeDays ? parseInt(String(leadTimeDays), 10) : null,
+        // (Jun 2026 audit) NaN guard mirrors /api/orders POST — "abc"
+        // previously parsed to NaN and 500'd inside Prisma.
+        leadTimeDays: (() => {
+          if (!leadTimeDays) return null;
+          const n = parseInt(String(leadTimeDays), 10);
+          return Number.isFinite(n) && n >= 0 ? n : null;
+        })(),
         itemsDescription: itemsDescription || null,
         ...(items && items.length > 0
           ? {
               orderItems: {
-                create: items.map((item) => ({
-                  name: item.name,
-                  quantity: item.quantity,
-                  unit: item.unit || "each",
-                  unitCost: item.unitCost ?? 0,
-                  totalCost: (item.quantity ?? 1) * (item.unitCost ?? 0),
-                })),
+                // (Jun 2026 audit) Coerce quantity/unitCost like
+                // /api/orders POST does — a non-numeric quantity
+                // previously poisoned the row (raw value stored, NaN
+                // totalCost).
+                create: items.map((item) => {
+                  const qty = Number(item.quantity ?? 1) || 1;
+                  const cost = Number(item.unitCost) || 0;
+                  return {
+                    name: item.name,
+                    quantity: qty,
+                    unit: item.unit || "each",
+                    unitCost: cost,
+                    totalCost: qty * cost,
+                  };
+                }),
               },
             }
           : {}),

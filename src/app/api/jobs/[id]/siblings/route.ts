@@ -41,6 +41,10 @@ export async function GET(
       endDate: true,
       status: true,
       parentStage: true,
+      // (Jun 2026 audit) parentId lets clients exclude derived stage
+      // rollups (any sibling whose id appears as another's parentId) so
+      // action flows only ever target leaf jobs.
+      parentId: true,
     },
   });
 

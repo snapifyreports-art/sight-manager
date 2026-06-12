@@ -38,7 +38,6 @@ import { usePullForwardDecision } from "@/hooks/usePullForwardDecision";
 import { useOrderStatus } from "@/hooks/useOrderStatus";
 import { useOrderEmail } from "@/hooks/useOrderEmail";
 import { useJobAction } from "@/hooks/useJobAction";
-import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 import { LatenessSummary } from "@/components/lateness/LatenessSummary";
 
 // ---------- Types ----------
@@ -56,6 +55,9 @@ interface OrderTask {
     contactName?: string | null;
     accountNumber?: string | null;
   };
+  // (Jun 2026 audit) MaterialOrder.jobId is nullable — one-off orders
+  // attach directly to a plot or the site instead. Consumers must
+  // null-check `job` and fall back to the plot/site attachment.
   job: {
     id: string;
     name: string;
@@ -70,7 +72,24 @@ interface OrderTask {
         postcode?: string | null;
       };
     };
-  };
+  } | null;
+  plot: {
+    id: string;
+    name: string;
+    plotNumber?: string | null;
+    site: {
+      id: string;
+      name: string;
+      address?: string | null;
+      postcode?: string | null;
+    };
+  } | null;
+  site: {
+    id: string;
+    name: string;
+    address?: string | null;
+    postcode?: string | null;
+  } | null;
   orderItems: Array<{
     id: string;
     name: string;
@@ -78,6 +97,37 @@ interface OrderTask {
     unit: string;
     unitCost?: number;
   }>;
+}
+
+// (Jun 2026 audit) Null-safe labels for one-off orders — mirrors
+// orderJobLabel/orderPlotLabel in
+// src/components/reports/daily-brief/types.ts so a job-less order
+// renders "One-off order · Plot 3" instead of crashing on
+// `order.job.plot.site.name` (which took down the whole /tasks page).
+function orderJobLabel(o: OrderTask): string {
+  return o.job ? o.job.name : "One-off order";
+}
+
+function orderPlotLabel(o: OrderTask): string {
+  const plot = o.job?.plot ?? o.plot;
+  if (plot) return plot.plotNumber ? `Plot ${plot.plotNumber}` : plot.name;
+  return o.site ? "Site-wide" : "—";
+}
+
+function orderSite(o: OrderTask) {
+  return o.job?.plot.site ?? o.plot?.site ?? o.site ?? null;
+}
+
+function orderSiteName(o: OrderTask): string {
+  return orderSite(o)?.name ?? "—";
+}
+
+/** Where a click on the order row should land — the job page when a job
+ *  exists, otherwise the owning site's Orders tab (one-offs live there). */
+function orderHref(o: OrderTask): string | null {
+  if (o.job) return `/jobs/${o.job.id}`;
+  const site = orderSite(o);
+  return site ? `/sites/${site.id}?tab=orders` : null;
 }
 
 interface JobTask {
@@ -164,7 +214,6 @@ const urgencyBadge = {
 
 export function TasksClient() {
   const router = useRouter();
-  const toast = useToast();
   const { devDate } = useDevDate();
   const [data, setData] = useState<TaskData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -202,7 +251,7 @@ export function TasksClient() {
       const existing = map.get(key);
       if (existing) {
         existing.orders.push(order);
-        const siteName = order.job.plot.site.name;
+        const siteName = orderSiteName(order);
         if (!existing.sites.includes(siteName)) {
           existing.sites.push(siteName);
         }
@@ -215,7 +264,7 @@ export function TasksClient() {
           contactName: order.supplier.contactName ?? null,
           orderDateISO: dateKey,
           orders: [order],
-          sites: [order.job.plot.site.name],
+          sites: [orderSiteName(order)],
         });
       }
     }
@@ -226,7 +275,7 @@ export function TasksClient() {
   }, [data]);
 
   // ── Quick confirm delivery — delegated to useOrderStatus hook ──
-  const { setOrderStatus, isPending: isOrderPending } = useOrderStatus();
+  const { setOrderStatus, setManyOrderStatus, isPending: isOrderPending } = useOrderStatus();
 
   async function handleQuickConfirm(orderId: string, listKey: "confirmDelivery" | "overdueOrders" | "awaitingDelivery") {
     const result = await setOrderStatus(orderId, "DELIVERED");
@@ -270,20 +319,24 @@ export function TasksClient() {
   });
 
   function openChaseDialog(order: OrderTask) {
+    // (Jun 2026 audit) Null-safe for one-off orders — fall back to the
+    // direct plot/site attachment and omit the jobId (no real Job FK).
+    const site = orderSite(order);
+    const plot = order.job?.plot ?? order.plot;
     openChaseOrderEmail({
       orderId: order.id,
       supplierName: order.supplier.name,
       supplierContactName: order.supplier.contactName ?? null,
       supplierContactEmail: order.supplier.contactEmail ?? null,
       supplierAccountNumber: order.supplier.accountNumber ?? null,
-      jobId: order.job.id,
-      jobName: order.job.name,
-      plotName: order.job.plot.name,
-      plotNumber: order.job.plot.plotNumber ?? null,
-      siteId: order.job.plot.site.id,
-      siteName: order.job.plot.site.name,
-      siteAddress: order.job.plot.site.address ?? null,
-      sitePostcode: order.job.plot.site.postcode ?? null,
+      jobId: order.job?.id ?? null,
+      jobName: orderJobLabel(order),
+      plotName: plot?.name ?? "Site-wide",
+      plotNumber: plot?.plotNumber ?? null,
+      siteId: site?.id ?? "",
+      siteName: site?.name ?? "",
+      siteAddress: site?.address ?? null,
+      sitePostcode: site?.postcode ?? null,
       itemsDescription: order.itemsDescription ?? null,
       items: order.orderItems.map((i) => ({ name: i.name, quantity: i.quantity, unit: i.unit, unitCost: i.unitCost })),
       expectedDeliveryDate: order.expectedDeliveryDate,
@@ -299,27 +352,34 @@ export function TasksClient() {
       contactEmail: group.contactEmail,
       // Pick account number off the first order's supplier (all share the same supplier in a group)
       accountNumber: group.orders[0]?.supplier.accountNumber ?? null,
-      orders: group.orders.map((o) => ({
-        id: o.id,
-        job: {
-          id: o.job.id,
-          name: o.job.name,
-          plot: {
-            name: o.job.plot.name,
-            plotNumber: o.job.plot.plotNumber ?? null,
-            site: {
-              id: o.job.plot.site.id,
-              name: o.job.plot.site.name,
-              address: o.job.plot.site.address ?? null,
-              postcode: o.job.plot.site.postcode ?? null,
+      orders: group.orders.map((o) => {
+        // (Jun 2026 audit) One-off orders carry no job — fall back to the
+        // direct plot/site attachment. useOrderEmail already supports
+        // omitting job.id for one-offs (audit jobId only when real).
+        const plot = o.job?.plot ?? o.plot;
+        const site = orderSite(o);
+        return {
+          id: o.id,
+          job: {
+            ...(o.job ? { id: o.job.id } : {}),
+            name: orderJobLabel(o),
+            plot: {
+              name: plot?.name ?? "Site-wide",
+              plotNumber: plot?.plotNumber ?? null,
+              site: {
+                id: site?.id ?? "",
+                name: site?.name ?? "",
+                address: site?.address ?? null,
+                postcode: site?.postcode ?? null,
+              },
             },
           },
-        },
-        expectedDeliveryDate: o.expectedDeliveryDate,
-        dateOfOrder: o.dateOfOrder,
-        itemsDescription: o.itemsDescription ?? null,
-        items: o.orderItems.map((i) => ({ name: i.name, quantity: i.quantity, unit: i.unit, unitCost: i.unitCost })),
-      })),
+          expectedDeliveryDate: o.expectedDeliveryDate,
+          dateOfOrder: o.dateOfOrder,
+          itemsDescription: o.itemsDescription ?? null,
+          items: o.orderItems.map((i) => ({ name: i.name, quantity: i.quantity, unit: i.unit, unitCost: i.unitCost })),
+        };
+      }),
       siteNames: group.sites,
     });
   }
@@ -328,20 +388,21 @@ export function TasksClient() {
   // Uses the composite group.key (supplier + dateOfOrder) for the pending
   // state so two batches to the same supplier on different dates show
   // their spinners independently.
+  // (Jun 2026 audit) Routed through useOrderStatus.setManyOrderStatus —
+  // the same hardened path the Send-Order email button uses. The old
+  // /api/orders/bulk-status call bypassed the combined late-send popup,
+  // never re-stamped dateOfOrder on PENDING→ORDERED (so supplier
+  // performance / Story "sent" events read the PLANNED date), and
+  // skipped the order-date invariants. The hook handles toasts.
   async function handleMarkGroupSent(group: SupplierGroup) {
     const stateKey = group.key;
     setSendingGroupIds((prev) => new Set(prev).add(stateKey));
     try {
       const orderIds = group.orders.map((o) => o.id);
-      const res = await fetch("/api/orders/bulk-status", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ orderIds, status: "ORDERED" }),
-      });
-      if (res.ok && data) {
-        const remainingOrders = data.sendOrder.filter(
-          (o) => !orderIds.includes(o.id)
-        );
+      const { ok } = await setManyOrderStatus(orderIds, "ORDERED");
+      if (ok.length > 0 && data) {
+        const sentIds = new Set(ok);
+        const remainingOrders = data.sendOrder.filter((o) => !sentIds.has(o.id));
         setData({
           ...data,
           sendOrder: remainingOrders,
@@ -350,12 +411,7 @@ export function TasksClient() {
             sendOrder: remainingOrders.length,
           },
         });
-        toast.success(`${orderIds.length} order${orderIds.length !== 1 ? "s" : ""} marked as sent`);
-      } else if (!res.ok) {
-        toast.error(await fetchErrorMessage(res, "Failed to mark orders as sent"));
       }
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Network error marking orders as sent");
     } finally {
       setSendingGroupIds((prev) => {
         const next = new Set(prev);
@@ -501,7 +557,7 @@ export function TasksClient() {
                   >
                     <div
                       className="min-w-0 flex-1 cursor-pointer"
-                      onClick={() => router.push(`/jobs/${order.job.id}`)}
+                      onClick={() => { const href = orderHref(order); if (href) router.push(href); }}
                     >
                       <p className="truncate text-sm font-medium text-red-800">
                         <Link
@@ -513,7 +569,7 @@ export function TasksClient() {
                         </Link>
                       </p>
                       <p className="truncate text-xs text-red-600">
-                        {order.job.plot.site.name} &bull; {order.job.plot.name} &bull; {order.job.name}
+                        {orderSiteName(order)} &bull; {orderPlotLabel(order)} &bull; {orderJobLabel(order)}
                       </p>
                       {order.itemsDescription && (
                         <p className="mt-0.5 truncate text-xs text-red-500">
@@ -737,7 +793,7 @@ export function TasksClient() {
                   >
                     <div
                       className="min-w-0 flex-1 cursor-pointer"
-                      onClick={() => router.push(`/jobs/${order.job.id}`)}
+                      onClick={() => { const href = orderHref(order); if (href) router.push(href); }}
                     >
                       <p className="text-sm font-medium">
                         <Link
@@ -749,8 +805,8 @@ export function TasksClient() {
                         </Link>
                       </p>
                       <p className="text-xs opacity-75">
-                        {order.job.plot.site.name} &bull; {order.job.plot.name}{" "}
-                        &bull; {order.job.name}
+                        {orderSiteName(order)} &bull; {orderPlotLabel(order)}{" "}
+                        &bull; {orderJobLabel(order)}
                       </p>
                       {order.itemsDescription && (
                         <p className="mt-0.5 truncate text-xs opacity-60">
@@ -808,7 +864,7 @@ export function TasksClient() {
             <div className="space-y-3">
               {supplierGroups.map((group) => {
                 const isGroupSending = sendingGroupIds.has(group.key);
-                const plotNames = [...new Set(group.orders.map((o) => o.job.plot.name))];
+                const plotNames = [...new Set(group.orders.map((o) => orderPlotLabel(o)))];
                 // Aggregate items across all orders in the group
                 const itemMap = new Map<string, { name: string; unit: string; quantity: number }>();
                 for (const order of group.orders) {
@@ -911,10 +967,10 @@ export function TasksClient() {
                           <div
                             key={order.id}
                             className="flex items-center gap-2 rounded px-2 py-1 text-xs cursor-pointer hover:bg-blue-100/50 transition-colors"
-                            onClick={() => router.push(`/jobs/${order.job.id}`)}
+                            onClick={() => { const href = orderHref(order); if (href) router.push(href); }}
                           >
                             <span className="min-w-0 flex-1 text-muted-foreground">
-                              {order.job.plot.name} &bull; {order.job.name}
+                              {orderPlotLabel(order)} &bull; {orderJobLabel(order)}
                             </span>
                             <span className="shrink-0 text-blue-600">
                               {format(new Date(order.dateOfOrder), "dd MMM")}
@@ -955,7 +1011,7 @@ export function TasksClient() {
                   >
                     <div
                       className="min-w-0 flex-1 cursor-pointer"
-                      onClick={() => router.push(`/jobs/${order.job.id}`)}
+                      onClick={() => { const href = orderHref(order); if (href) router.push(href); }}
                     >
                       <p className="text-sm font-medium">
                         <Link
@@ -967,8 +1023,8 @@ export function TasksClient() {
                         </Link>
                       </p>
                       <p className="text-xs text-muted-foreground">
-                        {order.job.plot.site.name} &bull; {order.job.plot.name}{" "}
-                        &bull; {order.job.name}
+                        {orderSiteName(order)} &bull; {orderPlotLabel(order)}{" "}
+                        &bull; {orderJobLabel(order)}
                       </p>
                       {order.orderItems.length > 0 && (
                         <p className="mt-0.5 truncate text-xs text-muted-foreground">
@@ -1097,7 +1153,7 @@ export function TasksClient() {
                 <button
                   key={`del-${order.id}`}
                   className="flex w-full items-center justify-between rounded-lg border p-3 text-left transition-colors hover:bg-accent/50"
-                  onClick={() => router.push(`/jobs/${order.job.id}`)}
+                  onClick={() => { const href = orderHref(order); if (href) router.push(href); }}
                 >
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
@@ -1114,8 +1170,8 @@ export function TasksClient() {
                       </p>
                     </div>
                     <p className="mt-0.5 text-xs text-muted-foreground">
-                      {order.job.plot.site.name} &bull; {order.job.plot.name} &bull;{" "}
-                      {order.job.name}
+                      {orderSiteName(order)} &bull; {orderPlotLabel(order)} &bull;{" "}
+                      {orderJobLabel(order)}
                     </p>
                   </div>
                   <span className="text-xs text-muted-foreground">

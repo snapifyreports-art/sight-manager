@@ -26,6 +26,11 @@ export default async function SuppliersPage() {
 
   const [suppliers, contractors] = await Promise.all([
     prisma.supplier.findMany({
+      // (Jun 2026 audit) Active only — archived suppliers reappeared in
+      // the grid because this page query skipped the archivedAt filter
+      // GET /api/suppliers applies. The client's "Show archived" toggle
+      // re-fetches with ?include=archived for the restore flow.
+      where: { archivedAt: null },
       orderBy: { name: "asc" },
       include: {
         _count: { select: { orders: true, materials: true } },
@@ -83,6 +88,7 @@ export default async function SuppliersPage() {
       contactNumber: s.contactNumber,
       type: s.type,
       accountNumber: s.accountNumber,
+      archivedAt: s.archivedAt?.toISOString() ?? null,
       createdAt: s.createdAt.toISOString(),
       updatedAt: s.updatedAt.toISOString(),
       _count: s._count,

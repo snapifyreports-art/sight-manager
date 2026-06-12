@@ -260,6 +260,15 @@ export async function POST(
     await Promise.all(
       Array.from(parentIds).map((pid) => recomputeParentFromChildren(tx, pid)),
     );
+
+    // (Jun 2026) Anchored inspections move with their jobs — same
+    // in-transaction contract as jobs/[id]/delay (inspection-dates.ts:
+    // "MUST be called by every code path that moves a job's start/end
+    // date"). Without this every SCHEDULED/BOOKED/OVERDUE hold-point on
+    // the plot kept its pre-restart date and the cron nagged about
+    // visits that were actually weeks away.
+    const { recomputeInspectionDates } = await import("@/lib/inspection-dates");
+    await recomputeInspectionDates(tx, plotId, now);
   },
   // 30s envelope — restart-decision can shift many jobs + orders + run
   // parent recomputes inside the tx, default 5s isn't enough.

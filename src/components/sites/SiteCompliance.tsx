@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { format, parseISO } from "date-fns";
-import { Plus, ShieldCheck, AlertTriangle, Loader2, Trash2 } from "lucide-react";
+import { Plus, ShieldCheck, AlertTriangle, Loader2, Trash2, Paperclip } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -187,6 +187,21 @@ export function SiteCompliance({ siteId }: { siteId: string }) {
                 >
                   <td className="px-3 py-2">
                     <p className="font-medium">{it.name}</p>
+                    {/* (Jun 2026 audit) Attached document link — the API
+                        returns it and the delete confirm references it,
+                        but the table never rendered it, so an attached
+                        cert was impossible to open from this screen. */}
+                    {it.document && (
+                      <a
+                        href={it.document.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-xs text-blue-600 hover:underline"
+                      >
+                        <Paperclip className="size-3" aria-hidden="true" />
+                        {it.document.name}
+                      </a>
+                    )}
                     {it.notes && (
                       <p className="text-xs text-muted-foreground">{it.notes}</p>
                     )}

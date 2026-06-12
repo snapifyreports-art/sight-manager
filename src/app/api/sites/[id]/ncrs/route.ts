@@ -5,6 +5,7 @@ import { canAccessSite } from "@/lib/site-access";
 import { apiError } from "@/lib/api-errors";
 import { sessionHasPermission } from "@/lib/permissions";
 import { logEvent } from "@/lib/event-log";
+import { nextRef } from "@/lib/ref-sequence";
 
 export const dynamic = "force-dynamic";
 
@@ -14,8 +15,9 @@ export const dynamic = "force-dynamic";
  * POST — create. body: { title, description, plotId?, jobId?,
  *   contactId?, rootCause?, correctiveAction? }
  *
- * The ref field auto-generates as "NCR-NNN" where NNN is the
- * (count + 1) of existing NCRs on the site, zero-padded to 3.
+ * The ref field auto-generates as "NCR-NNN" — max existing suffix + 1
+ * (Jun 2026 audit: was count + 1, which minted duplicate refs after any
+ * delete).
  */
 
 async function authorise(siteId: string, requiredPermission?: string) {
@@ -83,8 +85,11 @@ export async function POST(
     );
   }
 
-  const count = await prisma.nCR.count({ where: { siteId: id } });
-  const ref = `NCR-${String(count + 1).padStart(3, "0")}`;
+  const existingRefs = await prisma.nCR.findMany({
+    where: { siteId: id },
+    select: { ref: true },
+  });
+  const ref = nextRef("NCR", existingRefs.map((r) => r.ref));
 
   try {
     const ncr = await prisma.nCR.create({

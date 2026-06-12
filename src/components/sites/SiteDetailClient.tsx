@@ -314,7 +314,7 @@ const EDIT_SITE_TABS = new Set([
 
 // ---------- Site Snags Sub-Component ----------
 
-function SiteSnags({ siteId, plots, initialSnagId }: { siteId: string; plots: Array<{ id: string; name: string; plotNumber: string | null }>; initialSnagId?: string }) {
+function SiteSnags({ siteId, plots, initialSnagId, initialStatusFilter }: { siteId: string; plots: Array<{ id: string; name: string; plotNumber: string | null }>; initialSnagId?: string; initialStatusFilter?: string }) {
   // Snags come from /api/sites/[id]/snags with a full shape defined by the
   // downstream SnagList/SnagDialog components. We pass them through as-is.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -418,7 +418,7 @@ function SiteSnags({ siteId, plots, initialSnagId }: { siteId: string; plots: Ar
 
       {showAgeingReport && <SnagAgeingReport siteId={siteId} />}
 
-      <SnagList snags={snags} onSelect={(s) => { setSelectedSnag(s); setDialogOpen(true); }} onRefresh={loadSnags} showPlot highlightId={initialSnagId} siteId={siteId} />
+      <SnagList snags={snags} onSelect={(s) => { setSelectedSnag(s); setDialogOpen(true); }} onRefresh={loadSnags} showPlot highlightId={initialSnagId} siteId={siteId} initialStatusFilter={initialStatusFilter} />
       {selectedSnag && (
         <SnagDialog
           open={dialogOpen}
@@ -538,10 +538,14 @@ export function SiteDetailClient({
   site: initialSite,
   initialTab,
   initialSnagId,
+  initialSnagFilter,
 }: {
   site: SiteDetail;
   initialTab?: string;
   initialSnagId?: string;
+  /** (Jun 2026 audit) Seeds the snag tab's status filter — wired from
+   *  ?filter= so the re-inspection push lands on the resolved list. */
+  initialSnagFilter?: string;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -2391,10 +2395,10 @@ export function SiteDetailClient({
                                 title="Deliveries awaited"
                               >
                                 <Truck className="size-3" />
-                                {plot.awaitingDeliveryCount} delivery
+                                {plot.awaitingDeliveryCount}{" "}
                                 {plot.awaitingDeliveryCount === 1
-                                  ? ""
-                                  : "ies"}{" "}
+                                  ? "delivery"
+                                  : "deliveries"}{" "}
                                 due
                               </span>
                             )}
@@ -2456,9 +2460,13 @@ export function SiteDetailClient({
                             </span>
                           </span>
                         )}
+                        {/* salePrice > 0 too — it's the divisor below, and a
+                            placeholder £0 sale price rendered "(-Infinity%)".
+                            Matches HouseValueCard's guard on the plot page. */}
                         {plot.buildBudget != null &&
                           plot.salePrice != null &&
-                          plot.buildBudget > 0 && (
+                          plot.buildBudget > 0 &&
+                          plot.salePrice > 0 && (
                             (() => {
                               const margin =
                                 plot.salePrice - plot.buildBudget;
@@ -2543,7 +2551,7 @@ export function SiteDetailClient({
 
           <div className={activeTab !== "snags" ? "hidden" : undefined}>
             {visitedTabs.has("snags") && (
-              <SiteSnags siteId={site.id} plots={site.plots.map((p) => ({ id: p.id, name: p.name, plotNumber: p.plotNumber }))} initialSnagId={initialSnagId} />
+              <SiteSnags siteId={site.id} plots={site.plots.map((p) => ({ id: p.id, name: p.name, plotNumber: p.plotNumber }))} initialSnagId={initialSnagId} initialStatusFilter={initialSnagFilter} />
             )}
           </div>
 

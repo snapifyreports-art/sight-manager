@@ -27,9 +27,16 @@ export async function GET(req: NextRequest) {
   // Filter by user's site access
   const siteIds = await getUserSiteIds(session.user.id, session.user.role);
   if (siteIds !== null) {
-    // Non-admin: the job.plot.siteId filter already requires a live
-    // job, so orphans drop out.
-    where.job = { plot: { siteId: { in: siteIds } } };
+    // (Jun 2026 audit) Non-admin: match the whereOrdersForSite SSoT —
+    // job's plot, direct plot, OR direct site. The old job-only
+    // predicate silently hid one-off orders (jobId=null) from every
+    // non-admin caller; it also doubled as the orphan guard, which the
+    // OR still provides (an orphan matches none of the three).
+    where.OR = [
+      { job: { plot: { siteId: { in: siteIds } } } },
+      { plot: { siteId: { in: siteIds } } },
+      { siteId: { in: siteIds } },
+    ];
   } else {
     // (May 2026) Admin: no site filter — but still exclude contextless
     // orphan orders (job/site/plot all deleted) so they don't pollute

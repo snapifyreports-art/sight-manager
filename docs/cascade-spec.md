@@ -278,11 +278,16 @@ all downstream also pushed by daysLate.
 
 **Behavior:**
 - Record the rained-off day as a site-level weather event.
-- If delayJobs is true: for every IN_PROGRESS job on the site, apply A8 with
-  +1 day (or N days if multi-day rain-off).
+- If delayJobs is true: for every WEATHER-AFFECTED job overlapping the day
+  (weatherAffected=true, IN_PROGRESS), route through the cascade engine
+  with +1 working day. The trigger job KEEPS its start and extends its end
+  (the rain day lengthens it); downstream jobs shift uniformly.
+  <!-- (Jun 2026 R4, owner-confirmed) Spec previously said "every
+       IN_PROGRESS job on the site"; the implementation has always scoped
+       to weather-affected jobs, and Keith confirmed that semantics. -->
 
-**After:** weather event recorded; optionally programme pushed by 1 day on
-every active plot.
+**After:** weather event recorded; optionally weather-hit chains pushed by
+1 working day via the cascade engine (orders ride along per I3).
 
 ### A11 — Cascade Preview (/api/jobs/[id]/cascade POST)
 

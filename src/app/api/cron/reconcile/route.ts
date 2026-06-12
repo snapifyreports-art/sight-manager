@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { recomputePlotPercent } from "@/lib/plot-percent";
 import { recomputeParentFromChildren } from "@/lib/parent-job";
+import { recomputeInspectionDates } from "@/lib/inspection-dates";
 import { calculateCascade } from "@/lib/cascade";
 import { getServerCurrentDate } from "@/lib/dev-date";
 import { logEvent } from "@/lib/event-log";
@@ -283,6 +284,11 @@ export async function GET(req: NextRequest) {
         });
         jobs.splice(0, jobs.length, ...refreshed);
       }
+      // (Jun 2026) Anchored inspections shift with the auto-cascaded
+      // jobs — inspection-dates.ts contract: every code path that moves
+      // a job's dates must recompute, and this is the one path that runs
+      // unattended every night. Once per plot that had overlap fixes.
+      await recomputeInspectionDates(prisma, plot.id, todayMidnight);
       overlapPlotsFixed++;
     }
     // One EventLog row per overlap that was auto-resolved so the

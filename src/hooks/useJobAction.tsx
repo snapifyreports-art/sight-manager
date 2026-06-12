@@ -880,12 +880,22 @@ export function useJobAction(
             (s: { id: string }) => s.id === job.id
           );
           if (current && current.endDate) {
-            // A predecessor is a job that should END before this job STARTS
+            // A predecessor is a job that should END before this job STARTS.
+            // Leaf-only: exclude stage rollups (any sibling whose id appears
+            // as another sibling's parentId) — the sign-off POST below would
+            // 400 on the actions route's leaf guard, and a parent's derived
+            // endDate (max of children) systematically wins the sort.
+            const parentIds = new Set(
+              siblings
+                .map((s: { parentId?: string | null }) => s.parentId)
+                .filter(Boolean)
+            );
             const currentStart = current.startDate || current.endDate;
             const prev = [...siblings]
               .filter(
                 (s: { id: string; endDate: string | null; status: string }) =>
                   s.id !== current.id &&
+                  !parentIds.has(s.id) &&
                   s.endDate &&
                   s.endDate < currentStart &&
                   s.status !== "COMPLETED"

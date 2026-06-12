@@ -400,21 +400,23 @@ async function testBlockPendingDirectDelivery(siteId: string) {
     res.status === 400 && after?.status === "PENDING",
     `HTTP=${res.status}, status after=${after?.status}`
   );
-  // Bulk path
+  // (Jun 2026 audit) /api/orders/bulk-status was deleted — bulk callers
+  // now loop the per-order PUT (useOrderStatus.setManyOrderStatus), so the
+  // surviving invariant is the same per-order 400. Never res.json() the
+  // old endpoint: a deleted route returns Next's HTML 404 page.
   const order2 = await prisma.materialOrder.create({
     data: { jobId: jobs[0].id, supplierId: supplier.id, status: "PENDING" },
   });
-  const res2 = await req(`/api/orders/bulk-status`, {
-    method: "POST",
+  const res2 = await req(`/api/orders/${order2.id}`, {
+    method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ orderIds: [order2.id], status: "DELIVERED" }),
+    body: JSON.stringify({ status: "DELIVERED" }),
   });
   const after2 = await prisma.materialOrder.findUnique({ where: { id: order2.id } });
-  const body2 = await res2.json();
   record(
-    "Fix 8b: Bulk PENDING→DELIVERED silently skipped",
-    res2.ok && body2.updated === 0 && after2?.status === "PENDING",
-    `updated=${body2.updated}, status after=${after2?.status}`
+    "Fix 8b: Per-order PENDING→DELIVERED rejected (bulk-status route removed)",
+    res2.status === 400 && after2?.status === "PENDING",
+    `HTTP=${res2.status}, status after=${after2?.status}`
   );
 }
 

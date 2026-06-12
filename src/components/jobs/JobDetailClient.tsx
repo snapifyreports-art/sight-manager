@@ -68,7 +68,7 @@ import { useAddNote } from "@/hooks/useAddNote";
 import { useSnagAction, type SnagStatus } from "@/hooks/useSnagAction";
 import { useOrderStatus, type OrderStatus } from "@/hooks/useOrderStatus";
 import { useToast, fetchErrorMessage } from "@/components/ui/toast";
-import { JobStatusBadge, OrderStatusBadge, SnagStatusBadge, SnagPriorityBadge } from "@/components/shared/StatusBadge";
+import { JobStatusBadge, OrderStatusBadge, SnagStatusBadge, SnagPriorityBadge, InspectionStatusBadge } from "@/components/shared/StatusBadge";
 import { useJobContractorPicker } from "@/hooks/useJobContractorPicker";
 
 // ---------- Types ----------
@@ -173,6 +173,7 @@ interface JobDetail {
     type: string;
     status: string;
     scheduledDate: string;
+    bookedDate: string | null;
     isBlocking: boolean;
   }>;
 }
@@ -247,6 +248,11 @@ const ACTION_ICON_MAP: Record<string, { icon: typeof Play; color: string }> = {
   edit: { icon: Briefcase, color: "text-blue-500" },
 };
 
+// UK money — £-prefixed with thousands separators + pence, matching the
+// £-formatted figures everywhere else (HouseValueCard, plot cards).
+const formatMoney = (n: number) =>
+  `£${n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
 // ---------- Main Component ----------
 
 interface ContractorContact {
@@ -282,7 +288,7 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
   useEffect(() => { setJob(initialJob); }, [initialJob]);
 
   // Centralised pre-start / early-start flow
-  const { triggerAction: triggerJobAction, isLoading: jobActionLoading, dialogs: jobActionDialogs } = useJobAction(
+  const { triggerAction: triggerJobAction, runSimpleAction, isLoading: jobActionLoading, dialogs: jobActionDialogs } = useJobAction(
     (_action, _jobId, data) => {
       if (data && typeof data === "object" && "status" in data) {
         setJob((prev) => ({ ...prev, status: (data as { status: string }).status }));
@@ -340,28 +346,29 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
   // Add snag state
   const [snagDialogOpen, setSnagDialogOpen] = useState(false);
 
-  // Snags linked to this job
+  // Snags linked to this job. Loader is shared by the mount effect and
+  // SnagDialog's onSaved — pre-fix onSaved refetched /api/jobs/[id] and
+  // read a `snags` field that endpoint never returns, so a snag raised
+  // from this page silently never appeared in the "Snags (N)" card.
   const [jobSnags, setJobSnags] = useState<JobSnag[]>([]);
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch(`/api/plots/${initialJob.plotId}/snags`);
-        if (cancelled) return;
-        if (!res.ok) {
-          toast.error(await fetchErrorMessage(res, "Failed to load snags"));
-          return;
-        }
-        const data: Array<JobSnag & { jobId?: string | null }> = await res.json();
-        if (!cancelled && Array.isArray(data)) {
-          setJobSnags(data.filter((s) => s.jobId === initialJob.id));
-        }
-      } catch (e) {
-        if (!cancelled) toast.error(e instanceof Error ? e.message : "Failed to load snags");
+  const loadJobSnags = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/plots/${initialJob.plotId}/snags`);
+      if (!res.ok) {
+        toast.error(await fetchErrorMessage(res, "Failed to load snags"));
+        return;
       }
-    })();
-    return () => { cancelled = true; };
+      const data: Array<JobSnag & { jobId?: string | null }> = await res.json();
+      if (Array.isArray(data)) {
+        setJobSnags(data.filter((s) => s.jobId === initialJob.id));
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to load snags");
+    }
   }, [initialJob.plotId, initialJob.id, toast]);
+  useEffect(() => {
+    void loadJobSnags();
+  }, [loadJobSnags]);
 
   // Contractor picker — unified via useJobContractorPicker.
   // Replaces ~65 lines of bespoke state + fetch + PUT logic that was
@@ -447,15 +454,24 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
   async function handleSignOff() {
     setSigningOff(true);
     try {
-      // Complete first, then sign off separately
-      const completeRes = await fetch(`/api/jobs/${job.id}/actions`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "complete" }),
-      });
-      if (!completeRes.ok) {
-        toast.error(await fetchErrorMessage(completeRes, "Failed to complete job before sign-off"));
-        return;
+      // Complete first, then sign off separately. The complete step routes
+      // through the shared runSimpleAction so a hard-blocked job (409
+      // requiresInspectionOverride) opens the centralised "Record what
+      // failed & rebook" override dialog (D1) instead of dying in a raw
+      // error toast. Skip it when already COMPLETED — e.g. re-pressing
+      // Sign Off after the override completed the job — so the typed
+      // notes aren't lost to a "Job is already completed" 400.
+      if (job.status !== "COMPLETED") {
+        const completeRes = await runSimpleAction(job.id, "complete", { silent: true });
+        if (!completeRes.ok) {
+          // blocked → the override dialog is open; the sign-off dialog
+          // stays behind it so the typed notes survive a retry.
+          const blocked = (completeRes.data as { blocked?: boolean } | undefined)?.blocked;
+          if (!blocked) {
+            toast.error(completeRes.error ?? "Failed to complete job before sign-off");
+          }
+          return;
+        }
       }
       const res = await fetch(`/api/jobs/${job.id}/actions`, {
         method: "POST",
@@ -796,7 +812,10 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
                 {actionLoading === "stop" ? "Stopping..." : "Stop"}
               </Button>
             )}
-            {job.status !== "COMPLETED" && (
+            {/* (Jun 2026 audit) Hidden for NOT_STARTED — the actions route
+                rejects complete-from-NOT_STARTED with a 400, so the button
+                only ever lost the user's typed notes. Start first. */}
+            {job.status !== "COMPLETED" && job.status !== "NOT_STARTED" && (
               <Button
                 variant="outline"
                 size="sm"
@@ -1064,11 +1083,11 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
                           <div className="mt-1 space-y-0.5">
                             {order.orderItems.map((item) => (
                               <p key={item.id} className="text-xs text-muted-foreground">
-                                {item.name} &mdash; {item.quantity} {item.unit} @ {item.unitCost.toFixed(2)} = {item.totalCost.toFixed(2)}
+                                {item.name} &mdash; {item.quantity} {item.unit} @ {formatMoney(item.unitCost)} = {formatMoney(item.totalCost)}
                               </p>
                             ))}
                             <p className="text-xs font-medium">
-                              Total: {orderTotal.toFixed(2)}
+                              Total: {formatMoney(orderTotal)}
                             </p>
                           </div>
                         )}
@@ -1284,26 +1303,21 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
             <a href="/inspections" className="text-xs font-medium text-blue-600 hover:underline">Manage →</a>
           </CardHeader>
           <CardContent className="space-y-1.5">
-            {job.anchoredInspections!.map((i) => {
-              const c =
-                i.status === "PASSED" ? "bg-emerald-100 text-emerald-700"
-                : i.status === "FAILED" ? "bg-red-100 text-red-700"
-                : i.status === "OVERDUE" ? "bg-amber-100 text-amber-700"
-                : i.status === "BOOKED" ? "bg-blue-100 text-blue-700"
-                : "bg-slate-100 text-slate-600";
-              return (
-                <div key={i.id} className="flex items-center justify-between gap-2 text-sm">
-                  <span className="flex min-w-0 items-center gap-1.5 truncate">
-                    {i.name}
-                    {i.isBlocking && <span className="rounded bg-red-100 px-1 py-0.5 text-[9px] font-semibold uppercase text-red-700">blocks</span>}
-                  </span>
-                  <span className="flex shrink-0 items-center gap-2">
-                    <span className="text-xs text-muted-foreground">{format(new Date(i.scheduledDate), "d MMM")}</span>
-                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${c}`}>{i.status.toLowerCase()}</span>
-                  </span>
-                </div>
-              );
-            })}
+            {/* Shared SSoT badge (inspection-doctype.ts) — the local pill
+                map showed OVERDUE amber and lost the "Booked (was
+                overdue)" distinction the Inspections list/Gantt show. */}
+            {job.anchoredInspections!.map((i) => (
+              <div key={i.id} className="flex items-center justify-between gap-2 text-sm">
+                <span className="flex min-w-0 items-center gap-1.5 truncate">
+                  {i.name}
+                  {i.isBlocking && <span className="rounded bg-red-100 px-1 py-0.5 text-[9px] font-semibold uppercase text-red-700">blocks</span>}
+                </span>
+                <span className="flex shrink-0 items-center gap-2">
+                  <span className="text-xs text-muted-foreground">{format(new Date(i.scheduledDate), "d MMM")}</span>
+                  <InspectionStatusBadge status={i.status} bookedDate={i.bookedDate} />
+                </span>
+              </div>
+            ))}
           </CardContent>
         </Card>
       )}
@@ -1774,7 +1788,10 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
                       {hasBlockingOrders ? (
                         <div className="mt-2 space-y-1.5">
                           <p className="text-xs font-medium text-amber-700">
-                            Cannot start \u2014 awaiting delivery:
+                            {/* JSX text nodes don't process \u escapes \u2014 only
+                                expressions do (the bare sequence rendered
+                                literally on screen). */}
+                            Cannot start {"\u2014"} awaiting delivery:
                           </p>
                           {nj.pendingOrders.map((po) => (
                             <div
@@ -1966,17 +1983,19 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
                       <span className="font-medium">{ju.jobName}</span>
                       <div className="flex items-center gap-2 text-xs text-muted-foreground">
                         <span>
+                          {/* Bare \u2013 in JSX text renders literally \u2014
+                              wrap in an expression like the neighbours. */}
                           {ju.originalStart
                             ? format(new Date(ju.originalStart), "dd MMM")
                             : "\u2014"}{" "}
-                          \u2013{" "}
+                          {"\u2013"}{" "}
                           {ju.originalEnd
                             ? format(new Date(ju.originalEnd), "dd MMM")
                             : "\u2014"}
                         </span>
                         <ArrowRight className="size-3" />
                         <span className="font-medium text-foreground">
-                          {format(new Date(ju.newStart), "dd MMM")} \u2013{" "}
+                          {format(new Date(ju.newStart), "dd MMM")} {"\u2013"}{" "}
                           {format(new Date(ju.newEnd), "dd MMM")}
                         </span>
                       </div>
@@ -2065,11 +2084,9 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
         initialJobId={job.id}
         initialContactId={job.contractors?.[0]?.contactId}
         onSaved={() => {
-          // Refresh snags list
-          fetch(`/api/jobs/${job.id}`)
-            .then((r) => r.ok ? r.json() : null)
-            .then((d) => { if (d?.snags) setJobSnags(d.snags); })
-            .catch(() => {});
+          // Refresh snags list via the shared loader (the job endpoint
+          // doesn't return snags — see loadJobSnags above).
+          void loadJobSnags();
         }}
       />
 

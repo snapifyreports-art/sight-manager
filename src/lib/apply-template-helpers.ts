@@ -412,6 +412,10 @@ export async function createInspectionsFromTemplate(
     id: string;
     name: string;
     type: string;
+    // "What to check" guidance typed on the template — copied into the
+    // plot Inspection's notes (parity with the manual-add path, Jun 2026
+    // D4). Pre-fix it was silently dropped at apply time.
+    description?: string | null;
     anchorTemplateJobId: string;
     anchorEdge: string;
     offsetDays: number;
@@ -472,6 +476,7 @@ export async function createInspectionsFromTemplate(
         isBlocking: ti.isBlocking ?? false,
         scheduledDate,
         inspectorContactId: ti.defaultInspectorContactId ?? null,
+        notes: ti.description?.trim() || null,
       },
     });
     created++;

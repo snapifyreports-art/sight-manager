@@ -70,6 +70,24 @@ export async function PATCH(
   const body = await req.json();
   const { status, priority, assignedToId, contactId, jobId, notes, location, description } = body;
 
+  // (Jun 2026 audit) Validate enum fields up front — a typo'd client
+  // value previously reached Prisma and 500'd via apiError instead of a
+  // 400. Mirrors the priority check POST /plots/[id]/snags already has.
+  const SNAG_STATUSES = ["OPEN", "IN_PROGRESS", "RESOLVED", "CLOSED"];
+  if (status !== undefined && !SNAG_STATUSES.includes(status)) {
+    return NextResponse.json(
+      { error: `status must be one of: ${SNAG_STATUSES.join(", ")}` },
+      { status: 400 },
+    );
+  }
+  const SNAG_PRIORITIES = ["LOW", "MEDIUM", "HIGH", "CRITICAL"];
+  if (priority !== undefined && !SNAG_PRIORITIES.includes(priority)) {
+    return NextResponse.json(
+      { error: `priority must be one of: ${SNAG_PRIORITIES.join(", ")}` },
+      { status: 400 },
+    );
+  }
+
   const existing = await prisma.snag.findUnique({
     where: { id },
     include: { plot: { select: { siteId: true, plotNumber: true, name: true } } },

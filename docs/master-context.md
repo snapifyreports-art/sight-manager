@@ -519,7 +519,7 @@ All ~78 client mutation handlers use `if (!res.ok) { toast.error(await fetchErro
 
 - `/api/jobs/[id]` PUT (manual date edit) does NOT cascade by design (spec A13). If someone changes both start and end with different deltas, the programme can diverge. Keith hasn't asked for this to change.
 - `PostCompletionDialog`'s `markOrderDelivered` helper does a fire-and-forget PUT. Wrap if surfacing errors becomes important.
-- `bulk-status` endpoint `/api/orders/bulk-status` exists but no client uses it. Delete or adopt.
+- `/api/orders/bulk-status` was DELETED (Jun 2026 review wave) — it had no client callers. Bulk order-status changes go through the per-order PUT loop in `useOrderStatus.setManyOrderStatus`. The site-scoped `/api/sites/[id]/bulk-status` (jobs) still exists and is unrelated.
 - `SiteWalkthrough`'s cascade preview uses `useJobAction().previewCascade` now (post-Batch 1), but other surfaces in the walkthrough still do some direct mutations — Batch 1 migration agent is currently running to finish these.
 
 ### Prisma pool exhaustion risk

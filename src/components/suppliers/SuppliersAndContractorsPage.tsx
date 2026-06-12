@@ -14,6 +14,8 @@ interface Supplier {
   contactNumber: string | null;
   type: string | null;
   accountNumber: string | null;
+  /** (Jun 2026 audit) Soft-delete timestamp. Non-null = archived. */
+  archivedAt?: string | null;
   createdAt: string;
   updatedAt: string;
   _count: { orders: number; materials: number };

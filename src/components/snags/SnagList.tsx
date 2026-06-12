@@ -63,11 +63,25 @@ interface SnagListProps {
   showPlot?: boolean;
   highlightId?: string;
   siteId?: string;
+  /** (Jun 2026 audit) Seeds the status filter — wired from ?filter= so
+   *  the re-inspection push ("filter=resolved") lands on the resolved
+   *  list instead of the unfiltered tab. */
+  initialStatusFilter?: string;
 }
 
-export function SnagList({ snags, onSelect, onRefresh, showPlot, highlightId, siteId }: SnagListProps) {
+export function SnagList({ snags, onSelect, onRefresh, showPlot, highlightId, siteId, initialStatusFilter }: SnagListProps) {
   const toast = useToast();
   const [filterStatus, setFilterStatus] = useState<string>("all");
+  // (Jun 2026 review) Respond to PROP CHANGES, not just mount — a
+  // client-side navigation can deliver a new ?filter= to an already-
+  // mounted list (Next reuses the component instance), which a lazy
+  // useState seed would silently ignore.
+  useEffect(() => {
+    const normalized = initialStatusFilter?.toUpperCase().replace(/-/g, "_");
+    if (normalized && ["OPEN", "IN_PROGRESS", "RESOLVED", "CLOSED"].includes(normalized)) {
+      setFilterStatus(normalized);
+    }
+  }, [initialStatusFilter]);
   const [filterPriority, setFilterPriority] = useState<string>("all");
   const [filterContractor, setFilterContractor] = useState<string>("all");
   const [filterPlot, setFilterPlot] = useState<string>("all");

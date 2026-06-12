@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { canAccessSite } from "@/lib/site-access";
 import { apiError } from "@/lib/api-errors";
 import { sessionHasPermission } from "@/lib/permissions";
+import { nextRef } from "@/lib/ref-sequence";
 
 export const dynamic = "force-dynamic";
 
@@ -83,8 +84,13 @@ export async function POST(
   if (!body?.title?.trim()) {
     return NextResponse.json({ error: "title is required" }, { status: 400 });
   }
-  const count = await prisma.variation.count({ where: { plotId: id } });
-  const ref = `VAR-${String(count + 1).padStart(3, "0")}`;
+  // (Jun 2026 audit) Max existing suffix + 1, not count + 1 — count
+  // mints duplicate refs as soon as any variation is deleted.
+  const existingRefs = await prisma.variation.findMany({
+    where: { plotId: id },
+    select: { ref: true },
+  });
+  const ref = nextRef("VAR", existingRefs.map((r) => r.ref));
 
   try {
     const v = await prisma.variation.create({

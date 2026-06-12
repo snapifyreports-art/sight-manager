@@ -101,10 +101,23 @@ export async function POST(
     try {
       const job = await prisma.job.findUnique({
         where: { id: jobId },
-        include: { plot: true },
+        include: { plot: true, _count: { select: { children: true } } },
       });
 
       if (!job || job.plot.siteId !== siteId) continue;
+
+      // (Jun 2026 review) Leaf guard — mirror /api/jobs/[id]/actions.
+      // Parent Jobs are derived rollups; writing a lifecycle status
+      // directly onto one creates drift until the next child mutation
+      // overwrites it. Skip into failed[] so the caller's toast says why.
+      if (job._count.children > 0) {
+        failed.push({
+          jobId,
+          jobName: job.name,
+          error: "This is a stage rollup — start, stop or complete its sub-jobs instead",
+        });
+        continue;
+      }
 
       // Idempotency: skip jobs already in the target state
       if (action === "start" && job.status === "IN_PROGRESS") continue;

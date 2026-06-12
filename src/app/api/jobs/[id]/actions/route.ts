@@ -86,15 +86,30 @@ export async function POST(
 
   const existing = await prisma.job.findUnique({
     where: { id },
-    include: { plot: true },
+    include: { plot: true, _count: { select: { children: true } } },
   });
   if (!existing) {
     return NextResponse.json({ error: "Job not found" }, { status: 404 });
   }
 
   // Site-access check — caller must have access to the job's site
+  // (kept BEFORE the leaf guard so unauthorized probes always get 403,
+  // never a 400 that leaks whether a job id is a stage rollup).
   if (!(await canAccessSite(session.user.id, (session.user as { role: string }).role, existing.plot.siteId))) {
     return NextResponse.json({ error: "You do not have access to this site" }, { status: 403 });
+  }
+
+  // (Jun 2026 audit) Leaf guard — parent Jobs are derived rollups
+  // (parent-job.ts: status/dates re-derive from children on every child
+  // mutation). Writing a lifecycle status directly onto one (e.g.
+  // Complete on a stage with unfinished children) creates drift until
+  // the next child mutation overwrites it. Steel-fence the API in
+  // addition to the UI filters.
+  if (ACTION_STATUS_MAP[action] && existing._count.children > 0) {
+    return NextResponse.json(
+      { error: "This is a stage rollup — start, stop or complete its sub-jobs instead" },
+      { status: 400 }
+    );
   }
 
   // Guard against double-start and double-complete

@@ -30,10 +30,13 @@ export default async function SiteDetailPage({
   searchParams,
 }: {
   params: Promise<{ siteId: string }>;
-  searchParams: Promise<{ tab?: string; snagId?: string }>;
+  searchParams: Promise<{ tab?: string; snagId?: string; filter?: string }>;
 }) {
   const { siteId } = await params;
-  const { tab: initialTab, snagId: initialSnagId } = await searchParams;
+  // (Jun 2026 audit) `filter` seeds the snag tab's status filter — the
+  // re-inspection push deep-links ?tab=snags&filter=resolved and the
+  // param was previously dropped here, landing on the unfiltered list.
+  const { tab: initialTab, snagId: initialSnagId, filter: initialSnagFilter } = await searchParams;
 
   // (Jun 2026 audit BLOCKER) Per-site access gate — the (dashboard) layout
   // only enforces login, so without this ANY logged-in user could read any
@@ -244,5 +247,12 @@ export default async function SiteDetailPage({
     }),
   };
 
-  return <SiteDetailClient site={serialized} initialTab={initialTab} initialSnagId={initialSnagId} />;
+  return (
+    <SiteDetailClient
+      site={serialized}
+      initialTab={initialTab}
+      initialSnagId={initialSnagId}
+      initialSnagFilter={initialSnagFilter}
+    />
+  );
 }

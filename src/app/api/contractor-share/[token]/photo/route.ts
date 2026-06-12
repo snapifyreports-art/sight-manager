@@ -123,6 +123,16 @@ export async function POST(
       }
     }
 
+    // (Jun 2026 audit) Files were provided but NOTHING persisted (every
+    // upload errored and `continue`d) — return an error rather than
+    // `{ ok: true, count: 0 }`, which read as success to the portal.
+    if (created.length === 0) {
+      return NextResponse.json(
+        { error: "Photo upload failed — no photos were saved" },
+        { status: 500 },
+      );
+    }
+
     if (created.length > 0) {
       const contractorLabel =
         assignment.contact.company || assignment.contact.name;

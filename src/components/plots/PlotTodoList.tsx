@@ -500,7 +500,7 @@ function JobRow({
           <>Should have started {format(new Date(job.startDate), "d MMM")}</>
         )}
         {variant === "progress" && job.endDate && (
-          <>{isOverdue ? "Due" : "Due"} {format(new Date(job.endDate), "d MMM")}</>
+          <>{isOverdue ? "Was due" : "Due"} {format(new Date(job.endDate), "d MMM")}</>
         )}
         {job.assignedTo && <span> &middot; {job.assignedTo.name}</span>}
         {contractor && <span> &middot; {contractor.company || contractor.name}</span>}

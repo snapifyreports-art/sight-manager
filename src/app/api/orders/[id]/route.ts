@@ -715,6 +715,18 @@ export async function PUT(
                   ),
                 );
 
+                // (Jun 2026) Anchored inspections shift with the expanded
+                // trigger + shifted successors — mirrors what
+                // applyJobPushCascade already does on the PUSH_JOB path
+                // (order-push-cascade.ts). An END-edge inspection on the
+                // expanded job would otherwise keep its pre-expand date.
+                const { recomputeInspectionDates } = await import(
+                  "@/lib/inspection-dates"
+                );
+                // Pass the dev-date-aware date — defaulting to the real
+                // wall clock would mis-flip OVERDUE under simulated dates.
+                await recomputeInspectionDates(prisma, existing.job.plotId, today);
+
                 await logEvent(prisma, {
                   type: "SCHEDULE_CASCADED",
                   description: `Delivery push → expand job: end +${deltaWD} WD, ${successors.length} successors shifted`,
@@ -892,7 +904,12 @@ export async function PUT(
         void sendPushToSiteAudience(targetSiteId, "DELIVERY_CONFIRMED", {
           title: "📦 Delivery confirmed",
           body: `${existing.supplier.name}: ${orderLabel}`,
-          url: `/orders?orderId=${id}`,
+          // (Jun 2026 audit) One-off orders aren't in the Orders page
+          // list (it's job-based only), so ?orderId= deep links opened
+          // nothing — route them to the site's Orders tab instead.
+          url: existing.jobId
+            ? `/orders?orderId=${id}`
+            : `/sites/${targetSiteId}?tab=orders`,
           tag: `delivery-${id}`,
         }).catch((err) => {
           console.warn("[order-update] sendPushToSiteAudience failed:", err);
@@ -933,7 +950,33 @@ export async function DELETE(
     return NextResponse.json({ error: "Order not found" }, { status: 404 });
   }
 
+  // (Jun 2026 audit) Site-access guard — same sourceSiteId + canAccessSite
+  // check GET and PUT already run. Pre-fix any MANAGE_ORDERS holder could
+  // delete any order tenant-wide by id (cross-site IDOR). 404 not 403 so
+  // we don't leak existence to a caller without rights.
+  const sourceSiteId = existing.job?.plot.siteId ?? existing.siteId ?? null;
+  if (!sourceSiteId) {
+    return NextResponse.json({ error: "Order not found" }, { status: 404 });
+  }
+  if (
+    !(await canAccessSite(
+      session.user.id,
+      (session.user as { role: string }).role,
+      sourceSiteId,
+    ))
+  ) {
+    return NextResponse.json({ error: "Order not found" }, { status: 404 });
+  }
+
   try {
+    await prisma.materialOrder.delete({
+      where: { id },
+    });
+
+    // (Jun 2026 audit) Audit AFTER the successful delete — pre-fix the
+    // event was written first, so a failed delete still left a "was
+    // deleted" row in the log. Fire-and-forget: a failed audit row must
+    // not convert the already-committed delete into a 500.
     await logEvent(prisma, {
       type: "ORDER_CANCELLED",
       description: `[${existing.supplier.name}] Order for ${existing.job?.name ?? "one-off order"} was deleted`,
@@ -946,11 +989,7 @@ export async function DELETE(
         supplier: existing.supplier.name,
         status: "DELETED",
       },
-    });
-
-    await prisma.materialOrder.delete({
-      where: { id },
-    });
+    }).catch(() => {});
 
     return NextResponse.json({ success: true });
   } catch (err) {

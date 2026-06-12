@@ -215,6 +215,17 @@ export async function POST(
       createdPhotos.push(photo);
     }
 
+    // (Jun 2026 audit) Files were provided but NOTHING persisted (every
+    // Supabase upload failed and `continue`d) — that must be an error,
+    // not a 201 with []. Pre-fix SnagList's close flow saw photoRes.ok
+    // and CLOSED the snag believing the after-photo evidence existed.
+    if (createdPhotos.length === 0) {
+      return NextResponse.json(
+        { error: "Photo upload failed — no photos were saved" },
+        { status: 500 },
+      );
+    }
+
     // Log event for snag photo uploads
     if (createdPhotos.length > 0 && snag.plot) {
       const plotLabel = snag.plot.plotNumber ? `Plot ${snag.plot.plotNumber}` : snag.plot.name;
@@ -231,6 +242,24 @@ export async function POST(
           tag: tag || null,
         },
       });
+    }
+
+    // (Jun 2026 review) PARTIAL failure must not read as full success
+    // either — multi-photo callers (snag create, close-out, sign-off
+    // request) treat res.ok as "all evidence stored" and proceed to
+    // close/resolve. Fail the request with the counts so the caller
+    // warns instead of silently losing close-out evidence; the photos
+    // that did persist (and were logged above) are included for
+    // completeness.
+    const failedCount = files.length - createdPhotos.length;
+    if (failedCount > 0) {
+      return NextResponse.json(
+        {
+          error: `${failedCount} of ${files.length} photo${files.length !== 1 ? "s" : ""} failed to upload (${createdPhotos.length} saved)`,
+          photos: createdPhotos,
+        },
+        { status: 500 },
+      );
     }
 
     return NextResponse.json(createdPhotos, { status: 201 });

@@ -147,6 +147,11 @@ export function SnagDialog({
   const [users, setUsers] = useState<SnagUser[]>(usersProp || []);
   const [contacts, setContacts] = useState<SnagContact[]>([]);
   const [jobs, setJobs] = useState<JobItem[]>([]);
+  // (Jun 2026 audit) Plot + site names for the contractor email — the
+  // payload previously hardcoded plotName/siteName to "" so the email
+  // read "Snag Raised — , ". Captured from the /api/plots/[id] fetch
+  // the dialog already makes for the jobs list.
+  const [plotInfo, setPlotInfo] = useState<{ plotName: string; siteName: string } | null>(null);
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -251,6 +256,13 @@ export function SnagDialog({
         if (!cancelled && data.jobs && Array.isArray(data.jobs)) {
           setJobs(data.jobs);
         }
+        // (Jun 2026 audit) Plot/site context for the contractor email.
+        if (!cancelled && data?.id) {
+          setPlotInfo({
+            plotName: data.plotNumber ? `Plot ${data.plotNumber}` : (data.name ?? ""),
+            siteName: data.site?.name ?? "",
+          });
+        }
       } catch (e) {
         if (!cancelled) setLoadError((prev) => prev ?? (e instanceof Error ? e.message : "Failed to load jobs"));
       }
@@ -296,6 +308,21 @@ export function SnagDialog({
   useEffect(() => {
     if (!open) setLoadError(null);
   }, [open]);
+
+  // (Jun 2026 audit) Reset the form whenever the dialog opens or the
+  // target snag changes. The Dialog's onOpenChange only fires on
+  // INTERNAL interactions (Esc / backdrop / X) — never when the parent
+  // flips the `open` prop — and every caller opens this dialog
+  // programmatically. Pre-fix, viewing snag A then editing snag B
+  // showed A's fields (and Update PATCHed snag B with A's data), and a
+  // permanently-mounted "Raise Snag" dialog re-opened pre-filled with
+  // the previous snag plus its still-queued photos.
+  useEffect(() => {
+    if (open) resetForm();
+    // resetForm reads the latest props on each call; memoising it just to
+    // list it here would add a useCallback chain for no behavioural gain.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, snag?.id]);
 
   // Sync initialPhotos when they change
   useEffect(() => {
@@ -400,14 +427,36 @@ export function SnagDialog({
 
       // Upload pending files (selected during creation) to the snag
       if (snagId && pendingFiles.length > 0) {
+        // (Jun 2026 review) Capture what we're actually uploading —
+        // photos queued WHILE this await is in flight live only in
+        // state, not in this closure. Clearing state wholesale from the
+        // stale closure would drop those files unsent and leak their
+        // un-revoked object URLs, so clear functionally below instead.
+        const uploadedFiles = pendingFiles;
+        const uploadedPreviews = pendingPreviews;
         const formData = new FormData();
-        pendingFiles.forEach((f) => formData.append("photos", f));
+        uploadedFiles.forEach((f) => formData.append("photos", f));
         if (photoTag) formData.append("tag", photoTag);
         const pendingRes = await fetch(`/api/snags/${snagId}/photos`, {
           method: "POST",
           body: formData,
         }).catch(() => null);
-        if (!pendingRes || !pendingRes.ok) photoUploadFailed = true;
+        if (!pendingRes || !pendingRes.ok) {
+          photoUploadFailed = true;
+        } else {
+          // (Jun 2026 audit) Fold the stored photos into snagPhotos so
+          // the optional "email contractor" step right after creation
+          // attaches them (pre-fix just-uploaded photos never made the
+          // email), and clear the queue so they can't be re-uploaded by
+          // a later save from this still-mounted dialog.
+          const created = await pendingRes.json().catch(() => null);
+          if (Array.isArray(created)) {
+            setSnagPhotos((prev) => [...created, ...prev]);
+          }
+          setPendingFiles((prev) => prev.filter((f) => !uploadedFiles.includes(f)));
+          uploadedPreviews.forEach((url) => URL.revokeObjectURL(url));
+          setPendingPreviews((prev) => prev.filter((url) => !uploadedPreviews.includes(url)));
+        }
       }
 
       if (photoUploadFailed) {
@@ -565,8 +614,10 @@ export function SnagDialog({
             description: form.description,
             priority: form.priority,
             location: form.location || "",
-            plotName: "",
-            siteName: "",
+            // (Jun 2026 audit) Real plot/site context — hardcoded ""
+            // previously rendered the subject as "Snag Raised — , ".
+            plotName: plotInfo?.plotName ?? "",
+            siteName: plotInfo?.siteName ?? "",
             photoUrls: allPhotoUrls,
           },
         }),
@@ -608,6 +659,10 @@ export function SnagDialog({
     setPendingFiles([]);
     pendingPreviews.forEach((url) => URL.revokeObjectURL(url));
     setPendingPreviews([]);
+    // (Jun 2026 review) photoTag must re-seed too — the dialog stays
+    // mounted between opens, so a stale "before"/"after" tag from the
+    // previous snag would silently apply to the next snag's photos.
+    setPhotoTag("");
     if (!initialPhotos || initialPhotos.length === 0) {
       setPhotoAttachments([]);
     }
@@ -828,7 +883,30 @@ export function SnagDialog({
               ) : null}
 
               {/* Add Photos button (always visible in view mode) */}
-              <div>
+              <div className="space-y-2">
+                {/* (Jun 2026 audit) Tag radio in view mode too — photos
+                    added here previously uploaded with whatever stale
+                    photoTag state held, with no way to choose. */}
+                <div className="flex items-center gap-3 text-xs">
+                  <span className="text-muted-foreground">Tag as:</span>
+                  {[
+                    { value: "", label: "None" },
+                    { value: "before", label: "Before" },
+                    { value: "after", label: "After" },
+                  ].map((opt) => (
+                    <label key={opt.value} className="flex items-center gap-1">
+                      <input
+                        type="radio"
+                        name="photoTagView"
+                        value={opt.value}
+                        checked={photoTag === opt.value}
+                        onChange={(e) => setPhotoTag(e.target.value)}
+                        className="size-3 accent-blue-600"
+                      />
+                      {opt.label}
+                    </label>
+                  ))}
+                </div>
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -938,6 +1016,10 @@ export function SnagDialog({
                             ref={closeFileRef}
                             type="file"
                             accept="image/*"
+                            // (Jun 2026 audit) Jump straight to the camera
+                            // on phones — matches SnagList's close dialog,
+                            // the other surface for the same action.
+                            capture="environment"
                             className="hidden"
                             onChange={(e) => {
                               const files = e.target.files;
@@ -1354,7 +1436,9 @@ export function SnagDialog({
                     variant="outline"
                     size="sm"
                     onClick={() => fileInputRef.current?.click()}
-                    disabled={uploading}
+                    // `saving` too: in create mode photos queued while the
+                    // save POST is in flight would miss the upload batch.
+                    disabled={uploading || saving}
                   >
                     {uploading ? (
                       <Loader2 className="size-3.5 animate-spin" />

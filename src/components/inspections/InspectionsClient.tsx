@@ -25,12 +25,26 @@ interface Insp {
   bookingLeadWeeks: number | null;
   isBlocking?: boolean;
   anchorJobId: string | null;
+  anchorEdge: string;
+  offsetDays: number;
   certificateDocumentId: string | null;
   plot: { id: string; name: string; plotNumber: string | null; siteId: string; site: { name: string } };
   anchorJob: { id: string; name: string } | null;
   inspector: { id: string; name: string; company: string | null } | null;
   certificate: { id: string; name: string; url: string } | null;
   _count: { snags: number; ncrs: number };
+}
+
+/** Anchor relationship label, edge/offset aware — e.g. "2d before
+ *  Foundations starts", "when Brickwork finishes", "3d after Roofing
+ *  finishes". The old unconditional "after {job}" contradicted the Move
+ *  dialog for START-edge / negative-offset anchors. */
+function anchorLabel(i: Insp): string | null {
+  if (!i.anchorJob) return null;
+  const edge = i.anchorEdge === "START" ? "starts" : "finishes";
+  const n = i.offsetDays ?? 0;
+  if (n === 0) return `when ${i.anchorJob.name} ${edge}`;
+  return `${Math.abs(n)}d ${n < 0 ? "before" : "after"} ${i.anchorJob.name} ${edge}`;
 }
 
 /** Date by which a SCHEDULED inspection should be booked (lead window). */
@@ -62,6 +76,10 @@ export function InspectionsClient({ initial, canManage, siteId, embedded }: { in
   const [search, setSearch] = useState("");
   // (Jun 2026 S9) Skeleton while the embedded mount-fetch is in flight.
   const [loading, setLoading] = useState(false);
+  // (Jun 2026 audit) The embedded site tab renders for everyone but the
+  // API gates VIEW_INSPECTIONS — a 403 must not read as a confident
+  // "No inspections yet".
+  const [forbidden, setForbidden] = useState(false);
   // (Jun 2026 S11) ?focus=<id> deep-link target — alerts/pushes land the
   // manager on the exact row, scrolled + ringed. Read from
   // window.location (not useSearchParams) so the embedded site-tab copy
@@ -75,7 +93,12 @@ export function InspectionsClient({ initial, canManage, siteId, embedded }: { in
     setLoading(true);
     try {
       const res = await fetch(`/api/inspections${siteId ? `?siteId=${siteId}` : ""}`);
-      if (res.ok) setItems(await res.json());
+      if (res.ok) {
+        setItems(await res.json());
+        setForbidden(false);
+      } else if (res.status === 403) {
+        setForbidden(true);
+      }
     } finally {
       setLoading(false);
     }
@@ -205,7 +228,11 @@ export function InspectionsClient({ initial, canManage, siteId, embedded }: { in
         </span>
       </div>
 
-      {loading && items.length === 0 ? (
+      {forbidden ? (
+        <p className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
+          You don&apos;t have permission to view inspections.
+        </p>
+      ) : loading && items.length === 0 ? (
         <div className="divide-y rounded-lg border">
           {[0, 1, 2].map((n) => (
             <div key={n} className="flex animate-pulse items-center gap-4 p-3">
@@ -247,7 +274,7 @@ export function InspectionsClient({ initial, canManage, siteId, embedded }: { in
                     <Link href={`/sites/${i.plot.siteId}?tab=plots`} className="hover:underline">
                       {i.plot.site.name} · Plot {i.plot.plotNumber ?? i.plot.name}
                     </Link>
-                    {i.anchorJob ? <span> · after {i.anchorJob.name}</span> : null}
+                    {i.anchorJob ? <span> · {anchorLabel(i)}</span> : null}
                   </div>
                 </div>
 
@@ -515,8 +542,13 @@ function NotifyContractorDialog({ insp, onClose }: { insp: Insp; onClose: () => 
   // "(no email)" and the send is blocked — the notification IS an email.
   const [contacts, setContacts] = useState<Array<{ id: string; name: string; company: string | null; email: string | null }>>([]);
   const [contactId, setContactId] = useState("");
+  // (Jun 2026 audit fix) Tell the trade the actual VISIT day — for a
+  // BOOKED inspection that's bookedDate, not the derived scheduled date
+  // (worst case booked-but-overdue: the message quoted a date already in
+  // the past). Same bookedDate ?? scheduledDate rule as SiteOnSiteToday.
+  const visitDate = insp.bookedDate ?? insp.scheduledDate;
   const [message, setMessage] = useState(
-    `${inspectionTypeLabel(insp.type)} inspection "${insp.name}" is scheduled for ${format(new Date(insp.scheduledDate), "EEE d MMM")} on Plot ${insp.plot.plotNumber ?? insp.plot.name}. Please make sure the area is ready and accessible.`,
+    `${inspectionTypeLabel(insp.type)} inspection "${insp.name}" is scheduled for ${format(new Date(visitDate), "EEE d MMM")} on Plot ${insp.plot.plotNumber ?? insp.plot.name}. Please make sure the area is ready and accessible.`,
   );
   const [busy, setBusy] = useState(false);
   const [sent, setSent] = useState(false);
@@ -543,7 +575,7 @@ function NotifyContractorDialog({ insp, onClose }: { insp: Insp; onClose: () => 
           notes: message.trim(),
           contractorIds: [contactId],
           mode: "request",
-          dueBy: insp.scheduledDate,
+          dueBy: visitDate,
           sendEmail: true,
         }),
       });

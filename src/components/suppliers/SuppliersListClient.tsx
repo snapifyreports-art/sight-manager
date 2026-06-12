@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import {
   Dialog,
   DialogContent,
@@ -32,6 +33,8 @@ interface Supplier {
   contactNumber: string | null;
   type: string | null;
   accountNumber: string | null;
+  /** (Jun 2026 audit) Soft-delete timestamp. Non-null = archived. */
+  archivedAt?: string | null;
   createdAt: string;
   updatedAt: string;
   _count: { orders: number; materials: number };
@@ -46,11 +49,53 @@ export function SuppliersListClient({ suppliers: initial }: { suppliers: Supplie
   const [createOpen, setCreateOpen] = useState(false);
   const [form, setForm] = useState({ name: "", contactName: "", contactEmail: "", contactNumber: "", type: "", accountNumber: "" });
   const [saving, setSaving] = useState(false);
+  // (Jun 2026 audit) Toggle for showing archived suppliers — mirrors the
+  // UsersClient show-archived/restore pattern so the "You can restore
+  // later from the suppliers list" promise in the archive confirm holds.
+  const [showArchived, setShowArchived] = useState(false);
 
   // (May 2026 pattern sweep) Sync to prop changes after router.refresh().
   useEffect(() => {
     setSuppliers(initial);
   }, [initial]);
+
+  // (Jun 2026 audit) Re-fetch when the archive toggle changes so the
+  // list reflects active vs all suppliers from the server. Cancelled
+  // flag (May 2026 pattern sweep) so rapid toggling can't let a slow,
+  // stale response land after a newer one and desync list vs switch.
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/suppliers${showArchived ? "?include=archived" : ""}`, { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!cancelled && data && Array.isArray(data)) setSuppliers(data);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [showArchived]);
+
+  // (Jun 2026 audit) Restore an archived supplier — the PUT already
+  // accepts archivedAt: null (suppliers/[id]/route.ts).
+  const handleRestore = async (supplier: Supplier) => {
+    try {
+      const res = await fetch(`/api/suppliers/${supplier.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ archivedAt: null }),
+      });
+      if (!res.ok) {
+        throw new Error(await fetchErrorMessage(res, "Failed to restore supplier"));
+      }
+      setSuppliers((prev) =>
+        prev.map((s) => (s.id === supplier.id ? { ...s, archivedAt: null } : s)),
+      );
+      toast.success(`${supplier.name} restored`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to restore supplier");
+    }
+  };
 
   const filtered = suppliers.filter((s) =>
     s.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -97,14 +142,27 @@ export function SuppliersListClient({ suppliers: initial }: { suppliers: Supplie
         </Button>
       </div>
 
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          placeholder="Search suppliers..."
-          className="pl-9"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="relative w-full sm:max-w-xs">
+          <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            placeholder="Search suppliers..."
+            className="pl-9"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
+        {/* (Jun 2026 audit) Toggle archived suppliers into the list so
+            an archived supplier can be restored — the archive confirm
+            promises exactly this flow. */}
+        <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+          <Switch
+            checked={showArchived}
+            onCheckedChange={setShowArchived}
+            aria-label="Show archived suppliers"
+          />
+          <span>Show archived</span>
+        </label>
       </div>
 
       {filtered.length === 0 ? (
@@ -126,6 +184,14 @@ export function SuppliersListClient({ suppliers: initial }: { suppliers: Supplie
                 <div className="min-w-0 flex-1">
                   <h3 className="truncate text-sm font-semibold group-hover:text-blue-600">
                     {s.name}
+                    {/* (Jun 2026 audit) Archived suppliers keep their card
+                        visible (when "Show archived" is on) but carry a
+                        clear badge. */}
+                    {s.archivedAt && (
+                      <span className="ml-1.5 rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-600">
+                        Archived
+                      </span>
+                    )}
                   </h3>
                   {s.type && (
                     <span className="mt-0.5 inline-block rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600">
@@ -185,6 +251,28 @@ export function SuppliersListClient({ suppliers: initial }: { suppliers: Supplie
                       )}
                     </span>
                   ))}
+                </div>
+              )}
+
+              {/* (Jun 2026 audit) Restore row for archived suppliers —
+                  the PUT clears archivedAt and the card rejoins pickers. */}
+              {s.archivedAt && (
+                <div className="mt-2 flex items-center justify-between border-t pt-2">
+                  <span className="text-[10px] text-muted-foreground">
+                    Archived {new Date(s.archivedAt).toLocaleDateString()}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-6 px-2 text-[11px]"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      handleRestore(s);
+                    }}
+                  >
+                    Restore
+                  </Button>
                 </div>
               )}
             </Link>

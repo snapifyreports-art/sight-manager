@@ -38,6 +38,11 @@ export async function GET(
       // (Jun 2026 S6) Reverse-link — snags raised at an inspection
       // sign-off show a "from inspection" chip back to the source.
       inspection: { select: { id: true, name: true } },
+      // (Jun 2026 audit) First 3 photos for SnagList's thumbnail strip —
+      // this is SnagList's only feeder and without them the thumbnails
+      // never rendered anywhere (only the 📷 count showed). Mirrors the
+      // plot-level snags route's shape.
+      photos: { select: { id: true, url: true }, take: 3 },
       _count: { select: { photos: true } },
     },
     orderBy: { createdAt: "desc" },

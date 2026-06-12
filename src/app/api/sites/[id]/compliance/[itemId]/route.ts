@@ -32,6 +32,8 @@ async function authorise(siteId: string, requiredPermission?: string) {
   return { session };
 }
 
+const COMPLIANCE_STATUSES = ["PENDING", "ACTIVE", "EXPIRED", "EXEMPT"];
+
 export async function PUT(
   req: NextRequest,
   { params }: { params: Promise<{ id: string; itemId: string }> },
@@ -40,7 +42,26 @@ export async function PUT(
   const a = await authorise(id, "EDIT_PROGRAMME");
   if ("error" in a) return a.error;
 
+  // (Jun 2026 audit IDOR) The child must belong to the site in the URL.
+  // Pre-fix a caller with access to ANY site could pair their own site
+  // id with a foreign itemId and edit another site's compliance records.
+  const existing = await prisma.siteComplianceItem.findUnique({
+    where: { id: itemId },
+    select: { siteId: true },
+  });
+  if (!existing || existing.siteId !== id) {
+    return NextResponse.json({ error: "Compliance item not found" }, { status: 404 });
+  }
+
   const body = await req.json();
+  // (Jun 2026 audit) Validate status against the enum up front — a
+  // typo'd client value previously reached Prisma and 500'd via apiError.
+  if (body.status !== undefined && !COMPLIANCE_STATUSES.includes(body.status)) {
+    return NextResponse.json(
+      { error: `status must be one of: ${COMPLIANCE_STATUSES.join(", ")}` },
+      { status: 400 },
+    );
+  }
   try {
     const item = await prisma.siteComplianceItem.update({
       where: { id: itemId },
@@ -70,7 +91,15 @@ export async function DELETE(
   if ("error" in a) return a.error;
 
   try {
-    await prisma.siteComplianceItem.delete({ where: { id: itemId } });
+    // (Jun 2026 audit IDOR) deleteMany with both conditions — 404 when
+    // the item doesn't belong to the site in the URL, instead of hard-
+    // deleting another site's compliance record.
+    const deleted = await prisma.siteComplianceItem.deleteMany({
+      where: { id: itemId, siteId: id },
+    });
+    if (deleted.count === 0) {
+      return NextResponse.json({ error: "Compliance item not found" }, { status: 404 });
+    }
     return NextResponse.json({ ok: true });
   } catch (err) {
     return apiError(err, "Failed to delete compliance item");

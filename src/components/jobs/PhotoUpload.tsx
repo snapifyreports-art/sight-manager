@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect } from "react";
+import { format } from "date-fns";
 import {
   Camera,
   Upload,
@@ -25,6 +26,7 @@ import {
   DialogContent,
 } from "@/components/ui/dialog";
 import { useToast, fetchErrorMessage } from "@/components/ui/toast";
+import { useConfirm } from "@/hooks/useConfirm";
 
 interface JobPhoto {
   id: string;
@@ -68,6 +70,7 @@ export function PhotoUpload({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const toast = useToast();
+  const { confirm, dialog: confirmDialog } = useConfirm();
 
   const filteredPhotos =
     filterTag === "all"
@@ -108,6 +111,17 @@ export function PhotoUpload({
 
   const handleDelete = useCallback(
     async (photoId: string) => {
+      // (Jun 2026 audit) Confirm before the permanent delete — photos are
+      // sign-off/audit evidence, and the lightbox Delete button sits a
+      // thumb-width from the prev/next arrows on mobile. Same useConfirm
+      // pattern as materials/drawings deletes.
+      const ok = await confirm({
+        title: "Delete photo?",
+        body: "This can't be undone.",
+        confirmLabel: "Delete photo",
+        danger: true,
+      });
+      if (!ok) return;
       setDeletingId(photoId);
       try {
         const res = await fetch(
@@ -124,7 +138,7 @@ export function PhotoUpload({
         setDeletingId(null);
       }
     },
-    [jobId, photos, onPhotosChange, lightboxIndex, toast]
+    [jobId, photos, onPhotosChange, lightboxIndex, toast, confirm]
   );
 
   const handleUpdateTag = useCallback(
@@ -170,6 +184,9 @@ export function PhotoUpload({
 
   return (
     <Card>
+      {/* Delete-photo confirm — mounted on the component's only return
+          path so the confirm() promise always has a dialog to resolve. */}
+      {confirmDialog}
       <CardHeader>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -364,7 +381,10 @@ export function PhotoUpload({
                     </div>
                     <span className="text-xs text-muted-foreground">
                       {lightboxPhoto.uploadedBy?.name || "Unknown"} &middot;{" "}
-                      {new Date(lightboxPhoto.createdAt).toLocaleDateString()}
+                      {/* date-fns format, not toLocaleDateString — the
+                          browser-locale default can render MM/DD/YYYY;
+                          the app convention is UK "dd MMM yyyy". */}
+                      {format(new Date(lightboxPhoto.createdAt), "dd MMM yyyy")}
                     </span>
                     <span className="text-xs text-muted-foreground">
                       {lightboxIndex! + 1} / {filteredPhotos.length}

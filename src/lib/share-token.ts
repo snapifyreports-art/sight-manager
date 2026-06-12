@@ -112,9 +112,11 @@ export function signShareToken(payload: { plotId: string; exp: number }): string
 //   - "Forgot password?" flow on the login page
 //   - Admin-triggered "Resend invite" action on the user list
 // Either way the recipient clicks a link, lands on /reset-password/<token>,
-// sets a new password, and is logged in. Single-use is enforced by
-// updating the user's password (which the verifier checks against the
-// signed-at timestamp via passwordVersion).
+// sets a new password, and is logged in.
+// (Jun 2026 R10 — honest docs) These tokens are NOT single-use: a link
+// works repeatedly until its 24h expiry. True single-use needs a
+// passwordVersion (or jti) check the verifier doesn't have yet —
+// planned post-launch. Expiry + HMAC are the current protections.
 export function signResetToken(payload: { userId: string; email: string; exp: number }): string {
   const data = b64url(JSON.stringify(payload));
   const sig = createHmac("sha256", requireSecret()).update(data).digest("base64url");
