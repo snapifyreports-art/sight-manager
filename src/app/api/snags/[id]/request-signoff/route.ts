@@ -43,9 +43,14 @@ export async function POST(
     return NextResponse.json({ error: "Snag is already resolved" }, { status: 400 });
   }
 
-  // Update snag status to IN_PROGRESS if OPEN, and append resolution notes
+  // Update snag status to IN_PROGRESS if OPEN, and append resolution notes.
+  // (Jun 2026 Wave-4 S6) Stamp signOffRequestedAt here too — this is the
+  // in-app twin of contractor-share/snag-action, so the contractor card's
+  // "Requested" badge (which now reads signOffRequestedAt, not status) stays
+  // consistent regardless of which path the sign-off request came through.
   const updateData: Record<string, unknown> = {
     status: "IN_PROGRESS",
+    signOffRequestedAt: new Date(),
   };
 
   if (notes) {

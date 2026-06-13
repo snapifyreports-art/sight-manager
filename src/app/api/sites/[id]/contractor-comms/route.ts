@@ -63,6 +63,10 @@ export async function GET(
       priority: true,
       location: true,
       contactId: true,
+      // (Jun 2026 Wave-4 S6) Drives the SnagCard "Sign Off Requested" badge
+      // from an actual request, consistent with the contractor portal card —
+      // not inferred from status === IN_PROGRESS (also set when merely worked on).
+      signOffRequestedAt: true,
       plot: { select: { id: true, plotNumber: true, name: true } },
     },
   });
