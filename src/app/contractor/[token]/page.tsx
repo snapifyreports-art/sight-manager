@@ -130,27 +130,48 @@ export default async function ContractorSharePage({
     select: {
       contactId: true,
       job: {
-        select: { actualEndDate: true, originalEndDate: true },
+        select: { id: true, actualEndDate: true, originalEndDate: true },
       },
     },
   });
-  function onTimePct(rows: typeof siteCompletedRows): number | null {
-    if (rows.length === 0) return null;
-    const onTime = rows.filter((r) => {
-      const a = r.job.actualEndDate;
-      const o = r.job.originalEndDate;
-      if (!a || !o) return false;
-      return a.getTime() <= o.getTime();
-    }).length;
-    return Math.round((onTime / rows.length) * 100);
+  // (Jun 2026 Wave-4 D4) Fault-aware: a late finish only counts against a
+  // contractor when the manager ATTRIBUTED it to them (and didn't excuse it).
+  // Weather / a late predecessor / a design change finishing the job late is
+  // on-time as far as this contractor is concerned — matching the in-app
+  // leaderboard. jobId → (contactId → attributed working-days late).
+  const siteLateEvents = await prisma.latenessEvent.findMany({
+    where: { siteId, jobId: { not: null }, excused: false, attributedContactId: { not: null } },
+    select: { jobId: true, attributedContactId: true },
+  });
+  const faultJobs = new Set<string>(); // jobId → has any attributed fault
+  const faultJobContractor = new Set<string>(); // `${jobId}|${contactId}`
+  for (const e of siteLateEvents) {
+    if (!e.jobId || !e.attributedContactId) continue;
+    faultJobs.add(e.jobId);
+    faultJobContractor.add(`${e.jobId}|${e.attributedContactId}`);
   }
-  const contractorOnTime = onTimePct(
-    siteCompletedRows.filter((r) => r.contactId === contactId),
-  );
-  const siteOnTime = onTimePct(siteCompletedRows);
-  const contractorCompletedCount = siteCompletedRows.filter(
-    (r) => r.contactId === contactId,
-  ).length;
+  // This contractor's rate: on-time unless a delay was attributed to THEM.
+  const myRows = siteCompletedRows.filter((r) => r.contactId === contactId);
+  const contractorOnTime =
+    myRows.length === 0
+      ? null
+      : Math.round(
+          (myRows.filter((r) => !faultJobContractor.has(`${r.job.id}|${r.contactId}`)).length /
+            myRows.length) *
+            100,
+        );
+  // (Jun 2026 Wave-4 S7) Site average over DISTINCT jobs (a job shared by N
+  // trades is counted once, not N times), late if ANY attributed fault.
+  const distinctSiteJobs = new Set(siteCompletedRows.map((r) => r.job.id));
+  const siteOnTime =
+    distinctSiteJobs.size === 0
+      ? null
+      : Math.round(
+          ([...distinctSiteJobs].filter((id) => !faultJobs.has(id)).length /
+            distinctSiteJobs.size) *
+            100,
+        );
+  const contractorCompletedCount = myRows.length;
 
   // (#168) Chronological by startDate everywhere a job list appears.
   const byStartDate = (a: { startDate: Date | null }, b: { startDate: Date | null }) => {

@@ -58,7 +58,7 @@ export async function GET(req: NextRequest) {
   // to the longest single query (~600ms) since Prisma + pgbouncer
   // handle the concurrency fine for reads.
   // All job-level analytics use LEAF jobs only (parents are derived rollups).
-  const [sites, plots, jobs, orders, orderItems, contractors, events, rainedOffDays, weatherNotes] = await Promise.all([
+  const [sites, plots, jobs, orders, orderItems, contractors, events, rainedOffDays, weatherNotes, attributedLateness] = await Promise.all([
     prisma.site.findMany({
       where: siteId
         ? { id: siteId }
@@ -181,7 +181,22 @@ export async function GET(req: NextRequest) {
         ...(plotFilter.plot ? { job: plotFilter } : {}),
       },
     }),
+    // (Jun 2026 Wave-4 D4) Lateness the manager ATTRIBUTED to a contractor
+    // (not excused) \u2014 the basis for fault-aware contractor on-time below.
+    prisma.latenessEvent.findMany({
+      where: { ...siteFilter, jobId: { not: null }, excused: false, attributedContactId: { not: null } },
+      select: { jobId: true, attributedContactId: true, daysLate: true },
+    }),
   ]);
+
+  // (Jun 2026 Wave-4 D4) jobId \u2192 (contactId \u2192 attributed working-days late).
+  const attributedDelayByJob = new Map<string, Map<string, number>>();
+  for (const e of attributedLateness) {
+    if (!e.jobId || !e.attributedContactId) continue;
+    const byContact = attributedDelayByJob.get(e.jobId) ?? new Map<string, number>();
+    byContact.set(e.attributedContactId, (byContact.get(e.attributedContactId) ?? 0) + e.daysLate);
+    attributedDelayByJob.set(e.jobId, byContact);
+  }
 
   // ── Site Progress ──
   const siteProgress = sites.map((site) => {
@@ -327,15 +342,17 @@ export async function GET(req: NextRequest) {
 
     if (j.status === "COMPLETED") {
       entry.completedJobs++;
-      if (j.endDate && j.actualEndDate) {
-        const delay = differenceInWorkingDays(
-          new Date(j.actualEndDate),
-          new Date(j.endDate)
-        );
-        if (delay <= 0) {
-          entry.onTimeJobs++;
+      if (j.actualEndDate) {
+        // (Jun 2026 Wave-4 D4) Fault-aware: only delay the manager
+        // ATTRIBUTED to THIS contractor (not excused) counts against them.
+        // A late finish caused by weather / a late predecessor / a design
+        // change is on-time as far as this contractor is concerned. Pre-fix
+        // this counted any finish past the (already-moved) endDate.
+        const theirDelay = attributedDelayByJob.get(j.id)?.get(c.id) ?? 0;
+        if (theirDelay > 0) {
+          entry.totalDelayDays += theirDelay;
         } else {
-          entry.totalDelayDays += delay;
+          entry.onTimeJobs++;
         }
       } else {
         // (May 2026 audit D-P1) Jobs without actualEndDate are not

@@ -3,7 +3,6 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canAccessSite } from "@/lib/site-access";
 import { apiError } from "@/lib/api-errors";
-import { differenceInWorkingDays } from "@/lib/working-days";
 
 export const dynamic = "force-dynamic";
 
@@ -82,7 +81,10 @@ export async function GET(
 
   try {
     const rows = await prisma.jobContractor.findMany({
-      where: { job: { plot: { siteId: id } } },
+      // (Jun 2026 Wave-4 D3) LEAF jobs only — align to the contractor share
+      // page, on-site-today and Contractor Comms, which all filter to leaves.
+      // Counting parent rollup jobs double-counted a contractor's work.
+      where: { job: { plot: { siteId: id }, children: { none: {} } } },
       select: {
         contactId: true,
         contact: {
@@ -103,7 +105,6 @@ export async function GET(
             endDate: true,
             actualStartDate: true,
             actualEndDate: true,
-            originalEndDate: true,
             plot: {
               select: { plotNumber: true, houseType: true },
             },
@@ -111,6 +112,31 @@ export async function GET(
         },
       },
     });
+
+    // (Jun 2026 Wave-4 D4) Only a delay the manager ATTRIBUTED to a
+    // contractor (and didn't excuse) counts against them. A job that ran late
+    // due to weather, a late predecessor, a design change or a material delay
+    // — attributed elsewhere or excused — is on-time as far as this
+    // contractor is concerned. Build jobId → (contactId → attributed WD late).
+    const latenessEvents = await prisma.latenessEvent.findMany({
+      where: {
+        siteId: id,
+        jobId: { not: null },
+        excused: false,
+        attributedContactId: { not: null },
+      },
+      select: { jobId: true, attributedContactId: true, daysLate: true },
+    });
+    const attributedDelay = new Map<string, Map<string, number>>();
+    for (const e of latenessEvents) {
+      if (!e.jobId || !e.attributedContactId) continue;
+      const byContact = attributedDelay.get(e.jobId) ?? new Map<string, number>();
+      byContact.set(
+        e.attributedContactId,
+        (byContact.get(e.attributedContactId) ?? 0) + e.daysLate,
+      );
+      attributedDelay.set(e.jobId, byContact);
+    }
 
     const map = new Map<string, ContractorRow>();
     for (const r of rows) {
@@ -134,22 +160,19 @@ export async function GET(
       let daysLate: number | null = null;
       if (r.job.status === "COMPLETED") {
         row.jobsCompleted++;
-        if (
-          r.job.actualEndDate &&
-          r.job.actualEndDate.getTime() <= r.job.originalEndDate.getTime()
-        ) {
+        // (Jun 2026 Wave-4 D4) The contractor's delay = working days the
+        // manager attributed to THEM on this job (not excused). Zero means
+        // on-time for this contractor — even if the job itself finished late
+        // for reasons outside their control. Pre-fix this counted ANY late
+        // finish (actualEnd > originalEnd) against them regardless of fault.
+        const theirDelay = attributedDelay.get(r.job.id)?.get(r.contactId) ?? 0;
+        if (theirDelay > 0) {
+          row.jobsLate++;
+          daysLate = theirDelay;
+          row.totalDelayDaysAttributed += theirDelay;
+        } else {
           row.jobsOnTime++;
           daysLate = 0;
-        } else if (r.job.actualEndDate) {
-          row.jobsLate++;
-          // Working-day delta from originalEnd → actualEnd. Clamp to 0
-          // (older inline shadow returned 0 for negative deltas; preserve
-          // that semantic — "jobs late" can't be negatively-late).
-          daysLate = Math.max(
-            0,
-            differenceInWorkingDays(r.job.actualEndDate, r.job.originalEndDate),
-          );
-          row.totalDelayDaysAttributed += daysLate;
         }
       }
 
