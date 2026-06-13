@@ -160,7 +160,9 @@ export interface SiteStory {
         category: string | null;
         status: string;
         expiresAt: string | null;
-        /** True when active + within 14 days of expiry. */
+        /** True when the expiry date has passed (derived live, not status). */
+        expired: boolean;
+        /** True when not yet expired but within 14 days of expiry. */
         expiringSoon: boolean;
       }[];
     };
@@ -971,20 +973,37 @@ export async function buildSiteStory(
   const complianceNow = new Date();
   const complianceWarnBy = new Date(complianceNow);
   complianceWarnBy.setDate(complianceWarnBy.getDate() + 14);
+  // (Jun 2026 Wave-4 D10 fix) Derive expiry from the DATE against the current
+  // instant, not the cron-persisted status. The reconcile cron only flips an
+  // item to EXPIRED at 04:00 once expiresAt < midnight-today, so a doc that
+  // lapses *today* sits at ACTIVE until the next run — a status-only check
+  // (and the prior `expiresAt > now` warn) counted it as neither expired nor
+  // expiring, letting the Closure gate pass a site with same-day-lapsed cover
+  // while the Compliance tab (which derives live) showed it EXPIRED. We now
+  // mirror the Compliance tab GET (`expiresAt.getTime() < now`) so the two
+  // surfaces agree and closure can never miss a lapsed statutory item. EXEMPT
+  // is deliberately waived and never counts as expired.
+  const docIsExpired = (status: string, expiresAt: Date | null) =>
+    status === "EXPIRED" ||
+    (status !== "EXEMPT" &&
+      expiresAt != null &&
+      expiresAt.getTime() < complianceNow.getTime());
   const docIsExpiringSoon = (status: string, expiresAt: Date | null) =>
-    status === "ACTIVE" &&
+    !docIsExpired(status, expiresAt) &&
+    status !== "EXEMPT" &&
     expiresAt != null &&
-    expiresAt > complianceNow &&
-    expiresAt <= complianceWarnBy;
+    expiresAt.getTime() <= complianceWarnBy.getTime();
   const complianceDocsTotal = complianceDocsRaw.length;
-  const complianceDocsActive = complianceDocsRaw.filter(
-    (d) => d.status === "ACTIVE",
-  ).length;
-  const complianceDocsExpired = complianceDocsRaw.filter(
-    (d) => d.status === "EXPIRED",
+  const complianceDocsExpired = complianceDocsRaw.filter((d) =>
+    docIsExpired(d.status, d.expiresAt),
   ).length;
   const complianceDocsExpiringSoon = complianceDocsRaw.filter((d) =>
     docIsExpiringSoon(d.status, d.expiresAt),
+  ).length;
+  // "Active" = valid ACTIVE cover that hasn't lapsed (excludes a stored-ACTIVE
+  // doc whose date has passed but the cron hasn't flipped yet).
+  const complianceDocsActive = complianceDocsRaw.filter(
+    (d) => d.status === "ACTIVE" && !docIsExpired(d.status, d.expiresAt),
   ).length;
   const recentComplianceDocs = complianceDocsRaw.slice(0, 12).map((d) => ({
     id: d.id,
@@ -992,6 +1011,7 @@ export async function buildSiteStory(
     category: d.category,
     status: d.status,
     expiresAt: d.expiresAt?.toISOString() ?? null,
+    expired: docIsExpired(d.status, d.expiresAt),
     expiringSoon: docIsExpiringSoon(d.status, d.expiresAt),
   }));
 

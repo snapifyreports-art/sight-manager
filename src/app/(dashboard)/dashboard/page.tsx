@@ -56,6 +56,20 @@ export default async function DashboardPage() {
   };
   const eventSiteWhere = siteIds !== null ? { siteId: { in: siteIds } } : {};
 
+  // (Jun 2026 Wave-4 D9) The two compliance At-Risk panels — expiring
+  // documents and outstanding variations — carry compliance-category data
+  // (cert expiry, variation cost/time impact) that the rest of the app gates
+  // on VIEW_COMPLIANCE. Without this guard an assigned CONTRACTOR (who lacks
+  // the perm) would see confidential variation pricing on /dashboard, since
+  // the page itself only enforces a logged-in session. Mirrors the
+  // VIEW_INSPECTIONS gate on the inspections At-Risk feeds.
+  const canViewCompliance =
+    !!session &&
+    sessionHasPermission(
+      session.user as { role?: string; permissions?: string[] },
+      "VIEW_COMPLIANCE",
+    );
+
   // Run all queries in parallel for performance
   const [
     totalSites,
@@ -268,27 +282,30 @@ export default async function DashboardPage() {
 
     // (Jun 2026 R26) At-Risk: compliance expiring soon / already expired.
     // expiresAt within [past, today+14d]; EXEMPT items are out of scope.
-    prisma.siteComplianceItem.findMany({
-      take: 8,
-      where: {
-        expiresAt: {
-          not: null,
-          lte: complianceWarnCutoff,
-        },
-        status: { in: ["PENDING", "ACTIVE", "EXPIRED"] },
-        ...(siteIds !== null
-          ? { siteId: { in: siteIds } }
-          : { site: { status: { notIn: ["COMPLETED", "ARCHIVED"] } } }),
-      },
-      orderBy: { expiresAt: "asc" },
-      select: {
-        id: true,
-        name: true,
-        status: true,
-        expiresAt: true,
-        site: { select: { id: true, name: true } },
-      },
-    }),
+    // (Jun 2026 Wave-4 D9) Gated on VIEW_COMPLIANCE — compliance docs.
+    canViewCompliance
+      ? prisma.siteComplianceItem.findMany({
+          take: 8,
+          where: {
+            expiresAt: {
+              not: null,
+              lte: complianceWarnCutoff,
+            },
+            status: { in: ["PENDING", "ACTIVE", "EXPIRED"] },
+            ...(siteIds !== null
+              ? { siteId: { in: siteIds } }
+              : { site: { status: { notIn: ["COMPLETED", "ARCHIVED"] } } }),
+          },
+          orderBy: { expiresAt: "asc" },
+          select: {
+            id: true,
+            name: true,
+            status: true,
+            expiresAt: true,
+            site: { select: { id: true, name: true } },
+          },
+        })
+      : Promise.resolve([]),
 
     // (Jun 2026 Wave-4 B2) UNCAPPED overdue jobs (dates only) for the
     // headline "At-Risk Jobs" + "Working Days Late" stat cards. The list
@@ -358,24 +375,29 @@ export default async function DashboardPage() {
     // (Jun 2026 Wave-4 D12) At-Risk: outstanding variations — REQUESTED, not
     // yet approved/rejected. Each carries pending cost/time impact a director
     // wants on their radar; previously they had no proactive surface anywhere.
-    prisma.variation.findMany({
-      take: 8,
-      where: {
-        status: "REQUESTED",
-        ...(siteIds !== null ? { plot: { siteId: { in: siteIds } } } : {}),
-      },
-      orderBy: { createdAt: "desc" },
-      select: {
-        id: true,
-        ref: true,
-        title: true,
-        costDelta: true,
-        daysDelta: true,
-        plot: {
-          select: { id: true, name: true, plotNumber: true, site: { select: { id: true, name: true } } },
-        },
-      },
-    }),
+    // (Jun 2026 Wave-4 D9) Gated on VIEW_COMPLIANCE — the cost/time deltas are
+    // commercially sensitive (a CONTRACTOR must never see variation pricing),
+    // matching the variation read API's own VIEW_COMPLIANCE gate.
+    canViewCompliance
+      ? prisma.variation.findMany({
+          take: 8,
+          where: {
+            status: "REQUESTED",
+            ...(siteIds !== null ? { plot: { siteId: { in: siteIds } } } : {}),
+          },
+          orderBy: { createdAt: "desc" },
+          select: {
+            id: true,
+            ref: true,
+            title: true,
+            costDelta: true,
+            daysDelta: true,
+            plot: {
+              select: { id: true, name: true, plotNumber: true, site: { select: { id: true, name: true } } },
+            },
+          },
+        })
+      : Promise.resolve([]),
   ]);
 
   // Build the job status map with defaults

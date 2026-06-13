@@ -215,6 +215,7 @@ interface StoryData {
         category: string | null;
         status: string;
         expiresAt: string | null;
+        expired: boolean;
         expiringSoon: boolean;
       }>;
     };
@@ -1191,7 +1192,7 @@ export function SiteStoryPanel({ siteId }: { siteId: string }) {
                       {data.compliance.documents.recent.slice(0, 3).map((d) => (
                         <li key={d.id} className="truncate text-slate-700">
                           {d.name}
-                          {d.status === "EXPIRED" ? (
+                          {d.expired ? (
                             <span className="text-red-700"> · expired</span>
                           ) : d.expiringSoon ? (
                             <span className="text-amber-700"> · expiring</span>
