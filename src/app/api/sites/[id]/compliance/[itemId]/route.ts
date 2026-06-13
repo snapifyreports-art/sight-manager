@@ -39,7 +39,8 @@ export async function PUT(
   { params }: { params: Promise<{ id: string; itemId: string }> },
 ) {
   const { id, itemId } = await params;
-  const a = await authorise(id, "EDIT_PROGRAMME");
+  // (Jun 2026 Wave-4 D9) Editing a compliance item requires MANAGE_COMPLIANCE.
+  const a = await authorise(id, "MANAGE_COMPLIANCE");
   if ("error" in a) return a.error;
 
   // (Jun 2026 audit IDOR) The child must belong to the site in the URL.

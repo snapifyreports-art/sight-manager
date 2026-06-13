@@ -49,7 +49,10 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  const auth = await authorise(id);
+  // (Jun 2026 Wave-4 D9) Reading compliance documents (insurance/permits/
+  // certs + expiry) requires VIEW_COMPLIANCE — pre-fix any site-access user
+  // (incl. an assigned contractor) could read the statutory register.
+  const auth = await authorise(id, "VIEW_COMPLIANCE");
   if ("error" in auth) return auth.error;
 
   const items = await prisma.siteComplianceItem.findMany({
@@ -84,7 +87,8 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  const auth = await authorise(id, "EDIT_PROGRAMME");
+  // (Jun 2026 Wave-4 D9) Adding a compliance item requires MANAGE_COMPLIANCE.
+  const auth = await authorise(id, "MANAGE_COMPLIANCE");
   if ("error" in auth) return auth.error;
 
   const body = await req.json();
