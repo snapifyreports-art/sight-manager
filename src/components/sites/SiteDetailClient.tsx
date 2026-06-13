@@ -81,6 +81,7 @@ import { SiteProgramme } from "@/components/programme/SiteProgramme";
 import { SiteHeatmap } from "@/components/sites/SiteHeatmap";
 import { SnagList } from "@/components/snags/SnagList";
 import { SnagDialog } from "@/components/snags/SnagDialog";
+import { CabinViewButton } from "@/components/sites/CabinViewButton";
 import { DailySiteBrief } from "@/components/reports/DailySiteBrief";
 import { ContractorDaySheets } from "@/components/reports/ContractorDaySheets";
 import { ContractorComms } from "@/components/reports/ContractorComms";
@@ -1083,6 +1084,10 @@ export function SiteDetailClient({
                 notification opt-in. Star toggle that POST/DELETEs to
                 /api/sites/[id]/watch. */}
             <WatchToggle siteId={site.id} siteName={site.name} />
+            {/* (Jun 2026) Cabin / TV view — mints the read-only wall-screen
+                link for this site (the /live screen existed but had no UI
+                entry point). */}
+            <CabinViewButton siteId={site.id} />
             {/* (#173) Quick Raise Snag — only on operational tabs where
                 a manager might spot an issue in flight. Hidden on the
                 Snags tab (in-tab button takes over) and on every
