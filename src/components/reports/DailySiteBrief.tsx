@@ -1477,7 +1477,12 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
               )}
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium">
-                  Today —{" "}
+                  {/* (Jun 2026 R3) Date-stamp when not viewing today, so a
+                      back-dated Brief can't read as "today". */}
+                  {format(date, "yyyy-MM-dd") === format(getCurrentDate(), "yyyy-MM-dd")
+                    ? "Today"
+                    : format(date, "EEE d MMM")}{" "}
+                  —{" "}
                   {data.isRainedOff ? (
                     <span className="text-blue-700">rained off</span>
                   ) : (
@@ -1515,7 +1520,11 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                   onClick={() => setRainedOffDialogOpen(true)}
                 >
                   <CloudRain className="mr-1 size-3.5" aria-hidden />
-                  Mark today rained off
+                  Mark{" "}
+                  {format(date, "yyyy-MM-dd") === format(getCurrentDate(), "yyyy-MM-dd")
+                    ? "today"
+                    : format(date, "EEE d MMM")}{" "}
+                  rained off
                 </Button>
               )}
             </div>

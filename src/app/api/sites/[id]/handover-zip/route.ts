@@ -51,6 +51,22 @@ export async function POST(
     );
   }
 
+  // (Jun 2026 R7) The handover pack bundles budgets, margins, supplier
+  // costs and the full inspection register — management-level data. Gate
+  // on VIEW_ANALYTICS so a plain CONTRACTOR-role login with site access
+  // can't download the lot.
+  if (
+    !sessionHasPermission(
+      session.user as { role?: string; permissions?: string[] },
+      "VIEW_ANALYTICS",
+    )
+  ) {
+    return NextResponse.json(
+      { error: "You do not have permission to generate the handover pack" },
+      { status: 403 },
+    );
+  }
+
   const site = await prisma.site.findUnique({
     where: { id },
     select: { id: true, name: true, status: true },

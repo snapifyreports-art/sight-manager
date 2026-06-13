@@ -1490,10 +1490,10 @@ export function PlotDetailClient({
             <Share2 className="size-3.5" />
             Share
           </Button>
-          {/* AddJobDialog hidden – functionality preserved */}
-          <div className="hidden">
-            <AddJobDialog plotId={plot.id} onCreated={handleJobCreated} />
-          </div>
+          {/* (Jun 2026 R19) Add Job restored to the header — one-off works,
+              extras and odd jobs are real, and the Add-inspection dialog
+              anchors to jobs, so a plot needs a way to add them. */}
+          <AddJobDialog plotId={plot.id} onCreated={handleJobCreated} />
         </div>
       </div>
 
