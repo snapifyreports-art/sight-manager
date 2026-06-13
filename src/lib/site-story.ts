@@ -408,6 +408,14 @@ interface BuildOptions {
    *  triggering user's permission themselves — the handover-zip route does
    *  (review fix); a new caller that forgets re-opens the boundary. */
   includeInspections?: boolean;
+  /** (Jun 2026 Wave-4 D9 leak fix) When false, the compliance block — NCRs,
+   *  defects, variations (incl. cost/time deltas) and compliance documents —
+   *  and the per-plot NCR/defect/variation counters are zeroed/omitted. The
+   *  story route passes the caller's VIEW_COMPLIANCE permission here so this
+   *  aggregating surface can't leak commercial compliance data to a user the
+   *  dedicated NCR/defect/variation APIs already block. Default true — a
+   *  caller that forgets to pass it re-opens the boundary. */
+  includeCompliance?: boolean;
 }
 
 // (May 2026 audit D-P1-7) Local `workingDaysBetween` removed. The
@@ -429,6 +437,12 @@ export async function buildSiteStory(
   options: BuildOptions = {},
 ): Promise<SiteStory> {
   const includeFull = options.includeFullDetail === true;
+  // (Jun 2026 Wave-4 D9 leak fix) Default true; the story route passes the
+  // caller's VIEW_COMPLIANCE here. When false every compliance read below
+  // short-circuits to an empty array, so the rollups, per-plot counters and
+  // the assembled compliance block all derive as empty/zero — no commercial
+  // data reaches a user without the permission.
+  const includeCompliance = options.includeCompliance !== false;
 
   const site = await tx.site.findUnique({
     where: { id: siteId },
@@ -875,7 +889,7 @@ export async function buildSiteStory(
   // tabs but they never reached Story or Handover. Now: site-level
   // totals + per-plot counts + recent items roll up here, the SiteStory
   // panel surfaces them, and Handover ZIP renders per-plot PDFs.
-  const allNcrs = await tx.nCR.findMany({
+  const allNcrs = !includeCompliance ? [] : await tx.nCR.findMany({
     where: { siteId },
     select: {
       id: true,
@@ -902,7 +916,7 @@ export async function buildSiteStory(
     (n) => n.status === "RESOLVED" || n.status === "CLOSED",
   ).length;
 
-  const allDefects = await tx.defectReport.findMany({
+  const allDefects = !includeCompliance ? [] : await tx.defectReport.findMany({
     where: { plotId: { in: plotIds } },
     select: {
       id: true,
@@ -922,7 +936,7 @@ export async function buildSiteStory(
     (d) => d.status === "RESOLVED" || d.status === "CLOSED",
   ).length;
 
-  const allVariations = await tx.variation.findMany({
+  const allVariations = !includeCompliance ? [] : await tx.variation.findMany({
     where: { plotId: { in: plotIds } },
     select: {
       id: true,
@@ -959,7 +973,7 @@ export async function buildSiteStory(
   // panel + Closure readiness see whether the site's statutory paperwork
   // is in date. Closure gates on nothing being EXPIRED; an item active but
   // within 14 days of expiry is surfaced as a warn (expiringSoon).
-  const complianceDocsRaw = await tx.siteComplianceItem.findMany({
+  const complianceDocsRaw = !includeCompliance ? [] : await tx.siteComplianceItem.findMany({
     where: { siteId },
     select: {
       id: true,

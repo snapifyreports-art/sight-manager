@@ -55,6 +55,15 @@ export async function GET(
         session.user as { role?: string; permissions?: string[] },
         "VIEW_INSPECTIONS",
       ),
+      // (Jun 2026 Wave-4 D9 leak fix) The compliance block carries variation
+      // cost/time deltas + NCR/defect/cert detail — commercially sensitive.
+      // Gate it on VIEW_COMPLIANCE so this aggregating route matches the
+      // dedicated NCR/defect/variation APIs; without this a CONTRACTOR with
+      // site access could fetch variation pricing straight off the story API.
+      includeCompliance: sessionHasPermission(
+        session.user as { role?: string; permissions?: string[] },
+        "VIEW_COMPLIANCE",
+      ),
     });
     return NextResponse.json(story);
   } catch (err) {
