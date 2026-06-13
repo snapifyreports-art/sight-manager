@@ -31,6 +31,9 @@ import {
   Filter,
   Truck,
   Clock,
+  FileWarning,
+  Wrench,
+  Replace,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -88,6 +91,7 @@ const CATEGORIES = [
   { value: "orders", label: "Orders & Deliveries" },
   { value: "snags", label: "Snags" },
   { value: "inspections", label: "Inspections" },
+  { value: "compliance", label: "Compliance" },
   { value: "photos", label: "Photos" },
   { value: "weather", label: "Weather" },
   { value: "notes", label: "Notes" },
@@ -140,6 +144,11 @@ function EventIcon({ type, description }: { type: string; description: string })
     case "PHOTO_SHARED":       return <Camera className={cls} />;
     case "LATENESS_OPENED":    return <AlertTriangle className={cls} />;
     case "LATENESS_RESOLVED":  return <Clock className={cls} />;
+    // (Jun 2026 Wave-4 S10) Compliance / quality categories.
+    case "NCR_RAISED":         return <FileWarning className={cls} />;
+    case "DEFECT_RAISED":      return <Wrench className={cls} />;
+    case "VARIATION_RAISED":   return <Replace className={cls} />;
+    case "TOOLBOX_TALK":       return <MessageSquare className={cls} />;
     default:                 return <Server className={cls} />;
   }
 }
@@ -178,6 +187,11 @@ function eventColour(type: string, description: string): string {
     case "PHOTO_SHARED":       return "text-pink-600 bg-pink-50 dark:bg-pink-950/30";
     case "LATENESS_OPENED":    return "text-red-600 bg-red-50 dark:bg-red-950/30";
     case "LATENESS_RESOLVED":  return "text-emerald-600 bg-emerald-50 dark:bg-emerald-950/30";
+    // (Jun 2026 Wave-4 S10) Compliance / quality categories.
+    case "NCR_RAISED":         return "text-red-600 bg-red-50 dark:bg-red-950/30";
+    case "DEFECT_RAISED":      return "text-orange-600 bg-orange-50 dark:bg-orange-950/30";
+    case "VARIATION_RAISED":   return "text-violet-600 bg-violet-50 dark:bg-violet-950/30";
+    case "TOOLBOX_TALK":       return "text-teal-600 bg-teal-50 dark:bg-teal-950/30";
     default:                 return "text-slate-600 bg-slate-50 dark:bg-slate-950/30";
   }
 }

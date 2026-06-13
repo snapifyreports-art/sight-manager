@@ -6,6 +6,7 @@ import { apiError } from "@/lib/api-errors";
 import { sessionHasPermission } from "@/lib/permissions";
 import { nextRef } from "@/lib/ref-sequence";
 import { logEvent } from "@/lib/event-log";
+import { sendPushToSiteAudience } from "@/lib/push";
 
 export const dynamic = "force-dynamic";
 
@@ -56,7 +57,9 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  const a = await authoriseByPlot(id);
+  // (Jun 2026 Wave-4 D9) Reading variations now requires VIEW_COMPLIANCE —
+  // they carry commercial cost/time deltas, not general site data.
+  const a = await authoriseByPlot(id, "VIEW_COMPLIANCE");
   if ("error" in a) return a.error;
 
   // (May 2026 Surfacing audit) Surface "Approved by [Name] on [Date]"
@@ -90,7 +93,8 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  const a = await authoriseByPlot(id, "EDIT_PROGRAMME");
+  // (Jun 2026 Wave-4 D9) Raising a variation now requires MANAGE_COMPLIANCE.
+  const a = await authoriseByPlot(id, "MANAGE_COMPLIANCE");
   if ("error" in a) return a.error;
 
   const body = await req.json();
@@ -121,13 +125,33 @@ export async function POST(
     // log it to the Site Log (with its cost/time impact) so it shows in the
     // Events Log + Story timeline, like NCRs. Pre-fix it was invisible
     // everywhere except Story/Closure/Handover.
+    const impact = variationImpact(v.costDelta, v.daysDelta);
     await logEvent(prisma, {
-      type: "USER_ACTION",
+      // (Jun 2026 Wave-4 S10) Dedicated Site Log category for variations.
+      type: "VARIATION_RAISED",
       siteId: a.siteId,
       plotId: id,
       userId: a.session.user.id,
-      description: `Variation ${ref} raised: "${v.title}"${variationImpact(v.costDelta, v.daysDelta)}`,
+      description: `Variation ${ref} raised: "${v.title}"${impact}`,
+      detail: { variationId: v.id, ref, costDelta: v.costDelta, daysDelta: v.daysDelta },
     });
+    // (Jun 2026 Wave-4 D12) Push to the site audience — a scope change
+    // moves the end date and the budget, so commercial managers should
+    // hear about it as it happens, not discover it in the log. Mutable per
+    // user via the VARIATION_RAISED notification toggle. Best-effort.
+    const plotForPush = await prisma.plot.findUnique({
+      where: { id },
+      select: { plotNumber: true, name: true, site: { select: { name: true } } },
+    });
+    const plotLabel = plotForPush?.plotNumber
+      ? `Plot ${plotForPush.plotNumber}`
+      : plotForPush?.name ?? "A plot";
+    await sendPushToSiteAudience(a.siteId, "VARIATION_RAISED", {
+      title: "Variation raised",
+      body: `${ref} on ${plotLabel}${plotForPush?.site?.name ? ` (${plotForPush.site.name})` : ""}: "${v.title}"${impact}`,
+      url: `/sites/${a.siteId}?tab=variations`,
+      tag: `variation-${v.id}`,
+    }).catch(() => {});
     return NextResponse.json(v, { status: 201 });
   } catch (err) {
     return apiError(err, "Failed to create variation");

@@ -131,7 +131,13 @@ export async function POST(
     }
 
     // Append the contractor's note onto the snag history.
-    const updateData: Record<string, unknown> = { status: "IN_PROGRESS" };
+    // (Jun 2026 Wave-4 S6) Stamp signOffRequestedAt so the "Requested" badge
+    // reflects an actual sign-off request, not merely a snag being worked on
+    // (status IN_PROGRESS is also set when a manager starts a fix in-app).
+    const updateData: Record<string, unknown> = {
+      status: "IN_PROGRESS",
+      signOffRequestedAt: new Date(),
+    };
     if (notesStr) {
       const timestamp = new Date().toLocaleDateString("en-GB");
       const existing = snag.notes || "";

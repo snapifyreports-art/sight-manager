@@ -17,6 +17,9 @@ const CATEGORY_TYPES: Record<string, EventType[]> = {
   schedule: ["SCHEDULE_CASCADED"],
   // (Jun 2026 S7) Inspection lifecycle events in their own filter.
   inspections: ["INSPECTION_SCHEDULED", "INSPECTION_BOOKED", "INSPECTION_PASSED", "INSPECTION_FAILED", "INSPECTION_OVERDUE"],
+  // (Jun 2026 Wave-4 S10) Compliance / quality — NCRs, defects, variations,
+  // toolbox talks in one filter.
+  compliance: ["NCR_RAISED", "DEFECT_RAISED", "VARIATION_RAISED", "TOOLBOX_TALK"],
   system: ["SITE_CREATED", "SITE_UPDATED", "PLOT_CREATED", "PLOT_UPDATED", "NOTIFICATION"],
 };
 

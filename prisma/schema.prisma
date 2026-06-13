@@ -103,6 +103,10 @@ enum NotificationType {
   // 14 days of expiry, or already expired. Daily push from the reconcile
   // cron — a lapsed cert/insurance on site is a real-world liability.
   COMPLIANCE_EXPIRING
+  // (Jun 2026 Wave-4 D12) A variation / change request was raised on a
+  // site. Pushed to the site audience so commercial managers see scope
+  // changes as they happen rather than discovering them in the log.
+  VARIATION_RAISED
 }
 
 enum SnagPriority {
@@ -161,6 +165,15 @@ enum EventType {
   INSPECTION_PASSED
   INSPECTION_FAILED
   INSPECTION_OVERDUE
+  // (Jun 2026 Wave-4 S10) Compliance/quality events get their own Site Log
+  // categories so the manager can filter the log to "what got raised"
+  // rather than burying NCRs, defects, variations and toolbox talks under
+  // USER_ACTION / NOTIFICATION. EventLog.detail carries the record id +
+  // ref + plot/job context for click-through.
+  NCR_RAISED // a non-conformance report was opened
+  DEFECT_RAISED // a defect report was logged
+  VARIATION_RAISED // a variation / change request was raised
+  TOOLBOX_TALK // a toolbox talk was requested or recorded
   USER_ACTION
   NOTIFICATION
   SYSTEM
@@ -1112,6 +1125,11 @@ model Snag {
   // inspection sign-off (user-classified Snag-or-NCR). SetNull so deleting
   // the inspection keeps the snag in the funnel.
   inspectionId String?
+  // (Jun 2026 Wave-4 S6) Set when a contractor sign-off was requested on
+  // this snag, so the SnagSignOffCard can show an accurate "Requested"
+  // badge instead of inferring it from status === IN_PROGRESS (which also
+  // covers snags simply being worked on). Null = no sign-off pending.
+  signOffRequestedAt DateTime?
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt
 

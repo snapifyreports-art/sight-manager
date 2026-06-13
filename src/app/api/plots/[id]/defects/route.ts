@@ -47,7 +47,8 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  const a = await authoriseByPlot(id);
+  // (Jun 2026 Wave-4 D9) Reading defect reports now requires VIEW_COMPLIANCE.
+  const a = await authoriseByPlot(id, "VIEW_COMPLIANCE");
   if ("error" in a) return a.error;
 
   // (May 2026 Surfacing audit) Surface reporter / resolver / assigned-
@@ -99,7 +100,8 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  const a = await authoriseByPlot(id, "EDIT_PROGRAMME");
+  // (Jun 2026 Wave-4 D9) Reporting a defect now requires MANAGE_COMPLIANCE.
+  const a = await authoriseByPlot(id, "MANAGE_COMPLIANCE");
   if ("error" in a) return a.error;
 
   const body = await req.json();
@@ -131,11 +133,13 @@ export async function POST(
     // (Jun 2026 Wave-4 B19) Log to the Site Log like NCRs do — a defect
     // was previously invisible in the Events Log and the Story timeline.
     await logEvent(prisma, {
-      type: "USER_ACTION",
+      // (Jun 2026 Wave-4 S10) Dedicated Site Log category for defects.
+      type: "DEFECT_RAISED",
       siteId: a.siteId,
       plotId: id,
       userId: a.session.user.id,
       description: `Defect ${ref} reported: "${d.title}"`,
+      detail: { defectId: d.id, ref },
     });
     return NextResponse.json(d, { status: 201 });
   } catch (err) {

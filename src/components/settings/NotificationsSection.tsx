@@ -107,6 +107,12 @@ const NOTIFICATION_TYPE_META: Record<
     label: "Compliance — Expiring",
     description: "An insurance, certificate or RAMS document is within 14 days of expiry, or has expired.",
   },
+  // (Jun 2026 Wave-4 D12) Variation raised / approved / rejected on a site
+  // you watch — a scope change that moves the budget and the end date.
+  VARIATION_RAISED: {
+    label: "Variation Raised",
+    description: "When a variation (change request) is raised, approved or rejected on a site you watch or are assigned to. A scope change that moves the budget and the end date.",
+  },
 };
 
 interface Preference {

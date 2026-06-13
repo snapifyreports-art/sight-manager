@@ -5,6 +5,7 @@ import { canAccessSite } from "@/lib/site-access";
 import { apiError } from "@/lib/api-errors";
 import { sessionHasPermission } from "@/lib/permissions";
 import { logEvent } from "@/lib/event-log";
+import { sendPushToSiteAudience } from "@/lib/push";
 
 export const dynamic = "force-dynamic";
 
@@ -57,7 +58,9 @@ export async function PUT(
   { params }: { params: Promise<{ id: string; varId: string }> },
 ) {
   const { id, varId } = await params;
-  const a = await authoriseByPlot(id, "EDIT_PROGRAMME");
+  // (Jun 2026 Wave-4 D9) Editing / approving a variation now requires
+  // MANAGE_COMPLIANCE.
+  const a = await authoriseByPlot(id, "MANAGE_COMPLIANCE");
   if ("error" in a) return a.error;
 
   // (Jun 2026 audit IDOR) The child must belong to the plot in the URL.
@@ -115,13 +118,34 @@ export async function PUT(
     // director sees an approved/rejected variation (and its cost/time impact)
     // in the Events Log + Story timeline. Only on the meaningful transitions.
     if (body.status === "APPROVED" || body.status === "REJECTED") {
+      const impact = variationImpact(v.costDelta, v.daysDelta);
       await logEvent(prisma, {
-        type: "USER_ACTION",
+        // (Jun 2026 Wave-4 S10) The approve/reject decision shares the
+        // variation Site Log category so the log filter shows the whole
+        // variation lifecycle, not just the raise.
+        type: "VARIATION_RAISED",
         siteId: a.siteId,
         plotId: id,
         userId: a.session.user.id,
-        description: `Variation ${v.ref} ${v.status.toLowerCase()}: "${v.title}"${variationImpact(v.costDelta, v.daysDelta)}`,
+        description: `Variation ${v.ref} ${v.status.toLowerCase()}: "${v.title}"${impact}`,
+        detail: { variationId: v.id, ref: v.ref, status: v.status },
       });
+      // (Jun 2026 Wave-4 D12) Push the commercial decision to the site
+      // audience — an approved/rejected variation moves budget + end date.
+      // Mutable via the VARIATION_RAISED toggle. Best-effort.
+      const plotForPush = await prisma.plot.findUnique({
+        where: { id },
+        select: { plotNumber: true, name: true, site: { select: { name: true } } },
+      });
+      const plotLabel = plotForPush?.plotNumber
+        ? `Plot ${plotForPush.plotNumber}`
+        : plotForPush?.name ?? "A plot";
+      await sendPushToSiteAudience(a.siteId, "VARIATION_RAISED", {
+        title: `Variation ${v.status.toLowerCase()}`,
+        body: `${v.ref} on ${plotLabel}${plotForPush?.site?.name ? ` (${plotForPush.site.name})` : ""}: "${v.title}"${impact}`,
+        url: `/sites/${a.siteId}?tab=variations`,
+        tag: `variation-${v.id}`,
+      }).catch(() => {});
     }
     return NextResponse.json(v);
   } catch (err) {

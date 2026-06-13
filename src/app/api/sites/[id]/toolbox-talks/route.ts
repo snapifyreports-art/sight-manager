@@ -311,12 +311,14 @@ export async function POST(
     }
 
     await logEvent(prisma, {
-      type: "USER_ACTION",
+      // (Jun 2026 Wave-4 S10) Dedicated Site Log category for toolbox talks.
+      type: "TOOLBOX_TALK",
       siteId: id,
       userId: a.session.user.id,
       description: isRequest
         ? `Toolbox talk requested: "${talk.topic}" (${contractorIds.length} contractor${contractorIds.length !== 1 ? "s" : ""}${emailSentCount > 0 ? `, ${emailSentCount} emailed` : ""})`
         : `Toolbox talk logged: "${talk.topic}"${uploads.length > 0 ? ` (with ${uploads.length} attachment${uploads.length !== 1 ? "s" : ""})` : ""}`,
+      detail: { talkId: talk.id },
     });
     return NextResponse.json(talk, { status: 201 });
   } catch (err) {

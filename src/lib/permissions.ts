@@ -14,6 +14,11 @@ export const ALL_PERMISSIONS = [
   "VIEW_SETTINGS",
   "VIEW_USERS",
   "VIEW_INSPECTIONS",
+  // (Jun 2026 Wave-4 D9) Compliance = NCRs, defect reports, variations and
+  // compliance documents. Commercially sensitive (variation costs, defect
+  // liability) so it gets its own view/manage pair rather than riding on
+  // site access / EDIT_PROGRAMME.
+  "VIEW_COMPLIANCE",
   // Actions
   "SIGN_OFF_JOBS",
   "MANAGE_ORDERS",
@@ -21,6 +26,7 @@ export const ALL_PERMISSIONS = [
   "DELETE_ITEMS",
   "MANAGE_USERS",
   "MANAGE_INSPECTIONS",
+  "MANAGE_COMPLIANCE",
 ] as const;
 
 export type Permission = (typeof ALL_PERMISSIONS)[number];
@@ -81,6 +87,12 @@ export const PERMISSION_META: Record<
     description: "View the inspections page and per-site inspections",
     group: "page",
   },
+  VIEW_COMPLIANCE: {
+    label: "Compliance",
+    description:
+      "View NCRs, defect reports, variations and compliance documents",
+    group: "page",
+  },
   SIGN_OFF_JOBS: {
     label: "Sign Off Jobs",
     description: "Can sign off and complete jobs",
@@ -112,6 +124,12 @@ export const PERMISSION_META: Record<
       "Can book, pass/fail, reschedule and assign inspections and raise findings",
     group: "action",
   },
+  MANAGE_COMPLIANCE: {
+    label: "Manage Compliance",
+    description:
+      "Can raise, edit and approve NCRs, defect reports and variations",
+    group: "action",
+  },
 };
 
 // --- Default permissions per role ---
@@ -137,6 +155,11 @@ export const DEFAULT_PERMISSIONS: Record<UserRole, string[]> = {
     "VIEW_SETTINGS",
     "VIEW_INSPECTIONS",
     "MANAGE_ORDERS",
+    // (Jun 2026 Wave-4 D9) Contract managers own the commercial side —
+    // variations, NCRs and defect liability — so they get the full
+    // compliance view/manage pair.
+    "VIEW_COMPLIANCE",
+    "MANAGE_COMPLIANCE",
   ],
   CONTRACTOR: ["VIEW_DASHBOARD", "VIEW_TASKS", "VIEW_SETTINGS"],
 };

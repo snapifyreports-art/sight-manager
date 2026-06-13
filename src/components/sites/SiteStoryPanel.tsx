@@ -203,6 +203,21 @@ interface StoryData {
         daysDelta: number | null;
       }>;
     };
+    // (Jun 2026 Wave-4 D10) Compliance documents — insurance/permits/certs.
+    documents?: {
+      total: number;
+      active: number;
+      expired: number;
+      expiringSoon: number;
+      recent: Array<{
+        id: string;
+        name: string;
+        category: string | null;
+        status: string;
+        expiresAt: string | null;
+        expiringSoon: boolean;
+      }>;
+    };
   };
   evidence: {
     preStartChecks: { total: number; checked: number };
@@ -1045,7 +1060,8 @@ export function SiteStoryPanel({ siteId }: { siteId: string }) {
           something to show so a clean site doesn't grow noise. */}
       {(data.compliance.ncrs.total > 0 ||
         data.compliance.defects.total > 0 ||
-        data.compliance.variations.total > 0) && (
+        data.compliance.variations.total > 0 ||
+        (data.compliance.documents?.total ?? 0) > 0) && (
         <section className="rounded-xl border bg-white p-5">
           <h3 className="mb-3 font-semibold text-slate-900">Compliance</h3>
           <div className="grid gap-3 sm:grid-cols-3">
@@ -1145,6 +1161,47 @@ export function SiteStoryPanel({ siteId }: { siteId: string }) {
                 )}
               </div>
             )}
+            {/* (Jun 2026 Wave-4 D10) Compliance documents — insurance,
+                permits, CDM, certs. Expired is a closure blocker; within
+                14 days of expiry is a warning. */}
+            {data.compliance.documents &&
+              data.compliance.documents.total > 0 && (
+                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-600">
+                    Compliance Docs
+                  </p>
+                  <p className="mt-1 text-2xl font-bold text-slate-900">
+                    {data.compliance.documents.total}
+                  </p>
+                  <p className="text-xs text-slate-600">
+                    {data.compliance.documents.expired > 0 ? (
+                      <span className="text-red-700">
+                        {data.compliance.documents.expired} expired
+                      </span>
+                    ) : data.compliance.documents.expiringSoon > 0 ? (
+                      <span className="text-amber-700">
+                        {data.compliance.documents.expiringSoon} expiring soon
+                      </span>
+                    ) : (
+                      <span className="text-emerald-700">all in date</span>
+                    )}
+                  </p>
+                  {data.compliance.documents.recent.length > 0 && (
+                    <ul className="mt-2 space-y-0.5 text-xs">
+                      {data.compliance.documents.recent.slice(0, 3).map((d) => (
+                        <li key={d.id} className="truncate text-slate-700">
+                          {d.name}
+                          {d.status === "EXPIRED" ? (
+                            <span className="text-red-700"> · expired</span>
+                          ) : d.expiringSoon ? (
+                            <span className="text-amber-700"> · expiring</span>
+                          ) : null}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
           </div>
         </section>
       )}

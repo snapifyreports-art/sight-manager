@@ -93,10 +93,12 @@ export async function PATCH(
         include: { attachments: true },
       });
       await logEvent(prisma, {
-        type: "USER_ACTION",
+        // (Jun 2026 Wave-4 S10) Toolbox Site Log category.
+        type: "TOOLBOX_TALK",
         siteId: id,
         userId: a.session.user.id,
         description: `Toolbox talk completed: "${existing.topic}"`,
+        detail: { talkId },
       });
       return NextResponse.json(updated);
     }
@@ -111,10 +113,12 @@ export async function PATCH(
         include: { attachments: true },
       });
       await logEvent(prisma, {
-        type: "USER_ACTION",
+        // (Jun 2026 Wave-4 S10) Toolbox Site Log category.
+        type: "TOOLBOX_TALK",
         siteId: id,
         userId: a.session.user.id,
         description: `Toolbox talk cancelled: "${existing.topic}"`,
+        detail: { talkId },
       });
       return NextResponse.json(updated);
     }

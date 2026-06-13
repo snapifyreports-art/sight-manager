@@ -50,7 +50,9 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  const a = await authorise(id);
+  // (Jun 2026 Wave-4 D9) Reading NCRs now requires VIEW_COMPLIANCE — they
+  // carry root-cause / liability detail, not general site data.
+  const a = await authorise(id, "VIEW_COMPLIANCE");
   if ("error" in a) return a.error;
 
   const ncrs = await prisma.nCR.findMany({
@@ -74,7 +76,8 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  const a = await authorise(id, "EDIT_PROGRAMME");
+  // (Jun 2026 Wave-4 D9) Raising an NCR now requires MANAGE_COMPLIANCE.
+  const a = await authorise(id, "MANAGE_COMPLIANCE");
   if ("error" in a) return a.error;
 
   const body = await req.json();
@@ -107,12 +110,14 @@ export async function POST(
       },
     });
     await logEvent(prisma, {
-      type: "USER_ACTION",
+      // (Jun 2026 Wave-4 S10) Dedicated Site Log category for NCRs.
+      type: "NCR_RAISED",
       siteId: id,
       plotId: body.plotId || null,
       jobId: body.jobId || null,
       userId: a.session.user.id,
       description: `${ref} raised: "${ncr.title}"`,
+      detail: { ncrId: ncr.id, ref },
     });
     return NextResponse.json(ncr, { status: 201 });
   } catch (err) {

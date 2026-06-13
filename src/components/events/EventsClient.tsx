@@ -28,6 +28,10 @@ import {
   Clock,
   AlertTriangle,
   ClipboardCheck,
+  FileWarning,
+  Wrench,
+  Replace,
+  MessageSquare,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -130,6 +134,10 @@ const EVENT_TYPES = [
   "INSPECTION_PASSED",
   "INSPECTION_FAILED",
   "INSPECTION_OVERDUE",
+  "NCR_RAISED",
+  "DEFECT_RAISED",
+  "VARIATION_RAISED",
+  "TOOLBOX_TALK",
 ] as const;
 
 const EVENT_TYPE_CONFIG: Record<
@@ -372,6 +380,35 @@ const EVENT_TYPE_CONFIG: Record<
     badgeVariant: "destructive",
     iconBg: "bg-red-500/15",
     iconColor: "text-red-600 dark:text-red-400",
+  },
+  // (Jun 2026 Wave-4 S10) Compliance / quality categories.
+  NCR_RAISED: {
+    label: "NCR Raised",
+    icon: FileWarning,
+    badgeVariant: "destructive",
+    iconBg: "bg-red-500/15",
+    iconColor: "text-red-600 dark:text-red-400",
+  },
+  DEFECT_RAISED: {
+    label: "Defect Raised",
+    icon: Wrench,
+    badgeVariant: "secondary",
+    iconBg: "bg-orange-500/15",
+    iconColor: "text-orange-600 dark:text-orange-400",
+  },
+  VARIATION_RAISED: {
+    label: "Variation",
+    icon: Replace,
+    badgeVariant: "secondary",
+    iconBg: "bg-violet-500/15",
+    iconColor: "text-violet-600 dark:text-violet-400",
+  },
+  TOOLBOX_TALK: {
+    label: "Toolbox Talk",
+    icon: MessageSquare,
+    badgeVariant: "outline",
+    iconBg: "bg-teal-500/15",
+    iconColor: "text-teal-600 dark:text-teal-400",
   },
 };
 

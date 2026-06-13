@@ -44,7 +44,8 @@ export async function PUT(
   { params }: { params: Promise<{ id: string; defectId: string }> },
 ) {
   const { id, defectId } = await params;
-  const a = await authoriseByPlot(id, "EDIT_PROGRAMME");
+  // (Jun 2026 Wave-4 D9) Editing a defect now requires MANAGE_COMPLIANCE.
+  const a = await authoriseByPlot(id, "MANAGE_COMPLIANCE");
   if ("error" in a) return a.error;
 
   // (Jun 2026 audit IDOR) The child must belong to the plot in the URL.

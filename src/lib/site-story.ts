@@ -145,6 +145,25 @@ export interface SiteStory {
         daysDelta: number | null;
       }[];
     };
+    /** (Jun 2026 Wave-4 D10) Compliance documents — insurance, permits,
+     *  CDM, environment certs (SiteComplianceItem). Closure readiness
+     *  gates on nothing being expired; expiringSoon (≤14d) is a warn. */
+    documents: {
+      total: number;
+      active: number;
+      expired: number;
+      /** Active but within 14 days of expiry. */
+      expiringSoon: number;
+      recent: {
+        id: string;
+        name: string;
+        category: string | null;
+        status: string;
+        expiresAt: string | null;
+        /** True when active + within 14 days of expiry. */
+        expiringSoon: boolean;
+      }[];
+    };
   };
   /** (May 2026 Story-linkage audit) Evidence-trail rollups: voice
    *  notes and photo annotations are user-entered artefacts that
@@ -933,6 +952,49 @@ export async function buildSiteStory(
     0,
   );
 
+  // ─── Compliance documents: insurance / permits / CDM / certs ────────
+  // (Jun 2026 Wave-4 D10) SiteComplianceItem rolls up here so the Story
+  // panel + Closure readiness see whether the site's statutory paperwork
+  // is in date. Closure gates on nothing being EXPIRED; an item active but
+  // within 14 days of expiry is surfaced as a warn (expiringSoon).
+  const complianceDocsRaw = await tx.siteComplianceItem.findMany({
+    where: { siteId },
+    select: {
+      id: true,
+      name: true,
+      category: true,
+      status: true,
+      expiresAt: true,
+    },
+    orderBy: [{ expiresAt: "asc" }, { createdAt: "desc" }],
+  });
+  const complianceNow = new Date();
+  const complianceWarnBy = new Date(complianceNow);
+  complianceWarnBy.setDate(complianceWarnBy.getDate() + 14);
+  const docIsExpiringSoon = (status: string, expiresAt: Date | null) =>
+    status === "ACTIVE" &&
+    expiresAt != null &&
+    expiresAt > complianceNow &&
+    expiresAt <= complianceWarnBy;
+  const complianceDocsTotal = complianceDocsRaw.length;
+  const complianceDocsActive = complianceDocsRaw.filter(
+    (d) => d.status === "ACTIVE",
+  ).length;
+  const complianceDocsExpired = complianceDocsRaw.filter(
+    (d) => d.status === "EXPIRED",
+  ).length;
+  const complianceDocsExpiringSoon = complianceDocsRaw.filter((d) =>
+    docIsExpiringSoon(d.status, d.expiresAt),
+  ).length;
+  const recentComplianceDocs = complianceDocsRaw.slice(0, 12).map((d) => ({
+    id: d.id,
+    name: d.name,
+    category: d.category,
+    status: d.status,
+    expiresAt: d.expiresAt?.toISOString() ?? null,
+    expiringSoon: docIsExpiringSoon(d.status, d.expiresAt),
+  }));
+
   // Per-plot maps for the plotStories aggregation below.
   const ncrCountsByPlot = new Map<string, { open: number; total: number }>();
   for (const n of allNcrs) {
@@ -1661,6 +1723,14 @@ export async function buildSiteStory(
         costDelta: variationsCostDelta,
         daysDelta: variationsDaysDelta,
         recent: recentVariations,
+      },
+      // (Jun 2026 Wave-4 D10) Compliance documents — insurance/permits/certs.
+      documents: {
+        total: complianceDocsTotal,
+        active: complianceDocsActive,
+        expired: complianceDocsExpired,
+        expiringSoon: complianceDocsExpiringSoon,
+        recent: recentComplianceDocs,
       },
     },
     evidence: {

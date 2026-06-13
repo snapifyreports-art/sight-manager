@@ -10,6 +10,9 @@ interface Snag {
   priority: string;
   location: string | null;
   notes?: string | null;
+  // (Jun 2026 Wave-4 S6) Set when a contractor sign-off was requested —
+  // drives the "Requested" badge instead of inferring it from status.
+  signOffRequestedAt?: string | null;
   plot: { plotNumber: string | null; name: string };
   photos?: Array<{ id: string; url: string; tag: string | null }>;
 }
@@ -32,15 +35,18 @@ export function SnagSignOffCard({ snag, token }: { snag: Snag; token: string }) 
   const [notes, setNotes] = useState("");
   const [photos, setPhotos] = useState<File[]>([]);
   const [submitting, setSubmitting] = useState(false);
-  const [requested, setRequested] = useState(snag.status === "IN_PROGRESS");
+  // (Jun 2026 Wave-4 S6) "Requested" reflects an actual sign-off request
+  // (signOffRequestedAt set), not merely IN_PROGRESS — a snag a manager is
+  // working on in-app is also IN_PROGRESS but has no pending sign-off.
+  const [requested, setRequested] = useState(!!snag.signOffRequestedAt);
   const [error, setError] = useState<string | null>(null);
 
   // (May 2026 pattern sweep) Sync requested to prop changes — on
   // subsequent page renders with updated snag prop the button could
   // otherwise show wrong state.
   useEffect(() => {
-    setRequested(snag.status === "IN_PROGRESS");
-  }, [snag.status]);
+    setRequested(!!snag.signOffRequestedAt);
+  }, [snag.signOffRequestedAt]);
 
   const hasDetail = (snag.photos && snag.photos.length > 0) || snag.notes;
 

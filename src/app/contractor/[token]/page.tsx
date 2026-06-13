@@ -245,6 +245,8 @@ export default async function ContractorSharePage({
     where: { contactId, plot: { siteId }, status: { in: ["OPEN", "IN_PROGRESS"] } },
     select: {
       id: true, description: true, status: true, priority: true, location: true, notes: true,
+      // (Jun 2026 Wave-4 S6) drives the contractor card's "Requested" badge.
+      signOffRequestedAt: true,
       plot: { select: { id: true, plotNumber: true, name: true } },
       photos: { select: { id: true, url: true, tag: true }, orderBy: { createdAt: "asc" } },
     },
@@ -260,11 +262,20 @@ export default async function ContractorSharePage({
   // (separate internalNotes / publicNotes columns) is tracked for a
   // future sprint — this is the lower-risk in-flight mitigation.
   const openSnags = openSnagsRaw.map((s) => {
-    if (!s.notes) return s;
+    // (Jun 2026 Wave-4 S6) Normalise the Date to an ISO string so the
+    // client card prop stays string-only across the RSC boundary.
+    const signOffRequestedAt = s.signOffRequestedAt
+      ? s.signOffRequestedAt.toISOString()
+      : null;
+    if (!s.notes) return { ...s, signOffRequestedAt };
     const contractorLines = s.notes
       .split("\n")
       .filter((line) => /^\[[^\]]+\]\s+Contractor notes/i.test(line));
-    return { ...s, notes: contractorLines.length > 0 ? contractorLines.join("\n") : null };
+    return {
+      ...s,
+      signOffRequestedAt,
+      notes: contractorLines.length > 0 ? contractorLines.join("\n") : null,
+    };
   });
 
   // Contractor-scoped documents (RAMS, method statements) — visible here

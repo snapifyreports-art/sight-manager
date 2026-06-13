@@ -70,6 +70,15 @@ interface ClosureSummary {
      *  REJECTED variations are finalised, so the gate below subtracts
      *  them instead of counting them as outstanding forever. */
     variations: { total: number; approved: number; rejected?: number };
+    /** (Jun 2026 Wave-4 D10) Compliance documents — insurance/permits/certs.
+     *  Optional for old cached payloads. Closure blocks on `expired > 0`;
+     *  `expiringSoon` is surfaced as a warning, not a hard gate. */
+    documents?: {
+      total: number;
+      active: number;
+      expired: number;
+      expiringSoon: number;
+    };
   };
   evidence?: {
     preStartChecks: { total: number; checked: number };
@@ -270,12 +279,19 @@ export function SiteClosurePanel({ siteId }: { siteId: string }) {
   const inspectionsUnresolved = inspectionsOpen + inspectionsFailed;
   const inspectionsReady =
     (data.inspections?.total ?? 0) === 0 || inspectionsUnresolved === 0;
+  // (Jun 2026 Wave-4 D10) Compliance documents. An EXPIRED insurance /
+  // permit / cert is a hard gate — you can't sign off a site whose
+  // statutory cover lapsed. Within-14-days is a warning, not a block.
+  const complianceDocsExpired = data.compliance?.documents?.expired ?? 0;
+  const complianceDocsExpiringSoon =
+    data.compliance?.documents?.expiringSoon ?? 0;
   const allReady =
     incompletePlots === 0 &&
     data.variance.snagsOpen === 0 &&
     openNcrs === 0 &&
     openDefects === 0 &&
     variationsOutstanding === 0 &&
+    complianceDocsExpired === 0 &&
     handoverDocsReady &&
     preStartReady &&
     inspectionsReady &&
@@ -363,6 +379,24 @@ export function SiteClosurePanel({ siteId }: { siteId: string }) {
                 okLabel="All variations approved or rejected"
                 warnLabel={`${variationsOutstanding} variation${variationsOutstanding !== 1 ? "s" : ""} still awaiting a decision`}
               />
+              {/* (Jun 2026 Wave-4 D10) Compliance documents in date. An
+                  expired insurance / permit / cert is a hard gate; within
+                  14 days of expiry is a separate warning below. */}
+              {data.compliance.documents &&
+                data.compliance.documents.total > 0 && (
+                  <ChecklistRow
+                    ok={complianceDocsExpired === 0}
+                    okLabel="All compliance documents in date"
+                    warnLabel={`${complianceDocsExpired} compliance document${complianceDocsExpired !== 1 ? "s" : ""} (insurance / permit / cert) expired — must be renewed before closing the site`}
+                  />
+                )}
+              {complianceDocsExpiringSoon > 0 && (
+                <ChecklistRow
+                  ok={false}
+                  okLabel=""
+                  warnLabel={`${complianceDocsExpiringSoon} compliance document${complianceDocsExpiringSoon !== 1 ? "s" : ""} within 14 days of expiry — renew soon (does not block closure)`}
+                />
+              )}
             </>
           )}
           {data.handoverReadiness && handoverDocsRequired > 0 && (
