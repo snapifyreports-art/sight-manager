@@ -74,7 +74,8 @@ const SITE_TAB_GROUPS = [
     icon: FolderOpen,
     tabs: [
       { label: "Quants",         tab: "quants" },
-      { label: "Drawings",       tab: "drawings" },
+      // (Jun 2026) "Drawings" + "Documents" merged into one Documents surface
+      // with a category filter. ?tab=drawings still resolves (drawings-filtered).
       { label: "Documents",      tab: "documents" },
       { label: "Photos",         tab: "photos" },
       { label: "Critical Path",  tab: "critical-path" },

@@ -81,8 +81,6 @@ import { SiteProgramme } from "@/components/programme/SiteProgramme";
 import { SiteHeatmap } from "@/components/sites/SiteHeatmap";
 import { SnagList } from "@/components/snags/SnagList";
 import { SnagDialog } from "@/components/snags/SnagDialog";
-import { DocumentList } from "@/components/documents/DocumentList";
-import { DocumentUpload } from "@/components/documents/DocumentUpload";
 import { DailySiteBrief } from "@/components/reports/DailySiteBrief";
 import { ContractorDaySheets } from "@/components/reports/ContractorDaySheets";
 import { ContractorComms } from "@/components/reports/ContractorComms";
@@ -92,7 +90,7 @@ import { BudgetReport } from "@/components/reports/BudgetReport";
 import { SiteCalendar } from "@/components/reports/SiteCalendar";
 import { BatchPlotQR } from "@/components/plots/PlotQRCode";
 import { SiteQuantsClient } from "@/components/admin/SiteQuantsClient";
-import { SiteDrawingsClient } from "@/components/admin/SiteDrawingsClient";
+import { SiteDocumentsClient } from "@/components/admin/SiteDocumentsClient";
 import { WeeklySiteReport } from "@/components/reports/WeeklySiteReport";
 import { CriticalPath } from "@/components/reports/CriticalPath";
 import { SiteOrders } from "@/components/orders/SiteOrders";
@@ -487,54 +485,6 @@ function SiteSnags({ siteId, plots, initialSnagId, initialStatusFilter }: { site
           }}
         />
       )}
-    </div>
-  );
-}
-
-// ---------- Site Documents Sub-Component ----------
-
-function SiteDocuments({ siteId }: { siteId: string }) {
-  // Documents come from /api/sites/[id]/documents and are passed straight
-  // through to DocumentList, which owns the concrete type.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [docs, setDocs] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  const loadDocs = useCallback(() => {
-    // (May 2026 pattern sweep) Guard with .ok.
-    fetch(`/api/sites/${siteId}/documents`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => { if (d) setDocs(d); })
-      .finally(() => setLoading(false));
-  }, [siteId]);
-
-  useEffect(() => {
-    // (May 2026 pattern sweep) Cancellation flag for site-switch race.
-    let cancelled = false;
-    fetch(`/api/sites/${siteId}/documents`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => { if (d && !cancelled) setDocs(d); })
-      .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [siteId]);
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center py-16">
-        <Loader2 className="size-6 animate-spin text-muted-foreground" />
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-4">
-      <DocumentUpload siteId={siteId} onUploaded={loadDocs} />
-      <DocumentList
-        documents={docs}
-        onDelete={(id) => setDocs((prev) => prev.filter((d) => d.id !== id))}
-        level="site"
-      />
     </div>
   );
 }
@@ -2671,7 +2621,10 @@ export function SiteDetailClient({
 
           <div className={activeTab !== "documents" ? "hidden" : undefined}>
             {visitedTabs.has("documents") && (
-              <SiteDocuments siteId={site.id} />
+              <SiteDocumentsClient
+                siteId={site.id}
+                plots={site.plots.map((p) => ({ id: p.id, plotNumber: p.plotNumber, name: p.name }))}
+              />
             )}
           </div>
 
@@ -2776,11 +2729,15 @@ export function SiteDetailClient({
             )}
           </div>
 
+          {/* (Jun 2026) "Drawings" merged into Documents — this block keeps
+              old ?tab=drawings links working, opening the unified surface
+              pre-filtered to drawings. */}
           <div className={activeTab !== "drawings" ? "hidden" : undefined}>
             {visitedTabs.has("drawings") && (
-              <SiteDrawingsClient
+              <SiteDocumentsClient
                 siteId={site.id}
                 plots={site.plots.map((p) => ({ id: p.id, plotNumber: p.plotNumber, name: p.name }))}
+                initialCategory="DRAWING"
               />
             )}
           </div>
