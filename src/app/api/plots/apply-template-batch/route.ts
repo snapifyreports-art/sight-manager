@@ -10,6 +10,13 @@ import { sessionHasPermission } from "@/lib/permissions";
 import { logEvent } from "@/lib/event-log";
 
 export const dynamic = "force-dynamic";
+// (Jun 2026 Keith field report — 504 on 249-plot site) Give each request
+// the maximum headroom the plan allows. The client chunks large batches
+// into small groups so no single request should come close to this, but
+// the ceiling means a slightly-heavy chunk (a template with 20+ jobs and
+// many orders per plot) can't be killed by the default ~10–15s limit.
+// 60s is the universally-safe cap (allowed on every Vercel plan).
+export const maxDuration = 60;
 
 // POST /api/plots/apply-template-batch — create multiple plots from a template
 export async function POST(request: NextRequest) {
@@ -197,7 +204,17 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Check for existing plot numbers on this site
+  // (Jun 2026 Keith field report) SKIP plot numbers that already exist on
+  // this site rather than rejecting the whole request. This makes chunked
+  // + retried batch creation IDEMPOTENT: a large batch is split into small
+  // chunks client-side; if one chunk times out or the network drops
+  // mid-way, pressing Create again re-sends every chunk — the plots that
+  // already landed are skipped here, and only the missing ones are
+  // created. Pre-fix this 400'd the entire batch the instant one number
+  // collided, so "retry just the failed plots" was actually broken once
+  // any plot had been created.
+  let plotsToCreate = plots;
+  const skippedExisting: string[] = [];
   if (plotNumbers.length > 0) {
     const existing = await prisma.plot.findMany({
       where: {
@@ -207,12 +224,32 @@ export async function POST(request: NextRequest) {
       select: { plotNumber: true },
     });
     if (existing.length > 0) {
-      const dupes = existing.map((p) => p.plotNumber).join(", ");
-      return NextResponse.json(
-        { error: `Plot numbers already exist on this site: ${dupes}` },
-        { status: 400 }
-      );
+      const existingSet = new Set(existing.map((p) => p.plotNumber));
+      plotsToCreate = [];
+      for (const p of plots) {
+        const num = p.plotNumber?.trim();
+        if (num && existingSet.has(num)) skippedExisting.push(num);
+        else plotsToCreate.push(p);
+      }
     }
+  }
+
+  // Every plot in this chunk already exists from a previous attempt —
+  // nothing to do. Return success (not an error) with the skip list so
+  // the chunked caller carries on to the next chunk cleanly.
+  if (plotsToCreate.length === 0) {
+    return NextResponse.json(
+      {
+        created: 0,
+        plotIds: [],
+        errors: [],
+        warnings: {},
+        inspectionWarnings: [],
+        documentWarnings: [],
+        skippedExisting,
+      },
+      { status: 200 },
+    );
   }
 
   const fallbackStartDate = new Date(startDate);
@@ -234,7 +271,7 @@ export async function POST(request: NextRequest) {
   // Identical for every plot in the batch, so a single list suffices.
   let inspectionWarnings: string[] = [];
 
-  for (const plotInput of plots) {
+  for (const plotInput of plotsToCreate) {
     // Per-plot start date (May 2026): each plot row may carry its own
     // startDate from the wizard's stagger / per-plot override flow. Fall
     // back to the batch-level date for legacy callers that don't pass
@@ -264,11 +301,11 @@ export async function POST(request: NextRequest) {
           },
         });
 
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const { warnings: w, jobIdMap } = await createJobsFromTemplate(
           tx,
           plot.id,
           perPlotStart,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           scopedJobs as any,
           supplierMappings || null,
           site.assignedToId
@@ -353,7 +390,7 @@ export async function POST(request: NextRequest) {
     const firstError = errors[0]?.error ?? "unknown error";
     return NextResponse.json(
       {
-        error: `All ${plots.length} plot${plots.length === 1 ? "" : "s"} failed to create — first error: ${firstError}`,
+        error: `All ${plotsToCreate.length} plot${plotsToCreate.length === 1 ? "" : "s"} failed to create — first error: ${firstError}`,
         errors,
       },
       { status: 500 }
@@ -368,6 +405,7 @@ export async function POST(request: NextRequest) {
       warnings: warningsByPlot,
       inspectionWarnings,
       documentWarnings,
+      skippedExisting,
     },
     { status: 201 }
   );

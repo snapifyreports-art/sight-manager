@@ -10,6 +10,12 @@ import { logEvent } from "@/lib/event-log";
 import { sessionHasPermission } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
+// (Jun 2026 504-class sweep) A site-wide delay runs a per-plot cascade
+// inside its own 30s transaction for every selected plot. On a big site
+// (50+ plots) this can exceed the default function limit. Raise to the
+// safe 60s ceiling. A delay is NOT idempotent (re-running stacks another
+// shift), so this stays one request — headroom, not retry-chunking.
+export const maxDuration = 60;
 
 type DelayReasonType = "WEATHER_RAIN" | "WEATHER_TEMPERATURE" | "OTHER";
 

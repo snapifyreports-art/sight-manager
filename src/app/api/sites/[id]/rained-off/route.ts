@@ -9,6 +9,11 @@ import { calculateCascade } from "@/lib/cascade";
 import { logEvent } from "@/lib/event-log";
 
 export const dynamic = "force-dynamic";
+// (Jun 2026 504-class sweep) A "rained off" mark with delay-jobs enabled
+// runs a per-plot cascade transaction for every weather-affected plot on
+// the site. On a large site this can exceed the default function limit —
+// raise to the safe 60s ceiling. (POST only; the GET/DELETE are light.)
+export const maxDuration = 60;
 
 type WeatherImpactType = "RAIN" | "TEMPERATURE";
 

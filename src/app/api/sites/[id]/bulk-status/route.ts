@@ -10,6 +10,13 @@ import { snapToWorkingDay } from "@/lib/working-days";
 import { logEvent } from "@/lib/event-log";
 
 export const dynamic = "force-dynamic";
+// (Jun 2026 504-class sweep) "Complete All" runs a full per-job cascade
+// (date recompute + order push + parent rollup + inspection re-date) for
+// every job in the request. On a large multi-plot programme the default
+// ~10–15s function limit can be exceeded. Give it the safe 60s ceiling.
+// Cascades aren't idempotent on retry, so this stays one request — the
+// fix is headroom, not chunking.
+export const maxDuration = 60;
 
 const ACTION_STATUS_MAP: Record<string, JobStatus> = {
   start: "IN_PROGRESS",

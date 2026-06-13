@@ -6,6 +6,9 @@ import { sessionHasPermission } from "@/lib/permissions";
 import * as XLSX from "xlsx";
 
 export const dynamic = "force-dynamic";
+// (Jun 2026 504-class sweep) Bulk pricelist import upserts one row at a
+// time inside a transaction. Give the request the safe 60s ceiling.
+export const maxDuration = 60;
 
 interface PricelistRow {
   Name?: string;
@@ -69,7 +72,11 @@ export async function POST(
   let updated = 0;
 
   try {
-    // Process sequentially in a transaction (Supabase pool limit)
+    // Process sequentially in a transaction (Supabase pool limit).
+    // (Jun 2026 504-class sweep) Pre-fix this had NO timeout override, so
+    // it inherited Prisma's 5s interactive-transaction default — a pricelist
+    // of more than ~a hundred rows blew that limit and rolled back the WHOLE
+    // import with a confusing error. Match the batch-apply timeout (60s).
     await prisma.$transaction(async (tx) => {
       for (const row of validRows) {
         const name = String(row.Name).trim();
@@ -95,7 +102,7 @@ export async function POST(
           created++;
         }
       }
-    });
+    }, { timeout: 60_000 });
 
     return NextResponse.json({ imported: validRows.length, created, updated });
   } catch (err) {

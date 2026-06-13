@@ -4,6 +4,8 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useRefreshOnFocus } from "@/hooks/useRefreshOnFocus";
 import { format, addWeeks, addDays } from "date-fns";
+import { deriveBatchPlotDates } from "@/lib/plot-batch";
+import { PerPlotDateEditor } from "./PerPlotDateEditor";
 import {
   AlertTriangle,
   ClipboardCheck,
@@ -172,6 +174,11 @@ interface TemplateOrder {
   orderWeekOffset: number;
   deliveryWeekOffset: number;
   items: TemplateOrderItem[];
+  /** Supplier baked into the template. When set, the apply-template
+   *  flow auto-resolves it — the user is NOT asked to map a supplier.
+   *  Only orders with a null supplierId need the supplier-mapping step.
+   *  (Jun 2026 Keith field report) */
+  supplierId: string | null;
 }
 
 interface TemplateJob {
@@ -657,6 +664,21 @@ export function SiteDetailClient({
   const [bulkRangeStart, setBulkRangeStart] = useState("");
   const [bulkRangeEnd, setBulkRangeEnd] = useState("");
   const [bulkStep, setBulkStep] = useState<"config" | "suppliers">("config");
+  // (Jun 2026 Keith field report) Bulk add-plots now supports the same
+  // stagger / per-plot start-date feature as the new-site wizard. 0 =
+  // all plots share the batch start date. N = each plot starts N working
+  // days after the previous. Per-plot rows can be pinned to override.
+  const [bulkStaggerDays, setBulkStaggerDays] = useState<number>(0);
+  const [bulkPlotDates, setBulkPlotDates] = useState<Record<string, string>>(
+    {},
+  );
+  // (Jun 2026 Keith 504 report) Live progress for chunked bulk creation —
+  // a 200-plot batch is sent in chunks, so show "120/200" rather than a
+  // frozen spinner. null = not creating.
+  const [bulkProgress, setBulkProgress] = useState<{
+    done: number;
+    total: number;
+  } | null>(null);
 
   // Controlled tabs + overdue alerts (UX #6)
   // (May 2026 audit F-P1-18) Default landing tab is "daily-brief" rather
@@ -825,6 +847,8 @@ export function SiteDetailClient({
     setBulkRangeStart("");
     setBulkRangeEnd("");
     setBulkStep("config");
+    setBulkStaggerDays(0);
+    setBulkPlotDates({});
   }
 
   async function validatePostcode(pc: string) {
@@ -944,21 +968,40 @@ export function SiteDetailClient({
     }
   }
 
-  // Build bulk plot list from range
-  const bulkPlots = (() => {
+  // Build bulk plot list from range (numeric From/To, capped at 200).
+  const bulkPlotNumbers = (() => {
     const start = parseInt(bulkRangeStart);
     const end = parseInt(bulkRangeEnd);
     if (isNaN(start) || isNaN(end) || start > end || end - start > 200)
       return [];
-    return Array.from({ length: end - start + 1 }, (_, i) => ({
-      plotNumber: String(start + i),
-      plotName: `Plot ${start + i}`,
-    }));
+    return Array.from({ length: end - start + 1 }, (_, i) =>
+      String(start + i),
+    );
   })();
+
+  // Range string fed to the per-plot date editor (it re-parses + expands).
+  const bulkInput =
+    bulkPlotNumbers.length > 0 ? `${bulkRangeStart}-${bulkRangeEnd}` : "";
+
+  // (Jun 2026 Keith field report) Per-plot rows carry stagger/override-aware
+  // start dates — identical maths to the new-site wizard via the shared
+  // deriveBatchPlotDates. A per-plot date is only sent when actually set;
+  // the batch endpoint falls back to the batch-level startDate otherwise.
+  const bulkPlots = deriveBatchPlotDates(
+    bulkPlotNumbers,
+    startDate,
+    bulkStaggerDays,
+    bulkPlotDates,
+  ).map((p) => ({
+    plotNumber: p.plotNumber,
+    plotName: `Plot ${p.plotNumber}`,
+    startDate: p.startDate || undefined,
+  }));
 
   async function handleBulkCreate() {
     if (!selectedTemplateId || !startDate || bulkPlots.length === 0) return;
     setCreatingPlot(true);
+    setBulkProgress({ done: 0, total: bulkPlots.length });
     try {
       const res = await createBatchFromTemplate({
         siteId: site.id,
@@ -967,7 +1010,10 @@ export function SiteDetailClient({
         startDate,
         supplierMappings,
         plots: bulkPlots,
-      }, { silent: true });
+      }, {
+        silent: true,
+        onProgress: (done, total) => setBulkProgress({ done, total }),
+      });
 
       if (!res.ok) {
         let errorMsg = res.error ?? "Failed to create plots";
@@ -988,6 +1034,7 @@ export function SiteDetailClient({
       router.refresh();
     } finally {
       setCreatingPlot(false);
+      setBulkProgress(null);
     }
   }
 
@@ -1003,6 +1050,16 @@ export function SiteDetailClient({
         job.orders.map((order) => ({ order, jobName: job.name })),
       )
     : [];
+
+  // (Jun 2026 Keith field report) Only orders with NO supplier in the
+  // template need the supplier-mapping step — orders that already carry a
+  // supplierId are auto-resolved by apply-template-helpers. A live site's
+  // template is fully supplied, so adding a plot should ask for nothing
+  // and go straight to "Create Plot". Mirrors CreateSiteWizard's
+  // templateHasUnmappedOrders gate so the two flows can't disagree.
+  const unmappedTemplateOrders = allTemplateOrders.filter(
+    ({ order }) => !order.supplierId,
+  );
 
   return (
     <div className="space-y-6">
@@ -1477,7 +1534,7 @@ export function SiteDetailClient({
                       >
                         Back
                       </Button>
-                      {allTemplateOrders.length > 0 ? (
+                      {unmappedTemplateOrders.length > 0 ? (
                         <Button
                           onClick={() => setTemplateStep("suppliers")}
                           disabled={
@@ -1510,12 +1567,12 @@ export function SiteDetailClient({
                 {plotMode === "template" && templateStep === "suppliers" && (
                   <>
                     <div className="max-h-[50vh] space-y-3 overflow-y-auto py-2">
-                      {allTemplateOrders.length === 0 ? (
+                      {unmappedTemplateOrders.length === 0 ? (
                         <p className="text-sm text-muted-foreground">
                           No orders require supplier mapping.
                         </p>
                       ) : (
-                        allTemplateOrders.map(({ order, jobName }) => (
+                        unmappedTemplateOrders.map(({ order, jobName }) => (
                           <div
                             key={order.id}
                             className="rounded-lg border bg-slate-50/50 p-3"
@@ -1734,18 +1791,73 @@ export function SiteDetailClient({
                             </p>
                           </div>
 
-                          <div className="space-y-2">
-                            <Label htmlFor="bulk-start-date">Start Date</Label>
-                            <Input
-                              id="bulk-start-date"
-                              type="date"
-                              value={startDate}
-                              onChange={(e) => setStartDate(e.target.value)}
-                            />
-                            <p className="text-[11px] text-muted-foreground">
-                              All plots will share this start date.
-                            </p>
+                          <div className="grid grid-cols-2 gap-2">
+                            <div className="space-y-2">
+                              <Label htmlFor="bulk-start-date">
+                                Start Date
+                              </Label>
+                              <Input
+                                id="bulk-start-date"
+                                type="date"
+                                value={startDate}
+                                onChange={(e) => {
+                                  setStartDate(e.target.value);
+                                  // Editing the batch start clears per-plot
+                                  // pins so the staggered column recomputes
+                                  // around the new date.
+                                  setBulkPlotDates({});
+                                }}
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <Label
+                                htmlFor="bulk-stagger"
+                                title="Working-day gap between consecutive plots. 0 = all plots same date. 5 = each plot one working week after the previous."
+                              >
+                                Stagger (working days)
+                              </Label>
+                              <Input
+                                id="bulk-stagger"
+                                type="number"
+                                min={0}
+                                max={365}
+                                value={bulkStaggerDays}
+                                onChange={(e) => {
+                                  const v = parseInt(e.target.value, 10);
+                                  setBulkStaggerDays(
+                                    Number.isFinite(v) && v >= 0 ? v : 0,
+                                  );
+                                  setBulkPlotDates({});
+                                }}
+                                placeholder="0"
+                              />
+                            </div>
                           </div>
+                          <p className="text-[11px] text-muted-foreground">
+                            Plot 1 starts on this date; each later plot starts
+                            the stagger gap after the previous. Set 0 to start
+                            them all together — edit any row below to pin its
+                            own date.
+                          </p>
+
+                          {/* Per-plot date editor — the same control the
+                              new-site wizard uses, so the two add-plot flows
+                              stay in lock-step (shared component + maths). */}
+                          <PerPlotDateEditor
+                            input={bulkInput}
+                            startDate={startDate}
+                            staggerDays={bulkStaggerDays}
+                            overrides={bulkPlotDates}
+                            onOverrideChange={(plotNumber, date) =>
+                              setBulkPlotDates((prev) => {
+                                const next = { ...prev };
+                                if (date) next[plotNumber] = date;
+                                else delete next[plotNumber];
+                                return next;
+                              })
+                            }
+                            onResetAll={() => setBulkPlotDates({})}
+                          />
                         </>
                       )}
                     </div>
@@ -1756,7 +1868,7 @@ export function SiteDetailClient({
                       >
                         Back
                       </Button>
-                      {allTemplateOrders.length > 0 ? (
+                      {unmappedTemplateOrders.length > 0 ? (
                         <Button
                           onClick={() => setBulkStep("suppliers")}
                           disabled={
@@ -1781,7 +1893,9 @@ export function SiteDetailClient({
                           {creatingPlot ? (
                             <>
                               <Loader2 className="size-4 animate-spin" />
-                              Creating {bulkPlots.length} plots...
+                              {bulkProgress && bulkProgress.total > 10
+                                ? `Creating… ${bulkProgress.done}/${bulkProgress.total} plots`
+                                : `Creating ${bulkPlots.length} plots...`}
                             </>
                           ) : (
                             `Create ${bulkPlots.length} Plots`
@@ -1805,7 +1919,7 @@ export function SiteDetailClient({
                           Supplier mappings apply to all plots.
                         </p>
                       </div>
-                      {allTemplateOrders.map(({ order, jobName }) => (
+                      {unmappedTemplateOrders.map(({ order, jobName }) => (
                         <div
                           key={order.id}
                           className="rounded-lg border bg-slate-50/50 p-3"

@@ -2,7 +2,12 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { format } from "date-fns";
-import { addWorkingDays } from "@/lib/working-days";
+import {
+  parsePlotNumbers,
+  deriveBatchPlotDates,
+  type PlotBatchPlot,
+} from "@/lib/plot-batch";
+import { PerPlotDateEditor } from "./PerPlotDateEditor";
 import { BatchProgrammePreviewDialog } from "./BatchProgrammePreviewDialog";
 import { useConfirm } from "@/hooks/useConfirm";
 import {
@@ -140,13 +145,6 @@ interface Supplier {
   name: string;
 }
 
-interface PlotBatchPlot {
-  plotNumber: string;
-  /** Per-plot start date (ISO yyyy-mm-dd). Computed from the batch
-   *  start date + stagger by default; user can override per row. */
-  startDate: string;
-}
-
 interface PlotBatch {
   id: string;
   mode: "blank" | "template";
@@ -163,184 +161,7 @@ interface PlotBatch {
   variantName?: string;
 }
 
-/**
- * Parse a plot-numbers input string into an array.
- *
- * Accepts:
- *   - "1-20"                → ["1","2",...,"20"] (integer range shortcut)
- *   - "47-A, 47-B, 50"      → as-is (comma list, any strings)
- *   - "1-5, 10, 12-14"      → mixed: ["1","2","3","4","5","10","12","13","14"]
- *   - Whitespace trimmed, empty entries skipped
- *
- * Returns errors for: invalid ranges, ranges too large (>500), duplicates.
- * A-Z range syntax ("A-E") is NOT expanded — it's treated as a literal
- * single plot number, which is almost certainly what the user intended.
- */
-function parsePlotNumbers(input: string): { numbers: string[]; errors: string[] } {
-  const parts = input.split(/[,\n]/).map((s) => s.trim()).filter(Boolean);
-  const raw: string[] = [];
-  const errors: string[] = [];
-  for (const part of parts) {
-    // Only expand integer-integer ranges. "47-A" is treated as a literal
-    // (hyphen is valid in plot numbers, e.g. "47-A" or "Phase-2-Block-12").
-    const rangeMatch = part.match(/^(\d+)\s*-\s*(\d+)$/);
-    if (rangeMatch) {
-      const start = parseInt(rangeMatch[1], 10);
-      const end = parseInt(rangeMatch[2], 10);
-      if (end < start) {
-        errors.push(`"${part}": end must be ≥ start`);
-        continue;
-      }
-      if (end - start > 499) {
-        errors.push(`"${part}": range too large (${end - start + 1} plots, max 500)`);
-        continue;
-      }
-      for (let i = start; i <= end; i++) raw.push(String(i));
-    } else {
-      raw.push(part);
-    }
-  }
-  // Dedupe inside the batch
-  const seen = new Set<string>();
-  const dupes = new Set<string>();
-  const numbers: string[] = [];
-  for (const n of raw) {
-    if (seen.has(n)) dupes.add(n);
-    else {
-      seen.add(n);
-      numbers.push(n);
-    }
-  }
-  if (dupes.size > 0) errors.push(`Duplicates: ${[...dupes].join(", ")}`);
-  return { numbers, errors };
-}
-
 /** Compact label for a batch row. Collapses long consecutive-integer runs. */
-/**
- * Compute per-plot start dates for a batch.
- *
- *   - Plot 1 always = batchStartDate (raw, no snap — the apply-template
- *     endpoint snaps to a working day on commit if needed).
- *   - Each subsequent plot is offset by `staggerDays` working days from
- *     the previous plot's date. 0 = all plots same date.
- *   - Pinned overrides (rows the user manually edited) take precedence
- *     over the computed value.
- */
-function deriveBatchPlotDates(
-  numbers: string[],
-  batchStartDate: string,
-  staggerDays: number,
-  overrides: Record<string, string>,
-): PlotBatchPlot[] {
-  return numbers.map((num, idx) => {
-    if (overrides[num]) {
-      return { plotNumber: num, startDate: overrides[num] };
-    }
-    if (!batchStartDate) {
-      return { plotNumber: num, startDate: "" };
-    }
-    if (idx === 0 || staggerDays <= 0) {
-      return { plotNumber: num, startDate: batchStartDate };
-    }
-    // Working-day offset from plot 1 (idx * staggerDays).
-    const baseDate = new Date(batchStartDate + "T00:00:00");
-    const shifted = addWorkingDays(baseDate, idx * staggerDays);
-    return { plotNumber: num, startDate: format(shifted, "yyyy-MM-dd") };
-  });
-}
-
-/**
- * Per-plot date editor — a small table that shows once the user has
- * entered both plot numbers and a batch start date. Each row's date
- * defaults to (batchStart + plotIndex × stagger) but can be manually
- * overridden. Manually-set rows are "pinned" until cleared via Reset.
- *
- * Pinning + auto-fill:
- *   - Plot 1 always tracks batchStart unless pinned.
- *   - Subsequent plots track (batchStart + idx × stagger) unless pinned.
- *   - Editing the start date or stagger clears all pins (handled in
- *     the parent so the auto-filled column resets predictably).
- */
-function PerPlotDateEditor({
-  input,
-  startDate,
-  staggerDays,
-  overrides,
-  onOverrideChange,
-  onResetAll,
-}: {
-  input: string;
-  startDate: string;
-  staggerDays: number;
-  overrides: Record<string, string>;
-  onOverrideChange: (plotNumber: string, date: string) => void;
-  onResetAll: () => void;
-}) {
-  const { numbers, errors } = parsePlotNumbers(input);
-  if (errors.length > 0 || numbers.length === 0 || !startDate) return null;
-
-  const plots = deriveBatchPlotDates(numbers, startDate, staggerDays, overrides);
-  const pinnedCount = Object.keys(overrides).length;
-
-  return (
-    <div className="space-y-1.5">
-      <div className="flex items-center justify-between">
-        <Label className="text-xs">
-          Per-plot start dates{" "}
-          <span className="text-[10px] font-normal text-muted-foreground">
-            ({plots.length} plot{plots.length === 1 ? "" : "s"}
-            {pinnedCount > 0 ? ` · ${pinnedCount} pinned` : ""})
-          </span>
-        </Label>
-        {pinnedCount > 0 && (
-          <button
-            type="button"
-            onClick={onResetAll}
-            className="text-[10px] font-medium text-blue-600 hover:underline"
-          >
-            Reset all to auto
-          </button>
-        )}
-      </div>
-      <div className="max-h-[180px] space-y-1 overflow-y-auto rounded border bg-white/60 p-1.5">
-        {plots.map((p) => {
-          const pinned = !!overrides[p.plotNumber];
-          return (
-            <div
-              key={p.plotNumber}
-              className={`flex items-center gap-2 rounded px-1.5 py-0.5 text-xs ${
-                pinned ? "bg-blue-50/60" : ""
-              }`}
-            >
-              <span className="w-12 shrink-0 font-medium">
-                Plot {p.plotNumber}
-              </span>
-              <Input
-                type="date"
-                value={p.startDate}
-                onChange={(e) =>
-                  onOverrideChange(p.plotNumber, e.target.value)
-                }
-                className="h-7 flex-1 text-xs"
-              />
-              {pinned && (
-                <button
-                  type="button"
-                  onClick={() => onOverrideChange(p.plotNumber, "")}
-                  className="text-[10px] text-muted-foreground hover:text-blue-600"
-                  title="Clear pin and auto-fill"
-                >
-                  ↺
-                </button>
-              )}
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 function batchLabel(nums: string[]): string {
   if (nums.length === 0) return "No plots";
   if (nums.length === 1) return `Plot ${nums[0]}`;
@@ -856,7 +677,18 @@ export function CreateSiteWizard({
               startDate: batch.plots[0]?.startDate ?? "",
               supplierMappings,
               plots,
-            }, { silent: true });
+            }, {
+              silent: true,
+              // (Jun 2026 Keith 504 report) Large batches are now sent in
+              // chunks — show live progress so a 200+ plot site build looks
+              // like work happening, not a frozen spinner.
+              onProgress: (done, total) =>
+                setSubmitProgress(
+                  total > 10
+                    ? `Creating ${rangeLabel}… ${done}/${total} plots`
+                    : `Creating ${rangeLabel}…`,
+                ),
+            });
             if (!res.ok) throw new Error(res.error ?? "Failed to create plots");
             // (May 2026 Keith bug report) Collect supplier-skip
             // warnings for the summary toast below.

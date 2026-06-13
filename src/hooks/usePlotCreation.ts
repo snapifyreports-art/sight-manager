@@ -74,6 +74,10 @@ interface BlankBatchInput {
 interface Result {
   ok: boolean;
   error?: string;
+  /** How many plots were actually created (chunked batch path). */
+  created?: number;
+  /** Plot numbers skipped because they already existed (idempotent retry). */
+  skippedExisting?: string[];
   /** Per-plot error list (only set when batch APIs partially fail). */
   plotErrors?: Array<{ plotNumber: string; error: string }>;
   /**
@@ -93,6 +97,14 @@ interface Result {
 interface Options {
   /** Skip the toast on error (caller will surface its own UI). */
   silent?: boolean;
+  /**
+   * Progress callback for chunked batch creation — fired after each chunk
+   * of plots is attempted. `done` is how many plots have been processed so
+   * far (created + skipped + failed), `total` is the batch size. Lets the
+   * wizard / bulk dialog show "Creating plots… 60/249" instead of a frozen
+   * spinner on a multi-minute large-site build. (Jun 2026 Keith 504 report)
+   */
+  onProgress?: (done: number, total: number) => void;
 }
 
 export function usePlotCreation() {
@@ -201,77 +213,130 @@ export function usePlotCreation() {
     }
   }, [handleError, toast]);
 
-  // ── Batch of plots from a single template ────────────────────────────
+  // ── Batch of plots from a single template (CHUNKED) ──────────────────
+  // (Jun 2026 Keith 504 report) A large site (e.g. 249 plots) used to send
+  // EVERY plot in one request to apply-template-batch — a single serverless
+  // invocation that ran far past Vercel's function timeout and returned a
+  // 504, failing the whole batch. We now split the batch into small chunks
+  // and send one request per chunk, accumulating results and reporting
+  // progress. Because the endpoint now SKIPS plots that already exist, a
+  // chunk that times out / drops can be safely re-sent (the wizard's retry
+  // re-runs the batch): the plots that already landed are skipped server-
+  // side, only the missing ones are created. No duplicates, no dead end.
   const createBatchFromTemplate = useCallback(async (input: TemplateBatchInput, opts?: Options): Promise<Result> => {
     setIsLoading(true);
+    // Template plots are heavy — each plot is its full job tree + orders +
+    // inspections + materials + documents, each in its own DB transaction.
+    // Keep chunks small so one request stays comfortably inside the 60s
+    // function limit even for a 20-stage template with many orders per plot.
+    const CHUNK_SIZE = 10;
+    const total = input.plots.length;
+    let createdCount = 0;
+    let processed = 0;
+    let failedPlotCount = 0;
+    const plotErrors: Array<{ plotNumber: string; error: string }> = [];
+    const skippedExisting: string[] = [];
+    const warningsAcc: Record<
+      string,
+      Array<{ templateJobName: string; itemsDescription: string | null }>
+    > = {};
+    const inspWarningsAcc = new Set<string>();
+    const docWarningsAcc = new Set<string>();
+    // First HTTP-level failure (timeout / network / 5xx) — the retryable
+    // kind, as opposed to per-plot data errors which re-sending won't fix.
+    let firstChunkError: string | null = null;
+
     try {
-      const res = await fetch("/api/plots/apply-template-batch", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          siteId: input.siteId,
-          templateId: input.templateId,
-          variantId: input.variantId ?? null,
-          startDate: input.startDate,
-          supplierMappings: input.supplierMappings ?? {},
-          plots: input.plots,
-        }),
-      });
-      if (!res.ok) {
-        const err = await handleError(res, "Failed to create plots", opts?.silent ?? false);
-        // If partial failures, caller may want to surface them specifically.
-        if (err.plotErrors && !opts?.silent) {
-          const preview = err.plotErrors
-            .slice(0, 3)
-            .map((e) => `Plot ${e.plotNumber}: ${e.error}`)
-            .join("; ");
-          toast.error(`${err.plotErrors.length} plot${err.plotErrors.length !== 1 ? "s" : ""} failed — ${preview}`);
+      for (let i = 0; i < total; i += CHUNK_SIZE) {
+        const chunk = input.plots.slice(i, i + CHUNK_SIZE);
+        try {
+          const res = await fetch("/api/plots/apply-template-batch", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              siteId: input.siteId,
+              templateId: input.templateId,
+              variantId: input.variantId ?? null,
+              startDate: input.startDate,
+              supplierMappings: input.supplierMappings ?? {},
+              plots: chunk,
+            }),
+          });
+          if (!res.ok) {
+            const error = await fetchErrorMessage(res, "Failed to create plots");
+            failedPlotCount += chunk.length;
+            if (!firstChunkError) firstChunkError = error;
+          } else {
+            const body = await res.json().catch(() => ({}));
+            if (typeof body?.created === "number") createdCount += body.created;
+            if (Array.isArray(body?.errors)) {
+              for (const e of body.errors) plotErrors.push(e);
+            }
+            if (Array.isArray(body?.skippedExisting)) {
+              for (const n of body.skippedExisting) skippedExisting.push(n);
+            }
+            if (body?.warnings && typeof body.warnings === "object") {
+              Object.assign(warningsAcc, body.warnings);
+            }
+            if (Array.isArray(body?.inspectionWarnings)) {
+              for (const w of body.inspectionWarnings) inspWarningsAcc.add(w);
+            }
+            if (Array.isArray(body?.documentWarnings)) {
+              for (const w of body.documentWarnings) docWarningsAcc.add(w);
+            }
+          }
+        } catch (e) {
+          failedPlotCount += chunk.length;
+          if (!firstChunkError) {
+            firstChunkError = e instanceof Error ? e.message : "Network error";
+          }
         }
-        return err;
+        processed += chunk.length;
+        opts?.onProgress?.(processed, total);
       }
-      // (May 2026 Keith bug report) Surface order_skipped warnings to
-      // the caller. Pre-fix the route returned them but the hook
-      // dropped them on the floor, so the user never knew that orders
-      // had been silently skipped due to missing supplier.
-      const body = await res.json().catch(() => ({}));
-      // (May 2026 user-journey audit Bug 2) Surface PER-PLOT errors
-      // too. The route returns 201 if at least one plot succeeded
-      // even when `errors[]` lists failed plots. Pre-fix the hook
-      // ignored the array entirely so the wizard showed "Site
-      // created!" even though half the batch failed.
-      // (Jun 2026 S16, review fix) Inspection-skip warning fires BEFORE the
-      // per-plot-errors early return — the route returns 201 with BOTH
-      // populated when some plots succeeded, and the successful plots'
-      // silently-missing hold-points are exactly what this warns about.
-      const inspWarnings = body?.inspectionWarnings;
-      if (Array.isArray(inspWarnings) && inspWarnings.length > 0 && !opts?.silent) {
+
+      // Surface accumulated warnings ONCE (not once per chunk).
+      if (!opts?.silent && inspWarningsAcc.size > 0) {
+        const list = [...inspWarningsAcc];
         toast.error(
-          `Plots created but ${inspWarnings.length} inspection${inspWarnings.length === 1 ? "" : "s"} could not be scheduled (anchor stage missing or undated): ${inspWarnings.slice(0, 4).join(", ")}${inspWarnings.length > 4 ? "…" : ""}. Add them manually from each plot's Overview tab.`,
+          `Plots created but ${list.length} inspection${list.length === 1 ? "" : "s"} could not be scheduled (anchor stage missing or undated): ${list.slice(0, 4).join(", ")}${list.length > 4 ? "…" : ""}. Add them manually from each plot's Overview tab.`,
           { ttlMs: 15000 },
         );
       }
-      // (Jun 2026 audit) Placeholder drawings (cloned templates) are not
-      // copied — same warning as the single-plot path, once per batch.
-      const docWarnings = body?.documentWarnings;
-      if (Array.isArray(docWarnings) && docWarnings.length > 0 && !opts?.silent) {
+      if (!opts?.silent && docWarningsAcc.size > 0) {
+        const list = [...docWarningsAcc];
         toast.error(
-          `Plots created but ${docWarnings.length} drawing${docWarnings.length === 1 ? "" : "s"} were not copied (placeholder — file never re-uploaded after clone): ${docWarnings.slice(0, 4).join(", ")}${docWarnings.length > 4 ? "…" : ""}. Re-upload them in Settings → Templates.`,
+          `Plots created but ${list.length} drawing${list.length === 1 ? "" : "s"} were not copied (placeholder — file never re-uploaded after clone): ${list.slice(0, 4).join(", ")}${list.length > 4 ? "…" : ""}. Re-upload them in Settings → Templates.`,
           { ttlMs: 15000 },
         );
       }
-      if (Array.isArray(body?.errors) && body.errors.length > 0) {
+
+      const warnings = Object.keys(warningsAcc).length > 0 ? warningsAcc : undefined;
+
+      // A chunk failed at the HTTP level → the batch is incomplete but
+      // retryable. Report not-ok so the caller keeps its retry affordance;
+      // re-running skips whatever already landed (idempotent endpoint).
+      if (firstChunkError) {
+        const msg = `${failedPlotCount} plot${failedPlotCount === 1 ? "" : "s"} didn't finish (${firstChunkError}). ${createdCount} created so far — press Create again to make the rest.`;
+        if (!opts?.silent) toast.error(msg, { ttlMs: 15000 });
+        return { ok: false, error: msg, created: createdCount, skippedExisting, plotErrors };
+      }
+
+      // Per-plot DATA errors (not retryable by re-sending the same data).
+      if (plotErrors.length > 0) {
         if (!opts?.silent) {
-          const preview = (body.errors as Array<{ plotNumber: string; error: string }>)
+          const preview = plotErrors
             .slice(0, 3)
             .map((e) => `Plot ${e.plotNumber}: ${e.error}`)
             .join("; ");
           toast.error(
-            `${body.errors.length} plot${body.errors.length !== 1 ? "s" : ""} failed — ${preview}`,
+            `${plotErrors.length} plot${plotErrors.length !== 1 ? "s" : ""} failed — ${preview}`,
           );
         }
-        return { ok: true, warnings: body?.warnings, plotErrors: body.errors };
+        return { ok: true, warnings, plotErrors, created: createdCount, skippedExisting };
       }
-      return { ok: true, warnings: body?.warnings };
+
+      return { ok: true, warnings, created: createdCount, skippedExisting };
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Failed to create plots";
       if (!opts?.silent) toast.error(msg);
@@ -279,7 +344,7 @@ export function usePlotCreation() {
     } finally {
       setIsLoading(false);
     }
-  }, [handleError, toast]);
+  }, [toast]);
 
   // ── Chunked batch of blank plots ─────────────────────────────────────
   // Used by CreateSiteWizard for ranges like "Plots 1-20 blank" where
