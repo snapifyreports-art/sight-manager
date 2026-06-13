@@ -420,6 +420,9 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
     affectedOrderedOrders?: Array<{ id: string; supplierId: string | null; supplierName: string | null; itemsDescription: string | null; expectedDeliveryDate: string | null }>;
   } | null>(null);
   const [pendingEndDate, setPendingEndDate] = useState<string | null>(null);
+  // (Jun 2026 hardening) A start-date edit also cascades — track the pending
+  // new start so the confirm dialog applies it via the same cascade endpoint.
+  const [pendingStartDate, setPendingStartDate] = useState<string | null>(null);
 
   async function handleAction(action: string) {
     if (action === "complete") {
@@ -632,17 +635,30 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
   const handleStartDateSave = async () => {
     setSavingDate(true);
     try {
-      const res = await fetch(`/api/jobs/${job.id}`, {
-        method: "PUT",
+      // (Jun 2026 hardening) Moving a job's START shifts the whole job and
+      // cascades downstream, exactly like the end-date edit — go through the
+      // cascade endpoint (which moves start+end together, preserving duration,
+      // and shifts PENDING orders) instead of the bare PUT, which set startDate
+      // alone and silently changed the job's length with no cascade.
+      const res = await fetch(`/api/jobs/${job.id}/cascade`, {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ startDate: editDateValue }),
+        body: JSON.stringify({ newStartDate: editDateValue }),
       });
       if (!res.ok) {
-        toast.error(await fetchErrorMessage(res, "Failed to update start date"));
+        toast.error(await fetchErrorMessage(res, "Failed to preview cascade"));
         return;
       }
-      setEditingStartDate(false);
-      router.refresh();
+      const preview = await res.json();
+      if (preview.jobUpdates?.length > 0 || preview.orderUpdates?.length > 0) {
+        setDateCascadePreview(preview);
+        setPendingStartDate(editDateValue);
+        setPendingEndDate(null);
+      } else {
+        // No move at all (delta 0) — nothing to apply.
+        setEditingStartDate(false);
+        router.refresh();
+      }
     } finally {
       setSavingDate(false);
     }
@@ -684,13 +700,19 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
   };
 
   const handleDateCascadeConfirm = async () => {
-    if (!pendingEndDate) return;
+    if (!pendingEndDate && !pendingStartDate) return;
     setSavingDate(true);
     try {
+      // Apply whichever edit is pending — a start move or an end move. The
+      // cascade endpoint translates a start move into the equivalent end so
+      // the same engine shifts the plot either way.
+      const payload = pendingStartDate
+        ? { newStartDate: pendingStartDate, confirm: true }
+        : { newEndDate: pendingEndDate, confirm: true };
       const res = await fetch(`/api/jobs/${job.id}/cascade`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ newEndDate: pendingEndDate, confirm: true }),
+        body: JSON.stringify(payload),
       });
       if (!res.ok) {
         toast.error(await fetchErrorMessage(res, "Failed to apply date cascade"));
@@ -698,7 +720,9 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
       }
       setDateCascadePreview(null);
       setPendingEndDate(null);
+      setPendingStartDate(null);
       setEditingEndDate(false);
+      setEditingStartDate(false);
       router.refresh();
     } finally {
       setSavingDate(false);
@@ -1890,6 +1914,7 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
           if (!open) {
             setDateCascadePreview(null);
             setPendingEndDate(null);
+            setPendingStartDate(null);
           }
         }}
       >
@@ -2018,21 +2043,30 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
             <Button
               variant="outline"
               onClick={async () => {
-                // Save end date without cascade
+                // Save the edited date WITHOUT cascading downstream. Save
+                // whichever field is pending — a start edit must not fall
+                // through to { endDate: pendingEndDate } (which would be null
+                // and wipe the end date).
                 setSavingDate(true);
                 try {
                   const res = await fetch(`/api/jobs/${job.id}`, {
                     method: "PUT",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ endDate: pendingEndDate }),
+                    body: JSON.stringify(
+                      pendingStartDate
+                        ? { startDate: pendingStartDate }
+                        : { endDate: pendingEndDate },
+                    ),
                   });
                   if (!res.ok) {
-                    toast.error(await fetchErrorMessage(res, "Failed to update end date"));
+                    toast.error(await fetchErrorMessage(res, "Failed to update date"));
                     return;
                   }
                   setDateCascadePreview(null);
                   setPendingEndDate(null);
+                  setPendingStartDate(null);
                   setEditingEndDate(false);
+                  setEditingStartDate(false);
                   router.refresh();
                 } finally {
                   setSavingDate(false);

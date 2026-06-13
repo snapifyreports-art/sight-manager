@@ -256,6 +256,31 @@ export async function GET(
     }
   }
 
+  // (Jun 2026 hardening) Predecessor-readiness for "jobs starting today". A job
+  // is clear to start only when NO incomplete (not COMPLETED) leaf job on the
+  // same plot has a lower sortOrder. Pre-fix this read the lateStartJobs set,
+  // so only a NOT_STARTED *and overdue* predecessor flagged it — an IN_PROGRESS
+  // predecessor (still on the tools) or a not-yet-due NOT_STARTED one showed a
+  // green "Predecessor ✓", telling the manager to dispatch a trade onto work
+  // that can't start. Mirror the blockedJobs rule (status not COMPLETED, leaf).
+  const startTodayPlotIds = [...new Set(jobsStartingToday.map((j) => j.plotId))];
+  const startTodayPredecessors = startTodayPlotIds.length
+    ? await prisma.job.findMany({
+        where: {
+          plotId: { in: startTodayPlotIds },
+          status: { not: "COMPLETED" },
+          children: { none: {} },
+        },
+        select: { id: true, plotId: true, sortOrder: true },
+      })
+    : [];
+  const startTodayPredsByPlot = new Map<string, typeof startTodayPredecessors>();
+  for (const p of startTodayPredecessors) {
+    const existing = startTodayPredsByPlot.get(p.plotId) ?? [];
+    existing.push(p);
+    startTodayPredsByPlot.set(p.plotId, existing);
+  }
+
   // Batch 3
   const tomorrowStart = startOfDay(addDays(targetDate, 1));
   const tomorrowEnd = endOfDay(addDays(targetDate, 1));
@@ -721,7 +746,15 @@ export async function GET(
       ordersOrdered: orderedOrders,
       ordersTotal: orders.length,
     };
-  });
+  })
+  // (Jun 2026 Keith) Only surface plots that have actually been STARTED at some
+  // point and then gone quiet. A brand-new plot whose jobs are all NOT_STARTED
+  // hasn't stalled — it simply hasn't begun — so it shouldn't trigger the
+  // "inactive / awaiting restart" alert. inactivityType === "not_started" is
+  // exactly the never-touched case: no completed work AND no deferred /
+  // awaiting-contractor flag. (Plots overdue to START surface separately via
+  // the late-start / delayed-jobs sections, not here.)
+  .filter((p) => p.inactivityType !== "not_started");
 
   // Jobs that are IN_PROGRESS but a subsequent job on the same plot is already running/done
   const pendingSignOffs = pendingSignOffsRaw
@@ -935,9 +968,11 @@ export async function GET(
       const deliveredOrders = orders.filter((o) => o.status === "DELIVERED").length;
       const hasContractor = j.contractors.length > 0;
       const hasAssignee = !!j.assignedTo;
-      // Check predecessor: is there an incomplete job on same plot with lower sortOrder?
-      const hasPredecessorIssue = lateStartJobs.some(
-        (ls) => ls.plotId === j.plotId && ls.sortOrder < j.sortOrder
+      // Check predecessor: is there an incomplete (not COMPLETED) leaf job on
+      // the same plot with a lower sortOrder? Counts IN_PROGRESS + not-yet-due
+      // predecessors, matching the blockedJobs rule.
+      const hasPredecessorIssue = (startTodayPredsByPlot.get(j.plotId) ?? []).some(
+        (p) => p.id !== j.id && p.sortOrder < j.sortOrder
       );
       return {
         ...j,

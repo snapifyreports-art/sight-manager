@@ -52,14 +52,20 @@ export function getPositionForDate(
 
 /**
  * Returns the pixel width for a bar spanning from start to end.
- * Minimum width of 1 day so zero-length jobs are still visible.
+ *
+ * (Jun 2026 hardening) endDate is stored INCLUSIVE across the app — a job that
+ * runs Mon→Fri has end = Friday (the last day worked), so it spans
+ * (end - start) + 1 days. This +1 was missing here, so every bar on the
+ * Plot-Detail Gantt rendered one day too short (the final day blank) and
+ * disagreed with MiniGantt + the Programme grid, which both add +1. Minimum
+ * width of 1 day keeps a same-day job visible.
  */
 export function getBarWidth(
   start: Date,
   end: Date,
   dayWidth: number = DAY_WIDTH
 ): number {
-  const days = differenceInDays(end, start);
+  const days = differenceInDays(end, start) + 1;
   return Math.max(days, 1) * dayWidth;
 }
 

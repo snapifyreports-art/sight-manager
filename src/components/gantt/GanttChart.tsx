@@ -834,7 +834,9 @@ function ParentAggregateBar({
 
   const left = getPositionForDate(group.earliestStart, timelineStart, DAY_WIDTH);
   const endPos = getPositionForDate(group.latestEnd, timelineStart, DAY_WIDTH);
-  const width = Math.max(endPos - left, DAY_WIDTH);
+  // (Jun 2026 hardening) +DAY_WIDTH because latestEnd is inclusive — the bar
+  // must cover the final day's column, matching getBarWidth + the child bars.
+  const width = Math.max(endPos - left + DAY_WIDTH, DAY_WIDTH);
 
   const progress = computeProgress(group.children);
   const colors = getStatusColor(group.aggregateStatus);

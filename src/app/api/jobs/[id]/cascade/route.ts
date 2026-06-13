@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { calculateCascade } from "@/lib/cascade";
+import { addWorkingDays, differenceInWorkingDays } from "@/lib/working-days";
 import { canAccessSite } from "@/lib/site-access";
 import { apiError } from "@/lib/api-errors";
 import { logEvent } from "@/lib/event-log";
@@ -48,6 +49,31 @@ function buildCascadeArgs(allPlotJobs: Array<{ id: string; name: string; startDa
       status: o.status,
     })),
   };
+}
+
+/**
+ * (Jun 2026 hardening) Resolve the trigger's effective new END date.
+ *
+ * The cascade engine is driven by the trigger's new END (it shifts the whole
+ * plot by the working-day delta between the new end and the trigger's current
+ * end, preserving duration). A manual START-date edit (spec A13) must move the
+ * job by the start delta and cascade — so we translate the requested newStart
+ * into the equivalent newEnd (currentEnd shifted by the same working-day delta)
+ * and feed that to the SAME engine. Pre-fix, a start edit hit the bare job PUT,
+ * which set startDate only — silently changing the job's duration and skipping
+ * the cascade entirely.
+ */
+function resolveTriggerNewEnd(
+  job: { startDate: Date | null; endDate: Date | null },
+  newEndDate?: string,
+  newStartDate?: string,
+): Date | null {
+  if (newEndDate) return new Date(newEndDate);
+  if (newStartDate && job.startDate && job.endDate) {
+    const deltaWd = differenceInWorkingDays(new Date(newStartDate), job.startDate);
+    return addWorkingDays(job.endDate, deltaWd);
+  }
+  return null;
 }
 
 /**
@@ -100,13 +126,14 @@ export async function POST(
 
   const { id } = await params;
   const body = await req.json();
-  const { newEndDate, assumeOrdersSent } = body as {
-    newEndDate: string;
+  const { newEndDate, newStartDate, assumeOrdersSent } = body as {
+    newEndDate?: string;
+    newStartDate?: string;
     assumeOrdersSent?: string[];
   };
 
-  if (!newEndDate) {
-    return NextResponse.json({ error: "newEndDate is required" }, { status: 400 });
+  if (!newEndDate && !newStartDate) {
+    return NextResponse.json({ error: "newEndDate or newStartDate is required" }, { status: 400 });
   }
 
   const job = await prisma.job.findUnique({
@@ -122,6 +149,14 @@ export async function POST(
     return NextResponse.json({ error: "You do not have access to this site" }, { status: 403 });
   }
 
+  const effectiveNewEnd = resolveTriggerNewEnd(job, newEndDate, newStartDate);
+  if (!effectiveNewEnd) {
+    return NextResponse.json(
+      { error: "Cannot move a job that has no start/end dates" },
+      { status: 400 },
+    );
+  }
+
   const allPlotJobs = await prisma.job.findMany({
     where: { plotId: job.plotId, status: { not: "ON_HOLD" } },
     orderBy: { sortOrder: "asc" },
@@ -134,7 +169,7 @@ export async function POST(
   const { jobs, orders } = buildCascadeArgs(allPlotJobs, allOrders);
   const result = calculateCascade(
     id,
-    new Date(newEndDate),
+    effectiveNewEnd,
     jobs,
     orders,
     new Set(assumeOrdersSent ?? []),
@@ -187,16 +222,17 @@ export async function PUT(
 
   const { id } = await params;
   const body = await req.json();
-  const { newEndDate, confirm, force, assumeOrdersSent } = body as {
-    newEndDate: string;
+  const { newEndDate, newStartDate, confirm, force, assumeOrdersSent } = body as {
+    newEndDate?: string;
+    newStartDate?: string;
     confirm: boolean;
     force?: boolean;
     assumeOrdersSent?: string[];
   };
 
-  if (!newEndDate || !confirm) {
+  if ((!newEndDate && !newStartDate) || !confirm) {
     return NextResponse.json(
-      { error: "newEndDate and confirm: true are required" },
+      { error: "newEndDate (or newStartDate) and confirm: true are required" },
       { status: 400 }
     );
   }
@@ -214,6 +250,14 @@ export async function PUT(
     return NextResponse.json({ error: "You do not have access to this site" }, { status: 403 });
   }
 
+  const effectiveNewEnd = resolveTriggerNewEnd(job, newEndDate, newStartDate);
+  if (!effectiveNewEnd) {
+    return NextResponse.json(
+      { error: "Cannot move a job that has no start/end dates" },
+      { status: 400 },
+    );
+  }
+
   const allPlotJobs = await prisma.job.findMany({
     where: { plotId: job.plotId, status: { not: "ON_HOLD" } },
     orderBy: { sortOrder: "asc" },
@@ -229,7 +273,7 @@ export async function PUT(
   const { jobs: cascadeJobs, orders: cascadeOrders } = buildCascadeArgs(allPlotJobs, allOrders);
   const result = calculateCascade(
     id,
-    new Date(newEndDate),
+    effectiveNewEnd,
     cascadeJobs,
     cascadeOrders,
     overrideOrderIds,
