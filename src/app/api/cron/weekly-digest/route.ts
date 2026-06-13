@@ -6,6 +6,7 @@ import { checkCronAuth } from "@/lib/cron-auth";
 import { getServerCurrentDate, getServerStartOfDay } from "@/lib/dev-date";
 import { logEvent } from "@/lib/event-log";
 import { latenessReasonLabel } from "@/lib/labels";
+import { whereOrdersForSite } from "@/lib/order-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -117,6 +118,10 @@ export async function GET(req: NextRequest) {
     inspectionsPassed: number;
     inspectionsDueNextWeek: number;
     inspectionsOverdue: number;
+    // (Jun 2026 Wave-4 D8) Materials movement — the weekly digest was the
+    // one summary with no sense of orders, though every other one covers it.
+    ordersPlaced: number;
+    deliveriesReceived: number;
   };
 
   const allSubscribedSiteIds = Array.from(
@@ -140,7 +145,7 @@ export async function GET(req: NextRequest) {
     });
     await Promise.all(
       sitesForSummaries.map(async (s) => {
-        const [jobsStarted, jobsCompleted, snagsRaised, snagsResolved, photos, delays, staleSnags, latenessOpenedThisWeek, latenessResolvedThisWeek, openLatenessForSite, inspectionsPassed, inspectionsDueNextWeek, inspectionsOverdue] =
+        const [jobsStarted, jobsCompleted, snagsRaised, snagsResolved, photos, delays, staleSnags, latenessOpenedThisWeek, latenessResolvedThisWeek, openLatenessForSite, inspectionsPassed, inspectionsDueNextWeek, inspectionsOverdue, ordersPlaced, deliveriesReceived] =
           await Promise.all([
             prisma.job.count({
               where: { plot: { siteId: s.id }, actualStartDate: { gte: weekStart, lt: todayStart }, children: { none: {} } },
@@ -188,6 +193,18 @@ export async function GET(req: NextRequest) {
             prisma.inspection.count({
               where: { plot: { siteId: s.id }, status: "OVERDUE", bookedDate: null },
             }),
+            // (Jun 2026 Wave-4 D8) Orders placed this week — one ORDER_SENT
+            // event per send (exact), and deliveries received this week.
+            prisma.eventLog.count({
+              where: { siteId: s.id, type: "ORDER_SENT", createdAt: { gte: weekStart, lt: todayStart } },
+            }),
+            prisma.materialOrder.count({
+              where: {
+                ...whereOrdersForSite(s.id),
+                status: "DELIVERED",
+                deliveredDate: { gte: weekStart, lt: todayStart },
+              },
+            }),
           ]);
 
         const latenessDaysLost = openLatenessForSite.reduce((sum, e) => sum + e.daysLate, 0);
@@ -215,6 +232,8 @@ export async function GET(req: NextRequest) {
           inspectionsPassed,
           inspectionsDueNextWeek,
           inspectionsOverdue,
+          ordersPlaced,
+          deliveriesReceived,
         });
       }),
     );
@@ -243,7 +262,7 @@ export async function GET(req: NextRequest) {
 
     const totalActivity = summaries.reduce(
       (acc, s) =>
-        acc + s.jobsStarted + s.jobsCompleted + s.snagsRaised + s.snagsResolved + s.photos + s.delays + s.staleSnags + s.latenessOpened + s.latenessResolved + s.inspectionsPassed + s.inspectionsDueNextWeek + s.inspectionsOverdue,
+        acc + s.jobsStarted + s.jobsCompleted + s.snagsRaised + s.snagsResolved + s.photos + s.delays + s.staleSnags + s.latenessOpened + s.latenessResolved + s.inspectionsPassed + s.inspectionsDueNextWeek + s.inspectionsOverdue + s.ordersPlaced + s.deliveriesReceived,
       0,
     );
 
@@ -295,6 +314,11 @@ export async function GET(req: NextRequest) {
           stat("inspection due", "inspections due", s.inspectionsDueNextWeek, "#ede9fe"),
           s.inspectionsOverdue > 0
             ? `<span style="background:#fecaca;color:#b91c1c;border-radius:9999px;padding:2px 8px;font-size:11px;margin-right:6px;font-weight:600;">${s.inspectionsOverdue} inspection${s.inspectionsOverdue !== 1 ? "s" : ""} overdue</span>`
+            : "",
+          // (Jun 2026 Wave-4 D8) Materials movement.
+          stat("order placed", "orders placed", s.ordersPlaced, "#e0e7ff"),
+          s.deliveriesReceived > 0
+            ? `<span style="background:#dcfce7;border-radius:9999px;padding:2px 8px;font-size:11px;margin-right:6px;">${s.deliveriesReceived} deliver${s.deliveriesReceived === 1 ? "y" : "ies"} received</span>`
             : "",
         ]
           .filter(Boolean)

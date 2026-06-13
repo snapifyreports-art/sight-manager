@@ -595,11 +595,16 @@ export function SnagList({ snags, onSelect, onRefresh, showPlot, highlightId, si
                             either verifies the fix and closes, or kicks it
                             back to the contractor with a note. */}
                         {snag.status === "RESOLVED" && (
+                          // (Jun 2026 Wave-4 S9) Taller tap targets on mobile
+                          // (h-9 ≈ 36px) for this Verify-&-close / Reopen pair
+                          // — the riskiest edge-to-edge mis-tap (a destructive
+                          // close next to a reopen) on a phone on site. Stays
+                          // dense (h-6) on desktop.
                           <>
                             <Button
                               variant="outline"
                               size="sm"
-                              className="h-6 flex-1 gap-1 text-[11px] text-green-700 border-green-200 hover:bg-green-50"
+                              className="h-9 sm:h-6 flex-1 gap-1 text-[11px] text-green-700 border-green-200 hover:bg-green-50"
                               onClick={(e) => handleOpenCloseDialog(e, snag)}
                             >
                               <CheckCircle className="size-3" />
@@ -608,7 +613,7 @@ export function SnagList({ snags, onSelect, onRefresh, showPlot, highlightId, si
                             <Button
                               variant="outline"
                               size="sm"
-                              className="h-6 flex-1 gap-1 text-[11px] text-amber-700 border-amber-200 hover:bg-amber-50"
+                              className="h-9 sm:h-6 flex-1 gap-1 text-[11px] text-amber-700 border-amber-200 hover:bg-amber-50"
                               onClick={(e) => handleOpenReopenDialog(e, snag)}
                             >
                               <RotateCcw className="size-3" />

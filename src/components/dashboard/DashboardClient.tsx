@@ -29,6 +29,7 @@ import {
   CardDescription,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { HelpTip } from "@/components/shared/HelpTip";
 import {
   PieChart,
   Pie,
@@ -566,6 +567,13 @@ function AtRiskPanel({
         <div className="flex items-center gap-2">
           <AlertTriangle className="size-4 text-amber-600" aria-hidden="true" />
           <CardTitle className="text-base text-amber-900">At-Risk</CardTitle>
+          <HelpTip title="How At-Risk is worked out" anchor="below-left">
+            Things slipping that need attention now: jobs past their original
+            planned end (working days late), snags open more than 30 days,
+            failed or overdue inspections, expiring compliance docs, overdue
+            deliveries and outstanding variations. Lateness is measured against
+            the original plan, not a moved date. Click any row to drill in.
+          </HelpTip>
         </div>
         <CardDescription className="text-xs text-amber-800">
           Things slipping. Click any row to drill into the plot.

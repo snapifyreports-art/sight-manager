@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { HelpTip } from "@/components/shared/HelpTip";
 import {
   Loader2,
   Package,
@@ -300,6 +301,13 @@ export function SiteClosurePanel({ siteId }: { siteId: string }) {
         <div className="flex items-center gap-2">
           <Package className="size-5 text-purple-600" />
           <h2 className="text-lg font-semibold">Site Closure</h2>
+          <HelpTip title="Closure readiness" anchor="below-left">
+            Checks the site is genuinely ready to hand over: every plot
+            complete, snags/NCRs/defects cleared, inspections passed with
+            certificates filed, and compliance docs in date. Anything still
+            outstanding is listed below so you can clear it before generating
+            the handover pack.
+          </HelpTip>
           {data.site.status === "COMPLETED" && (
             <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-emerald-700">
               Closed
