@@ -15,21 +15,29 @@ export const dynamic = "force-dynamic";
 //      standard FCM / Apple / Mozilla push service hosts.
 //   3. Token min-length check stays as cheap path-rejection.
 
+// Google's FCM has fixed hosts (no regional shards), so match those exactly.
 const ALLOWED_PUSH_HOSTS = [
   "fcm.googleapis.com",
   "android.googleapis.com",
-  "updates.push.services.mozilla.com",
-  "api.push.apple.com",
-  "web.push.apple.com",
-  "wns2-by3p.notify.windows.com",
-  "wns2-am3p.notify.windows.com",
+];
+// (Jun 2026 Wave-4 S11) Apple, Mozilla and Microsoft WNS all spread across
+// MANY regional shards (wns2-by3p / wns2-am3p / wns2-pn1p / …). Pre-fix the
+// allowlist hard-coded two WNS shards, so a buyer on any other shard hit a
+// 400 "endpoint not recognised". Suffix-match the registrable PARENT domain
+// instead — still blocks arbitrary SSRF URLs, but accepts every legit shard.
+const ALLOWED_PUSH_DOMAINS = [
+  "push.services.mozilla.com",
+  "push.apple.com",
+  "notify.windows.com",
 ];
 
 function isAllowedEndpoint(url: string): boolean {
   try {
     const u = new URL(url);
-    return ALLOWED_PUSH_HOSTS.some(
-      (host) => u.hostname === host || u.hostname.endsWith(`.${host}`),
+    if (u.protocol !== "https:") return false;
+    if (ALLOWED_PUSH_HOSTS.includes(u.hostname)) return true;
+    return ALLOWED_PUSH_DOMAINS.some(
+      (d) => u.hostname === d || u.hostname.endsWith(`.${d}`),
     );
   } catch {
     return false;

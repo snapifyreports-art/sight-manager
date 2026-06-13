@@ -133,11 +133,17 @@ export function SiteCalendar({ siteId }: SiteCalendarProps) {
   const toast = useToast();
   const [data, setData] = useState<CalendarData | null>(null);
   const [loading, setLoading] = useState(true);
+  // (Jun 2026 Wave-4 S3) Track load failure so a failed fetch shows an
+  // error + Retry card instead of a silent blank month that reads as
+  // "nothing scheduled" — a real trap for a manager planning the week.
+  const [loadError, setLoadError] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
   const [currentMonth, setCurrentMonth] = useState(getCurrentDate());
   const [selectedDay, setSelectedDay] = useState<Date | null>(null);
 
   useEffect(() => {
     setLoading(true);
+    setLoadError(false);
     const monthStr = format(currentMonth, "yyyy-MM");
     // (May 2026 pattern sweep) Pre-fix chained .then(setData) accepted
     // error payloads as calendar data and crashed downstream `.jobs`
@@ -145,11 +151,15 @@ export function SiteCalendar({ siteId }: SiteCalendarProps) {
     // month clicks don't let an older month's events land on top.
     let cancelled = false;
     fetch(`/api/sites/${siteId}/calendar?month=${monthStr}`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => { if (d && !cancelled) setData(d); })
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
+      .then((d) => { if (!cancelled) setData(d); })
+      .catch(() => { if (!cancelled) setLoadError(true); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [siteId, currentMonth, devDate]);
+  }, [siteId, currentMonth, devDate, reloadKey]);
 
   // Build day → events map
   const dayEventsMap = useMemo(() => {
@@ -298,6 +308,19 @@ export function SiteCalendar({ siteId }: SiteCalendarProps) {
     return (
       <div className="flex items-center justify-center py-12">
         <Loader2 className="size-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  // (Jun 2026 Wave-4 S3) Failed first load — show an error + Retry rather
+  // than a blank grid the manager would misread as "nothing scheduled".
+  if (loadError && !data) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed py-12 text-center">
+        <p className="text-sm text-muted-foreground">Couldn&apos;t load the calendar.</p>
+        <Button variant="outline" size="sm" onClick={() => setReloadKey((k) => k + 1)}>
+          Retry
+        </Button>
       </div>
     );
   }

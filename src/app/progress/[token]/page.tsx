@@ -8,7 +8,8 @@ export const dynamic = "force-dynamic";
 /**
  * Customer-facing plot progress page. Public, no auth.
  *
- * Hard rules — read /api/progress/[token]/route.ts before changing:
+ * Hard rules for this PUBLIC, no-auth boundary — keep the Prisma selects
+ * below as NARROW as possible (a widened select is how a leak creeps in):
  *   - NO DATES rendered to the customer (no startDate, endDate,
  *     reservation, exchange, legal, move-in)
  *   - NO snags, NO orders, NO materials, NO contractors / suppliers
@@ -114,7 +115,7 @@ export default async function ProgressPage({
     return <NotFoundCard reason="This link isn't active" />;
   }
 
-  // Same narrow select as /api/progress/[token]/route.ts. Server
+  // Deliberately narrow select (see the hard rules above). Server
   // component pulls direct so the customer's first paint isn't
   // gated on a client fetch.
   const plot = await prisma.plot.findUnique({
@@ -328,8 +329,11 @@ export default async function ProgressPage({
                   <div className="flex items-center gap-3">
                     <ShieldCheck className="size-5 shrink-0 text-emerald-600" />
                     <div>
-                      <p className="text-sm font-medium text-slate-800">{ins.name}</p>
-                      <p className="text-xs text-slate-500">{inspectionTypeLabel(ins.type as never)} inspection</p>
+                      {/* (Jun 2026 Wave-4 D2) Standardised type label only —
+                          the manager-typed name can carry internal jargon
+                          ("BC stage 3 — re-visit after Tue fail") that should
+                          never reach a buyer. The type already reassures. */}
+                      <p className="text-sm font-medium text-slate-800">{inspectionTypeLabel(ins.type as never)} inspection</p>
                     </div>
                   </div>
                   {/* relativeWhen, not a hard date — this page's rule is

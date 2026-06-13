@@ -73,12 +73,27 @@ export function LiveCabinScreen(props: Props) {
     return () => clearInterval(t);
   }, []);
 
-  // Refresh the page so server-rendered data stays current.
+  // (Jun 2026 Wave-4 S5) Keep server-rendered data current on a wall-mounted
+  // TV. A repeating interval (not a one-shot setTimeout, which silently dies
+  // if a reload is ever throttled in a backgrounded tab) PLUS a catch-up
+  // reload when the tab becomes visible again after being hidden longer than
+  // a refresh cycle — so a cabin that went to sleep refreshes the moment it
+  // wakes rather than showing stale data until the next interval.
   useEffect(() => {
-    const t = setTimeout(() => {
-      window.location.reload();
-    }, REFRESH_MS);
-    return () => clearTimeout(t);
+    const interval = setInterval(() => window.location.reload(), REFRESH_MS);
+    let hiddenAt = 0;
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") {
+        hiddenAt = Date.now();
+      } else if (hiddenAt && Date.now() - hiddenAt > REFRESH_MS) {
+        window.location.reload();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   }, []);
 
   return (
@@ -275,13 +290,28 @@ function StatsPanel({
           accent={snags > 10 ? "text-amber-300" : "text-white"}
         />
         {showInspections && (
-          <Stat
-            label={inspectionsOverdue > 0 ? "Inspections overdue" : "Inspections this week"}
-            value={inspectionsOverdue > 0 ? inspectionsOverdue : inspectionsDueWeek}
-            accent={inspectionsOverdue > 0 ? "text-red-300" : "text-violet-300"}
-          />
+          <InspectionStat dueWeek={inspectionsDueWeek} overdue={inspectionsOverdue} />
         )}
       </div>
+    </div>
+  );
+}
+
+// (Jun 2026 Wave-4 S4) Show BOTH inspection numbers. Pre-fix the single tile
+// flipped to the overdue count whenever anything was overdue — so on a busy
+// site (almost always ≥1 overdue) the "this week" planning number, the thing
+// that actually helps the team plan the day, never appeared. Now the
+// this-week count stays the headline and overdue rides alongside it in red.
+function InspectionStat({ dueWeek, overdue }: { dueWeek: number; overdue: number }) {
+  return (
+    <div className="rounded-2xl border border-white/10 bg-white/5 p-8 text-center">
+      <p className="text-7xl font-black text-violet-300">{dueWeek}</p>
+      <p className="mt-3 text-base text-white/60">
+        Inspections this week
+        {overdue > 0 && (
+          <span className="ml-2 font-semibold text-red-300">· {overdue} overdue</span>
+        )}
+      </p>
     </div>
   );
 }

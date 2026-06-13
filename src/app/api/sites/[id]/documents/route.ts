@@ -98,6 +98,24 @@ export async function POST(
     return NextResponse.json({ error: `File too large (${Math.round(file.size / (1024 * 1024))}MB) — max 50MB` }, { status: 400 });
   }
 
+  // (Jun 2026 Wave-4 D7) Server-side type allowlist. The client `accept`
+  // attribute is trivially bypassed, and this bucket serves PUBLIC URLs —
+  // an uploaded HTML/SVG/script would then render from our own domain. Allow
+  // only the document + image types the UI advertises; deliberately NOT svg
+  // (it can carry inline script).
+  const ALLOWED_UPLOAD_EXTENSIONS = new Set([
+    "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx",
+    "dwg", "dxf", "txt", "csv",
+    "png", "jpg", "jpeg", "gif", "webp", "heic", "heif",
+  ]);
+  const uploadExt = (file.name.split(".").pop() || "").toLowerCase();
+  if (!ALLOWED_UPLOAD_EXTENSIONS.has(uploadExt)) {
+    return NextResponse.json(
+      { error: `File type ".${uploadExt}" isn't allowed. Accepted: PDF, Office docs, images, DWG/DXF.` },
+      { status: 400 },
+    );
+  }
+
   // If jobId provided, get the plotId from the job
   let resolvedPlotId = plotId;
   if (jobId && !plotId) {
