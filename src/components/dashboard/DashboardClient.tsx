@@ -158,6 +158,45 @@ interface ExpiringCompliance {
   site: { id: string; name: string };
 }
 
+/** (Jun 2026 Wave-4 D1) At-Risk: FAILED statutory/QA hold-points. */
+interface FailedInspection {
+  id: string;
+  name: string;
+  type: string;
+  isBlocking: boolean;
+  plot: {
+    id: string;
+    name: string;
+    plotNumber: string | null;
+    site: { id: string; name: string };
+  };
+}
+
+/** (Jun 2026 Wave-4 D1) At-Risk: ORDERED deliveries past their expected date. */
+interface OverdueDelivery {
+  id: string;
+  itemsDescription: string | null;
+  supplierName: string | null;
+  daysOverdue: number;
+  site: { id: string; name: string } | null;
+  plotNumber: string | null;
+}
+
+/** (Jun 2026 Wave-4 D12) At-Risk: outstanding (REQUESTED) variations. */
+interface OutstandingVariation {
+  id: string;
+  ref: string | null;
+  title: string;
+  costDelta: number | null;
+  daysDelta: number | null;
+  plot: {
+    id: string;
+    name: string;
+    plotNumber: string | null;
+    site: { id: string; name: string };
+  };
+}
+
 export interface DashboardData {
   stats: StatsData;
   jobsByStatus: JobsByStatus;
@@ -172,6 +211,9 @@ export interface DashboardData {
   staleSnags: StaleSnag[];
   overdueInspections: OverdueInspection[];
   expiringCompliance: ExpiringCompliance[];
+  failedInspections: FailedInspection[];
+  overdueDeliveries: OverdueDelivery[];
+  outstandingVariations: OutstandingVariation[];
   watchedSites: WatchedSite[];
   plotsOverBudget: PlotOverBudget[];
 }
@@ -486,17 +528,26 @@ function AtRiskPanel({
   staleSnags,
   overdueInspections = [],
   expiringCompliance = [],
+  failedInspections = [],
+  overdueDeliveries = [],
+  outstandingVariations = [],
 }: {
   overdueJobs: OverdueJob[];
   staleSnags: StaleSnag[];
   overdueInspections?: OverdueInspection[];
   expiringCompliance?: ExpiringCompliance[];
+  failedInspections?: FailedInspection[];
+  overdueDeliveries?: OverdueDelivery[];
+  outstandingVariations?: OutstandingVariation[];
 }) {
   if (
     overdueJobs.length === 0 &&
     staleSnags.length === 0 &&
     overdueInspections.length === 0 &&
-    expiringCompliance.length === 0
+    expiringCompliance.length === 0 &&
+    failedInspections.length === 0 &&
+    overdueDeliveries.length === 0 &&
+    outstandingVariations.length === 0
   )
     return null;
 
@@ -648,6 +699,118 @@ function AtRiskPanel({
                       >
                         {expired ? "Expired" : "Expiring"}
                       </span>
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
+
+        {/* (Jun 2026 Wave-4 D1) Failed hold-points — the most urgent QA state. */}
+        {failedInspections.length > 0 && (
+          <div>
+            <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-red-700">
+              <ClipboardCheck className="size-3.5" aria-hidden="true" />
+              Failed inspections ({failedInspections.length})
+            </p>
+            <ul className="space-y-1.5">
+              {failedInspections.map((i) => (
+                <li key={i.id}>
+                  <Link
+                    href={`/inspections?focus=${i.id}`}
+                    className="flex items-center justify-between gap-2 rounded-md bg-white px-3 py-2 text-xs ring-1 ring-red-100 hover:ring-red-300"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-medium text-slate-900">
+                        {i.plot.plotNumber ? `Plot ${i.plot.plotNumber}` : i.plot.name} · {i.name}
+                        {i.isBlocking && <span className="ml-1.5 rounded bg-red-100 px-1 text-[9px] font-semibold uppercase text-red-700">blocks</span>}
+                      </p>
+                      <p className="truncate text-[11px] text-slate-500">
+                        {i.plot.site.name} · {inspectionTypeLabel(i.type)}
+                      </p>
+                    </div>
+                    <span className="shrink-0 rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-semibold text-red-700">Failed</span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* (Jun 2026 Wave-4 D1) Overdue deliveries — ORDERED past expected date. */}
+        {overdueDeliveries.length > 0 && (
+          <div>
+            <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-red-700">
+              <Truck className="size-3.5" aria-hidden="true" />
+              Overdue deliveries ({overdueDeliveries.length})
+            </p>
+            <ul className="space-y-1.5">
+              {overdueDeliveries.map((o) => {
+                const inner = (
+                  <>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-medium text-slate-900">
+                        {o.itemsDescription || "Material order"}{o.supplierName ? ` · ${o.supplierName}` : ""}
+                      </p>
+                      <p className="truncate text-[11px] text-slate-500">
+                        {o.site?.name ?? "—"}{o.plotNumber ? ` · Plot ${o.plotNumber}` : ""}
+                      </p>
+                    </div>
+                    <span className="shrink-0 rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-semibold text-red-700">{o.daysOverdue} WD overdue</span>
+                  </>
+                );
+                return (
+                  <li key={o.id}>
+                    {o.site ? (
+                      <Link
+                        href={`/sites/${o.site.id}?tab=orders`}
+                        className="flex items-center justify-between gap-2 rounded-md bg-white px-3 py-2 text-xs ring-1 ring-red-100 hover:ring-red-300"
+                      >
+                        {inner}
+                      </Link>
+                    ) : (
+                      <div className="flex items-center justify-between gap-2 rounded-md bg-white px-3 py-2 text-xs ring-1 ring-red-100">{inner}</div>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
+
+        {/* (Jun 2026 Wave-4 D12) Outstanding variations — pending cost/time impact. */}
+        {outstandingVariations.length > 0 && (
+          <div>
+            <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-amber-700">
+              <AlertTriangle className="size-3.5" aria-hidden="true" />
+              Outstanding variations ({outstandingVariations.length})
+            </p>
+            <ul className="space-y-1.5">
+              {outstandingVariations.map((v) => {
+                const impact = [
+                  typeof v.costDelta === "number" && v.costDelta !== 0
+                    ? `${v.costDelta > 0 ? "+" : "−"}£${Math.abs(v.costDelta).toLocaleString("en-GB")}`
+                    : null,
+                  typeof v.daysDelta === "number" && v.daysDelta !== 0
+                    ? `${v.daysDelta > 0 ? "+" : "−"}${Math.abs(v.daysDelta)}d`
+                    : null,
+                ].filter(Boolean).join(", ");
+                return (
+                  <li key={v.id}>
+                    <Link
+                      href={`/sites/${v.plot.site.id}/plots/${v.plot.id}?tab=quality`}
+                      className="flex items-center justify-between gap-2 rounded-md bg-white px-3 py-2 text-xs ring-1 ring-amber-100 hover:ring-amber-300"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate font-medium text-slate-900">
+                          {v.ref ? `${v.ref}: ` : ""}{v.title}
+                        </p>
+                        <p className="truncate text-[11px] text-slate-500">
+                          {v.plot.plotNumber ? `Plot ${v.plot.plotNumber}` : v.plot.name} · {v.plot.site.name}
+                        </p>
+                      </div>
+                      {impact && <span className="shrink-0 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">{impact}</span>}
                     </Link>
                   </li>
                 );
@@ -1048,7 +1211,15 @@ export function DashboardClient({ data }: { data: DashboardData }) {
           manager should worry about right now: overdue jobs (end
           date passed, not COMPLETED) and stale snags (open >30 days).
           Hidden when there's nothing to show — no noise in calm weeks. */}
-      <AtRiskPanel overdueJobs={data.overdueJobs} staleSnags={data.staleSnags} overdueInspections={data.overdueInspections} expiringCompliance={data.expiringCompliance} />
+      <AtRiskPanel
+        overdueJobs={data.overdueJobs}
+        staleSnags={data.staleSnags}
+        overdueInspections={data.overdueInspections}
+        expiringCompliance={data.expiringCompliance}
+        failedInspections={data.failedInspections}
+        overdueDeliveries={data.overdueDeliveries}
+        outstandingVariations={data.outstandingVariations}
+      />
 
       {/* (May 2026 audit #168) Plots over budget. Hidden when none. */}
       {data.plotsOverBudget.length > 0 && (

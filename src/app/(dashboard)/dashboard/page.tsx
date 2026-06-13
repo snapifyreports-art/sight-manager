@@ -3,7 +3,7 @@ import { Prisma } from "@prisma/client";
 import { auth } from "@/lib/auth";
 import { getUserSiteIds } from "@/lib/site-access";
 import { DashboardClient, type DashboardData } from "@/components/dashboard/DashboardClient";
-import { whereJobEndOverdue } from "@/lib/lateness";
+import { whereJobEndOverdue, whereOrderOverdue } from "@/lib/lateness";
 import { differenceInWorkingDays } from "@/lib/working-days";
 import { sessionHasPermission } from "@/lib/permissions";
 import { cookies } from "next/headers";
@@ -81,6 +81,11 @@ export default async function DashboardPage() {
     // (Jun 2026 Wave-4 B2) Uncapped overdue jobs (dates only) for headline
     // stat cards.
     overdueAllDates,
+    // (Jun 2026 Wave-4 D1) At-Risk: FAILED hold-points + overdue deliveries.
+    failedInspections,
+    overdueDeliveries,
+    // (Jun 2026 Wave-4 D12) At-Risk: outstanding (REQUESTED) variations.
+    outstandingVariations,
   ] = await Promise.all([
     // Total sites (filtered)
     prisma.site.count({ where: siteWhere }),
@@ -299,6 +304,78 @@ export default async function DashboardPage() {
       },
       select: { originalEndDate: true },
     }),
+
+    // (Jun 2026 Wave-4 D1) At-Risk: FAILED inspections — a failed statutory
+    // hold-point is one of the most urgent things to chase, and it was the
+    // one inspection state the panel didn't surface (overdue-unbooked aside).
+    prisma.inspection.findMany({
+      take: 8,
+      where: {
+        status: "FAILED",
+        ...(siteIds !== null ? { plot: { siteId: { in: siteIds } } } : {}),
+      },
+      orderBy: { failedAt: "desc" },
+      select: {
+        id: true,
+        name: true,
+        type: true,
+        isBlocking: true,
+        plot: {
+          select: { id: true, name: true, plotNumber: true, site: { select: { id: true, name: true } } },
+        },
+      },
+    }),
+
+    // (Jun 2026 Wave-4 D1) At-Risk: overdue deliveries — ORDERED past their
+    // expected date. Scope across all three order→site attachment paths so
+    // one-off plot/site orders aren't dropped (whereOrdersForSite shape).
+    prisma.materialOrder.findMany({
+      take: 8,
+      where: {
+        ...whereOrderOverdue(today),
+        ...(siteIds !== null
+          ? {
+              OR: [
+                { job: { plot: { siteId: { in: siteIds } } } },
+                { plot: { siteId: { in: siteIds } } },
+                { siteId: { in: siteIds } },
+              ],
+            }
+          : {}),
+      },
+      orderBy: { expectedDeliveryDate: "asc" },
+      select: {
+        id: true,
+        itemsDescription: true,
+        expectedDeliveryDate: true,
+        supplier: { select: { name: true } },
+        job: { select: { plot: { select: { plotNumber: true, site: { select: { id: true, name: true } } } } } },
+        plot: { select: { plotNumber: true, site: { select: { id: true, name: true } } } },
+        site: { select: { id: true, name: true } },
+      },
+    }),
+
+    // (Jun 2026 Wave-4 D12) At-Risk: outstanding variations — REQUESTED, not
+    // yet approved/rejected. Each carries pending cost/time impact a director
+    // wants on their radar; previously they had no proactive surface anywhere.
+    prisma.variation.findMany({
+      take: 8,
+      where: {
+        status: "REQUESTED",
+        ...(siteIds !== null ? { plot: { siteId: { in: siteIds } } } : {}),
+      },
+      orderBy: { createdAt: "desc" },
+      select: {
+        id: true,
+        ref: true,
+        title: true,
+        costDelta: true,
+        daysDelta: true,
+        plot: {
+          select: { id: true, name: true, plotNumber: true, site: { select: { id: true, name: true } } },
+        },
+      },
+    }),
   ]);
 
   // Build the job status map with defaults
@@ -397,6 +474,39 @@ export default async function DashboardPage() {
       status: c.status,
       expiresAt: c.expiresAt?.toISOString() ?? null,
       site: c.site,
+    })),
+    // (Jun 2026 Wave-4 D1) At-Risk: failed hold-points.
+    failedInspections: failedInspections.map((i) => ({
+      id: i.id,
+      name: i.name,
+      type: i.type,
+      isBlocking: i.isBlocking,
+      plot: i.plot,
+    })),
+    // (Jun 2026 Wave-4 D1) At-Risk: overdue deliveries. Resolve the site
+    // from whichever of the three attachment paths the order used.
+    overdueDeliveries: overdueDeliveries.map((o) => {
+      const site = o.job?.plot?.site ?? o.plot?.site ?? o.site ?? null;
+      const plotNumber = o.job?.plot?.plotNumber ?? o.plot?.plotNumber ?? null;
+      return {
+        id: o.id,
+        itemsDescription: o.itemsDescription,
+        supplierName: o.supplier?.name ?? null,
+        daysOverdue: o.expectedDeliveryDate
+          ? Math.max(0, differenceInWorkingDays(today, o.expectedDeliveryDate))
+          : 0,
+        site: site ? { id: site.id, name: site.name } : null,
+        plotNumber,
+      };
+    }),
+    // (Jun 2026 Wave-4 D12) At-Risk: outstanding variations.
+    outstandingVariations: outstandingVariations.map((v) => ({
+      id: v.id,
+      ref: v.ref,
+      title: v.title,
+      costDelta: v.costDelta,
+      daysDelta: v.daysDelta,
+      plot: v.plot,
     })),
     watchedSites: watchedSites.map((w) => ({
       id: w.site.id,

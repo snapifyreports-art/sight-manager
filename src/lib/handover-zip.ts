@@ -525,7 +525,6 @@ export async function buildHandoverArchive({
         url: true,
         durationSec: true,
         caption: true,
-        transcript: true,
         createdAt: true,
         jobId: true,
       },
@@ -549,7 +548,6 @@ export async function buildHandoverArchive({
       url: v.url,
       durationSec: v.durationSec,
       caption: v.caption,
-      transcript: v.transcript,
       createdAt: v.createdAt,
       job: v.jobId ? { name: voiceJobMap.get(v.jobId) ?? null } : null,
     }));
@@ -576,8 +574,10 @@ export async function buildHandoverArchive({
           });
         });
       }
-      // Transcript index — one text file summarising every clip so
-      // a reader can grep for a phrase without playing the audio.
+      // Voice-notes index — one text file listing every clip (date, job,
+      // caption, length) so a reader can scan them without playing each.
+      // (Jun 2026 Wave-4 D6) No transcript line — there is no transcription
+      // pipeline, so it would always be blank and read as half-built.
       const indexLines: string[] = [];
       indexLines.push(`Voice notes — ${plotLabel}`);
       indexLines.push("");
@@ -585,10 +585,6 @@ export async function buildHandoverArchive({
         indexLines.push(
           `[${format(v.createdAt, "dd MMM yy HH:mm")}] ${v.job?.name ? `(${v.job.name}) ` : ""}${v.caption ?? ""}${v.durationSec ? ` — ${v.durationSec}s` : ""}`,
         );
-        if (v.transcript) {
-          indexLines.push(`  ${v.transcript}`);
-        }
-        indexLines.push("");
       }
       archive.append(indexLines.join("\n"), {
         name: `${folder}/voice-notes/_index.txt`,

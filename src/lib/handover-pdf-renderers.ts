@@ -1096,7 +1096,7 @@ export function renderReadmeTxt(
     lines.push("        handover-checklist.pdf (EPC / gas-safe / electrical / NHBC etc.)");
     lines.push("        certificates/  drawings/  specs/  rams/  handover-checklist/  other/");
     lines.push("        photos/                (per stage; _annotations.txt when photos were marked up)");
-    lines.push("        voice-notes/           (audio clips + _index.txt transcript summary)");
+    lines.push("        voice-notes/           (audio clips + _index.txt listing)");
   }
   lines.push("");
   lines.push("03_Contractor_Analysis/");
