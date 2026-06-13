@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { sessionHasPermission } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { getServerCurrentDate } from "@/lib/dev-date";
 import { getUserSiteIds, canAccessSite } from "@/lib/site-access";
@@ -20,6 +21,18 @@ export async function GET(req: NextRequest) {
   const session = await auth();
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  // (Jun 2026 hardening) Analytics routes expose supplier spend / margin /
+  // cost figures. canAccessSite is access, not permission — gate on
+  // VIEW_ANALYTICS so a site-assigned CONTRACTOR can't read commercial
+  // analytics via a direct API call (the /analytics nav is already gated).
+  if (
+    !sessionHasPermission(
+      session.user as { role?: string; permissions?: string[] },
+      "VIEW_ANALYTICS",
+    )
+  ) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   const { searchParams } = new URL(req.url);

@@ -345,7 +345,11 @@ export async function GET(
         // One-off orders (job=null) attach to a plot or the site directly.
         plot: { select: { plotNumber: true, name: true } },
         site: { select: { name: true } },
-        orderItems: { select: { id: true, name: true, quantity: true, unit: true, unitCost: true, totalCost: true } },
+        // (Jun 2026 hardening) Cost fields (unitCost/totalCost) dropped — the
+        // brief never renders them, but they shipped in the raw payload to any
+        // site-access user (incl. a contractor without VIEW_ORDERS). The
+        // dedicated order routes (VIEW_ORDERS-gated) supply costs where needed.
+        orderItems: { select: { id: true, name: true, quantity: true, unit: true } },
       },
       orderBy: { dateOfOrder: "asc" },
       take: 30,
@@ -364,7 +368,11 @@ export async function GET(
         // One-off orders (job=null) attach to a plot or the site directly.
         plot: { select: { plotNumber: true, name: true } },
         site: { select: { name: true } },
-        orderItems: { select: { id: true, name: true, quantity: true, unit: true, unitCost: true, totalCost: true } },
+        // (Jun 2026 hardening) Cost fields (unitCost/totalCost) dropped — the
+        // brief never renders them, but they shipped in the raw payload to any
+        // site-access user (incl. a contractor without VIEW_ORDERS). The
+        // dedicated order routes (VIEW_ORDERS-gated) supply costs where needed.
+        orderItems: { select: { id: true, name: true, quantity: true, unit: true } },
       },
       orderBy: { dateOfOrder: "asc" },
       take: 20,

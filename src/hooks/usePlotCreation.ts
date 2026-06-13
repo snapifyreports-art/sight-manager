@@ -376,6 +376,15 @@ export function usePlotCreation() {
   const createBlankBatch = useCallback(async (input: BlankBatchInput, opts?: Options): Promise<Result> => {
     setIsLoading(true);
     const plotErrors: Array<{ plotNumber: string; error: string }> = [];
+    // (Jun 2026 hardening) Make blank ranges idempotent like the template
+    // path. Pre-fix, a partial failure (504 / network blip mid-batch) left
+    // some plots created; "press Create again" re-POSTed every plot and the
+    // already-created ones returned 409, so the batch could NEVER complete —
+    // the blank range locked out forever, contradicting the wizard's own
+    // "retry just the failed plots, the ones that worked won't be duplicated"
+    // copy. Now a 409 is counted as a benign skip, so a retry only creates
+    // the plots that are genuinely missing.
+    const skippedExisting: string[] = [];
     try {
       for (let i = 0; i < input.plots.length; i += 3) {
         const chunk = input.plots.slice(i, i + 3);
@@ -390,6 +399,11 @@ export function usePlotCreation() {
           })
         );
         for (const { p, res } of results) {
+          if (res.status === 409) {
+            // Plot number already exists — benign on a retry; skip it.
+            skippedExisting.push(p.plotNumber);
+            continue;
+          }
           if (!res.ok) {
             const error = await fetchErrorMessage(res, "Create failed");
             plotErrors.push({ plotNumber: p.plotNumber, error });
@@ -401,9 +415,9 @@ export function usePlotCreation() {
           const preview = plotErrors.slice(0, 3).map((e) => `Plot ${e.plotNumber}: ${e.error}`).join("; ");
           toast.error(`${plotErrors.length} plot${plotErrors.length !== 1 ? "s" : ""} failed — ${preview}`);
         }
-        return { ok: false, error: `${plotErrors.length} plot(s) failed`, plotErrors };
+        return { ok: false, error: `${plotErrors.length} plot(s) failed`, plotErrors, skippedExisting };
       }
-      return { ok: true };
+      return { ok: true, skippedExisting };
     } finally {
       setIsLoading(false);
     }

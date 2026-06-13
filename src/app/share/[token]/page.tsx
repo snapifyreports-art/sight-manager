@@ -49,6 +49,13 @@ export default async function SharePage({
       description: true,
       site: { select: { id: true, name: true, location: true } },
       jobs: {
+        // (Jun 2026 hardening) LEAF jobs only — pre-fix this counted parent
+        // stage rows too, so the public progress % + "X of Y stages" caption
+        // were understated vs the leaf-only Plot.buildCompletePercent every
+        // internal screen (Portfolio / Heatmap / Story / Plot Detail) uses.
+        // A plot mid-way through a hierarchical stage showed e.g. 33% here vs
+        // 50% internally. Same filter as recomputePlotPercent.
+        where: { children: { none: {} } },
         orderBy: { sortOrder: "asc" },
         select: {
           id: true,

@@ -102,6 +102,15 @@ export async function POST(
       session.user as { role?: string; permissions?: string[] },
       "VIEW_INSPECTIONS",
     ),
+    // (Jun 2026 hardening) Same boundary for compliance. The route gates on
+    // VIEW_ANALYTICS, which is independently grantable from VIEW_COMPLIANCE —
+    // without this an analytics-only user could download the per-plot NCR /
+    // defect / variation logs (incl. variation cost deltas) the rest of the
+    // app gates on VIEW_COMPLIANCE.
+    includeCompliance: sessionHasPermission(
+      session.user as { role?: string; permissions?: string[] },
+      "VIEW_COMPLIANCE",
+    ),
   });
 
   // archiver implements Readable. Bridge to a web ReadableStream so we

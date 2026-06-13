@@ -73,6 +73,14 @@ interface BuildArgs {
    * skips the inspection-log PDFs + cert warnings so the ZIP honours the
    * same permission boundary as every other inspection surface. */
   includeInspections?: boolean;
+  /** (Jun 2026 hardening) False when the triggering user lacks
+   * VIEW_COMPLIANCE — skips the per-plot NCR / defect / variation log PDFs
+   * (variation logs carry cost/time deltas) + the Story compliance block, so
+   * the ZIP honours the same boundary D9 added to every other compliance
+   * surface. The route gates on VIEW_ANALYTICS, which is independently
+   * grantable from VIEW_COMPLIANCE, so without this an analytics-only user
+   * could download commercial compliance data. */
+  includeCompliance?: boolean;
 }
 
 // Sanitize any string used as a filename or folder. Keep it ASCII-safe
@@ -160,6 +168,7 @@ export async function buildHandoverArchive({
   siteId,
   triggeredByUserName,
   includeInspections = true,
+  includeCompliance = true,
 }: BuildArgs): Promise<Archiver> {
   const archive = archiver("zip", { zlib: { level: 6 } });
 
@@ -176,6 +185,7 @@ export async function buildHandoverArchive({
   const story = await buildSiteStory(prisma, siteId, {
     includeFullDetail: true,
     includeInspections,
+    includeCompliance,
   });
 
   const safeSiteName = safeName(story.site.name);
@@ -299,7 +309,7 @@ export async function buildHandoverArchive({
     // relation defined — so resolve user names via a separate User
     // lookup, then reshape into the nested-object form the renderer
     // expects.
-    const ncrRows = await prisma.nCR.findMany({
+    const ncrRows = !includeCompliance ? [] : await prisma.nCR.findMany({
       where: { plotId: plot.id },
       orderBy: { raisedAt: "asc" },
       select: {
@@ -352,7 +362,7 @@ export async function buildHandoverArchive({
       archive.append(ncrPdf, { name: `${folder}/ncr-log.pdf` });
     }
 
-    const defects = await prisma.defectReport.findMany({
+    const defects = !includeCompliance ? [] : await prisma.defectReport.findMany({
       where: { plotId: plot.id },
       orderBy: { reportedAt: "asc" },
       select: {
@@ -371,7 +381,7 @@ export async function buildHandoverArchive({
       });
     }
 
-    const variations = await prisma.variation.findMany({
+    const variations = !includeCompliance ? [] : await prisma.variation.findMany({
       where: { plotId: plot.id },
       orderBy: { createdAt: "asc" },
       select: {

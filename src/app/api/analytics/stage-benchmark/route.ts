@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { sessionHasPermission } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { getUserSiteIds } from "@/lib/site-access";
 
@@ -24,6 +25,16 @@ export async function GET(_req: NextRequest) {
   const session = await auth();
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  // (Jun 2026 hardening) Analytics route — gate on VIEW_ANALYTICS (access is
+  // not permission; the /analytics nav is already VIEW_ANALYTICS-gated).
+  if (
+    !sessionHasPermission(
+      session.user as { role?: string; permissions?: string[] },
+      "VIEW_ANALYTICS",
+    )
+  ) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   const siteIds = await getUserSiteIds(session.user.id, session.user.role);

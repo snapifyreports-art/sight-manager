@@ -625,6 +625,11 @@ function countOutstandingItems(data: ClosureSummary): number {
     (data.compliance?.ncrs.open ?? 0) +
     (data.compliance?.defects.open ?? 0) +
     variationsOutstanding +
+    // (Jun 2026 hardening) Mirror the allReady hard gate — an expired
+    // compliance doc blocks readiness, so it must also count toward the
+    // "X items outstanding — generate anyway?" confirm. Pre-fix, a site
+    // whose only blocker was a lapsed cert skipped the confirm entirely.
+    (data.compliance?.documents?.expired ?? 0) +
     handoverDocsOutstanding +
     preStartOutstanding +
     inspectionsUnresolved +

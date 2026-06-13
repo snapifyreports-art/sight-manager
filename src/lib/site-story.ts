@@ -1593,21 +1593,48 @@ export async function buildSiteStory(
   }
 
   // ─── Contractor performance ─────────────────────────────────────────
+  // (Jun 2026 hardening) LEAF jobs only + fault-attributed on-time, matching
+  // the contractor-analysis route and the contractor share page (Batch B).
+  // Pre-fix this counted parent rollup jobs and used a RAW actualEnd <=
+  // originalEnd comparison, so the Story contractor table disagreed with the
+  // Analytics leaderboard and the on-time % the contractor sees on their link.
   const contractorRows = await tx.jobContractor.findMany({
-    where: { job: { plot: { siteId } } },
+    where: { job: { plot: { siteId }, children: { none: {} } } },
     select: {
       contactId: true,
       contact: { select: { name: true, company: true } },
       job: {
         select: {
+          id: true,
           status: true,
-          actualEndDate: true,
-          originalEndDate: true,
           plot: { select: { siteId: true } },
         },
       },
     },
   });
+  // A late finish only counts against a contractor when a non-excused
+  // LatenessEvent attributed the delay to THEM (weather / late predecessor /
+  // design change are excused or attributed elsewhere → on-time for them).
+  const contractorLatenessEvents = await tx.latenessEvent.findMany({
+    where: {
+      siteId,
+      jobId: { not: null },
+      excused: false,
+      attributedContactId: { not: null },
+    },
+    select: { jobId: true, attributedContactId: true, daysLate: true },
+  });
+  const attributedDelayByContractor = new Map<string, Map<string, number>>();
+  for (const e of contractorLatenessEvents) {
+    if (!e.jobId || !e.attributedContactId) continue;
+    const byContact =
+      attributedDelayByContractor.get(e.jobId) ?? new Map<string, number>();
+    byContact.set(
+      e.attributedContactId,
+      (byContact.get(e.attributedContactId) ?? 0) + e.daysLate,
+    );
+    attributedDelayByContractor.set(e.jobId, byContact);
+  }
   const contractorMap = new Map<string, ContractorPerf>();
   for (const r of contractorRows) {
     if (r.job.plot.siteId !== siteId) continue;
@@ -1624,17 +1651,16 @@ export async function buildSiteStory(
     existing.jobsAssigned++;
     if (r.job.status === "COMPLETED") {
       existing.jobsCompleted++;
-      if (
-        r.job.actualEndDate &&
-        r.job.actualEndDate.getTime() <= r.job.originalEndDate.getTime()
-      ) {
-        existing.jobsOnTime++;
-      } else if (r.job.actualEndDate) {
+      // Fault-aware: only a non-excused delay the manager attributed to THIS
+      // contractor counts against them. Zero = on-time for this contractor,
+      // even if the job itself finished late for reasons outside their control.
+      const theirDelay =
+        attributedDelayByContractor.get(r.job.id)?.get(r.contactId) ?? 0;
+      if (theirDelay > 0) {
         existing.jobsLate++;
-        existing.totalDelayDaysAttributed += workingDaysBetween(
-          r.job.originalEndDate,
-          r.job.actualEndDate,
-        );
+        existing.totalDelayDaysAttributed += theirDelay;
+      } else {
+        existing.jobsOnTime++;
       }
     }
     contractorMap.set(r.contactId, existing);
