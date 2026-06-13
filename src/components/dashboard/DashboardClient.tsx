@@ -164,6 +164,11 @@ export interface DashboardData {
   recentEvents: EventLogEntry[];
   trafficLightJobs: TrafficLightJob[];
   overdueJobs: OverdueJob[];
+  /** (Jun 2026 Wave-4 B2) UNCAPPED overdue-job count + total working days
+   *  late, for the headline stat cards. overdueJobs[] is capped at 8 for
+   *  display, so the cards must NOT be derived from its length. */
+  atRiskCount: number;
+  totalLatenessWdLost: number;
   staleSnags: StaleSnag[];
   overdueInspections: OverdueInspection[];
   expiringCompliance: ExpiringCompliance[];
@@ -1030,11 +1035,8 @@ export function DashboardClient({ data }: { data: DashboardData }) {
       {/* Stats Row */}
       <StatsCards
         stats={data.stats}
-        atRiskCount={data.overdueJobs.length}
-        totalLatenessWdLost={data.overdueJobs.reduce(
-          (sum, j) => sum + (j.daysLate ?? 0),
-          0,
-        )}
+        atRiskCount={data.atRiskCount}
+        totalLatenessWdLost={data.totalLatenessWdLost}
       />
 
       {/* (May 2026 audit follow-up to #152) Sites the user is watching

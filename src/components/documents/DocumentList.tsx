@@ -182,7 +182,7 @@ function DocTable({
             <p className="truncate text-sm font-medium">{doc.name}</p>
             <p className="text-[10px] text-muted-foreground">
               {formatSize(doc.fileSize)} &middot; {doc.uploadedBy.name} &middot;{" "}
-              {new Date(doc.createdAt).toLocaleDateString()}
+              {new Date(doc.createdAt).toLocaleDateString("en-GB")}
               {showJob && doc.job && ` · ${doc.job.name}`}
             </p>
           </div>

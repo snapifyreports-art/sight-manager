@@ -29,6 +29,8 @@ import {
   MessageSquare,
   Plus,
   Filter,
+  Truck,
+  Clock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -128,6 +130,16 @@ function EventIcon({ type, description }: { type: string; description: string })
     case "INSPECTION_PASSED":  return <CheckCircle2 className={cls} />;
     case "INSPECTION_FAILED":
     case "INSPECTION_OVERDUE": return <AlertTriangle className={cls} />;
+    // (Jun 2026 Wave-4 B9) Types emitted in production that previously fell
+    // through to the generic Server icon — mirror the global Events Log.
+    case "WEATHER_IMPACT":     return <CloudRain className={cls} />;
+    case "PLOT_COMPLETED":
+    case "HANDOVER_COMPLETED": return <CheckCircle2 className={cls} />;
+    case "ORDER_SENT":         return <ShoppingCart className={cls} />;
+    case "DELIVERY_LATE":      return <Truck className={cls} />;
+    case "PHOTO_SHARED":       return <Camera className={cls} />;
+    case "LATENESS_OPENED":    return <AlertTriangle className={cls} />;
+    case "LATENESS_RESOLVED":  return <Clock className={cls} />;
     default:                 return <Server className={cls} />;
   }
 }
@@ -157,6 +169,15 @@ function eventColour(type: string, description: string): string {
     case "INSPECTION_PASSED":  return "text-emerald-600 bg-emerald-50 dark:bg-emerald-950/30";
     case "INSPECTION_FAILED":
     case "INSPECTION_OVERDUE": return "text-red-600 bg-red-50 dark:bg-red-950/30";
+    // (Jun 2026 Wave-4 B9) Match the global Events Log colours.
+    case "WEATHER_IMPACT":     return "text-sky-600 bg-sky-50 dark:bg-sky-950/30";
+    case "PLOT_COMPLETED":
+    case "HANDOVER_COMPLETED": return "text-emerald-600 bg-emerald-50 dark:bg-emerald-950/30";
+    case "ORDER_SENT":         return "text-violet-600 bg-violet-50 dark:bg-violet-950/30";
+    case "DELIVERY_LATE":      return "text-red-600 bg-red-50 dark:bg-red-950/30";
+    case "PHOTO_SHARED":       return "text-pink-600 bg-pink-50 dark:bg-pink-950/30";
+    case "LATENESS_OPENED":    return "text-red-600 bg-red-50 dark:bg-red-950/30";
+    case "LATENESS_RESOLVED":  return "text-emerald-600 bg-emerald-50 dark:bg-emerald-950/30";
     default:                 return "text-slate-600 bg-slate-50 dark:bg-slate-950/30";
   }
 }

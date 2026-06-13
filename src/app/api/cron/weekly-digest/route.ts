@@ -336,13 +336,13 @@ export async function GET(req: NextRequest) {
     </div>
     <div style="padding:32px;">
       <p style="margin:0 0 24px;color:#475569;font-size:14px;">Hi ${escapeHtml(u.name)},</p>
-      <p style="margin:0 0 24px;color:#475569;font-size:14px;">Here's what happened on the sites you're watching this week.</p>
+      <p style="margin:0 0 24px;color:#475569;font-size:14px;">Here's what happened this week across your sites.</p>
       ${siteRows}
       <div style="margin:24px 0 0;text-align:center;">
         <a href="${baseUrl}/dashboard" style="background:#2563eb;color:#fff;padding:10px 24px;border-radius:8px;text-decoration:none;font-size:14px;font-weight:600;">Open dashboard</a>
       </div>
       <p style="margin:24px 0 0;font-size:11px;color:#94a3b8;text-align:center;">
-        You're receiving this because you watch or are assigned to one or more sites. Toggle the watch button on a site header to stop seeing it here.
+        You're receiving this for every site you have access to. Mute a site from its header to stop seeing it here.
       </p>
     </div>
   </div>

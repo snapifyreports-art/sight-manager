@@ -138,18 +138,22 @@ export function Header() {
               <ClipboardCheck className="size-4 sm:size-3.5" />
               <span className="hidden sm:inline">Walk</span>
             </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="flex gap-1.5 px-1.5 sm:px-2 text-xs text-muted-foreground"
-              onClick={() => setSearchOpen(true)}
-            >
-              <Search className="size-4 sm:size-3.5" />
-              <span className="hidden lg:inline text-[10px] text-muted-foreground/60">⌘K</span>
-            </Button>
-            <Separator orientation="vertical" className="h-5" />
           </>
         )}
+        {/* (Jun 2026 Wave-4 B3) Global search is NOT site-scoped — keep its
+            button visible even with no site selected. Pre-fix it lived
+            inside the siteId gate, so a fresh account on /dashboard had no
+            clickable search at all (only the undiscoverable ⌘K shortcut). */}
+        <Button
+          variant="ghost"
+          size="sm"
+          className="flex gap-1.5 px-1.5 sm:px-2 text-xs text-muted-foreground"
+          onClick={() => setSearchOpen(true)}
+        >
+          <Search className="size-4 sm:size-3.5" />
+          <span className="hidden lg:inline text-[10px] text-muted-foreground/60">⌘K</span>
+        </Button>
+        <Separator orientation="vertical" className="h-5" />
         <div className="hidden"><DevModeToolbar /></div>
         {session?.user && (
           <DropdownMenu>

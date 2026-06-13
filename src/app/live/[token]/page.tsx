@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { verifyLiveToken } from "@/lib/share-token";
 import { addDays } from "date-fns";
 import { whereJobEndOverdue, whereJobStartOverdue } from "@/lib/lateness";
+import { whereOrdersForSite } from "@/lib/order-scope";
 import { LiveCabinScreen } from "./LiveCabinScreen";
 
 export const dynamic = "force-dynamic";
@@ -112,8 +113,11 @@ export default async function LiveCabinPage({
       },
     }),
     prisma.materialOrder.findMany({
+      // (Jun 2026 Wave-4 B14) Use the canonical order-scope helper — the
+      // inline OR was missing the direct-plot branch, so plot-level one-off
+      // orders were dropped from the cabin's delivery tiles.
       where: {
-        OR: [{ siteId: site.id }, { job: { plot: { siteId: site.id } } }],
+        ...whereOrdersForSite(site.id),
         status: "ORDERED",
         expectedDeliveryDate: { gte: dayStart, lt: dayEnd },
       },
@@ -126,7 +130,7 @@ export default async function LiveCabinPage({
     }),
     prisma.materialOrder.count({
       where: {
-        OR: [{ siteId: site.id }, { job: { plot: { siteId: site.id } } }],
+        ...whereOrdersForSite(site.id),
         status: "ORDERED",
         expectedDeliveryDate: { lt: dayStart },
       },

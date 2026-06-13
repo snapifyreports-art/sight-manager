@@ -25,8 +25,30 @@ interface Drawing {
   mimeType: string | null;
   category: string | null;
   plotId: string | null;
+  jobId: string | null;
   plot: { id: string; plotNumber: string | null; name: string } | null;
   createdAt: string;
+}
+
+// (Jun 2026 Wave-4 B13) Load this plot's drawings AND the site-wide ones.
+// The `?plotId=` query only returns docs attached to the plot or its jobs —
+// it can NEVER return site-wide docs (plotId null, no job), so the
+// "Site-wide drawings" panel was permanently empty. A second unscoped query
+// gets every site drawing; we keep only the true site-wide ones (no plot and
+// no job) and merge. The two result sets are disjoint, so there are no dupes.
+async function loadDrawings(siteId: string, plotId: string): Promise<Drawing[]> {
+  const [plotRes, siteRes] = await Promise.all([
+    fetch(`/api/sites/${siteId}/documents?plotId=${plotId}&category=DRAWING`),
+    fetch(`/api/sites/${siteId}/documents?category=DRAWING`),
+  ]);
+  if (!plotRes.ok) throw new Error(`Failed to load (HTTP ${plotRes.status})`);
+  const plotScoped: Drawing[] = await plotRes.json();
+  let siteWideOnly: Drawing[] = [];
+  if (siteRes.ok) {
+    const allSite: Drawing[] = await siteRes.json();
+    siteWideOnly = allSite.filter((d) => d.plotId === null && !d.jobId);
+  }
+  return [...plotScoped, ...siteWideOnly];
 }
 
 // Per-file upload row state — user can rename each file before uploading.
@@ -54,9 +76,7 @@ export function PlotDrawingsSection({ plotId, siteId }: { plotId: string; siteId
     setLoading(true);
     setError("");
     try {
-      const res = await fetch(`/api/sites/${siteId}/documents?plotId=${plotId}&category=DRAWING`);
-      if (!res.ok) throw new Error(`Failed to load (HTTP ${res.status})`);
-      setDrawings(await res.json());
+      setDrawings(await loadDrawings(siteId, plotId));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load");
     } finally {
@@ -69,11 +89,7 @@ export function PlotDrawingsSection({ plotId, siteId }: { plotId: string; siteId
     let cancelled = false;
     setLoading(true);
     setError("");
-    fetch(`/api/sites/${siteId}/documents?plotId=${plotId}&category=DRAWING`)
-      .then((r) => {
-        if (!r.ok) throw new Error(`Failed to load (HTTP ${r.status})`);
-        return r.json();
-      })
+    loadDrawings(siteId, plotId)
       .then((d) => { if (!cancelled) setDrawings(d); })
       .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load"); })
       .finally(() => { if (!cancelled) setLoading(false); });

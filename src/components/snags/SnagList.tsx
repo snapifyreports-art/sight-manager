@@ -189,8 +189,8 @@ export function SnagList({ snags, onSelect, onRefresh, showPlot, highlightId, si
       Contractor: s.contact ? (s.contact.company ? `${s.contact.company} — ${s.contact.name}` : s.contact.name) : "",
       "Assigned To": s.assignedTo?.name || "Unassigned",
       "Raised By": s.raisedBy?.name || "",
-      "Created Date": new Date(s.createdAt).toLocaleDateString(),
-      "Resolved Date": s.resolvedAt ? new Date(s.resolvedAt).toLocaleDateString() : "",
+      "Created Date": new Date(s.createdAt).toLocaleDateString("en-GB"),
+      "Resolved Date": s.resolvedAt ? new Date(s.resolvedAt).toLocaleDateString("en-GB") : "",
       "Days Open": Math.round(
         (Date.now() - new Date(s.createdAt).getTime()) / 86400000
       ),
@@ -528,7 +528,7 @@ export function SnagList({ snags, onSelect, onRefresh, showPlot, highlightId, si
                     </div>
                     <span className="flex items-center gap-1">
                       <Clock className="size-2.5" />
-                      {new Date(snag.createdAt).toLocaleDateString()}
+                      {new Date(snag.createdAt).toLocaleDateString("en-GB")}
                     </span>
                   </div>
 

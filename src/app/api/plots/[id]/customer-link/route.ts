@@ -152,6 +152,19 @@ export async function PATCH(
       select: { shareToken: true, shareEnabled: true },
     });
 
+    // (Jun 2026 Wave-4 B5) Disabling a link is a revoke — drop the
+    // customer's push subscriptions, mirroring rotate. Pre-fix only rotate
+    // severed them, so a buyer whose access was disabled (wrong buyer, sale
+    // fell through) kept live device subscriptions that would resume pushing
+    // if the link was later re-enabled for a different buyer.
+    if (body.enabled === false) {
+      await prisma.customerPushSubscription
+        .deleteMany({ where: { plotId: id } })
+        .catch((err) => {
+          console.warn("[customer-link disable] subscription cleanup failed:", err);
+        });
+    }
+
     return NextResponse.json({
       token: updated.shareToken,
       enabled: updated.shareEnabled,

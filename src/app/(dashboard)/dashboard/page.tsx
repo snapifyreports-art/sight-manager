@@ -78,6 +78,9 @@ export default async function DashboardPage() {
     // already expired. The reconcile cron flips past-due items to EXPIRED
     // nightly; this surfaces both the warn window and the expired tail.
     expiringCompliance,
+    // (Jun 2026 Wave-4 B2) Uncapped overdue jobs (dates only) for headline
+    // stat cards.
+    overdueAllDates,
   ] = await Promise.all([
     // Total sites (filtered)
     prisma.site.count({ where: siteWhere }),
@@ -157,6 +160,10 @@ export default async function DashboardPage() {
         id: true,
         name: true,
         endDate: true,
+        // (Jun 2026 Wave-4 B1) originalEndDate is the lateness SSoT baseline.
+        // The filter (whereJobEndOverdue) already measures off it; daysLate
+        // must too, or a rescheduled-forward job reads "0 WD late".
+        originalEndDate: true,
         plot: {
           select: {
             id: true,
@@ -174,7 +181,11 @@ export default async function DashboardPage() {
       take: 8,
       where: {
         status: { in: ["OPEN", "IN_PROGRESS"] },
-        createdAt: { lt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) },
+        // (Jun 2026 Wave-4) Anchor the 30-day stale cutoff to the dev-date
+        // `today`, not wall-clock Date.now() — matches Portfolio + the rest
+        // of this panel, so QA date-overrides stay consistent (and Date.now()
+        // is an impure call in a server render).
+        createdAt: { lt: new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000) },
         ...(siteIds !== null ? { plot: { siteId: { in: siteIds } } } : {}),
       },
       orderBy: { createdAt: "asc" },
@@ -273,6 +284,21 @@ export default async function DashboardPage() {
         site: { select: { id: true, name: true } },
       },
     }),
+
+    // (Jun 2026 Wave-4 B2) UNCAPPED overdue jobs (dates only) for the
+    // headline "At-Risk Jobs" + "Working Days Late" stat cards. The list
+    // above is capped at 8 for display; deriving the headline counts from
+    // that capped list made the cards read "8" and undercount lateness on
+    // a portfolio with more than 8 overdue jobs — disagreeing with the
+    // uncapped Portfolio total. This gives the true figures.
+    prisma.job.findMany({
+      where: {
+        ...whereJobEndOverdue(today),
+        ...jobSiteWhere,
+        children: { none: {} },
+      },
+      select: { originalEndDate: true },
+    }),
   ]);
 
   // Build the job status map with defaults
@@ -322,6 +348,14 @@ export default async function DashboardPage() {
       job: event.job,
     })),
     trafficLightJobs,
+    // (Jun 2026 Wave-4 B2) Headline figures from the UNCAPPED overdue set,
+    // not the take:8 display list — so the "At-Risk Jobs" card matches the
+    // Portfolio overdue total and "Working Days Late" sums every overdue job.
+    atRiskCount: overdueAllDates.length,
+    totalLatenessWdLost: overdueAllDates.reduce(
+      (sum, j) => sum + Math.max(0, differenceInWorkingDays(today, j.originalEndDate)),
+      0,
+    ),
     // (May 2026 audit #46 + D-P1-1) At-Risk panel feeds. `daysLate` is
     // pre-computed server-side using working-day arithmetic anchored to
     // the dev-date-aware `today` so it stays consistent with the
@@ -330,9 +364,11 @@ export default async function DashboardPage() {
       id: j.id,
       name: j.name,
       endDate: j.endDate?.toISOString() ?? null,
-      daysLate: j.endDate
-        ? Math.max(0, differenceInWorkingDays(today, j.endDate))
-        : 0,
+      // (Jun 2026 Wave-4 B1) Measure lateness off the immutable
+      // originalEndDate, matching whereJobEndOverdue + the Lateness SSoT.
+      // Using the current endDate read "0 WD late" for jobs slipped past
+      // their original plan but rescheduled to a future date.
+      daysLate: Math.max(0, differenceInWorkingDays(today, j.originalEndDate)),
       plot: j.plot,
     })),
     staleSnags: staleSnags.map((s) => ({

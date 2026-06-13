@@ -5,6 +5,7 @@ import { canAccessSite } from "@/lib/site-access";
 import { apiError } from "@/lib/api-errors";
 import { sessionHasPermission } from "@/lib/permissions";
 import { nextRef } from "@/lib/ref-sequence";
+import { logEvent } from "@/lib/event-log";
 
 export const dynamic = "force-dynamic";
 
@@ -35,7 +36,19 @@ async function authoriseByPlot(plotId: string, requiredPermission?: string) {
       ),
     };
   }
-  return { session };
+  return { session, siteId: plot.siteId };
+}
+
+/** Short "(+£40k, +15d)" impact suffix for Site Log descriptions. */
+function variationImpact(costDelta: number | null, daysDelta: number | null): string {
+  const parts: string[] = [];
+  if (typeof costDelta === "number" && costDelta !== 0) {
+    parts.push(`${costDelta > 0 ? "+" : "−"}£${Math.abs(costDelta).toLocaleString("en-GB")}`);
+  }
+  if (typeof daysDelta === "number" && daysDelta !== 0) {
+    parts.push(`${daysDelta > 0 ? "+" : "−"}${Math.abs(daysDelta)}d`);
+  }
+  return parts.length > 0 ? ` (${parts.join(", ")})` : "";
 }
 
 export async function GET(
@@ -103,6 +116,17 @@ export async function POST(
         costDelta: typeof body.costDelta === "number" ? body.costDelta : null,
         daysDelta: typeof body.daysDelta === "number" ? body.daysDelta : null,
       },
+    });
+    // (Jun 2026 Wave-4 B18) A variation moves the end date and the budget —
+    // log it to the Site Log (with its cost/time impact) so it shows in the
+    // Events Log + Story timeline, like NCRs. Pre-fix it was invisible
+    // everywhere except Story/Closure/Handover.
+    await logEvent(prisma, {
+      type: "USER_ACTION",
+      siteId: a.siteId,
+      plotId: id,
+      userId: a.session.user.id,
+      description: `Variation ${ref} raised: "${v.title}"${variationImpact(v.costDelta, v.daysDelta)}`,
     });
     return NextResponse.json(v, { status: 201 });
   } catch (err) {

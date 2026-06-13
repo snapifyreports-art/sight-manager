@@ -374,11 +374,14 @@ export default async function ProgressPage({
         )}
 
         {/* ─── Empty state when nothing yet ─── */}
-        {plot.journalEntries.length === 0 && photos.length === 0 && completed === 0 && !inProgress && (
+        {/* (Jun 2026 Wave-4 B6) Also require no passed inspections, else this
+            "hasn't started yet" card rendered beneath a populated Milestones
+            + "Quality checks passed" list — contradicting what's shown above. */}
+        {plot.journalEntries.length === 0 && photos.length === 0 && completed === 0 && !inProgress && passedInspections.length === 0 && (
           <section className="rounded-2xl border border-dashed bg-white p-8 text-center">
             <Hammer className="mx-auto size-10 text-slate-300" />
             <p className="mt-4 text-base font-medium text-slate-700">
-              Your build hasn't started yet
+              Your build hasn&apos;t started yet
             </p>
             <p className="mt-1 text-sm text-slate-500">
               Updates will appear here as soon as work begins on site.
@@ -389,7 +392,7 @@ export default async function ProgressPage({
         )}
 
         <footer className="mt-12 border-t pt-6 text-center text-xs text-slate-400">
-          We'll keep this page up to date as your home takes shape.
+          We&apos;ll keep this page up to date as your home takes shape.
         </footer>
       </div>
     </div>

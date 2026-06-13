@@ -5,6 +5,7 @@ import { canAccessSite } from "@/lib/site-access";
 import { apiError } from "@/lib/api-errors";
 import { sessionHasPermission } from "@/lib/permissions";
 import { nextRef } from "@/lib/ref-sequence";
+import { logEvent } from "@/lib/event-log";
 
 export const dynamic = "force-dynamic";
 
@@ -38,7 +39,7 @@ async function authoriseByPlot(plotId: string, requiredPermission?: string) {
       ),
     };
   }
-  return { session };
+  return { session, siteId: plot.siteId };
 }
 
 export async function GET(
@@ -126,6 +127,15 @@ export async function POST(
         reportedById: a.session.user.id,
         contractorId: body.contractorId || null,
       },
+    });
+    // (Jun 2026 Wave-4 B19) Log to the Site Log like NCRs do — a defect
+    // was previously invisible in the Events Log and the Story timeline.
+    await logEvent(prisma, {
+      type: "USER_ACTION",
+      siteId: a.siteId,
+      plotId: id,
+      userId: a.session.user.id,
+      description: `Defect ${ref} reported: "${d.title}"`,
     });
     return NextResponse.json(d, { status: 201 });
   } catch (err) {

@@ -271,8 +271,8 @@ function JobRow({
           {job.materialAlert.overdueDelivery > 0 && (
             <span className="flex items-center gap-1 text-red-600">
               <Clock className="size-3" />
-              {job.materialAlert.overdueDelivery} delivery
-              {job.materialAlert.overdueDelivery === 1 ? "" : "ies"} overdue
+              {job.materialAlert.overdueDelivery}{" "}
+              {job.materialAlert.overdueDelivery === 1 ? "delivery" : "deliveries"} overdue
             </span>
           )}
         </div>

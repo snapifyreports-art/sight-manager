@@ -259,7 +259,7 @@ export function SuppliersListClient({ suppliers: initial }: { suppliers: Supplie
               {s.archivedAt && (
                 <div className="mt-2 flex items-center justify-between border-t pt-2">
                   <span className="text-[10px] text-muted-foreground">
-                    Archived {new Date(s.archivedAt).toLocaleDateString()}
+                    Archived {new Date(s.archivedAt).toLocaleDateString("en-GB")}
                   </span>
                   <Button
                     variant="outline"

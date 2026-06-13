@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { canAccessSite } from "@/lib/site-access";
 import { apiError } from "@/lib/api-errors";
 import { sessionHasPermission } from "@/lib/permissions";
+import { getSupabase, PHOTOS_BUCKET } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
@@ -103,7 +104,27 @@ export async function DELETE(
     return NextResponse.json({ error: "noteId required" }, { status: 400 });
   }
   try {
-    await prisma.voiceNote.deleteMany({ where: { id: noteId, plotId: id } });
+    // (Jun 2026 Wave-4 B15) Fetch first so we can (a) 404 on a bad noteId and
+    // (b) remove the underlying audio object from storage — pre-fix the row
+    // was deleted but the audio file (and its live public URL) was orphaned
+    // in the bucket forever. Mirrors the document DELETE storage cleanup.
+    const note = await prisma.voiceNote.findFirst({
+      where: { id: noteId, plotId: id },
+      select: { id: true, url: true },
+    });
+    if (!note) {
+      return NextResponse.json({ error: "Voice note not found" }, { status: 404 });
+    }
+    const urlParts = note.url.split(`${PHOTOS_BUCKET}/`);
+    if (urlParts.length > 1) {
+      await getSupabase()
+        .storage.from(PHOTOS_BUCKET)
+        .remove([urlParts[1]])
+        .catch((err) =>
+          console.warn("[voice-note delete] storage cleanup failed:", err),
+        );
+    }
+    await prisma.voiceNote.delete({ where: { id: note.id } });
     return NextResponse.json({ ok: true });
   } catch (err) {
     return apiError(err, "Failed to delete voice note");

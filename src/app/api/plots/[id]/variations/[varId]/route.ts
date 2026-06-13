@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { canAccessSite } from "@/lib/site-access";
 import { apiError } from "@/lib/api-errors";
 import { sessionHasPermission } from "@/lib/permissions";
+import { logEvent } from "@/lib/event-log";
 
 export const dynamic = "force-dynamic";
 
@@ -34,7 +35,19 @@ async function authoriseByPlot(plotId: string, requiredPermission?: string) {
       ),
     };
   }
-  return { session };
+  return { session, siteId: plot.siteId };
+}
+
+/** Short "(+£40k, +15d)" impact suffix for Site Log descriptions. */
+function variationImpact(costDelta: number | null, daysDelta: number | null): string {
+  const parts: string[] = [];
+  if (typeof costDelta === "number" && costDelta !== 0) {
+    parts.push(`${costDelta > 0 ? "+" : "−"}£${Math.abs(costDelta).toLocaleString("en-GB")}`);
+  }
+  if (typeof daysDelta === "number" && daysDelta !== 0) {
+    parts.push(`${daysDelta > 0 ? "+" : "−"}${Math.abs(daysDelta)}d`);
+  }
+  return parts.length > 0 ? ` (${parts.join(", ")})` : "";
 }
 
 const VARIATION_STATUSES = ["REQUESTED", "APPROVED", "REJECTED", "IMPLEMENTED"];
@@ -98,6 +111,18 @@ export async function PUT(
 
   try {
     const v = await prisma.variation.update({ where: { id: varId }, data });
+    // (Jun 2026 Wave-4 B18) Log the commercial decision to the Site Log so a
+    // director sees an approved/rejected variation (and its cost/time impact)
+    // in the Events Log + Story timeline. Only on the meaningful transitions.
+    if (body.status === "APPROVED" || body.status === "REJECTED") {
+      await logEvent(prisma, {
+        type: "USER_ACTION",
+        siteId: a.siteId,
+        plotId: id,
+        userId: a.session.user.id,
+        description: `Variation ${v.ref} ${v.status.toLowerCase()}: "${v.title}"${variationImpact(v.costDelta, v.daysDelta)}`,
+      });
+    }
     return NextResponse.json(v);
   } catch (err) {
     return apiError(err, "Failed to update variation");

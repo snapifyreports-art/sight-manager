@@ -213,24 +213,27 @@ export function usePlotCreation() {
     }
   }, [handleError, toast]);
 
-  // ── Batch of plots from a single template (CHUNKED) ──────────────────
-  // (Jun 2026 Keith 504 report) A large site (e.g. 249 plots) used to send
-  // EVERY plot in one request to apply-template-batch — a single serverless
-  // invocation that ran far past Vercel's function timeout and returned a
-  // 504, failing the whole batch. We now split the batch into small chunks
-  // and send one request per chunk, accumulating results and reporting
-  // progress. Because the endpoint now SKIPS plots that already exist, a
-  // chunk that times out / drops can be safely re-sent (the wizard's retry
-  // re-runs the batch): the plots that already landed are skipped server-
-  // side, only the missing ones are created. No duplicates, no dead end.
+  // ── Batch of plots from a single template (ONE PLOT PER REQUEST) ─────
+  // (Jun 2026 Keith 504 report v2) A full house template is ~100+ sequential
+  // DB writes per plot (every job, sub-job, contractor link, order, item and
+  // inspection is its own round-trip). So even 10 plots in one request blew
+  // the serverless function's time limit — only ~2 plots landed before a 504.
+  // We now send exactly ONE plot per request, which always fits, run a couple
+  // in parallel for speed, and AUTO-RETRY a plot that times out. The endpoint
+  // skips plots that already exist, so a retry can never duplicate — it either
+  // creates the missing plot or no-ops. The durable fix (batch the per-plot
+  // writes so a plot is fast) is tracked as a separate follow-up.
   const createBatchFromTemplate = useCallback(async (input: TemplateBatchInput, opts?: Options): Promise<Result> => {
     setIsLoading(true);
-    // Template plots are heavy — each plot is its full job tree + orders +
-    // inspections + materials + documents, each in its own DB transaction.
-    // Keep chunks small so one request stays comfortably inside the 60s
-    // function limit even for a 20-stage template with many orders per plot.
-    const CHUNK_SIZE = 10;
+    const CHUNK_SIZE = 1;       // one heavy plot per request — never times out
+    const CONCURRENCY = 2;      // a couple in flight for speed; safe DB-pool load
+    const MAX_ATTEMPTS = 3;     // auto-retry timeouts/blips (idempotent endpoint)
     const total = input.plots.length;
+    const chunks: Array<typeof input.plots> = [];
+    for (let i = 0; i < total; i += CHUNK_SIZE) {
+      chunks.push(input.plots.slice(i, i + CHUNK_SIZE));
+    }
+
     let createdCount = 0;
     let processed = 0;
     let failedPlotCount = 0;
@@ -242,13 +245,15 @@ export function usePlotCreation() {
     > = {};
     const inspWarningsAcc = new Set<string>();
     const docWarningsAcc = new Set<string>();
-    // First HTTP-level failure (timeout / network / 5xx) — the retryable
-    // kind, as opposed to per-plot data errors which re-sending won't fix.
+    // First failure that survived all retries — the retryable kind (timeout /
+    // network / 5xx), as opposed to per-plot data errors.
     let firstChunkError: string | null = null;
 
-    try {
-      for (let i = 0; i < total; i += CHUNK_SIZE) {
-        const chunk = input.plots.slice(i, i + CHUNK_SIZE);
+    // Create one chunk (1 plot), retrying timeouts/5xx up to MAX_ATTEMPTS.
+    // 4xx (bad data) is NOT retried — re-sending won't fix it.
+    async function processChunk(chunk: typeof input.plots): Promise<void> {
+      let lastError = "Failed to create plots";
+      for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
         try {
           const res = await fetch("/api/plots/apply-template-batch", {
             method: "POST",
@@ -262,11 +267,7 @@ export function usePlotCreation() {
               plots: chunk,
             }),
           });
-          if (!res.ok) {
-            const error = await fetchErrorMessage(res, "Failed to create plots");
-            failedPlotCount += chunk.length;
-            if (!firstChunkError) firstChunkError = error;
-          } else {
+          if (res.ok) {
             const body = await res.json().catch(() => ({}));
             if (typeof body?.created === "number") createdCount += body.created;
             if (Array.isArray(body?.errors)) {
@@ -284,16 +285,38 @@ export function usePlotCreation() {
             if (Array.isArray(body?.documentWarnings)) {
               for (const w of body.documentWarnings) docWarningsAcc.add(w);
             }
+            return; // success
           }
+          lastError = await fetchErrorMessage(res, "Failed to create plots");
+          // Client-error (validation) won't be fixed by retrying.
+          if (res.status >= 400 && res.status < 500) break;
         } catch (e) {
-          failedPlotCount += chunk.length;
-          if (!firstChunkError) {
-            firstChunkError = e instanceof Error ? e.message : "Network error";
-          }
+          lastError = e instanceof Error ? e.message : "Network error";
         }
-        processed += chunk.length;
-        opts?.onProgress?.(processed, total);
+        // Brief fixed backoff before the next attempt.
+        if (attempt < MAX_ATTEMPTS) {
+          await new Promise((resolve) => setTimeout(resolve, 800));
+        }
       }
+      failedPlotCount += chunk.length;
+      if (!firstChunkError) firstChunkError = lastError;
+    }
+
+    try {
+      // Concurrency pool: CONCURRENCY workers pull chunks off a shared index.
+      // JS is single-threaded so the `idx++` is race-free.
+      let idx = 0;
+      async function worker(): Promise<void> {
+        while (idx < chunks.length) {
+          const myIdx = idx++;
+          await processChunk(chunks[myIdx]);
+          processed += chunks[myIdx].length;
+          opts?.onProgress?.(processed, total);
+        }
+      }
+      await Promise.all(
+        Array.from({ length: Math.min(CONCURRENCY, chunks.length) }, () => worker()),
+      );
 
       // Surface accumulated warnings ONCE (not once per chunk).
       if (!opts?.silent && inspWarningsAcc.size > 0) {

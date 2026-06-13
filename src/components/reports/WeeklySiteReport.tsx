@@ -649,7 +649,10 @@ export function WeeklySiteReport({ siteId }: WeeklySiteReportProps) {
                       <div key={i} className="rounded border px-2 py-1.5 text-sm mb-1">
                         <span className="font-medium">{d.supplier}</span>
                         <span className="ml-2 text-xs text-muted-foreground">
-                          {d.items || "Materials"} · Plot {d.plot.plotNumber}
+                          {d.items || "Materials"} ·{" "}
+                          {/* (Jun 2026 Wave-4 B12) site-wide orders have no
+                              plotNumber — don't render a bare "Plot ". */}
+                          {d.plot.plotNumber ? `Plot ${d.plot.plotNumber}` : "Site-wide"}
                         </span>
                       </div>
                     ))}

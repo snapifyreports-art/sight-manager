@@ -775,6 +775,9 @@ function ContractorCard({
               if (!j.startDate || !j.endDate) return false;
               const start = parseISO(j.startDate);
               const end = parseISO(j.endDate);
+              // (Jun 2026 Wave-4 B8) date-fns isWithinInterval throws on
+              // end < start — skip such a job rather than crash the panel.
+              if (end < start) return false;
               return isWithinInterval(day, { start, end });
             });
           };

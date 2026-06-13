@@ -89,7 +89,13 @@ export default async function ContractorSharePage({
   }
 
   const jobContractors = await prisma.jobContractor.findMany({
-    where: { contactId, job: { plot: { siteId } } },
+    // (Jun 2026 Wave-4 B7) LEAF jobs only — contractors can be assigned to
+    // parent/rollup jobs, and without this filter a phantom rollup row
+    // appeared in Active/Upcoming/Completed + the Mini Programme, and could
+    // be actioned. Every other contractor surface (the API route,
+    // Contractor Comms, on-site-today, and this page's own on-time calc)
+    // already filters to leaves; this query was the outlier.
+    where: { contactId, job: { plot: { siteId }, children: { none: {} } } },
     select: {
       job: {
         select: {
@@ -500,6 +506,11 @@ export default async function ContractorSharePage({
           const jobsForDay = (day: Date) =>
             allJobs.filter((j) => {
               if (!j.startDate || !j.endDate) return false;
+              // (Jun 2026 Wave-4 B8) date-fns throws a RangeError when
+              // end < start, which would 500 this PUBLIC page. A job whose
+              // end precedes its start (a drag slip / bad data) must just be
+              // skipped, not crash the whole contractor view.
+              if (j.endDate < j.startDate) return false;
               return isWithinInterval(day, { start: j.startDate, end: j.endDate });
             });
           const hasAnything = days.some((d) => jobsForDay(d).length > 0);

@@ -698,7 +698,7 @@ export function UsersClient({
                   {user.archivedAt ? (
                     <>
                       <span className="mr-auto text-[10px] text-muted-foreground">
-                        Archived {new Date(user.archivedAt).toLocaleDateString()}
+                        Archived {new Date(user.archivedAt).toLocaleDateString("en-GB")}
                       </span>
                       <Button
                         variant="outline"

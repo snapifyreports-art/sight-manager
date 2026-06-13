@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { format, formatDistanceToNow } from "date-fns";
 import {
   Play,
@@ -410,7 +411,16 @@ export function EventsClient({
 
   // Filters
   const [typeFilter, setTypeFilter] = useState<string>("all");
-  const [siteFilter, setSiteFilter] = useState<string>("all");
+  // (Jun 2026 Wave-4 B11) Seed the site filter from the ?site= URL param so
+  // the Weekly Report's "Activity Log" link lands pre-scoped to that site.
+  // Pre-fix the param was ignored and the link opened the unfiltered global
+  // log. Validate the id against the accessible sites before trusting it.
+  const searchParams = useSearchParams();
+  const initialSiteFilter = (() => {
+    const s = searchParams.get("site");
+    return s && sites.some((x) => x.id === s) ? s : "all";
+  })();
+  const [siteFilter, setSiteFilter] = useState<string>(initialSiteFilter);
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
 
