@@ -99,6 +99,10 @@ enum NotificationType {
   INSPECTION_WEEK_BEFORE
   INSPECTION_DAY_OF
   INSPECTION_OVERDUE
+  // (Jun 2026 R26) Compliance documents (insurance, certs, RAMS) within
+  // 14 days of expiry, or already expired. Daily push from the reconcile
+  // cron — a lapsed cert/insurance on site is a real-world liability.
+  COMPLIANCE_EXPIRING
 }
 
 enum SnagPriority {

@@ -6,6 +6,7 @@ import { recomputeInspectionDates } from "@/lib/inspection-dates";
 import { calculateCascade } from "@/lib/cascade";
 import { getServerCurrentDate } from "@/lib/dev-date";
 import { logEvent } from "@/lib/event-log";
+import { sendPushToSiteAudience } from "@/lib/push";
 
 export const dynamic = "force-dynamic";
 
@@ -321,10 +322,11 @@ export async function GET(req: NextRequest) {
   // flipped to EXPIRED. The 14-day "warn" window is a read-side concern
   // (dashboard At-Risk + ?tab=compliance) — no status change for those.
   //
-  // NOTE: no push notification is fired here — the NotificationType enum
-  // has no compliance-expiry value, and per the directive we don't
-  // misuse an unrelated one. A push type needs adding (reported).
+  // (Jun 2026 R26) After the flip, a daily push warns the site audience
+  // about anything expired OR within 14 days of expiry — see the push
+  // pass below. ON_HOLD sites get the status flip (data) but no push.
   let complianceExpiredFlipped = 0;
+  let compliancePushed = 0;
   const complianceErrors: Array<{ itemId: string; error: string }> = [];
   try {
     const complianceToday = getServerCurrentDate(req);
@@ -360,6 +362,54 @@ export async function GET(req: NextRequest) {
     }
   } catch (err) {
     console.error("[RECONCILE] Compliance expiry pass failed:", err);
+  }
+
+  // ---- (Jun 2026 R26) Compliance expiry push ----
+  // Daily nudge — items already expired or within 14 days of expiry, on
+  // ACTIVE sites only (ON_HOLD = data flip above, no push, per R12).
+  // Repeats daily like the inspection-overdue nag; preferences + the
+  // WatchedSite mute let a manager silence it.
+  try {
+    const cToday = getServerCurrentDate(req);
+    cToday.setHours(0, 0, 0, 0);
+    const warnBy = new Date(cToday);
+    warnBy.setDate(warnBy.getDate() + 14);
+    const dueItems = await prisma.siteComplianceItem.findMany({
+      where: {
+        expiresAt: { not: null, lte: warnBy },
+        status: { in: ["PENDING", "ACTIVE", "EXPIRED"] },
+        site: { status: "ACTIVE" },
+      },
+      select: { id: true, name: true, siteId: true, expiresAt: true, status: true },
+      orderBy: { expiresAt: "asc" },
+    });
+    const bySite = new Map<string, typeof dueItems>();
+    for (const it of dueItems) {
+      const arr = bySite.get(it.siteId) ?? [];
+      arr.push(it);
+      bySite.set(it.siteId, arr);
+    }
+    for (const [siteId, items] of bySite) {
+      const expired = items.filter((i) => i.status === "EXPIRED").length;
+      const soon = items.length - expired;
+      const title =
+        expired > 0
+          ? `⚠️ ${expired} compliance ${expired === 1 ? "item" : "items"} expired`
+          : `📋 ${soon} compliance ${soon === 1 ? "item" : "items"} expiring soon`;
+      const body = items
+        .slice(0, 5)
+        .map((i) => `${i.name}${i.status === "EXPIRED" ? " (expired)" : i.expiresAt ? ` — ${i.expiresAt.toISOString().slice(0, 10)}` : ""}`)
+        .join(", ");
+      await sendPushToSiteAudience(siteId, "COMPLIANCE_EXPIRING", {
+        title,
+        body,
+        url: `/sites/${siteId}?tab=compliance`,
+        tag: `compliance-${siteId}`,
+      }).catch(() => {});
+      compliancePushed += items.length;
+    }
+  } catch (err) {
+    console.error("[RECONCILE] Compliance expiry push failed:", err);
   }
 
   const durationMs = Date.now() - startedAt;
@@ -400,8 +450,10 @@ export async function GET(req: NextRequest) {
     parentsAdjusted,
     overlapPlotsFixed,
     overlapJobsShifted,
-    // (Jun 2026 R26) Compliance items flipped to EXPIRED this run.
+    // (Jun 2026 R26) Compliance items flipped to EXPIRED this run + the
+    // count covered by the daily expiring/expired push.
     complianceExpiredFlipped,
+    compliancePushed,
     complianceErrors: complianceErrors.length,
     plotErrors: plotErrors.length,
     parentErrors: parentErrors.length,

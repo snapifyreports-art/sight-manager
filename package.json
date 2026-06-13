@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev -p 3002",
-    "build": "npm run test:smoke && npm run test:links && next build",
+    "build": "npm run test:smoke && npm run test:links && npm run test:gates && next build",
     "build:nocheck": "next build",
     "start": "next start",
     "lint": "eslint",
@@ -16,7 +16,8 @@
     "db:migrate": "npx prisma migrate dev",
     "db:studio": "npx prisma studio",
     "postinstall": "npx prisma generate",
-    "test:links": "node scripts/check-internal-links.mjs"
+    "test:links": "node scripts/check-internal-links.mjs",
+    "test:gates": "node scripts/check-site-access-gates.mjs"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.1",

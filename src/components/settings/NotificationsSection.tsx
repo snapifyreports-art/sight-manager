@@ -103,6 +103,10 @@ const NOTIFICATION_TYPE_META: Record<
     label: "Inspection — Overdue",
     description: "A hold-point inspection passed its scheduled date without a recorded result.",
   },
+  COMPLIANCE_EXPIRING: {
+    label: "Compliance — Expiring",
+    description: "An insurance, certificate or RAMS document is within 14 days of expiry, or has expired.",
+  },
 };
 
 interface Preference {
