@@ -315,18 +315,83 @@ export function AnalyticsClient() {
     })
   );
 
-  // Flatten summary + contractor performance + site progress + supplier spend
-  // into separate sheets conceptually, but ReportExportButtons writes one
-  // sheet — so we emit the contractor performance table as the main data
-  // (most useful for board reporting).
-  const exportRows = data.contractorPerformance.map((c) => ({
-    Contractor: c.name,
-    "Total Jobs": c.totalJobs,
-    "Completed Jobs": c.completedJobs,
-    "On-Time Jobs": c.onTimeJobs,
-    "On-Time Rate %": c.onTimeRate ?? "",
-    "Avg Delay (days)": c.avgDelayDays,
-  }));
+  // (Jun 2026 Wave-4 D5) Full-tab export — one Excel sheet per analytics
+  // table (Keith: "do the full tab export now"). Empty sheets are dropped by
+  // ReportExportButtons. The Summary sheet always carries the headline totals.
+  const exportSheets: Array<{ name: string; rows: Array<Record<string, unknown>> }> = [
+    {
+      name: "Summary",
+      rows: [
+        {
+          "Total Sites": data.summary.totalSites,
+          "Total Plots": data.summary.totalPlots,
+          "Total Jobs": data.summary.totalJobs,
+          "Total Orders": data.summary.totalOrders,
+          "Total Spend (£)": data.summary.totalSpend,
+          "On-Time Delivery %": data.orderMetrics.onTimeDeliveryRate ?? "",
+          "Avg Lead Time (days)": data.orderMetrics.avgLeadTimeDays ?? "",
+        },
+      ],
+    },
+    {
+      name: "Site Progress",
+      rows: data.siteProgress.map((s) => ({
+        Site: s.siteName,
+        Status: s.status,
+        Plots: s.totalPlots,
+        Jobs: s.totalJobs,
+        "Completed Jobs": s.completedJobs,
+        "Avg Build %": s.avgBuildPercent,
+        "Delayed Jobs": s.delayedJobs,
+        "On Track": s.onTrack ? "Yes" : "No",
+      })),
+    },
+    {
+      name: "Contractor Performance",
+      rows: data.contractorPerformance.map((c) => ({
+        Contractor: c.name,
+        "Total Jobs": c.totalJobs,
+        "Completed Jobs": c.completedJobs,
+        "Measurable Jobs": c.measurableJobs,
+        "On-Time Jobs": c.onTimeJobs,
+        "On-Time Rate %": c.onTimeRate ?? "",
+        "Avg Delay (days)": c.avgDelayDays,
+      })),
+    },
+    {
+      name: "Job Durations",
+      rows: data.jobDurations.map((d) => ({
+        "Job / Stage": d.jobName,
+        Count: d.count,
+        "Avg Planned (days)": d.avgPlannedDays,
+        "Avg Actual (days)": d.avgActualDays ?? "",
+        "Variance (days)": d.varianceDays ?? "",
+      })),
+    },
+    {
+      name: "Supplier Spend",
+      rows: data.orderMetrics.supplierSpend.map((s) => ({
+        Supplier: s.name,
+        "Spend (£)": s.spend,
+        Orders: s.orderCount,
+      })),
+    },
+    {
+      name: "Orders by Status",
+      rows: Object.entries(data.orderMetrics.ordersByStatus).map(([status, count]) => ({
+        Status: status,
+        Count: count,
+      })),
+    },
+    {
+      name: "Weather Impact",
+      rows:
+        data.rainedOffStats?.bySite.map((s) => ({
+          Site: s.siteName,
+          "Weather Days": s.days,
+        })) ?? [],
+    },
+  ];
 
   return (
     <div className="space-y-6">
@@ -344,8 +409,7 @@ export function AnalyticsClient() {
         </div>
         <ReportExportButtons
           filename={`analytics-${format(new Date(), "yyyy-MM-dd")}`}
-          rows={exportRows}
-          sheetName="Contractor Performance"
+          sheets={exportSheets}
           compact
         />
       </div>

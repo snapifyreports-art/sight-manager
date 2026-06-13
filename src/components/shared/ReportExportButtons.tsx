@@ -39,6 +39,13 @@ export interface ReportExportButtonsProps {
   rows?: Array<Record<string, unknown>>;
   /** Excel sheet name (max 31 chars per xlsx spec). */
   sheetName?: string;
+  /**
+   * (Jun 2026 Wave-4 D5) Multi-sheet export — one tab per entry. When
+   * provided, this takes precedence over `rows`/`sheetName`, so a report
+   * with several tables (e.g. Analytics) downloads as one workbook with a
+   * sheet each. Empty-row sheets are skipped.
+   */
+  sheets?: Array<{ name: string; rows: Array<Record<string, unknown>> }>;
   /** Override the print handler. Default: window.print(). */
   onPrint?: () => void;
   /** Hide the PDF/print button. Some reports don't make sense printed. */
@@ -53,6 +60,7 @@ export function ReportExportButtons({
   filename,
   rows,
   sheetName = "Data",
+  sheets,
   onPrint,
   hidePrint = false,
   hideExcel = false,
@@ -63,13 +71,32 @@ export function ReportExportButtons({
     else window.print();
   };
 
+  // (Jun 2026 Wave-4 D5) A workbook is exportable if there's a non-empty
+  // single sheet OR at least one non-empty multi-sheet entry.
+  const multiSheets = (sheets ?? []).filter((s) => s.rows.length > 0);
+  const canExcel =
+    multiSheets.length > 0 || (!!rows && rows.length > 0);
+
   const handleExcel = async () => {
-    if (!rows || rows.length === 0) return;
+    if (!canExcel) return;
     const XLSX = await import("xlsx");
-    const ws = XLSX.utils.json_to_sheet(rows);
     const wb = XLSX.utils.book_new();
-    // Sheet names are limited to 31 chars.
-    XLSX.utils.book_append_sheet(wb, ws, sheetName.slice(0, 31));
+    if (multiSheets.length > 0) {
+      // (Jun 2026 Wave-4 D5) One tab per table. Sheet names are limited to
+      // 31 chars and must be unique within the workbook.
+      const used = new Set<string>();
+      for (const s of multiSheets) {
+        let name = s.name.slice(0, 31);
+        let i = 2;
+        while (used.has(name)) name = `${s.name.slice(0, 28)} ${i++}`;
+        used.add(name);
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(s.rows), name);
+      }
+    } else {
+      const ws = XLSX.utils.json_to_sheet(rows!);
+      // Sheet names are limited to 31 chars.
+      XLSX.utils.book_append_sheet(wb, ws, sheetName.slice(0, 31));
+    }
     // (May 2026 audit) Auto-append today's date unless the caller
     // already included one in the filename. Pre-this, every download
     // was just "budget-report.xlsx" — stacking reports across days
@@ -82,7 +109,6 @@ export function ReportExportButtons({
     XLSX.writeFile(wb, `${filename}${dateSuffix}.xlsx`);
   };
 
-  const canExcel = !!rows && rows.length > 0;
   const size = compact ? "sm" : "default";
   const iconSize = compact ? "size-3" : "size-4";
   const textSize = compact ? "text-xs" : "text-sm";
