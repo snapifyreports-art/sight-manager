@@ -46,6 +46,10 @@ export async function GET(req: NextRequest) {
   const tomorrow = addDays(now, 1);
   const tomorrowStr = tomorrow.toISOString().split("T")[0];
 
+  // (R12) ACTIVE only. This cron is push-only — it writes no data (the
+  // 05:00 weather cron owns the EventLog row), so excluding ON_HOLD here
+  // IS the "data only for ON_HOLD" outcome: a paused site simply gets no
+  // evening weather ping. ARCHIVED/COMPLETED excluded as always.
   const sites = await prisma.site.findMany({
     where: { status: "ACTIVE", postcode: { not: null } },
     select: { id: true, name: true, postcode: true },

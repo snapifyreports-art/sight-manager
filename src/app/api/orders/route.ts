@@ -55,6 +55,12 @@ export async function GET(req: NextRequest) {
           plot: { include: { site: true } },
         },
       },
+      // (Jun 2026 R23) One-off orders (jobId=null) attach directly to a
+      // plot or a site. Include those relations so the global Orders page
+      // can render a "One-off · Plot N / Site-wide" label instead of
+      // showing a job-less order with no context.
+      plot: { include: { site: true } },
+      site: true,
     },
     orderBy: { dateOfOrder: "desc" },
   });

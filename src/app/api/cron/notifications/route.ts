@@ -182,10 +182,14 @@ export async function GET(req: NextRequest) {
   // site's audience (assignee + accessible users minus mutes). Was
   // sendPushToAll which spammed every tenant user with every site's
   // brief regardless of relevance.
+  // (R12) ACTIVE only — ON_HOLD sites are paused, so they get no daily-
+  // brief push. The set is reused below to gate the snag-reinspection
+  // fan-out so a paused site can't ping either.
   const activeSites = await prisma.site.findMany({
     where: { status: "ACTIVE" },
     select: { id: true, name: true },
   });
+  const activeSiteIds = new Set(activeSites.map((s) => s.id));
   for (const site of activeSites) {
     notifications.push(
       sendPushToSiteAudience(site.id, "JOBS_STARTING_TODAY", {
@@ -227,6 +231,9 @@ export async function GET(req: NextRequest) {
       siteCounts.set(siteId, (siteCounts.get(siteId) ?? 0) + g._count._all);
     }
     for (const [siteId, count] of siteCounts) {
+      // (R12) Skip ON_HOLD (and any non-active) sites — paused sites
+      // don't nag about re-inspections.
+      if (!activeSiteIds.has(siteId)) continue;
       notifications.push(
         sendPushToSiteAudience(siteId, "JOBS_READY_FOR_SIGNOFF", {
           title: "Snag Re-Inspections Due",

@@ -2,6 +2,7 @@ import { notFound, redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/lib/auth";
 import { canAccessSite } from "@/lib/site-access";
+import { sessionHasPermission } from "@/lib/permissions";
 import { JobDetailClient } from "@/components/jobs/JobDetailClient";
 
 export const dynamic = "force-dynamic";
@@ -84,6 +85,12 @@ export default async function JobDetailPage({
     notFound();
   }
 
+  // (Jun 2026 R18) Order-item costs are commercially sensitive — only
+  // expose unitCost/totalCost to sessions with VIEW_ORDERS. Without it,
+  // the client still sees item names + quantities (useful on site) but
+  // the £ figures are stripped server-side so they never reach the wire.
+  const canViewOrders = sessionHasPermission(session.user, "VIEW_ORDERS");
+
   // Serialize dates for client component
   const serializedJob = {
     ...job,
@@ -120,6 +127,10 @@ export default async function JobDetailPage({
       orderItems: order.orderItems.map((item) => ({
         ...item,
         createdAt: item.createdAt.toISOString(),
+        // (Jun 2026 R18) Null out the cost fields when the viewer lacks
+        // VIEW_ORDERS — names/quantities stay, the money goes.
+        unitCost: canViewOrders ? item.unitCost : null,
+        totalCost: canViewOrders ? item.totalCost : null,
       })),
     })),
     actions: job.actions.map((action) => ({

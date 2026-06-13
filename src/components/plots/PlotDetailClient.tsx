@@ -36,6 +36,7 @@ import {
   HardHat,
   Heart,
   PoundSterling,
+  Pencil,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Breadcrumbs } from "@/components/ui/breadcrumbs";
@@ -1442,6 +1443,48 @@ export function PlotDetailClient({
     await copyShareToClipboard(shareUrl);
   };
 
+  // (Jun 2026 R21) Plot edit — a small name + description dialog next to
+  // Share. PUTs to /api/plots/[id] (which already accepts both fields and
+  // gates on EDIT_PROGRAMME) and router.refresh()es so the header + every
+  // tab re-render from the server with the new values.
+  const editToast = useToast();
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [editName, setEditName] = useState(plot.name);
+  const [editDescription, setEditDescription] = useState(plot.description ?? "");
+  const [editSaving, setEditSaving] = useState(false);
+
+  const openEditDialog = () => {
+    setEditName(plot.name);
+    setEditDescription(plot.description ?? "");
+    setEditDialogOpen(true);
+  };
+
+  const handleSavePlotEdit = async () => {
+    if (!editName.trim()) return;
+    setEditSaving(true);
+    try {
+      const res = await fetch(`/api/plots/${plot.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: editName.trim(),
+          description: editDescription.trim() || null,
+        }),
+      });
+      if (!res.ok) {
+        editToast.error(await fetchErrorMessage(res, "Failed to update plot"));
+        return;
+      }
+      setEditDialogOpen(false);
+      editToast.success("Plot updated");
+      router.refresh();
+    } catch (err) {
+      editToast.error(err instanceof Error ? err.message : "Network error updating plot");
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Back + Breadcrumb */}
@@ -1489,6 +1532,16 @@ export function PlotDetailClient({
           >
             <Share2 className="size-3.5" />
             Share
+          </Button>
+          {/* (Jun 2026 R21) Edit plot name + description. */}
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5 text-xs"
+            onClick={openEditDialog}
+          >
+            <Pencil className="size-3.5" />
+            Edit
           </Button>
           {/* (Jun 2026 R19) Add Job restored to the header — one-off works,
               extras and odd jobs are real, and the Add-inspection dialog
@@ -1794,6 +1847,52 @@ export function PlotDetailClient({
                 Regenerate
               </Button>
             )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* (Jun 2026 R21) Edit Plot Dialog — name + description only. */}
+      <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Edit Plot</DialogTitle>
+            <DialogDescription>
+              Update the plot name and description.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="plot-edit-name">Name</Label>
+              <Input
+                id="plot-edit-name"
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                placeholder="Plot name"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="plot-edit-description">Description</Label>
+              <Textarea
+                id="plot-edit-description"
+                value={editDescription}
+                onChange={(e) => setEditDescription(e.target.value)}
+                placeholder="Optional description..."
+                rows={3}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setEditDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              disabled={editSaving || !editName.trim()}
+              onClick={handleSavePlotEdit}
+            >
+              {editSaving ? <Loader2 className="mr-1.5 size-3.5 animate-spin" /> : null}
+              Save
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

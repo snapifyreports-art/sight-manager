@@ -64,6 +64,8 @@ interface Site {
 interface Plot {
   id: string;
   name: string;
+  // (Jun 2026 R23) plotNumber drives one-off label fallbacks.
+  plotNumber?: string | null;
   description: string | null;
   siteId: string;
   createdAt: string;
@@ -98,10 +100,20 @@ interface OrderItem {
   createdAt: string;
 }
 
+// (Jun 2026 R23) One-off orders (jobId=null) attach directly to a plot or
+// site instead of a job.
+interface OrderPlotAttachment {
+  id: string;
+  name: string;
+  plotNumber?: string | null;
+  siteId: string;
+  site: Site;
+}
+
 interface Order {
   id: string;
   supplierId: string;
-  jobId: string;
+  jobId: string | null;
   contactId: string | null;
   orderDetails: string | null;
   dateOfOrder: string;
@@ -117,11 +129,22 @@ interface Order {
   createdAt: string;
   updatedAt: string;
   supplier: Supplier;
-  job: Job;
+  // Null for one-off orders — fall back to plot/site.
+  job: Job | null;
+  plot: OrderPlotAttachment | null;
+  site: Site | null;
   orderItems: OrderItem[];
 }
 
 type OrderStatus = "PENDING" | "ORDERED" | "DELIVERED" | "CANCELLED";
+
+// (Jun 2026 R23) Null-safe attachment helpers — mirror OrdersClient.
+function orderPlot(order: Order): { id: string; name: string; plotNumber?: string | null } | null {
+  return order.job?.plot ?? order.plot ?? null;
+}
+function orderSite(order: Order): Site | null {
+  return order.job?.plot.site ?? order.plot?.site ?? order.site ?? null;
+}
 
 // ---------- Component ----------
 
@@ -196,7 +219,14 @@ export function OrderDetailSheet({
           Are you sure you want to delete the{" "}
           <span className="font-medium text-foreground">{order.supplier.name}</span>{" "}
           order for{" "}
-          <span className="font-medium text-foreground">{order.job.plot.name} — {order.job.name}</span>?
+          <span className="font-medium text-foreground">
+            {order.job
+              ? `${order.job.plot.name} — ${order.job.name}`
+              : `One-off — ${(() => {
+                  const p = orderPlot(order);
+                  return p ? (p.plotNumber ? `Plot ${p.plotNumber}` : p.name) : "Site-wide";
+                })()}`}
+          </span>?
           This cannot be undone.
         </>
       ),
@@ -312,20 +342,42 @@ export function OrderDetailSheet({
                 {order.supplier.name} <ExternalLink className="size-3" />
               </Link>
             </div>
+            {/* (Jun 2026 R23) Job row only for job-linked orders; one-off
+                orders show a "One-off" label instead. */}
             <div className="flex items-center justify-between">
               <span className="text-xs font-medium text-muted-foreground">Job</span>
-              <Link href={`/jobs/${order.job.id}`} className="flex items-center gap-1 text-sm font-medium text-blue-600 hover:underline">
-                {order.job.name} <ExternalLink className="size-3" />
-              </Link>
+              {order.job ? (
+                <Link href={`/jobs/${order.job.id}`} className="flex items-center gap-1 text-sm font-medium text-blue-600 hover:underline">
+                  {order.job.name} <ExternalLink className="size-3" />
+                </Link>
+              ) : (
+                <span className="text-sm font-medium text-muted-foreground">One-off order</span>
+              )}
             </div>
             <div className="flex items-center justify-between">
               <span className="text-xs font-medium text-muted-foreground">Location</span>
-              <Link
-                href={`/sites/${order.job.plot.siteId}/plots/${order.job.plot.id}`}
-                className="text-sm text-blue-600 hover:underline"
-              >
-                {order.job.plot.site.name} &gt; {order.job.plot.name}
-              </Link>
+              {(() => {
+                const site = orderSite(order);
+                const plot = orderPlot(order);
+                if (plot && site) {
+                  return (
+                    <Link
+                      href={`/sites/${site.id}/plots/${plot.id}`}
+                      className="text-sm text-blue-600 hover:underline"
+                    >
+                      {site.name} &gt; {plot.plotNumber ? `Plot ${plot.plotNumber}` : plot.name}
+                    </Link>
+                  );
+                }
+                if (site) {
+                  return (
+                    <Link href={`/sites/${site.id}`} className="text-sm text-blue-600 hover:underline">
+                      {site.name} &gt; Site-wide
+                    </Link>
+                  );
+                }
+                return <span className="text-sm text-muted-foreground">Site-wide</span>;
+              })()}
             </div>
           </div>
 
@@ -376,40 +428,47 @@ export function OrderDetailSheet({
                     size="sm"
                     className="gap-1.5 text-xs"
                     disabled={statusBusy}
-                    onClick={() => openSendOrderEmail({
-                      supplierId: order.supplier.id,
-                      supplierName: order.supplier.name,
-                      contactName: order.supplier.contactName,
-                      contactEmail: order.supplier.contactEmail,
-                      accountNumber: order.supplier.accountNumber,
-                      siteNames: [order.job.plot.site.name],
-                      orders: [{
-                        id: order.id,
-                        job: {
-                          id: order.job.id,
-                          name: order.job.name,
-                          plot: {
-                            name: order.job.plot.name,
-                            plotNumber: null,
-                            site: {
-                              id: order.job.plot.site.id,
-                              name: order.job.plot.site.name,
-                              address: order.job.plot.site.address,
-                              postcode: order.job.plot.site.postcode,
+                    onClick={() => {
+                      // (Jun 2026 R23) Null-safe for one-off orders: fall
+                      // back to the plot/site attachment, and omit the audit
+                      // jobId (a fabricated id would 500 on the FK).
+                      const site = orderSite(order);
+                      const plot = orderPlot(order);
+                      openSendOrderEmail({
+                        supplierId: order.supplier.id,
+                        supplierName: order.supplier.name,
+                        contactName: order.supplier.contactName,
+                        contactEmail: order.supplier.contactEmail,
+                        accountNumber: order.supplier.accountNumber,
+                        siteNames: [site?.name ?? ""],
+                        orders: [{
+                          id: order.id,
+                          job: {
+                            ...(order.job ? { id: order.job.id } : {}),
+                            name: order.job ? order.job.name : "One-off order",
+                            plot: {
+                              name: plot?.name ?? "Site-wide",
+                              plotNumber: plot?.plotNumber ?? null,
+                              site: {
+                                id: site?.id ?? "",
+                                name: site?.name ?? "",
+                                address: site?.address ?? null,
+                                postcode: site?.postcode ?? null,
+                              },
                             },
                           },
-                        },
-                        expectedDeliveryDate: order.expectedDeliveryDate,
-                        dateOfOrder: order.dateOfOrder,
-                        itemsDescription: order.itemsDescription,
-                        items: (order.orderItems ?? []).map((i) => ({
-                          name: i.name,
-                          quantity: i.quantity,
-                          unit: i.unit,
-                          unitCost: i.unitCost,
-                        })),
-                      }],
-                    })}
+                          expectedDeliveryDate: order.expectedDeliveryDate,
+                          dateOfOrder: order.dateOfOrder,
+                          itemsDescription: order.itemsDescription,
+                          items: (order.orderItems ?? []).map((i) => ({
+                            name: i.name,
+                            quantity: i.quantity,
+                            unit: i.unit,
+                            unitCost: i.unitCost,
+                          })),
+                        }],
+                      });
+                    }}
                   >
                     <Mail className="size-3.5" />
                     Send Order to Supplier

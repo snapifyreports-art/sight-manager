@@ -32,10 +32,19 @@ export async function GET(req: NextRequest) {
   const now = getServerCurrentDate(req);
   const dayStart = getServerStartOfDay(req);
 
-  const sites = await prisma.site.findMany({ where: { status: "ACTIVE" }, select: { id: true } });
+  // (R12) ON_HOLD sites are included so their OVERDUE flips + event-log
+  // breadcrumbs (data updates) still run — a paused site's statutory
+  // hold-points don't stop ticking. ARCHIVED/COMPLETED stay excluded.
+  // Pushes are suppressed below for the ON_HOLD subset (data only).
+  const sites = await prisma.site.findMany({
+    where: { status: { in: ["ACTIVE", "ON_HOLD"] } },
+    select: { id: true, status: true },
+  });
   const summary = { sites: sites.length, flippedOverdue: 0, bookingDue: 0, weekBefore: 0, dayOf: 0, overdueAlerts: 0, failed: 0 };
 
   for (const site of sites) {
+    // ON_HOLD = data updates only — flip statuses + log, but no pushes.
+    const pushSuppressed = site.status === "ON_HOLD";
     // (Jun 2026 audit) Per-site failure isolation — every other per-site
     // cron (weather, weather-evening, lateness) wraps its loop body so a
     // single bad site can't stop the remaining sites' OVERDUE flips and
@@ -75,7 +84,7 @@ export async function GET(req: NextRequest) {
         const daysOverdue = Math.floor((dayStart.getTime() - new Date(i.scheduledDate).getTime()) / 86_400_000);
         return daysOverdue <= 3 || isMonday;
       });
-      if (overdueToNag.length > 0) {
+      if (overdueToNag.length > 0 && !pushSuppressed) {
         await sendPushToSiteAudience(site.id, "INSPECTION_OVERDUE", {
           title: `⚠️ ${overdueToNag.length} inspection${overdueToNag.length === 1 ? "" : "s"} overdue`,
           body: listing(overdueToNag),
@@ -87,7 +96,7 @@ export async function GET(req: NextRequest) {
       // 3. Booking-due (book it now — N weeks ahead).
       const bookingCandidates = await prisma.inspection.findMany({ where: { ...sw, ...whereInspectionBookingDueCandidates(dayStart) }, include: inspInclude });
       const bookingDue = bookingCandidates.filter((i) => isBookingDueOn(i, dayStart));
-      if (bookingDue.length > 0) {
+      if (bookingDue.length > 0 && !pushSuppressed) {
         await sendPushToSiteAudience(site.id, "INSPECTION_BOOKING_DUE", {
           title: `📋 Book ${bookingDue.length} inspection${bookingDue.length === 1 ? "" : "s"} now`,
           body: listing(bookingDue),
@@ -99,7 +108,7 @@ export async function GET(req: NextRequest) {
 
       // 4. One week before — final checks.
       const weekBefore = await prisma.inspection.findMany({ where: { ...sw, ...whereInspectionWeekBefore(dayStart) }, include: inspInclude });
-      if (weekBefore.length > 0) {
+      if (weekBefore.length > 0 && !pushSuppressed) {
         await sendPushToSiteAudience(site.id, "INSPECTION_WEEK_BEFORE", {
           title: `📅 Inspection${weekBefore.length === 1 ? "" : "s"} due next week`,
           body: `Final checks: ${listing(weekBefore)}`,
@@ -110,7 +119,7 @@ export async function GET(req: NextRequest) {
 
       // 5. Day-of.
       const dayOf = await prisma.inspection.findMany({ where: { ...sw, ...whereInspectionDayOf(dayStart) }, include: inspInclude });
-      if (dayOf.length > 0) {
+      if (dayOf.length > 0 && !pushSuppressed) {
         await sendPushToSiteAudience(site.id, "INSPECTION_DAY_OF", {
           title: `🔍 Inspection${dayOf.length === 1 ? "" : "s"} today`,
           body: listing(dayOf),

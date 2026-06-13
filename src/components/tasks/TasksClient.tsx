@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Breadcrumbs } from "@/components/ui/breadcrumbs";
@@ -310,11 +310,26 @@ export function TasksClient() {
     setRefreshKey((k) => k + 1);
   });
 
+  // (Jun 2026 R25) When a supplier-date batch spans MULTIPLE sites, the
+  // order splits into one email per site — each site gets its own ORDERED
+  // batch. useOrderEmail drives a single-draft dialog, so we queue the
+  // remaining per-site emails here and open the next one after each send.
+  const siteEmailQueue = useRef<import("@/hooks/useOrderEmail").SendOrderGroupInput[]>([]);
+
   // ── Chase + Send order email (unified via useOrderEmail) ──
   // The hook owns the dialog, mailto, event log, and (for send mode) the
   // mark-as-ORDERED status update. onSent fires after the user hits send
   // so we refresh the task list to drop the cleared items.
-  const { openSendOrderEmail, openChaseOrderEmail, dialogs: emailDialogs } = useOrderEmail(() => {
+  const { openSendOrderEmail, openChaseOrderEmail, dialogs: emailDialogs } = useOrderEmail((mode) => {
+    // (Jun 2026 R25) After a send, open the next queued per-site email (if
+    // this batch spanned multiple sites). Refresh only once the queue is
+    // drained so the cleared orders disappear from every site's list.
+    if (mode === "send" && siteEmailQueue.current.length > 0) {
+      const next = siteEmailQueue.current.shift()!;
+      // Defer so the just-closed dialog fully unmounts before reopening.
+      setTimeout(() => openSendOrderEmail(next), 150);
+      return;
+    }
     setRefreshKey((k) => k + 1);
   });
 
@@ -344,15 +359,21 @@ export function TasksClient() {
     });
   }
 
-  function openSendOrderDialogForGroup(group: SupplierGroup) {
-    openSendOrderEmail({
+  // (Jun 2026 R25) Build a SendOrderGroupInput for a single site's slice of
+  // a supplier batch. The hook marks exactly these order ids ORDERED.
+  function buildSiteEmailInput(
+    group: SupplierGroup,
+    orders: OrderTask[],
+    siteName: string,
+  ): import("@/hooks/useOrderEmail").SendOrderGroupInput {
+    return {
       supplierId: group.supplierId,
       supplierName: group.supplierName,
       contactName: group.contactName,
       contactEmail: group.contactEmail,
       // Pick account number off the first order's supplier (all share the same supplier in a group)
-      accountNumber: group.orders[0]?.supplier.accountNumber ?? null,
-      orders: group.orders.map((o) => {
+      accountNumber: orders[0]?.supplier.accountNumber ?? null,
+      orders: orders.map((o) => {
         // (Jun 2026 audit) One-off orders carry no job — fall back to the
         // direct plot/site attachment. useOrderEmail already supports
         // omitting job.id for one-offs (audit jobId only when real).
@@ -380,8 +401,33 @@ export function TasksClient() {
           items: o.orderItems.map((i) => ({ name: i.name, quantity: i.quantity, unit: i.unit, unitCost: i.unitCost })),
         };
       }),
-      siteNames: group.sites,
-    });
+      siteNames: [siteName],
+    };
+  }
+
+  function openSendOrderDialogForGroup(group: SupplierGroup) {
+    // (Jun 2026 R25) Partition the batch by site. A supplier delivering to
+    // two sites on the same order date gets two emails (each addressed with
+    // its own site name/address and marking only that site's orders ORDERED)
+    // — a single email mixing sites would put the wrong delivery address on
+    // half the lines and over-mark on send.
+    const bySite = new Map<string, { siteName: string; orders: OrderTask[] }>();
+    for (const o of group.orders) {
+      const site = orderSite(o);
+      const siteKey = site?.id ?? "__no-site__";
+      const siteName = site?.name ?? "—";
+      const bucket = bySite.get(siteKey);
+      if (bucket) bucket.orders.push(o);
+      else bySite.set(siteKey, { siteName, orders: [o] });
+    }
+
+    const buckets = Array.from(bySite.values());
+    const inputs = buckets.map((b) => buildSiteEmailInput(group, b.orders, b.siteName));
+
+    // Open the first site's email immediately; queue the rest so each one
+    // opens after the previous is sent (see the useOrderEmail onSent above).
+    siteEmailQueue.current = inputs.slice(1);
+    if (inputs.length > 0) openSendOrderEmail(inputs[0]);
   }
 
   // ── Mark a whole supplier-date batch as ORDERED ──
@@ -927,10 +973,20 @@ export function TasksClient() {
                         size="sm"
                         className="h-7 shrink-0 border-blue-300 text-blue-700 hover:bg-blue-50 hover:text-blue-800"
                         onClick={() => openSendOrderDialogForGroup(group)}
-                        title="Send order to supplier via email"
+                        title={
+                          group.sites.length > 1
+                            ? `Spans ${group.sites.length} sites — opens one email per site`
+                            : "Send order to supplier via email"
+                        }
                       >
                         <Mail className="size-3.5" />
-                        <span>Send Order</span>
+                        {/* (Jun 2026 R25) Flag the multi-site split so the
+                            user expects more than one email to open. */}
+                        <span>
+                          {group.sites.length > 1
+                            ? `Send Orders (${group.sites.length} sites)`
+                            : "Send Order"}
+                        </span>
                       </Button>
                       <Button
                         variant="outline"

@@ -25,6 +25,8 @@ import { CreateSiteWizard } from "./CreateSiteWizard";
 import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 import { useBusyOverlay } from "@/components/ui/busy-overlay";
 import { useConfirmAction } from "@/hooks/useConfirmAction";
+import { useSession } from "next-auth/react";
+import { sessionHasPermission } from "@/lib/permissions";
 
 // ---------- Types ----------
 
@@ -95,6 +97,14 @@ export function SitesClient({
   const toast = useToast();
   const { withLock } = useBusyOverlay();
   const searchParams = useSearchParams();
+  const { data: sessionData } = useSession();
+  // (Jun 2026 R14 review) Creating a site is EDIT_PROGRAMME-gated server-side
+  // and its wizard loads templates from a now-gated route — so only show
+  // "New Site" to users who can actually complete it.
+  const canCreateSite = sessionHasPermission(
+    (sessionData?.user ?? undefined) as { role?: string; permissions?: string[] } | undefined,
+    "EDIT_PROGRAMME",
+  );
   const [sites, setSites] = useState(initialSites);
   const [dialogOpen, setDialogOpen] = useState(false);
 
@@ -210,10 +220,12 @@ export function SitesClient({
           </p>
         </div>
 
-        <Button onClick={() => setDialogOpen(true)}>
-          <Plus className="size-4" />
-          New Site
-        </Button>
+        {canCreateSite && (
+          <Button onClick={() => setDialogOpen(true)}>
+            <Plus className="size-4" />
+            New Site
+          </Button>
+        )}
         <CreateSiteWizard
           open={dialogOpen}
           onOpenChange={setDialogOpen}

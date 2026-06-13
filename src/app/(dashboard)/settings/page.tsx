@@ -24,8 +24,18 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
     "VIEW_USERS",
   );
 
+  // (R14) The Templates surface holds programme building blocks — gate
+  // it on EDIT_PROGRAMME (mirrors the hasUsersAccess pattern). Without
+  // it the tab content is hidden AND the server skips the (potentially
+  // large) template fetch, the same way the Users tab gates its directory.
+  const hasTemplatesAccess = sessionHasPermission(
+    session.user as { role?: string; permissions?: string[] },
+    "EDIT_PROGRAMME",
+  );
+
   const [templates, users, sites] = await Promise.all([
-    prisma.plotTemplate.findMany({
+    hasTemplatesAccess
+      ? prisma.plotTemplate.findMany({
       // (May 2026 bug Keith reported) Filter out archived templates
       // by default — pre-fix the settings page server-loaded EVERY
       // template including archived ones, so "deleted" (= archived)
@@ -50,7 +60,8 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
           },
         },
       },
-    }),
+    })
+      : Promise.resolve([]),
     hasUsersAccess
       ? prisma.user.findMany({
           // (May 2026 audit S-P0) Active users only by default; the
@@ -88,6 +99,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
       sites={sites}
       initialTab={initialTab}
       hasUsersAccess={hasUsersAccess}
+      hasTemplatesAccess={hasTemplatesAccess}
     />
   );
 }

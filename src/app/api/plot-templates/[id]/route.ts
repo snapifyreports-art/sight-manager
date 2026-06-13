@@ -34,6 +34,10 @@ export async function GET(
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  // (R14) Single-template read gated on EDIT_PROGRAMME — same as the list
+  // route and the mutation verbs below. Reuses the shared helper.
+  const denied = requireEditProgramme(session);
+  if (denied) return denied;
 
   const { id } = await params;
 

@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { format, formatDistanceToNow } from "date-fns";
+import { format } from "date-fns";
 import { getCurrentDate } from "@/lib/dev-date";
 import {
   ArrowLeft,
@@ -17,7 +17,6 @@ import {
   Building2,
   LayoutGrid,
   ShoppingCart,
-  Clock,
   Package,
   HardHat,
   UserPlus,
@@ -145,8 +144,10 @@ interface JobDetail {
       name: string;
       quantity: number;
       unit: string;
-      unitCost: number;
-      totalCost: number;
+      // (Jun 2026 R18) Null when the viewer lacks VIEW_ORDERS — costs are
+      // stripped server-side, so the UI must render the cost-free variant.
+      unitCost: number | null;
+      totalCost: number | null;
     }>;
   }>;
   actions: Array<{
@@ -241,12 +242,8 @@ interface NextJobResponse {
 // Status badges moved to @/components/shared/StatusBadge — single source
 // of truth so IN_PROGRESS looks identical everywhere in the app.
 
-const ACTION_ICON_MAP: Record<string, { icon: typeof Play; color: string }> = {
-  start: { icon: Play, color: "text-amber-500" },
-  stop: { icon: Pause, color: "text-red-500" },
-  complete: { icon: CheckCircle, color: "text-green-500" },
-  edit: { icon: Briefcase, color: "text-blue-500" },
-};
+// (Jun 2026 R20) ACTION_ICON_MAP removed alongside the "Action History"
+// card it fed — JobActionTimeline carries its own icon/label config now.
 
 // UK money — £-prefixed with thousands separators + pence, matching the
 // £-formatted figures everywhere else (HouseValueCard, plot cards).
@@ -417,6 +414,10 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
     deltaDays: number;
     jobUpdates: Array<{ jobId: string; jobName: string; originalStart: string | null; originalEnd: string | null; newStart: string; newEnd: string }>;
     orderUpdates: Array<{ orderId: string; originalOrderDate: string; originalDeliveryDate: string | null; newOrderDate: string; newDeliveryDate: string | null }>;
+    // (R5) ORDERED orders on the shifted jobs — locked dates the supplier
+    // committed to, which may now need re-confirming. Optional for older
+    // API responses that predate the field.
+    affectedOrderedOrders?: Array<{ id: string; supplierId: string | null; supplierName: string | null; itemsDescription: string | null; expectedDeliveryDate: string | null }>;
   } | null>(null);
   const [pendingEndDate, setPendingEndDate] = useState<string | null>(null);
 
@@ -885,7 +886,9 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <JobActionTimeline jobId={job.id} />
+          {/* (Jun 2026 R20) Feed the server-loaded job.actions so the
+              timeline doesn't re-fetch what the page already has. */}
+          <JobActionTimeline actions={job.actions} />
         </CardContent>
       </Card>
 
@@ -1061,8 +1064,14 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
             ) : (
               <div className="space-y-3">
                 {job.orders.map((order) => {
+                  // (Jun 2026 R18) Costs are present only when the viewer
+                  // has VIEW_ORDERS (else nulled server-side). Hide the £
+                  // column + order total entirely when they're absent.
+                  const costsVisible = order.orderItems.some(
+                    (item) => item.totalCost !== null,
+                  );
                   const orderTotal = order.orderItems.reduce(
-                    (sum, item) => sum + item.totalCost,
+                    (sum, item) => sum + (item.totalCost ?? 0),
                     0
                   );
                   return (
@@ -1083,12 +1092,19 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
                           <div className="mt-1 space-y-0.5">
                             {order.orderItems.map((item) => (
                               <p key={item.id} className="text-xs text-muted-foreground">
-                                {item.name} &mdash; {item.quantity} {item.unit} @ {formatMoney(item.unitCost)} = {formatMoney(item.totalCost)}
+                                {item.name} &mdash; {item.quantity} {item.unit}
+                                {/* (Jun 2026 R18) Show the £ figures only
+                                    when the viewer is allowed to see them. */}
+                                {costsVisible && item.unitCost !== null && item.totalCost !== null
+                                  ? ` @ ${formatMoney(item.unitCost)} = ${formatMoney(item.totalCost)}`
+                                  : ""}
                               </p>
                             ))}
-                            <p className="text-xs font-medium">
-                              Total: {formatMoney(orderTotal)}
-                            </p>
+                            {costsVisible && (
+                              <p className="text-xs font-medium">
+                                Total: {formatMoney(orderTotal)}
+                              </p>
+                            )}
                           </div>
                         )}
                         <p className="mt-1 text-xs text-muted-foreground">
@@ -1190,85 +1206,10 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
           </CardContent>
         </Card>
 
-        {/* Actions / History */}
-        <Card>
-          <CardHeader>
-            <div className="flex items-center gap-2">
-              <Clock className="size-4 text-muted-foreground" />
-              <CardTitle>Action History</CardTitle>
-            </div>
-            <CardDescription>
-              Timeline of actions taken on this job
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            {job.actions.length === 0 ? (
-              <div className="flex flex-col items-center py-8 text-center">
-                <Clock className="size-8 text-muted-foreground/50" />
-                <p className="mt-2 text-sm text-muted-foreground">
-                  No actions recorded yet
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-0">
-                {job.actions.map((action, index) => {
-                  // Defensive: `action.action` has historically been undefined
-                  // on rare race conditions (e.g. optimistic updates that put
-                  // the wrong shape into state). Default to "note" so we
-                  // never crash the whole page for a bad row.
-                  const actionKey = action.action ?? "note";
-                  const actionConfig =
-                    ACTION_ICON_MAP[actionKey] ?? {
-                      icon: Briefcase,
-                      color: "text-muted-foreground",
-                    };
-                  const ActionIcon = actionConfig.icon;
-                  const actionLabel =
-                    actionKey.charAt(0).toUpperCase() + actionKey.slice(1);
-
-                  return (
-                    <div
-                      key={action.id}
-                      className={`flex items-start gap-3 py-3 ${
-                        index !== job.actions.length - 1 ? "border-b" : ""
-                      }`}
-                    >
-                      <div className="mt-0.5">
-                        <ActionIcon
-                          className={`size-4 ${actionConfig.color}`}
-                        />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm font-medium">
-                          {actionLabel}
-                          {action.action === "start" && "ed"}
-                          {action.action === "stop" && "ped"}
-                          {action.action === "complete" && "d"}
-                          {action.action === "edit" && "ed"}
-                        </p>
-                        {action.notes && (
-                          <p className="mt-0.5 text-sm text-muted-foreground">
-                            {action.notes}
-                          </p>
-                        )}
-                        <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
-                          <span>by {action.user.name}</span>
-                          <span className="text-border">&middot;</span>
-                          <span>
-                            {formatDistanceToNow(
-                              new Date(action.createdAt),
-                              { addSuffix: true }
-                            )}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+        {/* (Jun 2026 R20) The old "Action History" card lived here and
+            rendered the same job.actions rows the "Action timeline" card
+            above already shows (via JobActionTimeline). Two audit lists of
+            identical data — deleted the duplicate, kept the timeline. */}
       </div>
 
       {/* Photos */}
@@ -2029,6 +1970,44 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
                             : ""}
                         </span>
                       </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {/* (R5) ORDERED orders on the shifted jobs. Their delivery
+                  dates are locked with the supplier, so the cascade can't
+                  move them \u2014 but the work they feed is moving, so they may
+                  now arrive too early / too late. Amber advisory, never a
+                  blocker. */}
+              {(dateCascadePreview.affectedOrderedOrders?.length ?? 0) > 0 && (
+                <div className="mt-3 space-y-1.5 rounded-lg border border-amber-200 bg-amber-50 p-3">
+                  <p className="flex items-center gap-1.5 text-xs font-medium text-amber-800">
+                    <AlertTriangle className="size-3.5 shrink-0" />
+                    These supplier dates may need re-confirming
+                  </p>
+                  {dateCascadePreview.affectedOrderedOrders!.map((o) => (
+                    <div
+                      key={o.id}
+                      className="flex items-center justify-between gap-2 text-xs text-amber-900"
+                    >
+                      <span className="truncate">
+                        {o.supplierId ? (
+                          <Link
+                            href={`/suppliers/${o.supplierId}`}
+                            className="font-medium underline underline-offset-2 hover:text-amber-700"
+                          >
+                            {o.supplierName ?? "Supplier"}
+                          </Link>
+                        ) : (
+                          <span className="font-medium">{o.supplierName ?? "Supplier"}</span>
+                        )}
+                        {o.itemsDescription ? ` \u2014 ${o.itemsDescription}` : ""}
+                      </span>
+                      {o.expectedDeliveryDate && (
+                        <span className="shrink-0 text-amber-700">
+                          due {format(new Date(o.expectedDeliveryDate), "dd MMM")}
+                        </span>
+                      )}
                     </div>
                   ))}
                 </div>

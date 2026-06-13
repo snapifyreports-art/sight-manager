@@ -51,6 +51,9 @@ export async function GET(req: NextRequest) {
   const dateLabel = format(now, "EEEE d MMMM");
   const todayStr = format(now, "yyyy-MM-dd");
 
+  // (R12) ACTIVE only. The daily wrap is push + email — it makes no data
+  // updates, so excluding ON_HOLD here is the "data only for ON_HOLD"
+  // outcome (a paused site generates no evening wrap push or digest row).
   const sites = await prisma.site.findMany({
     where: { status: "ACTIVE" },
     select: { id: true, name: true, postcode: true },
@@ -242,7 +245,9 @@ export async function GET(req: NextRequest) {
   // elsewhere"); the evening wrap silently left them out.
   const managers = await prisma.user.findMany({
     where: {
-      role: { in: ["SUPER_ADMIN", "CEO", "DIRECTOR", "SITE_MANAGER"] },
+      // (R2) CONTRACT_MANAGER added to match the morning daily-email list
+      // — both ends of the day now reach the same manager audience.
+      role: { in: ["SUPER_ADMIN", "CEO", "DIRECTOR", "SITE_MANAGER", "CONTRACT_MANAGER"] },
       archivedAt: null,
     },
     select: { id: true, role: true, email: true, name: true },

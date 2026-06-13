@@ -3,17 +3,31 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { apiError } from "@/lib/api-errors";
 import { sessionHasPermission } from "@/lib/permissions";
+import { copyTemplateScope } from "@/lib/template-clone";
 
 export const dynamic = "force-dynamic";
 
 /**
  * POST /api/plot-templates/[id]/clone
- * Body: { name?: string }  — default: "<Original> (copy)"
+ * Body: {
+ *   name?: string,             — default: "<Original> (copy)"
+ *   includeVariants?: boolean, — (R16) replicate the source's variants
+ *                                 too (each variant + its scoped rows).
+ *                                 Default false.
+ *   includeDocuments?: boolean — (R17) copy documents by reference
+ *                                 (share the storage object). Default true.
+ * }
  *
  * Deep-clones a template: all jobs (with parent/child relationships),
  * all orders + order items, and anchor references rebased to the new
  * job IDs. Does NOT clone sourcedPlots — the copy starts with zero
  * usage, as a fresh starter.
+ *
+ * (R17) Documents copy BY REFERENCE by default — the new rows reuse the
+ * source url/fileName with isPlaceholder=false, so a clone is immediately
+ * usable without re-uploading. (The old placeholder model is gone.)
+ * (R16) When includeVariants is set, each source variant is recreated on
+ * the clone with its full scoped content via the shared copy helper.
  *
  * Keith Apr 2026 UX audit — "if you have a similar house type, cloning
  * is one click vs. rebuilding from scratch".
@@ -42,26 +56,30 @@ export async function POST(
     const { id } = await params;
     const body = await req.json().catch(() => ({}));
     const newName = (body.name as string | undefined)?.trim();
+    // (R16/R17) Clone options. Variants default OFF (copying N variants
+    // worth of rows is opt-in); documents default ON (by reference).
+    const includeVariants = body.includeVariants === true;
+    const includeDocuments = body.includeDocuments !== false;
 
-    // Clone is base-scoped only — only TemplateJob/TemplateMaterial/
-    // TemplateDocument rows where variantId IS NULL (the base template's
-    // own content). Variants under the source template are NOT carried
-    // through; the user can re-add variants on the clone using the
-    // "Copy from base / Copy from X" seed flow. This avoids accidentally
-    // ballooning a clone with N variants worth of duplicated rows.
+    // Base-scoped content (variantId IS NULL) is always copied.
+    // (R16) Variant-scoped rows are loaded too when includeVariants is set,
+    // grouped by variantId so each one seeds onto a recreated variant.
     const source = await prisma.plotTemplate.findUnique({
       where: { id },
       include: {
         jobs: {
-          where: { variantId: null },
+          where: includeVariants ? undefined : { variantId: null },
           orderBy: { sortOrder: "asc" },
           include: {
             orders: { include: { items: true } },
           },
         },
-        materials: { where: { variantId: null } },
-        documents: { where: { variantId: null } },
-        inspections: { where: { variantId: null } },
+        materials: { where: includeVariants ? undefined : { variantId: null } },
+        documents: { where: includeVariants ? undefined : { variantId: null } },
+        inspections: { where: includeVariants ? undefined : { variantId: null } },
+        variants: includeVariants
+          ? { orderBy: { sortOrder: "asc" } }
+          : false,
       },
     });
     if (!source) return NextResponse.json({ error: "Template not found" }, { status: 404 });
@@ -91,156 +109,64 @@ export async function POST(
           },
         });
 
-        // Map old-job-id → new-job-id so we can remap parentId + anchorJobId.
-        const jobIdMap = new Map<string, string>();
+        // (R17) documentMode — by reference (share the storage object,
+        // isPlaceholder=false) when includeDocuments, else drop documents
+        // entirely (don't even create placeholder rows).
+        const documentMode = "reference" as const;
 
-        // First pass: create parents (jobs with parentId === null).
-        // (Jun 2026 audit) weatherAffected/weatherAffectedType carry over —
-        // the seed route copied both but clone dropped them, so plots
-        // applied from a cloned template never triggered weather alerting.
-        for (const job of source.jobs.filter((j) => j.parentId === null)) {
-          const createdJob = await tx.templateJob.create({
-            data: {
-              templateId: created.id,
-              name: job.name,
-              description: job.description,
-              stageCode: job.stageCode,
-              startWeek: job.startWeek,
-              endWeek: job.endWeek,
-              durationWeeks: job.durationWeeks,
-              durationDays: job.durationDays,
-              sortOrder: job.sortOrder,
-              weatherAffected: job.weatherAffected,
-              weatherAffectedType: job.weatherAffectedType,
-              contactId: job.contactId,
-              parentId: null,
-            },
-          });
-          jobIdMap.set(job.id, createdJob.id);
-        }
+        // Base scope (variantId === null). The shared helper copies jobs
+        // (parent/child), orders + items + lead times, materials, docs,
+        // and inspections — the single source of truth shared with the
+        // variant-seed flow so the two can't drift.
+        // (Jun 2026 audit history: weatherAffected, lead-time fields, and
+        // isBlocking are all carried by the helper.)
+        await copyTemplateScope({
+          tx,
+          templateId: created.id,
+          variantId: null,
+          source: {
+            jobs: source.jobs.filter((j) => j.variantId === null),
+            materials: source.materials.filter((m) => m.variantId === null),
+            documents: includeDocuments
+              ? source.documents.filter((d) => d.variantId === null)
+              : [],
+            inspections: source.inspections.filter((i) => i.variantId === null),
+          },
+          documentMode,
+        });
 
-        // Second pass: children, now that parent IDs are known.
-        for (const job of source.jobs.filter((j) => j.parentId !== null)) {
-          const newParentId = job.parentId ? jobIdMap.get(job.parentId) : null;
-          const createdJob = await tx.templateJob.create({
-            data: {
-              templateId: created.id,
-              name: job.name,
-              description: job.description,
-              stageCode: job.stageCode,
-              startWeek: job.startWeek,
-              endWeek: job.endWeek,
-              durationWeeks: job.durationWeeks,
-              durationDays: job.durationDays,
-              sortOrder: job.sortOrder,
-              weatherAffected: job.weatherAffected,
-              weatherAffectedType: job.weatherAffectedType,
-              contactId: job.contactId,
-              parentId: newParentId ?? null,
-            },
-          });
-          jobIdMap.set(job.id, createdJob.id);
-        }
-
-        // Third pass: orders (remap templateJobId + anchorJobId).
-        // SSOT note: anchor fields + lead-time fields are canonical for order
-        // timing — copy them all. Earlier this loop forgot leadTimeAmount /
-        // leadTimeUnit which meant cloned orders silently lost their lead
-        // time and apply-template fell back to the legacy deliveryWeekOffset
-        // fallback. Caught during the May 2026 SSOT-audit re-review.
-        for (const job of source.jobs) {
-          for (const order of job.orders) {
-            const newJobId = jobIdMap.get(order.templateJobId);
-            if (!newJobId) continue;
-            const newAnchorJobId = order.anchorJobId ? jobIdMap.get(order.anchorJobId) ?? null : null;
-            await tx.templateOrder.create({
+        // (R16) Variants — recreate each one + copy its variant-scoped
+        // content. Skipped entirely when includeVariants is false (the
+        // `variants` relation isn't even loaded in that case).
+        if (includeVariants && source.variants) {
+          for (const v of source.variants) {
+            const newVariant = await tx.templateVariant.create({
               data: {
-                templateJobId: newJobId,
-                supplierId: order.supplierId,
-                orderWeekOffset: order.orderWeekOffset,
-                deliveryWeekOffset: order.deliveryWeekOffset,
-                itemsDescription: order.itemsDescription,
-                anchorType: order.anchorType,
-                anchorAmount: order.anchorAmount,
-                anchorUnit: order.anchorUnit,
-                anchorDirection: order.anchorDirection,
-                anchorJobId: newAnchorJobId,
-                leadTimeAmount: order.leadTimeAmount,
-                leadTimeUnit: order.leadTimeUnit,
-                items: {
-                  create: order.items.map((it) => ({
-                    name: it.name,
-                    quantity: it.quantity,
-                    unit: it.unit,
-                    unitCost: it.unitCost,
-                  })),
-                },
+                templateId: created.id,
+                name: v.name,
+                description: v.description,
+                sortOrder: v.sortOrder,
+                buildBudget: v.buildBudget,
+                salePrice: v.salePrice,
               },
             });
+            await copyTemplateScope({
+              tx,
+              templateId: created.id,
+              variantId: newVariant.id,
+              source: {
+                jobs: source.jobs.filter((j) => j.variantId === v.id),
+                materials: source.materials.filter((m) => m.variantId === v.id),
+                documents: includeDocuments
+                  ? source.documents.filter((d) => d.variantId === v.id)
+                  : [],
+                inspections: source.inspections.filter(
+                  (i) => i.variantId === v.id,
+                ),
+              },
+              documentMode,
+            });
           }
-        }
-
-        // Fourth pass: materials (quants) — flat, no remap needed.
-        if (source.materials.length > 0) {
-          await tx.templateMaterial.createMany({
-            data: source.materials.map((m) => ({
-              templateId: created.id,
-              name: m.name,
-              quantity: m.quantity,
-              unit: m.unit,
-              unitCost: m.unitCost,
-              linkedStageCode: m.linkedStageCode,
-              category: m.category,
-              notes: m.notes,
-            })),
-          });
-        }
-
-        // Documents — Supabase storage objects aren't duplicated (storage
-        // costs add up across clones). Instead we create placeholder rows
-        // carrying the original metadata so the user can see what was on
-        // the source template and re-upload deliberately. UI flags
-        // isPlaceholder=true rows with a "re-upload" affordance.
-        if (source.documents.length > 0) {
-          await tx.templateDocument.createMany({
-            data: source.documents.map((d) => ({
-              templateId: created.id,
-              name: d.name,
-              url: "", // empty for placeholders — UI uses isPlaceholder check
-              fileName: d.fileName,
-              fileSize: d.fileSize,
-              mimeType: d.mimeType,
-              category: d.category,
-              isPlaceholder: true,
-            })),
-          });
-        }
-
-        // Inspections (Jun 2026 audit fix — were silently dropped, so a
-        // cloned template lost every statutory/QA hold-point). Remap each
-        // anchor via jobIdMap; skip any whose anchor didn't clone.
-        for (const ins of source.inspections) {
-          const newAnchorId = jobIdMap.get(ins.anchorTemplateJobId);
-          if (!newAnchorId) continue;
-          await tx.templateInspection.create({
-            data: {
-              templateId: created.id,
-              name: ins.name,
-              type: ins.type,
-              description: ins.description,
-              sortOrder: ins.sortOrder,
-              anchorTemplateJobId: newAnchorId,
-              anchorEdge: ins.anchorEdge,
-              offsetDays: ins.offsetDays,
-              bookingLeadWeeks: ins.bookingLeadWeeks,
-              defaultInspectorContactId: ins.defaultInspectorContactId,
-              // (Jun 2026 audit) isBlocking was dropped (schema default
-              // false), so a HARD hold-point silently became soft on
-              // every clone and the job-completion gate never fired for
-              // plots applied from the copy.
-              isBlocking: ins.isBlocking,
-            },
-          });
         }
 
         // Audit log: capture the clone-from event so the change log on the
@@ -251,7 +177,11 @@ export async function POST(
             userId: session.user?.id ?? null,
             userName: session.user?.name ?? session.user?.email ?? null,
             action: "cloned_from",
-            detail: `Cloned from "${source.name}"`,
+            detail: `Cloned from "${source.name}"${
+              includeVariants && source.variants && source.variants.length > 0
+                ? ` (incl. ${source.variants.length} variant${source.variants.length !== 1 ? "s" : ""})`
+                : ""
+            }${includeDocuments ? " · documents by reference" : " · no documents"}`,
           },
         });
 

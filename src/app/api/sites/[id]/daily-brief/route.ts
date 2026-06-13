@@ -260,7 +260,7 @@ export async function GET(
   const tomorrowStart = startOfDay(addDays(targetDate, 1));
   const tomorrowEnd = endOfDay(addDays(targetDate, 1));
 
-  const [overdueDeliveries, openSnags, openSnagsList, incompleteSnags, rainedOff, outstandingOrders, upcomingOrders, upcomingDeliveries, jobsStartingTomorrow, unassignedJobs, unassignedInternalJobs, unsignedCompletions, awaitingSignOff] = await Promise.all([
+  const [overdueDeliveries, openSnags, openSnagsList, resolvedSnagsList, incompleteSnags, rainedOff, outstandingOrders, upcomingOrders, upcomingDeliveries, jobsStartingTomorrow, unassignedJobs, unassignedInternalJobs, unsignedCompletions, awaitingSignOff] = await Promise.all([
     prisma.materialOrder.findMany({
       where: {
         ...whereOrdersForSite(id),
@@ -288,6 +288,19 @@ export async function GET(
         contact: { select: { name: true, company: true } },
       },
       orderBy: [{ priority: "desc" }, { createdAt: "asc" }],
+      take: 20,
+    }),
+    // (Jun 2026 R28) Resolved snags awaiting the manager's re-check —
+    // surfaced as a compact "Awaiting your re-check (N)" line in the
+    // Brief's issues area, deep-linking ?tab=snags&filter=resolved.
+    prisma.snag.findMany({
+      where: { plot: { siteId: id }, status: "RESOLVED" },
+      select: {
+        id: true, description: true, priority: true, location: true,
+        plotId: true,
+        plot: { select: { plotNumber: true, name: true, siteId: true } },
+      },
+      orderBy: [{ priority: "desc" }, { updatedAt: "asc" }],
       take: 20,
     }),
     prisma.snag.findMany({
@@ -853,6 +866,15 @@ export async function GET(
     plotId: i.plotId,
     plotLabel: i.plot.plotNumber ? `Plot ${i.plot.plotNumber}` : i.plot.name,
     inspectorName: i.inspector?.name ?? null,
+    // (Jun 2026 R30) BOOKED but the booked day no longer matches the
+    // (recomputed) scheduled day — surfaces the amber rebook/confirm chip
+    // on the Brief inspections panel. Booking is never auto-cleared.
+    bookingMismatch:
+      i.status === "BOOKED" &&
+      i.bookedDate != null &&
+      (i.bookedDate.getUTCFullYear() !== i.scheduledDate.getUTCFullYear() ||
+        i.bookedDate.getUTCMonth() !== i.scheduledDate.getUTCMonth() ||
+        i.bookedDate.getUTCDate() !== i.scheduledDate.getUTCDate()),
   });
   // (Jun 2026 Q1) Overdue-but-BOOKED is its own (amber) bucket — the visit
   // is arranged, the date just slipped past. Red is reserved for
@@ -960,6 +982,8 @@ export async function GET(
     })),
     openSnagsList,
     openSnagsTruncated: openSnags > openSnagsList.length,
+    // (Jun 2026 R28) Resolved snags awaiting manager re-check.
+    resolvedSnagsList,
     needsAttention,
     pendingSignOffs,
     inactivePlots,

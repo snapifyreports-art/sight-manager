@@ -34,6 +34,11 @@ export default async function DashboardPage() {
   });
   today.setHours(0, 0, 0, 0);
 
+  // (Jun 2026 R26) 14-day compliance warn window — computed once here
+  // (not inline in the query) so the query object stays a plain value.
+  const complianceWarnCutoff = new Date(today);
+  complianceWarnCutoff.setDate(complianceWarnCutoff.getDate() + 14);
+
   // Build where clauses for site-filtered queries
   const siteWhere = siteIds !== null ? { id: { in: siteIds } } : {};
   const jobSiteWhere = siteIds !== null ? { plot: { siteId: { in: siteIds } } } : {};
@@ -69,6 +74,10 @@ export default async function DashboardPage() {
     watchedSites,
     // (Jun 2026 Q17) At-Risk: overdue inspections.
     overdueInspections,
+    // (Jun 2026 R26) At-Risk: compliance items expiring within 14 days or
+    // already expired. The reconcile cron flips past-due items to EXPIRED
+    // nightly; this surfaces both the warn window and the expired tail.
+    expiringCompliance,
   ] = await Promise.all([
     // Total sites (filtered)
     prisma.site.count({ where: siteWhere }),
@@ -240,6 +249,30 @@ export default async function DashboardPage() {
           },
         })
       : Promise.resolve([]),
+
+    // (Jun 2026 R26) At-Risk: compliance expiring soon / already expired.
+    // expiresAt within [past, today+14d]; EXEMPT items are out of scope.
+    prisma.siteComplianceItem.findMany({
+      take: 8,
+      where: {
+        expiresAt: {
+          not: null,
+          lte: complianceWarnCutoff,
+        },
+        status: { in: ["PENDING", "ACTIVE", "EXPIRED"] },
+        ...(siteIds !== null
+          ? { siteId: { in: siteIds } }
+          : { site: { status: { notIn: ["COMPLETED", "ARCHIVED"] } } }),
+      },
+      orderBy: { expiresAt: "asc" },
+      select: {
+        id: true,
+        name: true,
+        status: true,
+        expiresAt: true,
+        site: { select: { id: true, name: true } },
+      },
+    }),
   ]);
 
   // Build the job status map with defaults
@@ -319,6 +352,15 @@ export default async function DashboardPage() {
       daysOverdue: Math.max(0, differenceInWorkingDays(today, i.scheduledDate)),
       isBlocking: i.isBlocking,
       plot: i.plot,
+    })),
+    // (Jun 2026 R26) At-Risk: expiring / expired compliance items. The
+    // block links each row to the site's ?tab=compliance.
+    expiringCompliance: expiringCompliance.map((c) => ({
+      id: c.id,
+      name: c.name,
+      status: c.status,
+      expiresAt: c.expiresAt?.toISOString() ?? null,
+      site: c.site,
     })),
     watchedSites: watchedSites.map((w) => ({
       id: w.site.id,

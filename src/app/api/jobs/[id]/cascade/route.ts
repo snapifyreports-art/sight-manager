@@ -50,6 +50,44 @@ function buildCascadeArgs(allPlotJobs: Array<{ id: string; name: string; startDa
   };
 }
 
+/**
+ * (R5) ORDERED orders that hang off a shifted job. These are NOT in
+ * `result.orderUpdates` because the cascade engine locks ORDERED orders
+ * in place (the supplier already committed a date) — but the jobs they
+ * supply are moving, so the manager should re-confirm the supplier date.
+ * Shape kept minimal: id + supplier (for the /suppliers/{id} link) +
+ * what was ordered + the committed delivery date.
+ */
+function collectAffectedOrderedOrders(
+  result: { jobUpdates: Array<{ jobId: string }> },
+  allOrders: Array<{
+    id: string;
+    jobId: string | null;
+    status: string;
+    itemsDescription: string | null;
+    expectedDeliveryDate: Date | null;
+    supplier: { id: string; name: string } | null;
+  }>,
+) {
+  const shiftedJobIds = new Set(result.jobUpdates.map((u) => u.jobId));
+  return allOrders
+    .filter(
+      (o) =>
+        o.status === "ORDERED" &&
+        o.jobId !== null &&
+        shiftedJobIds.has(o.jobId),
+    )
+    .map((o) => ({
+      id: o.id,
+      supplierId: o.supplier?.id ?? null,
+      supplierName: o.supplier?.name ?? null,
+      itemsDescription: o.itemsDescription,
+      expectedDeliveryDate: o.expectedDeliveryDate
+        ? o.expectedDeliveryDate.toISOString()
+        : null,
+    }));
+}
+
 // POST /api/jobs/[id]/cascade — preview cascade effects
 export async function POST(
   req: NextRequest,
@@ -90,7 +128,7 @@ export async function POST(
   });
   const allOrders = await prisma.materialOrder.findMany({
     where: { jobId: { in: allPlotJobs.map((j) => j.id) } },
-    include: { supplier: { select: { name: true } } },
+    include: { supplier: { select: { id: true, name: true } } },
   });
 
   const { jobs, orders } = buildCascadeArgs(allPlotJobs, allOrders);
@@ -114,6 +152,13 @@ export async function POST(
   return NextResponse.json({
     preview: true,
     ...JSON.parse(JSON.stringify({ ...result, conflicts: enrichedConflicts })),
+    // (R5) ORDERED orders attached to the shifted jobs. The cascade
+    // engine deliberately LOCKS ORDERED orders in place (I3 / #176) —
+    // the supplier already committed to a date we can't time-travel —
+    // so they never appear in `orderUpdates`. But the jobs they feed
+    // are moving, so their committed delivery dates may now be wrong.
+    // Surface them here so the UI can prompt the manager to re-confirm.
+    affectedOrderedOrders: collectAffectedOrderedOrders(result, allOrders),
   });
 }
 
@@ -175,6 +220,9 @@ export async function PUT(
   });
   const allOrders = await prisma.materialOrder.findMany({
     where: { jobId: { in: allPlotJobs.map((j) => j.id) } },
+    // (R5) supplier pulled so the apply response can list ORDERED orders
+    // on shifted jobs for the "re-confirm supplier dates" prompt.
+    include: { supplier: { select: { id: true, name: true } } },
   });
 
   const overrideOrderIds = new Set(assumeOrdersSent ?? []);
@@ -330,6 +378,9 @@ export async function PUT(
       // (#167) Tell the client which orders were just flipped so it can
       // show the "mark delivered today / set new delivery date" prompt.
       overriddenOrders: overriddenOrders.map((o) => ({ id: o.id })),
+      // (R5) ORDERED orders on the jobs that just moved — their committed
+      // supplier dates may now be wrong. Caller surfaces the re-confirm note.
+      affectedOrderedOrders: collectAffectedOrderedOrders(result, allOrders),
       conflicts: JSON.parse(JSON.stringify(result.conflicts)), // included for visibility, caller opted in via force
     });
   } catch (err) {

@@ -109,6 +109,27 @@ export async function PATCH(
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
+  // (Jun 2026 R27) Closing a snag straight from OPEN / IN_PROGRESS skips
+  // the verify-the-fix step a RESOLVED → CLOSED transition implies, so a
+  // closing note is mandatory — it's the only record of WHY the snag was
+  // dismissed without being resolved. The note may arrive either in this
+  // PATCH's `notes` (the close dialog appends a "[date] Closed: ..." line)
+  // or already on the snag from an earlier edit; require at least one.
+  const isClosingFromUnresolved =
+    status === "CLOSED" &&
+    (existing.status === "OPEN" || existing.status === "IN_PROGRESS");
+  if (isClosingFromUnresolved) {
+    const noteProvided =
+      (typeof notes === "string" && notes.trim().length > 0) ||
+      (existing.notes !== null && existing.notes.trim().length > 0);
+    if (!noteProvided) {
+      return NextResponse.json(
+        { error: "A closing note is required when closing an unresolved snag" },
+        { status: 400 },
+      );
+    }
+  }
+
   const isResolving =
     status === "RESOLVED" && existing.status !== "RESOLVED";
 

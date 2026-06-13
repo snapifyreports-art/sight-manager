@@ -54,14 +54,17 @@ export async function GET(req: NextRequest) {
   // muted sites (presence of WatchedSite row) are subtracted below.
   // (Jun 2026 audit) ARCHIVED sites excluded alongside COMPLETED — an
   // archived site must not keep feeding the Monday digest.
+  // (R12) ON_HOLD excluded too — the weekly digest is an email surface,
+  // and a paused site shouldn't drive a Monday retrospective. Only ACTIVE
+  // sites feed the digest now.
   const users = await prisma.user.findMany({
     where: {
       email: { not: "" },
       // (May 2026 audit S-P0) Don't email archived (offboarded) users.
       archivedAt: null,
       OR: [
-        { siteAccess: { some: { site: { status: { notIn: ["COMPLETED", "ARCHIVED"] } } } } },
-        { assignedSites: { some: { status: { notIn: ["COMPLETED", "ARCHIVED"] } } } },
+        { siteAccess: { some: { site: { status: "ACTIVE" } } } },
+        { assignedSites: { some: { status: "ACTIVE" } } },
       ],
     },
     select: {
@@ -69,11 +72,11 @@ export async function GET(req: NextRequest) {
       name: true,
       email: true,
       siteAccess: {
-        where: { site: { status: { notIn: ["COMPLETED", "ARCHIVED"] } } },
+        where: { site: { status: "ACTIVE" } },
         select: { siteId: true },
       },
       assignedSites: {
-        where: { status: { notIn: ["COMPLETED", "ARCHIVED"] } },
+        where: { status: "ACTIVE" },
         select: { id: true },
       },
       // WatchedSite rows now mean MUTED — subtract from the audience.
@@ -131,7 +134,8 @@ export async function GET(req: NextRequest) {
   const summariesMap = new Map<string, SiteSummary>();
   if (allSubscribedSiteIds.length > 0) {
     const sitesForSummaries = await prisma.site.findMany({
-      where: { id: { in: allSubscribedSiteIds }, status: { notIn: ["COMPLETED", "ARCHIVED"] } },
+      // (R12) ON_HOLD excluded — paused sites don't feed the weekly digest.
+      where: { id: { in: allSubscribedSiteIds }, status: "ACTIVE" },
       select: { id: true, name: true },
     });
     await Promise.all(

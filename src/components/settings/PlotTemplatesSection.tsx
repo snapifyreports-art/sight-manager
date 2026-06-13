@@ -83,6 +83,12 @@ export function PlotTemplatesSection({
   const { withLock } = useBusyOverlay();
   const [templates, setTemplates] = useState(initialTemplates);
   const [cloningId, setCloningId] = useState<string | null>(null);
+  // (R16/R17) Clone-options dialog. Holds the template being cloned plus
+  // the two copy toggles — variants OFF by default (opt-in, can be large),
+  // documents ON by default (copied by reference, no re-upload needed).
+  const [cloneTarget, setCloneTarget] = useState<{ id: string; name: string; variantCount: number } | null>(null);
+  const [cloneCopyVariants, setCloneCopyVariants] = useState(false);
+  const [cloneCopyDocuments, setCloneCopyDocuments] = useState(true);
 
   // URL state — `?tpl=X` opens that template in the editor on mount.
   // `?tpl=X&v=Y` opens the variant editor. Keeping them in the URL
@@ -98,13 +104,30 @@ export function PlotTemplatesSection({
     router.replace(qs ? `?${qs}` : window.location.pathname, { scroll: false });
   }
 
-  const handleClone = async (id: string, name: string) => {
+  // (R16/R17) Open the clone-options dialog. Resets the toggles to their
+  // defaults each time so a previous clone's choices don't leak across.
+  const openCloneDialog = (id: string, name: string, variantCount: number) => {
+    setCloneCopyVariants(false);
+    setCloneCopyDocuments(true);
+    setCloneTarget({ id, name, variantCount });
+  };
+
+  const handleClone = async () => {
+    if (!cloneTarget) return;
+    const { id, name } = cloneTarget;
+    const includeVariants = cloneCopyVariants && cloneTarget.variantCount > 0;
+    const includeDocuments = cloneCopyDocuments;
+    setCloneTarget(null);
     setCloningId(id);
     try {
       const res = await fetch(`/api/plot-templates/${id}/clone`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: `${name} (copy)` }),
+        body: JSON.stringify({
+          name: `${name} (copy)`,
+          includeVariants,
+          includeDocuments,
+        }),
       });
       if (res.ok) {
         const copy = await res.json();
@@ -789,7 +812,11 @@ export function PlotTemplatesSection({
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          handleClone(template.id, template.name);
+                          openCloneDialog(
+                            template.id,
+                            template.name,
+                            template.variants?.length ?? 0,
+                          );
                         }}
                         disabled={cloningId === template.id}
                         className="flex size-8 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-blue-50 hover:text-blue-600 disabled:opacity-50 sm:size-7"
@@ -873,6 +900,64 @@ export function PlotTemplatesSection({
             >
               {creating ? "Creating..." : "Create Template"}
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* (R16/R17) Clone-options dialog — pick what to carry over before
+          cloning. Variants off by default (opt-in); documents on (copied
+          by reference, no re-upload). */}
+      <Dialog open={!!cloneTarget} onOpenChange={(o) => { if (!o) setCloneTarget(null); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Clone template</DialogTitle>
+            <DialogDescription>
+              {cloneTarget
+                ? `A copy of "${cloneTarget.name}" will be created as a draft. Choose what to carry over.`
+                : ""}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <label
+              className={
+                "flex cursor-pointer items-start gap-3 rounded-lg border p-3 " +
+                ((cloneTarget?.variantCount ?? 0) === 0 ? "opacity-50" : "")
+              }
+            >
+              <input
+                type="checkbox"
+                className="mt-0.5 size-4 rounded"
+                checked={cloneCopyVariants}
+                disabled={(cloneTarget?.variantCount ?? 0) === 0}
+                onChange={(e) => setCloneCopyVariants(e.target.checked)}
+              />
+              <div>
+                <p className="text-sm font-medium">Copy variants</p>
+                <p className="text-xs text-muted-foreground">
+                  {(cloneTarget?.variantCount ?? 0) === 0
+                    ? "This template has no variants to copy."
+                    : `Replicate all ${cloneTarget?.variantCount} variant${cloneTarget?.variantCount !== 1 ? "s" : ""} with their own jobs, materials, documents and inspections.`}
+                </p>
+              </div>
+            </label>
+            <label className="flex cursor-pointer items-start gap-3 rounded-lg border p-3">
+              <input
+                type="checkbox"
+                className="mt-0.5 size-4 rounded"
+                checked={cloneCopyDocuments}
+                onChange={(e) => setCloneCopyDocuments(e.target.checked)}
+              />
+              <div>
+                <p className="text-sm font-medium">Copy documents</p>
+                <p className="text-xs text-muted-foreground">
+                  Reuse the source files by reference — no re-upload needed.
+                </p>
+              </div>
+            </label>
+          </div>
+          <DialogFooter>
+            <DialogClose render={<Button variant="outline" />}>Cancel</DialogClose>
+            <Button onClick={handleClone}>Clone</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -12,6 +12,18 @@ export const dynamic = "force-dynamic";
 
 const VALID_TYPES: InspectionType[] = ["NHBC", "BUILDING_CONTROL", "WARRANTY_CML", "INTERNAL_QA", "OTHER"];
 
+// (Jun 2026 R30) Same-calendar-day comparison for the booking-mismatch
+// flag. Compares the UTC date parts, matching how Inspection dates are
+// stored (date-only DateTimes at UTC midnight); a mismatch means the
+// booked day and the scheduled day have genuinely diverged.
+function sameCalendarDay(a: Date, b: Date): boolean {
+  return (
+    a.getUTCFullYear() === b.getUTCFullYear() &&
+    a.getUTCMonth() === b.getUTCMonth() &&
+    a.getUTCDate() === b.getUTCDate()
+  );
+}
+
 // GET /api/inspections — cross-site list scoped to accessible sites.
 // Filters: ?status= , ?siteId= , ?plotId= , ?open=1 (not PASSED).
 export async function GET(req: NextRequest) {
@@ -54,7 +66,21 @@ export async function GET(req: NextRequest) {
       _count: { select: { snags: true, ncrs: true } },
     },
   });
-  return NextResponse.json(inspections);
+
+  // (Jun 2026 R30) Booking-mismatch flag — a BOOKED hold-point whose
+  // booked day no longer lands on the (recomputed) scheduled day. The
+  // schedule shifts under cascades; the booking doesn't auto-follow, so a
+  // contractor could turn up on a day with no crew. We surface the flag
+  // (an amber "rebook or confirm" chip on the list + Brief) WITHOUT
+  // auto-clearing the booking — the manager decides to rebook or confirm.
+  const withMismatch = inspections.map((i) => ({
+    ...i,
+    bookingMismatch:
+      i.status === "BOOKED" &&
+      i.bookedDate != null &&
+      !sameCalendarDay(i.scheduledDate, i.bookedDate),
+  }));
+  return NextResponse.json(withMismatch);
 }
 
 // POST /api/inspections — manual create (gate MANAGE_INSPECTIONS).

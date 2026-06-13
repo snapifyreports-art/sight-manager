@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast, fetchErrorMessage } from "@/components/ui/toast";
+import { useConfirm } from "@/hooks/useConfirm";
 
 /**
  * Site Closure tab — generates the end-of-site Handover ZIP.
@@ -49,6 +50,11 @@ interface ClosureSummary {
     photoCount: number;
     journalEntryCount: number;
     snagCount: number;
+    // (R9) Signals for the "nothing recorded" advisory. Optional so an
+    // older cached story payload doesn't break the panel.
+    preStartTotal?: number;
+    inspectionTotal?: number;
+    handoverItemsTotal?: number;
   }>;
   // (May 2026 Closure-deepening) Compliance + readiness + toolbox
   // counts from the Story SSoT — Closure used to gate only on
@@ -95,6 +101,10 @@ interface ClosureSummary {
 
 export function SiteClosurePanel({ siteId }: { siteId: string }) {
   const toast = useToast();
+  // (R8) Confirm gate for generating the ZIP while readiness items are
+  // still outstanding. The dialog is mounted on EVERY return path below
+  // so the promise can resolve regardless of which branch is rendered.
+  const { confirm, dialog: confirmDialog } = useConfirm();
   const [data, setData] = useState<ClosureSummary | null>(null);
   const [loading, setLoading] = useState(true);
   // (Jun 2026 audit) Pre-fix a failed story fetch left loading=false +
@@ -145,6 +155,22 @@ export function SiteClosurePanel({ siteId }: { siteId: string }) {
   }, [siteId]);
 
   async function generate() {
+    // (R8) When readiness gates are still outstanding, confirm before
+    // building the bundle — warn, never block. The ZIP is always a
+    // snapshot of current state, so a manager can deliberately ship it
+    // early; this just makes that a conscious choice.
+    if (data) {
+      const outstanding = countOutstandingItems(data);
+      if (outstanding > 0) {
+        const ok = await confirm({
+          title: `${outstanding} item${outstanding !== 1 ? "s" : ""} outstanding — generate anyway?`,
+          body: "The handover ZIP will reflect the current state, including anything not yet complete. You can regenerate it later once the outstanding items are cleared.",
+          confirmLabel: "Generate anyway",
+          danger: true,
+        });
+        if (!ok) return;
+      }
+    }
     setGenerating(true);
     try {
       const res = await fetch(`/api/sites/${siteId}/handover-zip`, {
@@ -180,6 +206,7 @@ export function SiteClosurePanel({ siteId }: { siteId: string }) {
     return (
       <div className="flex items-center justify-center py-16 text-slate-400">
         <Loader2 className="size-5 animate-spin" />
+        {confirmDialog}
       </div>
     );
   }
@@ -197,6 +224,7 @@ export function SiteClosurePanel({ siteId }: { siteId: string }) {
         <Button variant="outline" size="sm" onClick={refresh}>
           Try again
         </Button>
+        {confirmDialog}
       </div>
     );
   }
@@ -252,6 +280,18 @@ export function SiteClosurePanel({ siteId }: { siteId: string }) {
     inspectionsReady &&
     toolboxOutstanding === 0 &&
     overdueNow === 0;
+
+  // (R9) Plots where the checklists were never set up: no handover
+  // checklist items AND no pre-start checks AND no inspections. Derived
+  // from the story payload's per-plot counters. Distinct from "items
+  // outstanding" — this flags plots that have nothing recorded at all,
+  // which usually means a setup step was skipped rather than work missed.
+  const plotsNothingRecorded = data.plotStories.filter(
+    (p) =>
+      (p.handoverItemsTotal ?? 0) === 0 &&
+      (p.preStartTotal ?? 0) === 0 &&
+      (p.inspectionTotal ?? 0) === 0,
+  );
 
   return (
     <div className="space-y-6">
@@ -363,6 +403,26 @@ export function SiteClosurePanel({ siteId }: { siteId: string }) {
             />
           )}
         </ul>
+
+        {/* (R9) Plots with nothing recorded — checklists never set up.
+            Amber advisory, never a blocker; sits under the readiness
+            checklist so the manager spots a skipped setup step. */}
+        {plotsNothingRecorded.length > 0 && (
+          <div className="mt-4 space-y-1.5 rounded-lg border border-amber-200 bg-amber-50 p-3">
+            {plotsNothingRecorded.map((p) => (
+              <p
+                key={p.id}
+                className="flex items-start gap-2 text-sm text-amber-800"
+              >
+                <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-600" />
+                <span>
+                  Nothing recorded on Plot {p.plotNumber ?? "?"} — checklists
+                  were never set up
+                </span>
+              </p>
+            ))}
+          </div>
+        )}
       </section>
 
       {/* What's in the bundle */}
@@ -440,6 +500,9 @@ export function SiteClosurePanel({ siteId }: { siteId: string }) {
           </Button>
         </div>
       </section>
+      {/* (R8) Mounted on the main path — the outstanding-items confirm
+          gate lives here. Loading + error paths mount their own copy. */}
+      {confirmDialog}
     </div>
   );
 }
@@ -487,5 +550,43 @@ function SummaryCard({
       <p className="mt-0.5 text-xl font-bold text-slate-900">{value}</p>
       {sub && <p className="text-[11px] text-slate-500">{sub}</p>}
     </div>
+  );
+}
+
+/**
+ * (R8) Total outstanding readiness items, mirroring the `allReady`
+ * gates rendered in the readiness checklist. Used only to phrase the
+ * "X items outstanding — generate anyway?" confirm; it never blocks.
+ */
+function countOutstandingItems(data: ClosureSummary): number {
+  const incompletePlots =
+    data.overview.plotsInProgress + data.overview.plotsNotStarted;
+  const variationsOutstanding = data.compliance?.variations
+    ? data.compliance.variations.total -
+      data.compliance.variations.approved -
+      (data.compliance.variations.rejected ?? 0)
+    : 0;
+  const handoverDocsRequired = data.handoverReadiness?.requiredTotal ?? 0;
+  const handoverDocsSigned = data.handoverReadiness?.requiredChecked ?? 0;
+  const handoverDocsOutstanding =
+    handoverDocsRequired > 0 ? handoverDocsRequired - handoverDocsSigned : 0;
+  const preStartRequired = data.evidence?.preStartChecks.total ?? 0;
+  const preStartChecked = data.evidence?.preStartChecks.checked ?? 0;
+  const preStartOutstanding =
+    preStartRequired > 0 ? preStartRequired - preStartChecked : 0;
+  const inspectionsUnresolved =
+    (data.inspections?.open ?? 0) + (data.inspections?.failed ?? 0);
+
+  return (
+    incompletePlots +
+    data.variance.snagsOpen +
+    (data.compliance?.ncrs.open ?? 0) +
+    (data.compliance?.defects.open ?? 0) +
+    variationsOutstanding +
+    handoverDocsOutstanding +
+    preStartOutstanding +
+    inspectionsUnresolved +
+    (data.toolboxTalks?.requested ?? 0) +
+    (data.overdueNow?.count ?? 0)
   );
 }

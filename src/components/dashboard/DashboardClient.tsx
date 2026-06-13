@@ -19,6 +19,7 @@ import {
   Star,
   MapPin,
   ClipboardCheck,
+  ShieldAlert,
 } from "lucide-react";
 import {
   Card,
@@ -41,7 +42,7 @@ import {
   Legend,
   type PieLabelRenderProps,
 } from "recharts";
-import { formatDistanceToNow } from "date-fns";
+import { formatDistanceToNow, format } from "date-fns";
 import { inspectionTypeLabel } from "@/lib/inspection-doctype";
 
 // ---------- Types ----------
@@ -148,6 +149,15 @@ interface PlotOverBudget {
   overrun: number;
 }
 
+/** (Jun 2026 R26) At-Risk: compliance items expiring soon / expired. */
+interface ExpiringCompliance {
+  id: string;
+  name: string;
+  status: string;
+  expiresAt: string | null;
+  site: { id: string; name: string };
+}
+
 export interface DashboardData {
   stats: StatsData;
   jobsByStatus: JobsByStatus;
@@ -156,6 +166,7 @@ export interface DashboardData {
   overdueJobs: OverdueJob[];
   staleSnags: StaleSnag[];
   overdueInspections: OverdueInspection[];
+  expiringCompliance: ExpiringCompliance[];
   watchedSites: WatchedSite[];
   plotsOverBudget: PlotOverBudget[];
 }
@@ -469,12 +480,20 @@ function AtRiskPanel({
   overdueJobs,
   staleSnags,
   overdueInspections = [],
+  expiringCompliance = [],
 }: {
   overdueJobs: OverdueJob[];
   staleSnags: StaleSnag[];
   overdueInspections?: OverdueInspection[];
+  expiringCompliance?: ExpiringCompliance[];
 }) {
-  if (overdueJobs.length === 0 && staleSnags.length === 0 && overdueInspections.length === 0) return null;
+  if (
+    overdueJobs.length === 0 &&
+    staleSnags.length === 0 &&
+    overdueInspections.length === 0 &&
+    expiringCompliance.length === 0
+  )
+    return null;
 
   // (May 2026 audit D-P1-1) `daysLate` / `daysOpen` are now pre-computed
   // server-side using working-day arithmetic. The old client-side
@@ -589,6 +608,45 @@ function AtRiskPanel({
                   </Link>
                 </li>
               ))}
+            </ul>
+          </div>
+        )}
+
+        {/* (Jun 2026 R26) Compliance expiring within 14 days or already
+            expired. Each row deep-links to the site's compliance tab. */}
+        {expiringCompliance.length > 0 && (
+          <div>
+            <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-red-700">
+              <ShieldAlert className="size-3.5" aria-hidden="true" />
+              Expiring compliance ({expiringCompliance.length})
+            </p>
+            <ul className="space-y-1.5">
+              {expiringCompliance.map((c) => {
+                const expired = c.status === "EXPIRED";
+                return (
+                  <li key={c.id}>
+                    <Link
+                      href={`/sites/${c.site.id}?tab=compliance`}
+                      className={`flex items-center justify-between gap-2 rounded-md bg-white px-3 py-2 text-xs ring-1 hover:ring-red-300 ${expired ? "ring-red-100" : "ring-amber-100"}`}
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate font-medium text-slate-900">
+                          {c.name}
+                        </p>
+                        <p className="truncate text-[11px] text-slate-500">
+                          {c.site.name}
+                          {c.expiresAt && ` · ${expired ? "expired" : "expires"} ${format(new Date(c.expiresAt), "d MMM yyyy")}`}
+                        </p>
+                      </div>
+                      <span
+                        className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold ${expired ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-700"}`}
+                      >
+                        {expired ? "Expired" : "Expiring"}
+                      </span>
+                    </Link>
+                  </li>
+                );
+              })}
             </ul>
           </div>
         )}
@@ -988,7 +1046,7 @@ export function DashboardClient({ data }: { data: DashboardData }) {
           manager should worry about right now: overdue jobs (end
           date passed, not COMPLETED) and stale snags (open >30 days).
           Hidden when there's nothing to show — no noise in calm weeks. */}
-      <AtRiskPanel overdueJobs={data.overdueJobs} staleSnags={data.staleSnags} overdueInspections={data.overdueInspections} />
+      <AtRiskPanel overdueJobs={data.overdueJobs} staleSnags={data.staleSnags} overdueInspections={data.overdueInspections} expiringCompliance={data.expiringCompliance} />
 
       {/* (May 2026 audit #168) Plots over budget. Hidden when none. */}
       {data.plotsOverBudget.length > 0 && (

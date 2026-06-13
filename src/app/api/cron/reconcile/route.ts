@@ -313,6 +313,55 @@ export async function GET(req: NextRequest) {
     console.error("[RECONCILE] Overlap pass failed:", err);
   }
 
+  // ---- (Jun 2026 R26) Compliance expiry reconcile ----
+  // Folded into reconcile (not daily-email) because flipping a cached
+  // status field back into line with reality is exactly what this cron
+  // already does for plot percents and parent rollups. Any compliance
+  // item whose expiresAt has passed and isn't already EXPIRED/EXEMPT is
+  // flipped to EXPIRED. The 14-day "warn" window is a read-side concern
+  // (dashboard At-Risk + ?tab=compliance) — no status change for those.
+  //
+  // NOTE: no push notification is fired here — the NotificationType enum
+  // has no compliance-expiry value, and per the directive we don't
+  // misuse an unrelated one. A push type needs adding (reported).
+  let complianceExpiredFlipped = 0;
+  const complianceErrors: Array<{ itemId: string; error: string }> = [];
+  try {
+    const complianceToday = getServerCurrentDate(req);
+    complianceToday.setHours(0, 0, 0, 0);
+    const newlyExpired = await prisma.siteComplianceItem.findMany({
+      where: {
+        expiresAt: { lt: complianceToday },
+        // EXEMPT items are deliberately out of scope; EXPIRED already done.
+        status: { in: ["PENDING", "ACTIVE"] },
+        site: { status: { notIn: ["COMPLETED", "ARCHIVED"] } },
+      },
+      select: { id: true, name: true, siteId: true, expiresAt: true },
+    });
+    for (const item of newlyExpired) {
+      try {
+        await prisma.siteComplianceItem.update({
+          where: { id: item.id },
+          data: { status: "EXPIRED" },
+        });
+        complianceExpiredFlipped++;
+        await logEvent(prisma, {
+          type: "USER_ACTION",
+          description: `Compliance item "${item.name}" expired (was due ${item.expiresAt ? item.expiresAt.toISOString().slice(0, 10) : "?"}) — marked EXPIRED`,
+          siteId: item.siteId,
+          detail: { complianceItemId: item.id, status: "EXPIRED" },
+        }).catch(() => {});
+      } catch (err) {
+        complianceErrors.push({
+          itemId: item.id,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+  } catch (err) {
+    console.error("[RECONCILE] Compliance expiry pass failed:", err);
+  }
+
   const durationMs = Date.now() - startedAt;
 
   // (May 2026 audit #85) Log only when something was actually adjusted
@@ -351,6 +400,9 @@ export async function GET(req: NextRequest) {
     parentsAdjusted,
     overlapPlotsFixed,
     overlapJobsShifted,
+    // (Jun 2026 R26) Compliance items flipped to EXPIRED this run.
+    complianceExpiredFlipped,
+    complianceErrors: complianceErrors.length,
     plotErrors: plotErrors.length,
     parentErrors: parentErrors.length,
     durationMs,

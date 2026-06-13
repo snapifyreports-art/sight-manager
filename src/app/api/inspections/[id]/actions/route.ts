@@ -139,11 +139,12 @@ export async function POST(
       if (!certId) {
         return NextResponse.json({ error: "A certificate must be attached before passing" }, { status: 400 });
       }
-      // (Jun 2026 audit fix) The certificate must be a document on THIS
-      // site — otherwise a wrong-site/plot doc could satisfy a statutory
-      // hold-point and the file would be missing from the plot's handover
-      // folder. A plot-scoped cert (plotId === this plot) is ideal; a
-      // site-level one is allowed but the ZIP loop only bundles plot docs.
+      // (Jun 2026 R31) The certificate must be a PLOT-scoped document on
+      // THIS plot — tightened from the earlier site-level check. The
+      // handover ZIP loop only bundles plot docs, so a site-level cert
+      // would satisfy the statutory hold-point yet go missing from the
+      // plot's handover folder. Require certDoc.plotId === insp.plotId and
+      // tell the user exactly where to file it.
       const certDoc = await prisma.siteDocument.findUnique({
         where: { id: certId },
         select: { siteId: true, plotId: true },
@@ -151,6 +152,12 @@ export async function POST(
       if (!certDoc || certDoc.siteId !== insp.plot.siteId) {
         return NextResponse.json(
           { error: "The certificate document must belong to this site" },
+          { status: 400 },
+        );
+      }
+      if (certDoc.plotId !== insp.plotId) {
+        return NextResponse.json(
+          { error: "The certificate must be filed against this plot — re-upload it to the plot's documents and try again." },
           { status: 400 },
         );
       }

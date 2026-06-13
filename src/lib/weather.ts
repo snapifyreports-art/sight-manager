@@ -22,6 +22,28 @@ export interface WeatherDay {
   tempMin: number;
 }
 
+/**
+ * (R1) Single source of truth for "is this day's weather risky enough
+ * to push a site alert about". Risky = a wet/icy category (rain / snow /
+ * thunder) OR a temperature extreme (a cold low that risks frost / a
+ * heatwave high). The weather + weather-evening crons reuse this so the
+ * morning summary push and the evening tomorrow-alert push agree on what
+ * counts as risky. The unconditional daily EventLog row does NOT use this
+ * — it always records the forecast regardless of risk.
+ */
+export function isWeatherRisky(day: {
+  category: string;
+  tempMin: number;
+  tempMax: number;
+}): boolean {
+  const riskyCategory = ["rain", "snow", "thunder"].includes(day.category);
+  // Cold low (frost / icy-ground risk) or a heatwave high — both stop
+  // outdoor trades or need precautions on site.
+  const coldExtreme = day.tempMin <= 2;
+  const hotExtreme = day.tempMax >= 30;
+  return riskyCategory || coldExtreme || hotExtreme;
+}
+
 const CATEGORY_LABEL: Record<string, string> = {
   clear: "Clear",
   partly_cloudy: "Partly cloudy",

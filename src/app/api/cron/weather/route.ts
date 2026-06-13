@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { fetchWeatherForPostcode } from "@/lib/weather";
+import { fetchWeatherForPostcode, isWeatherRisky } from "@/lib/weather";
 import { sendPushToSiteAudience } from "@/lib/push";
 import { logEvent } from "@/lib/event-log";
 import { endOfDay, addDays } from "date-fns";
@@ -53,10 +53,13 @@ export async function GET(req: NextRequest) {
   const dayStart = getServerStartOfDay(req);
   const dayEnd = endOfDay(now);
 
-  // Get all active sites with a postcode
+  // Get all active + on-hold sites with a postcode.
+  // (R12) ON_HOLD sites still get their daily weather EventLog row (a
+  // data update — the Brief reads it on a paused site), but all pushes
+  // are suppressed for them below. ARCHIVED/COMPLETED stay excluded.
   const sites = await prisma.site.findMany({
-    where: { status: "ACTIVE", postcode: { not: null } },
-    select: { id: true, name: true, postcode: true },
+    where: { status: { in: ["ACTIVE", "ON_HOLD"] }, postcode: { not: null } },
+    select: { id: true, name: true, postcode: true, status: true },
   });
 
   let logged = 0;
@@ -65,6 +68,10 @@ export async function GET(req: NextRequest) {
 
   for (const site of sites) {
     if (!site.postcode) continue;
+
+    // (R12) ON_HOLD = data only. The EventLog row below still writes;
+    // every push for this site is skipped.
+    const pushSuppressed = site.status === "ON_HOLD";
 
     try {
       // Check if today's weather is already logged for this site.
@@ -99,13 +106,21 @@ export async function GET(req: NextRequest) {
 
       logged++;
 
-      // Send daily weather summary push to this site's audience only.
-      await sendPushToSiteAudience(site.id, "WEATHER_ALERT" as NotificationType, {
-        title: `Weather — ${site.name}`,
-        body: `Today: ${CATEGORY_LABELS[today.category] ?? today.category}, ${Math.round(today.tempMin)}°C–${Math.round(today.tempMax)}°C`,
-        url: `/sites/${site.id}?tab=programme`,
-        tag: `weather-daily-${site.id}`,
-      });
+      // (R1) Only push the daily weather summary when today's conditions
+      // are actually RISKY — rain/snow/thunder or a temperature extreme.
+      // Pre-fix this fired every single morning for every active site
+      // ("Today: Clear, 8°C–14°C"), training the audience to mute weather
+      // alerts so the genuinely-actionable ones got lost. The EventLog
+      // row above stays unconditional so the Brief still shows the
+      // forecast on a fair day.
+      if (isWeatherRisky(today) && !pushSuppressed) {
+        await sendPushToSiteAudience(site.id, "WEATHER_ALERT" as NotificationType, {
+          title: `Weather — ${site.name}`,
+          body: `Today: ${CATEGORY_LABELS[today.category] ?? today.category}, ${Math.round(today.tempMin)}°C–${Math.round(today.tempMax)}°C`,
+          url: `/sites/${site.id}?tab=programme`,
+          tag: `weather-daily-${site.id}`,
+        });
+      }
 
       // Check tomorrow's forecast for weather alert
       const tomorrowStr = addDays(now, 1).toISOString().split("T")[0];
@@ -114,7 +129,10 @@ export async function GET(req: NextRequest) {
         const isRainy = ["rain", "snow", "thunder"].includes(tomorrow.category);
         const isCold = tomorrow.tempMin <= 2;
 
-        if (isRainy || isCold) {
+        // (R1) Reuse the shared risk helper so the morning summary push
+        // and this tomorrow-alert agree on what "risky" means.
+        // (R12) Skip the tomorrow-alert push entirely for ON_HOLD sites.
+        if (isWeatherRisky(tomorrow) && !pushSuppressed) {
           // Check if there are weather-sensitive jobs starting in the next 3 days
           const in3Days = addDays(now, 3);
           const weatherSensitiveJobCount = await prisma.job.count({
@@ -131,6 +149,9 @@ export async function GET(req: NextRequest) {
             const alertParts: string[] = [];
             if (isRainy) alertParts.push(CATEGORY_LABELS[tomorrow.category] ?? tomorrow.category);
             if (isCold) alertParts.push(`${Math.round(tomorrow.tempMin)}°C low`);
+            // (R1) Heat extreme — isWeatherRisky now also trips on a 30°C+
+            // high, so name it here too or the body would read "Tomorrow: ."
+            if (!isRainy && !isCold) alertParts.push(`${Math.round(tomorrow.tempMax)}°C high`);
 
             await sendPushToSiteAudience(site.id, "WEATHER_ALERT" as NotificationType, {
               title: `Weather Alert — ${site.name}`,

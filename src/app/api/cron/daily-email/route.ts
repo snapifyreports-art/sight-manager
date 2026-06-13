@@ -35,8 +35,12 @@ export async function GET(req: NextRequest) {
   // Get all active sites
   // (Jun 2026 audit) ARCHIVED is settable from the UI — an archived site
   // must not keep raising ACTION NEEDED alerts in every morning email.
+  // (R12) ON_HOLD excluded too — a paused site shouldn't drive ACTION
+  // NEEDED lines in the morning brief (email suppressed for ON_HOLD).
+  // Status flips / data updates for ON_HOLD sites still run in the
+  // lateness + inspection-alerts crons; this is the email surface only.
   const sites = await prisma.site.findMany({
-    where: { status: { notIn: ["COMPLETED", "ARCHIVED"] } },
+    where: { status: "ACTIVE" },
     select: { id: true, name: true, location: true },
   });
 
@@ -163,7 +167,10 @@ export async function GET(req: NextRequest) {
   // but could be "" from legacy seed data).
   const managers = await prisma.user.findMany({
     where: {
-      role: { in: ["SUPER_ADMIN", "CEO", "DIRECTOR", "SITE_MANAGER"] },
+      // (R2) CONTRACT_MANAGER added — they own programme delivery across
+      // sites and need the morning brief like the other manager roles.
+      // Kept aligned with the evening daily-wrap recipient list.
+      role: { in: ["SUPER_ADMIN", "CEO", "DIRECTOR", "SITE_MANAGER", "CONTRACT_MANAGER"] },
       email: { not: "" },
       // (May 2026 audit S-P0) Exclude archived (offboarded) users.
       archivedAt: null,

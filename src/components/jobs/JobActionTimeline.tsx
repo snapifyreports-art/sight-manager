@@ -57,13 +57,43 @@ const LABEL: Record<string, string> = {
   note: "Note added",
 };
 
-export function JobActionTimeline({ jobId }: { jobId: string }) {
+/**
+ * (Jun 2026 R20) `actions` may be passed in by a parent that already
+ * loaded the JobAction rows server-side (the job detail page does). When
+ * present we render them directly and skip the client fetch entirely —
+ * the job page used to render this timeline AND a second "Action History"
+ * card off the same `job.actions`, duplicating the list and firing a
+ * redundant round-trip. With `jobId` only, the legacy self-fetching
+ * behaviour is preserved for any standalone caller.
+ *
+ * Splitting the prop-fed path from the fetching path keeps each free of a
+ * setState-in-effect: the prop path is a pure render of `actions`, and the
+ * fetch path only ever setState()s from an async callback.
+ */
+export function JobActionTimeline({
+  jobId,
+  actions,
+}: {
+  jobId?: string;
+  actions?: ActionRow[];
+}) {
+  // Parent supplied the rows — render them straight through, no fetch.
+  if (actions !== undefined) {
+    return <TimelineBody rows={actions} loading={false} />;
+  }
+  return <FetchingTimeline jobId={jobId} />;
+}
+
+/** Self-fetching variant for standalone callers that only have a jobId. */
+function FetchingTimeline({ jobId }: { jobId?: string }) {
   const [rows, setRows] = useState<ActionRow[] | null>(null);
-  const [loading, setLoading] = useState(true);
+  // Seed loading from whether there's anything to fetch — no jobId means
+  // nothing loads, so the effect never needs to setState synchronously.
+  const [loading, setLoading] = useState(!!jobId);
 
   useEffect(() => {
+    if (!jobId) return;
     let cancelled = false;
-    setLoading(true);
     fetch(`/api/jobs/${jobId}/actions`, { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
@@ -77,6 +107,11 @@ export function JobActionTimeline({ jobId }: { jobId: string }) {
     };
   }, [jobId]);
 
+  return <TimelineBody rows={rows} loading={loading} />;
+}
+
+/** Presentational list — loading / empty / rows. */
+function TimelineBody({ rows, loading }: { rows: ActionRow[] | null; loading: boolean }) {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-6 text-sm text-muted-foreground">

@@ -253,6 +253,11 @@ export interface PlotStory {
   // PreStartCheck completion ratio (handover-readiness signal).
   preStartTotal: number;
   preStartChecked: number;
+  // (R9) Total handover-checklist items on this plot (required OR not).
+  // Closure's "nothing recorded" advisory fires when this is 0 AND there
+  // are no pre-start checks AND no inspections — i.e. the plot's
+  // checklists were never set up.
+  handoverItemsTotal: number;
   // Evidence-trail counters — voice notes + photo annotations on this plot.
   voiceNoteCount: number;
   photoAnnotationCount: number;
@@ -1061,7 +1066,15 @@ export async function buildSiteStory(
     string,
     { requiredTotal: number; requiredChecked: number }
   >();
+  // (R9) Count ALL handover items per plot (required or not) so the
+  // Closure "nothing recorded" advisory can tell a plot that genuinely
+  // has zero checklist items from one that has optional-only items.
+  const handoverItemsTotalByPlot = new Map<string, number>();
   for (const h of allHandoverItems) {
+    handoverItemsTotalByPlot.set(
+      h.plotId,
+      (handoverItemsTotalByPlot.get(h.plotId) ?? 0) + 1,
+    );
     if (!h.required) continue;
     const e = handoverByPlot.get(h.plotId) ?? {
       requiredTotal: 0,
@@ -1361,6 +1374,7 @@ export async function buildSiteStory(
         variationCountsByPlot.get(p.id)?.approved ?? 0,
       preStartTotal: preStartByPlot.get(p.id)?.total ?? 0,
       preStartChecked: preStartByPlot.get(p.id)?.checked ?? 0,
+      handoverItemsTotal: handoverItemsTotalByPlot.get(p.id) ?? 0,
       voiceNoteCount: voiceNoteByPlot.get(p.id) ?? 0,
       photoAnnotationCount: annotationByPlot.get(p.id) ?? 0,
       inspectionTotal: inspectionByPlot.get(p.id)?.total ?? 0,

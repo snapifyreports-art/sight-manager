@@ -165,3 +165,76 @@ export async function PATCH(
     return apiError(err, "Failed to update inspection");
   }
 }
+
+// DELETE /api/inspections/[id] — remove a hold-point.
+//
+// (Jun 2026 R29) Deleting an inspection is a destructive admin action, so
+// it's MANAGE_INSPECTIONS + site-access gated. It's also refused (400)
+// when the inspection carries history that a delete would orphan or erase:
+//   - status === PASSED         → a frozen, signed-off result
+//   - findings (snags + ncrs)   → deleting would orphan the findings
+//   - certificateDocumentId set → a filed certificate is attached
+// The UI hides the delete control for PASSED rows; the other two are
+// enforced here as the authoritative guard.
+export async function DELETE(
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const session = await auth();
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!sessionHasPermission(session.user as { role?: string; permissions?: string[] }, "MANAGE_INSPECTIONS")) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  const { id } = await params;
+  const existing = await prisma.inspection.findUnique({
+    where: { id },
+    select: {
+      name: true,
+      status: true,
+      plotId: true,
+      certificateDocumentId: true,
+      plot: { select: { siteId: true } },
+      _count: { select: { snags: true, ncrs: true } },
+    },
+  });
+  if (!existing) return NextResponse.json({ error: "Inspection not found" }, { status: 404 });
+  if (!(await canAccessSite(session.user.id, (session.user as { role: string }).role, existing.plot.siteId))) {
+    return NextResponse.json({ error: "No access" }, { status: 403 });
+  }
+
+  if (existing.status === "PASSED") {
+    return NextResponse.json(
+      { error: "Can't delete a passed inspection — its result is a frozen record." },
+      { status: 400 },
+    );
+  }
+  const findingCount = existing._count.snags + existing._count.ncrs;
+  if (findingCount > 0) {
+    return NextResponse.json(
+      { error: `This inspection has ${findingCount} finding${findingCount !== 1 ? "s" : ""} attached — resolve or detach them before deleting.` },
+      { status: 400 },
+    );
+  }
+  if (existing.certificateDocumentId) {
+    return NextResponse.json(
+      { error: "A certificate is filed against this inspection — remove it before deleting." },
+      { status: 400 },
+    );
+  }
+
+  try {
+    await prisma.inspection.delete({ where: { id } });
+    await logEvent(prisma, {
+      type: "USER_ACTION",
+      description: `Inspection "${existing.name}" deleted`,
+      siteId: existing.plot.siteId,
+      plotId: existing.plotId,
+      userId: session.user.id,
+      detail: { inspectionId: id },
+    }).catch(() => {});
+    return NextResponse.json({ success: true });
+  } catch (err) {
+    return apiError(err, "Failed to delete inspection");
+  }
+}

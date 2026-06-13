@@ -14,6 +14,19 @@ export async function GET(
   const session = await auth();
   if (!session)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // (R14) Variant list read gated on EDIT_PROGRAMME — matches the
+  // template list/[id] reads and the variant mutation verbs.
+  if (
+    !sessionHasPermission(
+      session.user as { role?: string; permissions?: string[] },
+      "EDIT_PROGRAMME",
+    )
+  ) {
+    return NextResponse.json(
+      { error: "You do not have permission to view templates" },
+      { status: 403 },
+    );
+  }
 
   const { id } = await params;
   // Variant content (jobs/materials/documents) is fetched via

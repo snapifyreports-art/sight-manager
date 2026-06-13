@@ -1138,6 +1138,14 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
 
   const s = data.summary;
 
+  // (Jun 2026 R3) Is the Brief showing real today? The Tomorrow weather
+  // card always reads forecast[0] (real-tomorrow) while its button marks
+  // viewedDate+1 — a mismatch on back-dated briefs. The card only makes
+  // sense relative to today, so it's hidden entirely when viewing any
+  // other day (the date-stamped Today card carries that day's weather).
+  const isViewingToday =
+    format(date, "yyyy-MM-dd") === format(getCurrentDate(), "yyyy-MM-dd");
+
   // Collect all actionable jobs for bulk mode
   const allActionableJobs = [
     ...data.jobsStartingToday.filter((j) => j.status !== "COMPLETED"),
@@ -1530,8 +1538,11 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
             </div>
           </div>
 
-          {/* Tomorrow card */}
-          {(() => {
+          {/* Tomorrow card — (Jun 2026 R3) only meaningful relative to
+              real today. When the Brief is back/forward-dated the card's
+              forecast[0] (real-tomorrow) no longer matches its button
+              (viewedDate+1), so hide it entirely off-today. */}
+          {isViewingToday && (() => {
             const tomorrow = data.weather?.forecast?.[0];
             const tomorrowIsBad = tomorrow && ["rain", "snow", "thunder"].includes(tomorrow.category);
             return (
@@ -1697,10 +1708,23 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                     <li key={i.id}>
                       <a
                         href={`/inspections?focus=${i.id}`}
-                        title={`${i.name} — ${inspectionTypeLabel(i.type)} · ${i.plotLabel} · ${format(new Date(i.scheduledDate), "d MMM")}${i.inspectorName ? ` · ${i.inspectorName}` : ""}`}
-                        className={cn("inline-block rounded border px-1.5 py-0.5 text-[11px] hover:brightness-95", tone)}
+                        title={
+                          i.bookingMismatch
+                            ? `${i.name} — booking no longer matches schedule — rebook or confirm (booked ${i.bookedDate ? format(new Date(i.bookedDate), "d MMM") : "—"}, now ${format(new Date(i.scheduledDate), "d MMM")})`
+                            : `${i.name} — ${inspectionTypeLabel(i.type)} · ${i.plotLabel} · ${format(new Date(i.scheduledDate), "d MMM")}${i.inspectorName ? ` · ${i.inspectorName}` : ""}`
+                        }
+                        className={cn(
+                          "inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[11px] hover:brightness-95",
+                          // (Jun 2026 R30) Override the bucket tone with an
+                          // amber rebook style when the booking no longer
+                          // matches the schedule.
+                          i.bookingMismatch ? "border-amber-400 bg-amber-100 text-amber-900" : tone,
+                        )}
                       >
                         {i.plotLabel} · {i.name}
+                        {i.bookingMismatch && (
+                          <CalendarClock className="size-2.5 shrink-0" aria-label="Booking no longer matches schedule — rebook or confirm" />
+                        )}
                       </a>
                     </li>
                   ))}
@@ -1814,6 +1838,20 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                 <span className="mr-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Issues</span>
                 {issuesPills}
               </div>
+            )}
+
+            {/* (Jun 2026 R28) Resolved-snag loop — resolved snags sit in
+                limbo until the manager verifies & closes them. A compact
+                line here lists how many are awaiting that re-check and
+                deep-links to the snags tab pre-filtered to resolved. */}
+            {(data.resolvedSnagsList?.length ?? 0) > 0 && (
+              <Link
+                href={`/sites/${siteId}?tab=snags&filter=resolved`}
+                className="flex w-fit items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-800 no-underline transition-colors hover:bg-emerald-100"
+              >
+                <ClipboardCheck className="size-3.5 shrink-0" aria-hidden />
+                Awaiting your re-check ({data.resolvedSnagsList!.length})
+              </Link>
             )}
           </div>
         );

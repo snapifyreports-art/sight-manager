@@ -16,6 +16,7 @@ import {
   Loader2,
   Search,
   X,
+  RotateCcw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -122,6 +123,13 @@ export function SnagList({ snags, onSelect, onRefresh, showPlot, highlightId, si
   const [closeSnag, setCloseSnag] = useState<Snag | null>(null);
   const [closeNote, setCloseNote] = useState("");
   const [closingInProgress, setClosingInProgress] = useState(false);
+
+  // (Jun 2026 R28) Reopen dialog state — a RESOLVED snag that didn't pass
+  // the manager's re-check goes back to IN_PROGRESS. A note is required so
+  // the contractor knows what still needs doing.
+  const [reopenSnag, setReopenSnag] = useState<Snag | null>(null);
+  const [reopenNote, setReopenNote] = useState("");
+  const [reopeningInProgress, setReopeningInProgress] = useState(false);
   const [pendingCloseFile, setPendingCloseFile] = useState<File | null>(null);
   const [pendingClosePreview, setPendingClosePreview] = useState<string | null>(null);
   const closeFileRef = useRef<HTMLInputElement>(null);
@@ -217,6 +225,16 @@ export function SnagList({ snags, onSelect, onRefresh, showPlot, highlightId, si
 
   const handleConfirmClose = async () => {
     if (!closeSnag) return;
+    // (Jun 2026 R27) A snag closed without first being RESOLVED skips the
+    // verify-the-fix step, so the closing note is the only audit trail of
+    // why it was dismissed — require it client-side (the server enforces
+    // the same rule with a 400). RESOLVED → CLOSED keeps the note optional.
+    const isUnresolvedClose =
+      closeSnag.status === "OPEN" || closeSnag.status === "IN_PROGRESS";
+    if (isUnresolvedClose && !closeNote.trim()) {
+      toast.error("A closing note is required when closing an unresolved snag");
+      return;
+    }
     setClosingInProgress(true);
     try {
       // (May 2026 pattern sweep) Both fetches inside this handler used
@@ -274,6 +292,45 @@ export function SnagList({ snags, onSelect, onRefresh, showPlot, highlightId, si
       toast.error(err instanceof Error ? err.message : "Network error closing snag");
     } finally {
       setClosingInProgress(false);
+    }
+  };
+
+  // (Jun 2026 R28) Reopen a RESOLVED snag back to IN_PROGRESS. A note is
+  // required — it's appended to the snag history so the contractor sees
+  // what failed the re-check.
+  const handleOpenReopenDialog = (e: React.MouseEvent, snag: Snag) => {
+    e.stopPropagation();
+    setReopenSnag(snag);
+    setReopenNote("");
+  };
+
+  const handleConfirmReopen = async () => {
+    if (!reopenSnag) return;
+    if (!reopenNote.trim()) {
+      toast.error("Add a note explaining what still needs doing");
+      return;
+    }
+    setReopeningInProgress(true);
+    try {
+      const existingNotes = reopenSnag.notes || "";
+      const dateStr = new Date().toLocaleDateString("en-GB");
+      const reopenedNote = `${existingNotes ? existingNotes + "\n\n" : ""}[${dateStr}] Reopened: ${reopenNote.trim()}`;
+      const res = await fetch(`/api/snags/${reopenSnag.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "IN_PROGRESS", notes: reopenedNote }),
+      });
+      if (!res.ok) {
+        toast.error(await fetchErrorMessage(res, "Failed to reopen snag"));
+        return;
+      }
+      setReopenSnag(null);
+      setReopenNote("");
+      onRefresh?.();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Network error reopening snag");
+    } finally {
+      setReopeningInProgress(false);
     }
   };
 
@@ -534,16 +591,30 @@ export function SnagList({ snags, onSelect, onRefresh, showPlot, highlightId, si
                             Resolve
                           </Button>
                         )}
+                        {/* (Jun 2026 R28) Resolved-snag loop — the manager
+                            either verifies the fix and closes, or kicks it
+                            back to the contractor with a note. */}
                         {snag.status === "RESOLVED" && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-6 flex-1 gap-1 text-[11px] text-slate-600 border-slate-200 hover:bg-slate-50"
-                            onClick={(e) => handleOpenCloseDialog(e, snag)}
-                          >
-                            <CheckCircle className="size-3" />
-                            Close
-                          </Button>
+                          <>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-6 flex-1 gap-1 text-[11px] text-green-700 border-green-200 hover:bg-green-50"
+                              onClick={(e) => handleOpenCloseDialog(e, snag)}
+                            >
+                              <CheckCircle className="size-3" />
+                              Verify &amp; close
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-6 flex-1 gap-1 text-[11px] text-amber-700 border-amber-200 hover:bg-amber-50"
+                              onClick={(e) => handleOpenReopenDialog(e, snag)}
+                            >
+                              <RotateCcw className="size-3" />
+                              Reopen
+                            </Button>
+                          </>
                         )}
                         {snag.status !== "RESOLVED" && (
                           <Button
@@ -596,17 +667,32 @@ export function SnagList({ snags, onSelect, onRefresh, showPlot, highlightId, si
                 )}
               </div>
 
-              {/* Closing note */}
-              <div>
-                <label className="text-xs font-medium">Closing Note</label>
-                <textarea
-                  className="mt-1 w-full rounded-md border px-3 py-2 text-sm"
-                  rows={2}
-                  value={closeNote}
-                  onChange={(e) => setCloseNote(e.target.value)}
-                  placeholder="e.g. Fixed and verified on site..."
-                />
-              </div>
+              {/* Closing note — (Jun 2026 R27) required when the snag was
+                  never RESOLVED, since closing it skips the verify step. */}
+              {(() => {
+                const noteRequired =
+                  closeSnag.status === "OPEN" ||
+                  closeSnag.status === "IN_PROGRESS";
+                return (
+                  <div>
+                    <label className="text-xs font-medium">
+                      Closing Note{noteRequired && <span className="text-red-600"> *</span>}
+                    </label>
+                    {noteRequired && (
+                      <p className="text-[11px] text-amber-700">
+                        This snag hasn&apos;t been marked resolved — a note is required to record why it&apos;s being closed.
+                      </p>
+                    )}
+                    <textarea
+                      className="mt-1 w-full rounded-md border px-3 py-2 text-sm"
+                      rows={2}
+                      value={closeNote}
+                      onChange={(e) => setCloseNote(e.target.value)}
+                      placeholder="e.g. Fixed and verified on site..."
+                    />
+                  </div>
+                );
+              })()}
 
               {/* After photo */}
               <div>
@@ -677,7 +763,12 @@ export function SnagList({ snags, onSelect, onRefresh, showPlot, highlightId, si
                 <Button
                   size="sm"
                   className="bg-green-600 hover:bg-green-700"
-                  disabled={closingInProgress}
+                  disabled={
+                    closingInProgress ||
+                    ((closeSnag.status === "OPEN" ||
+                      closeSnag.status === "IN_PROGRESS") &&
+                      !closeNote.trim())
+                  }
                   onClick={handleConfirmClose}
                 >
                   {closingInProgress ? (
@@ -686,6 +777,79 @@ export function SnagList({ snags, onSelect, onRefresh, showPlot, highlightId, si
                     <CheckCircle className="size-3.5" />
                   )}
                   {closingInProgress ? "Closing..." : "Confirm Close"}
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* (Jun 2026 R28) Reopen Snag Dialog — sends a RESOLVED snag back to
+          IN_PROGRESS with a mandatory note. */}
+      <Dialog
+        open={!!reopenSnag}
+        onOpenChange={(o) => {
+          if (!o) {
+            setReopenSnag(null);
+            setReopenNote("");
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Reopen Snag</DialogTitle>
+          </DialogHeader>
+
+          {reopenSnag && (
+            <div className="space-y-4">
+              <div className="rounded-lg border bg-slate-50 p-3">
+                <p className="text-sm font-medium">{reopenSnag.description}</p>
+                {reopenSnag.location && (
+                  <p className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
+                    <MapPin className="size-3" /> {reopenSnag.location}
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <label className="text-xs font-medium">
+                  Why is it being reopened?<span className="text-red-600"> *</span>
+                </label>
+                <p className="text-[11px] text-muted-foreground">
+                  Goes back to In Progress. The note tells the contractor what failed the re-check.
+                </p>
+                <textarea
+                  className="mt-1 w-full rounded-md border px-3 py-2 text-sm"
+                  rows={2}
+                  value={reopenNote}
+                  onChange={(e) => setReopenNote(e.target.value)}
+                  placeholder="e.g. Sealant still missing along the left edge..."
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setReopenSnag(null);
+                    setReopenNote("");
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  size="sm"
+                  className="bg-amber-600 hover:bg-amber-700"
+                  disabled={reopeningInProgress || !reopenNote.trim()}
+                  onClick={handleConfirmReopen}
+                >
+                  {reopeningInProgress ? (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  ) : (
+                    <RotateCcw className="size-3.5" />
+                  )}
+                  {reopeningInProgress ? "Reopening..." : "Reopen Snag"}
                 </Button>
               </div>
             </div>

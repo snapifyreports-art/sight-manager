@@ -212,6 +212,17 @@ export interface BriefData {
     contact: { name: string; company: string | null } | null;
   }>;
   openSnagsTruncated: boolean;
+  // (Jun 2026 R28) Resolved snags awaiting the manager's verify-and-close
+  // re-check. Surfaced as a compact "Awaiting your re-check (N)" line in
+  // the Brief issues area, deep-linking ?tab=snags&filter=resolved.
+  resolvedSnagsList?: Array<{
+    id: string;
+    description: string;
+    priority: string;
+    location: string | null;
+    plotId: string;
+    plot: { plotNumber: string | null; name: string; siteId: string };
+  }>;
   ordersToPlace: Array<{
     id: string;
     itemsDescription: string | null;
@@ -382,6 +393,9 @@ export interface BriefInspection {
   plotId: string;
   plotLabel: string;
   inspectorName: string | null;
+  // (Jun 2026 R30) BOOKED but the booked day no longer matches the
+  // scheduled day — renders an amber "rebook or confirm" chip.
+  bookingMismatch?: boolean;
 }
 
 /**

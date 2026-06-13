@@ -18,6 +18,22 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  // (R14) Templates are programme building blocks — gate the list read on
+  // EDIT_PROGRAMME, matching the mutation routes and the settings-tab gate.
+  // The apply-to-plot picker (liveOnly=true) is only shown to EDIT_PROGRAMME
+  // holders, so this doesn't break site creation for legitimate users.
+  if (
+    !sessionHasPermission(
+      session.user as { role?: string; permissions?: string[] },
+      "EDIT_PROGRAMME",
+    )
+  ) {
+    return NextResponse.json(
+      { error: "You do not have permission to view templates" },
+      { status: 403 },
+    );
+  }
+
   const { searchParams } = new URL(request.url);
   const liveOnly = searchParams.get("liveOnly") === "true";
   const includeArchived = searchParams.get("include") === "archived";

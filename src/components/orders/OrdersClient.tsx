@@ -95,6 +95,8 @@ interface Site {
 interface Plot {
   id: string;
   name: string;
+  // (Jun 2026 R23) plotNumber drives the "Plot N" label fallback.
+  plotNumber?: string | null;
   description: string | null;
   siteId: string;
   createdAt: string;
@@ -129,10 +131,21 @@ interface OrderItem {
   createdAt: string;
 }
 
+// (Jun 2026 R23) A one-off order has jobId=null and attaches directly to
+// a plot or a site. Either `plot` (with its site) or `site` carries the
+// context the row label needs when `job` is absent.
+interface OrderPlotAttachment {
+  id: string;
+  name: string;
+  plotNumber?: string | null;
+  siteId: string;
+  site: Site;
+}
+
 interface Order {
   id: string;
   supplierId: string;
-  jobId: string;
+  jobId: string | null;
   contactId: string | null;
   orderDetails: string | null;
   dateOfOrder: string;
@@ -146,7 +159,10 @@ interface Order {
   createdAt: string;
   updatedAt: string;
   supplier: Supplier;
-  job: Job;
+  // Null for one-off orders — fall back to plot/site below.
+  job: Job | null;
+  plot: OrderPlotAttachment | null;
+  site: Site | null;
   orderItems: OrderItem[];
 }
 
@@ -173,6 +189,26 @@ function isOverdue(order: Order): boolean {
   if (order.status === "DELIVERED" || order.status === "CANCELLED") return false;
   if (!order.expectedDeliveryDate) return false;
   return isBefore(new Date(order.expectedDeliveryDate), getCurrentDate());
+}
+
+// (Jun 2026 R23) Null-safe attachment helpers — mirror SiteOrders /
+// daily-brief so a job-less one-off order renders "One-off · Plot N /
+// Site-wide" instead of crashing on order.job.*.
+
+/** The plot an order is attached to (via job, or directly for one-offs). */
+function orderPlot(order: Order): { id: string; name: string; plotNumber?: string | null } | null {
+  return order.job?.plot ?? order.plot ?? null;
+}
+
+/** The site an order belongs to, whatever it's attached through. */
+function orderSite(order: Order): { id: string; name: string } | null {
+  return order.job?.plot.site ?? order.plot?.site ?? order.site ?? null;
+}
+
+function orderPlotLabel(order: Order): string {
+  const plot = orderPlot(order);
+  if (plot) return plot.plotNumber ? `Plot ${plot.plotNumber}` : plot.name;
+  return order.site ? "Site-wide" : "—";
 }
 
 // ---------- Status Badge (with optional click-to-filter affordance) ----------
@@ -1027,8 +1063,10 @@ export function OrdersClient({
         return false;
       }
       if (supplierFilter !== "ALL" && order.supplierId !== supplierFilter) return false;
-      if (plotFilter !== "ALL" && order.job.plotId !== plotFilter) return false;
-      if (siteFilter && order.job.plot.siteId !== siteFilter) return false;
+      // (Jun 2026 R23) Null-safe plot/site filtering — one-off orders use
+      // the direct plot/site attachment.
+      if (plotFilter !== "ALL" && orderPlot(order)?.id !== plotFilter) return false;
+      if (siteFilter && orderSite(order)?.id !== siteFilter) return false;
       if (dateFrom && order.expectedDeliveryDate && order.expectedDeliveryDate.split("T")[0] < dateFrom) return false;
       if (dateFrom && !order.expectedDeliveryDate) return false;
       if (dateTo && order.expectedDeliveryDate && order.expectedDeliveryDate.split("T")[0] > dateTo) return false;
@@ -1058,8 +1096,13 @@ export function OrdersClient({
   const plotOptions = useMemo(() => {
     const plotMap = new Map<string, string>();
     orders.forEach((o) => {
-      if (!plotMap.has(o.job.plotId)) {
-        plotMap.set(o.job.plotId, `${o.job.plot.site.name} > ${o.job.plot.name}`);
+      // (Jun 2026 R23) Site-only one-off orders have no plot — skip them
+      // here; they're still reachable via the All/site filters.
+      const plot = orderPlot(o);
+      const site = orderSite(o);
+      if (plot && !plotMap.has(plot.id)) {
+        const plotLabel = plot.plotNumber ? `Plot ${plot.plotNumber}` : plot.name;
+        plotMap.set(plot.id, `${site?.name ?? ""} > ${plotLabel}`);
       }
     });
     return Array.from(plotMap.entries())
@@ -1128,7 +1171,11 @@ export function OrdersClient({
           Are you sure you want to delete the{" "}
           <span className="font-medium text-foreground">{order.supplier.name}</span>{" "}
           order for{" "}
-          <span className="font-medium text-foreground">{order.job.plot.name} — {order.job.name}</span>?
+          <span className="font-medium text-foreground">
+            {order.job
+              ? `${order.job.plot.name} — ${order.job.name}`
+              : `One-off — ${orderPlotLabel(order)}`}
+          </span>?
           This cannot be undone.
         </>
       ),
@@ -1411,20 +1458,54 @@ export function OrdersClient({
                         </Link>
                       </TableCell>
                       <TableCell onClick={(e) => e.stopPropagation()}>
-                        <div>
-                          <Link href={`/jobs/${order.job.id}`} className="text-sm text-blue-600 hover:underline">
-                            {order.job.name}
-                          </Link>
-                          <p className="text-xs text-muted-foreground">
-                            <Link href={`/sites/${order.job.plot.siteId}`} className="hover:underline hover:text-blue-600">
-                              {order.job.plot.site.name}
+                        {order.job ? (
+                          <div>
+                            <Link href={`/jobs/${order.job.id}`} className="text-sm text-blue-600 hover:underline">
+                              {order.job.name}
                             </Link>
-                            {" > "}
-                            <Link href={`/sites/${order.job.plot.siteId}/plots/${order.job.plot.id}`} className="hover:underline hover:text-blue-600">
-                              {order.job.plot.name}
-                            </Link>
-                          </p>
-                        </div>
+                            <p className="text-xs text-muted-foreground">
+                              <Link href={`/sites/${order.job.plot.siteId}`} className="hover:underline hover:text-blue-600">
+                                {order.job.plot.site.name}
+                              </Link>
+                              {" > "}
+                              <Link href={`/sites/${order.job.plot.siteId}/plots/${order.job.plot.id}`} className="hover:underline hover:text-blue-600">
+                                {order.job.plot.name}
+                              </Link>
+                            </p>
+                          </div>
+                        ) : (
+                          // (Jun 2026 R23) One-off order — no job. Show the
+                          // "One-off" badge + the plot/site it's attached to.
+                          <div>
+                            <Badge variant="outline" className="text-[10px] font-medium">
+                              One-off
+                            </Badge>
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              {(() => {
+                                const site = orderSite(order);
+                                const plot = orderPlot(order);
+                                return (
+                                  <>
+                                    {site && (
+                                      <Link href={`/sites/${site.id}`} className="hover:underline hover:text-blue-600">
+                                        {site.name}
+                                      </Link>
+                                    )}
+                                    {plot && site && (
+                                      <>
+                                        {" > "}
+                                        <Link href={`/sites/${site.id}/plots/${plot.id}`} className="hover:underline hover:text-blue-600">
+                                          {plot.plotNumber ? `Plot ${plot.plotNumber}` : plot.name}
+                                        </Link>
+                                      </>
+                                    )}
+                                    {!site && !plot && <span>Site-wide</span>}
+                                  </>
+                                );
+                              })()}
+                            </p>
+                          </div>
+                        )}
                       </TableCell>
                       <TableCell onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center gap-1.5">

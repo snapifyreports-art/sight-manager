@@ -12,6 +12,7 @@ import { HelpTip } from "@/components/shared/HelpTip";
 import { InspectionStatusBadge, InspectionTypeBadge } from "@/components/shared/StatusBadge";
 import { SnagDialog } from "@/components/snags/SnagDialog";
 import { useInspectionAction, type InspectionFinding } from "@/hooks/useInspectionAction";
+import { useConfirm } from "@/hooks/useConfirm";
 import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 import { inspectionDisplayStatus, inspectionTypeLabel, INSPECTION_TYPE_META } from "@/lib/inspection-doctype";
 
@@ -33,6 +34,11 @@ interface Insp {
   inspector: { id: string; name: string; company: string | null } | null;
   certificate: { id: string; name: string; url: string } | null;
   _count: { snags: number; ncrs: number };
+  // (Jun 2026 R30) Computed server-side: BOOKED but the booked day no
+  // longer matches the (recomputed) scheduled day. Drives the amber
+  // "rebook or confirm" chip. Optional so older/embedded payloads that
+  // predate the field don't break the type.
+  bookingMismatch?: boolean;
 }
 
 /** Anchor relationship label, edge/offset aware — e.g. "2d before
@@ -133,6 +139,42 @@ export function InspectionsClient({ initial, canManage, siteId, embedded }: { in
   }, [canManage]);
 
   const action = useInspectionAction({ onChange: refetch });
+
+  // (Jun 2026 R29) Delete a hold-point — manage-only, hidden for PASSED in
+  // the UI; the server additionally refuses when findings or a certificate
+  // are attached. useConfirm guards the destructive click.
+  const toast = useToast();
+  const { confirm, dialog: confirmDialog } = useConfirm();
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const handleDelete = useCallback(
+    async (i: Insp) => {
+      const ok = await confirm({
+        title: "Delete this inspection?",
+        body: `"${i.name}" will be removed from the programme. This can't be undone.`,
+        confirmLabel: "Delete",
+        danger: true,
+      });
+      if (!ok) return;
+      setDeletingId(i.id);
+      try {
+        const res = await fetch(`/api/inspections/${i.id}`, { method: "DELETE" });
+        if (!res.ok) {
+          toast.error(await fetchErrorMessage(res, "Failed to delete inspection"));
+          return;
+        }
+        // Drop locally for instant feedback, then re-sync from the server.
+        setItems((prev) => prev.filter((x) => x.id !== i.id));
+        toast.success("Inspection deleted");
+        void refetch();
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Network error deleting inspection");
+      } finally {
+        setDeletingId(null);
+      }
+    },
+    [confirm, toast, refetch],
+  );
 
   // Distinct sites present in the data (for the cross-site filter).
   const siteOptions = useMemo(() => {
@@ -269,6 +311,17 @@ export function InspectionsClient({ initial, canManage, siteId, embedded }: { in
                         <ShieldAlert className="size-2.5" /> blocks
                       </span>
                     )}
+                    {/* (Jun 2026 R30) Booking no longer lands on the
+                        scheduled day — the manager rebooks or confirms; the
+                        booking is never auto-cleared. */}
+                    {i.bookingMismatch && (
+                      <span
+                        className="inline-flex items-center gap-0.5 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800"
+                        title={`Booked for ${i.bookedDate ? format(new Date(i.bookedDate), "d MMM") : "—"} but now scheduled for ${format(new Date(i.scheduledDate), "d MMM")}`}
+                      >
+                        <CalendarRange className="size-2.5" /> Booking no longer matches schedule — rebook or confirm
+                      </span>
+                    )}
                   </div>
                   <div className="text-xs text-muted-foreground">
                     <Link href={`/sites/${i.plot.siteId}?tab=plots`} className="hover:underline">
@@ -351,6 +404,26 @@ export function InspectionsClient({ initial, canManage, siteId, embedded }: { in
                     {i.status !== "PASSED" && (
                       <Button size="sm" variant="ghost" disabled={pending} onClick={() => setNotify(i)} title="Notify a contractor via Contractor Comms">Notify</Button>
                     )}
+                    {/* (Jun 2026 R29) Delete — hidden for PASSED (frozen
+                        result); the server also refuses when findings or a
+                        certificate are attached. */}
+                    {i.status !== "PASSED" && (
+                      <Button
+                        size="icon-xs"
+                        variant="ghost"
+                        className="text-muted-foreground hover:text-red-600"
+                        disabled={pending || deletingId === i.id}
+                        title="Delete inspection"
+                        aria-label="Delete inspection"
+                        onClick={() => void handleDelete(i)}
+                      >
+                        {deletingId === i.id ? (
+                          <Loader2 className="size-3.5 animate-spin" />
+                        ) : (
+                          <Trash2 className="size-3.5" />
+                        )}
+                      </Button>
+                    )}
                   </div>
                 )}
               </div>
@@ -382,6 +455,8 @@ export function InspectionsClient({ initial, canManage, siteId, embedded }: { in
           onDone={() => { setBook(null); void refetch(); }}
         />
       )}
+      {/* (Jun 2026 R29) Delete-confirm dialog (useConfirm). */}
+      {confirmDialog}
     </div>
   );
 }
@@ -644,7 +719,7 @@ function SignOffDialog({ kind, insp, onClose, onDone }: { kind: "pass" | "fail";
   // manager SELECTS the cert instead of pasting an opaque ID, or uploads
   // one inline (posted to the plot with category CERT so it lands in the
   // handover folder). Replaces the old dead-end paste-ID flow.
-  const [docs, setDocs] = useState<Array<{ id: string; name: string; category: string | null }>>([]);
+  const [docs, setDocs] = useState<Array<{ id: string; name: string; category: string | null; plotId: string | null }>>([]);
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
   // (Jun 2026 Q11) Optional per-finding contractor override. Unset =
@@ -660,12 +735,18 @@ function SignOffDialog({ kind, insp, onClose, onDone }: { kind: "pass" | "fail";
   const loadDocs = useCallback(async () => {
     const r = await fetch(`/api/sites/${insp.plot.siteId}/documents?plotId=${insp.plot.id}`);
     if (r.ok) {
-      const all: Array<{ id: string; name: string; category: string | null }> = await r.json();
+      const all: Array<{ id: string; name: string; category: string | null; plotId: string | null }> = await r.json();
+      // (Jun 2026 R31) The ?plotId= endpoint also returns job-level docs for
+      // jobs in this plot (plotId=null, jobId set). The pass handler now
+      // requires a PLOT-scoped cert (certDoc.plotId === insp.plotId), so the
+      // picker must only OFFER plot-scoped docs — otherwise the manager could
+      // pick a job doc the server then rejects.
+      const plotScoped = all.filter((d) => d.plotId === insp.plot.id);
       // (Jun 2026 W5) Certificates first — the pass flow is nearly always
       // picking a CERT doc, so don't bury them under drawings. Stable sort
       // keeps the server order within each group.
-      all.sort((a, b) => Number(b.category === "CERT") - Number(a.category === "CERT"));
-      setDocs(all);
+      plotScoped.sort((a, b) => Number(b.category === "CERT") - Number(a.category === "CERT"));
+      setDocs(plotScoped);
     }
   }, [insp.plot.siteId, insp.plot.id]);
   useEffect(() => { if (kind === "pass") void loadDocs(); }, [kind, loadDocs]);

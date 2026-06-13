@@ -49,6 +49,10 @@ interface SettingsClientProps {
    *  the Users tab (and the user directory it renders) is hidden and the
    *  server passes empty users/sites arrays. */
   hasUsersAccess?: boolean;
+  /** (R14) Whether the session holds EDIT_PROGRAMME — without it the
+   *  Plot Templates tab (and its content) is hidden and the server
+   *  passes an empty templates array. */
+  hasTemplatesAccess?: boolean;
 }
 
 function formatRole(role: string) {
@@ -58,7 +62,7 @@ function formatRole(role: string) {
     .join(" ");
 }
 
-export function SettingsClient({ user, templates, users, currentUserId, sites, initialTab, hasUsersAccess = false }: SettingsClientProps) {
+export function SettingsClient({ user, templates, users, currentUserId, sites, initialTab, hasUsersAccess = false, hasTemplatesAccess = false }: SettingsClientProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -71,12 +75,17 @@ export function SettingsClient({ user, templates, users, currentUserId, sites, i
   // (Jun 2026 review) A ?tab=users deep link from a session WITHOUT
   // VIEW_USERS lands on a tab whose trigger + content are hidden —
   // blank panel, no explanation. Map it back to General.
-  const sanitizeTab = (tab: string) =>
-    tab === "users" && !hasUsersAccess ? "general" : tab;
+  // (R14) Same guard for the templates tab when EDIT_PROGRAMME is absent,
+  // including the ?tpl= deep-link path that otherwise forces "templates".
+  const sanitizeTab = (tab: string) => {
+    if (tab === "users" && !hasUsersAccess) return "general";
+    if (tab === "templates" && !hasTemplatesAccess) return "general";
+    return tab;
+  };
   const resolveInitialTab = () => {
     const fromUrl = searchParams?.get("tab");
     if (fromUrl) return sanitizeTab(fromUrl);
-    if (searchParams?.get("tpl")) return "templates";
+    if (searchParams?.get("tpl") && hasTemplatesAccess) return "templates";
     return sanitizeTab(initialTab || "general");
   };
   const [activeTab, setActiveTab] = useState(resolveInitialTab);
@@ -84,7 +93,7 @@ export function SettingsClient({ user, templates, users, currentUserId, sites, i
   // Sync URL → activeTab on browser back / forward / direct nav.
   useEffect(() => {
     const fromUrl = searchParams?.get("tab");
-    const wantTplTab = !!searchParams?.get("tpl");
+    const wantTplTab = !!searchParams?.get("tpl") && hasTemplatesAccess;
     const desired = fromUrl ? sanitizeTab(fromUrl) : wantTplTab ? "templates" : null;
     if (desired && desired !== activeTab) {
       setActiveTab(desired);
@@ -129,10 +138,14 @@ export function SettingsClient({ user, templates, users, currentUserId, sites, i
             <User className="size-4" />
             General
           </TabsTrigger>
-          <TabsTrigger value="templates">
-            <LayoutTemplate className="size-4" />
-            Plot Templates
-          </TabsTrigger>
+          {/* (R14) Plot Templates tab gated on EDIT_PROGRAMME — same
+              pattern as the VIEW_USERS-gated Users tab below. */}
+          {hasTemplatesAccess && (
+            <TabsTrigger value="templates">
+              <LayoutTemplate className="size-4" />
+              Plot Templates
+            </TabsTrigger>
+          )}
           <TabsTrigger value="notifications">
             <Bell className="size-4" />
             Notifications
@@ -189,9 +202,11 @@ export function SettingsClient({ user, templates, users, currentUserId, sites, i
         </TabsContent>
 
         {/* Plot Templates Tab */}
-        <TabsContent value="templates">
-          <PlotTemplatesSection initialTemplates={templates} />
-        </TabsContent>
+        {hasTemplatesAccess && (
+          <TabsContent value="templates">
+            <PlotTemplatesSection initialTemplates={templates} />
+          </TabsContent>
+        )}
 
         {/* Notifications Tab */}
         <TabsContent value="notifications">
