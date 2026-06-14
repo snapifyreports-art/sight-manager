@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useSearchParams, useRouter } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
 import { PLATFORM } from "@/lib/platform";
+import { PoweredBy } from "@/components/shared/PoweredBy";
 import { useEffect, useState, Suspense } from "react";
 import {
   HardHat,
@@ -613,6 +614,13 @@ function SidebarNav({ collapsed = false, onNavigate, brandName, logoUrl }: { col
                 <LogOut className="size-3.5" />
               </Button>
             )}
+          </div>
+        )}
+        {/* (Jun 2026 white-label) Platform co-brand badge — present on every
+            internal page. Hidden on the narrow collapsed rail. */}
+        {!collapsed && (
+          <div className="flex justify-center border-t border-border/40 px-3 py-2.5">
+            <PoweredBy />
           </div>
         )}
       </div>
