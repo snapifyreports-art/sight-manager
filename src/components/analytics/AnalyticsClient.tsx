@@ -8,6 +8,14 @@ import { useDevDate } from "@/lib/dev-date-context";
 import { ReportExportButtons } from "@/components/shared/ReportExportButtons";
 import { useBrandName } from "@/hooks/useBrandName";
 import { Breadcrumbs } from "@/components/ui/breadcrumbs";
+// (Jun 2026) Six portfolio analytics views added from the data-inventory
+// opportunity list — each self-contained (own endpoint + fetch).
+import { QualityWidget } from "@/components/analytics/sections/QualityWidget";
+import { VariationsWidget } from "@/components/analytics/sections/VariationsWidget";
+import { MaterialsWidget } from "@/components/analytics/sections/MaterialsWidget";
+import { SupplierScorecardWidget } from "@/components/analytics/sections/SupplierScorecardWidget";
+import { TextThemesWidget } from "@/components/analytics/sections/TextThemesWidget";
+import { EventTypesWidget } from "@/components/analytics/sections/EventTypesWidget";
 import {
   BarChart,
   Bar,
@@ -935,6 +943,13 @@ export function AnalyticsClient() {
       <ContractorCalendarWidget />
       {/* (#191) Cross-site lateness rollup. */}
       <LatenessWidget />
+      {/* (Jun 2026) New portfolio views from the analytics data-inventory. */}
+      <QualityWidget />
+      <SupplierScorecardWidget />
+      <VariationsWidget />
+      <MaterialsWidget />
+      <EventTypesWidget />
+      <TextThemesWidget />
     </div>
   );
 }
