@@ -52,9 +52,12 @@ export async function GET(
     );
   }
 
-  // Fetch all jobs on the same plot
+  // Fetch all LEAF jobs on the same plot. (Jun 2026 daily-flow audit)
+  // Excluding parent stage rollups — they sort just before their own
+  // children, so the "next stage" group would otherwise be the stage
+  // header rather than its first real sub-job.
   const allPlotJobs = await prisma.job.findMany({
-    where: { plotId: job.plotId },
+    where: { plotId: job.plotId, children: { none: {} } },
     orderBy: { sortOrder: "asc" },
   });
 

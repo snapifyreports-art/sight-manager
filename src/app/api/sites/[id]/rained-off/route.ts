@@ -389,7 +389,20 @@ export async function DELETE(
     return NextResponse.json({ error: "You do not have access to this site" }, { status: 403 });
   }
 
-  const { date, type } = await req.json();
+  // (Jun 2026 daily-flow audit) The Daily Brief's "Undo rained off" sends
+  // the date as a ?date= QUERY param with NO body; the Programme calendar
+  // sends { date, type } in a JSON body. Accept either — and never let an
+  // empty body crash the route. Pre-fix `await req.json()` on a body-less
+  // DELETE threw SyntaxError (uncaught, outside the try), returning a 500,
+  // so undo failed every single time from the Brief.
+  const body = (await req.json().catch(() => ({}))) as {
+    date?: string;
+    type?: string;
+  };
+  const date = req.nextUrl.searchParams.get("date") ?? body.date;
+  const type = (req.nextUrl.searchParams.get("type") ?? body.type ?? undefined) as
+    | WeatherImpactType
+    | undefined;
 
   if (!date) {
     return NextResponse.json({ error: "date is required" }, { status: 400 });

@@ -498,15 +498,46 @@ function LatenessRow({
     if (!event.order) return;
     setSaving(true);
     try {
-      const r = await fetch(`/api/orders/${event.order.id}`, {
+      const orderId = event.order.id;
+      let r = await fetch(`/api/orders/${orderId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: "ORDERED" }),
       });
+      // (Jun 2026 daily-flow audit) Placing a PENDING order after its
+      // planned send date trips the late-send guard: the route returns 200
+      // { needsLateSendDecision: true } and writes NOTHING until we resend
+      // with a decision. Pre-fix that 200 was treated as success, so the
+      // order stayed PENDING (never placed, "orders to send" count never
+      // dropped) while the alert got excused — the manager was told it was
+      // sent when it wasn't. The manager is asserting it WAS sent on time
+      // and just logged late, so the truthful decision is NO_IMPACT (no
+      // programme effect); the orders route then places the order AND
+      // excuses this lateness event itself.
+      if (r.ok) {
+        const j = (await r.json().catch(() => ({}))) as {
+          needsLateSendDecision?: boolean;
+        };
+        if (j.needsLateSendDecision) {
+          r = await fetch(`/api/orders/${orderId}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              status: "ORDERED",
+              lateSend: {
+                choice: "NO_IMPACT",
+                note: "Order was sent on time — logged after the fact",
+              },
+            }),
+          });
+        }
+      }
       if (!r.ok) {
         toast.error(await fetchErrorMessage(r, "Couldn't mark the order as sent"));
         return;
       }
+      // Belt-and-braces: ensure the event is excused with a clear note even
+      // if it came through the non-late path (sent same working day).
       await fetch(`/api/lateness/${event.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -624,7 +655,7 @@ function LatenessRow({
               {needs ? "Attribute reason" : "Set reason"}
             </button>
           )}
-          {!event.resolvedAt && event.kind === "ORDER_SEND_OVERDUE" && event.order && (
+          {!event.resolvedAt && !event.excused && event.kind === "ORDER_SEND_OVERDUE" && event.order && (
             <button
               type="button"
               onClick={markOrderSent}

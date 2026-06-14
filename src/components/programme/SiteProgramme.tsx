@@ -2587,7 +2587,7 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
               </button>
               <button
                 onClick={handleBulkDelay}
-                disabled={delayLoading}
+                disabled={delayLoading || delayDays < 1}
                 className="flex items-center gap-1.5 rounded-md bg-amber-500 px-4 py-1.5 text-xs font-medium text-white hover:bg-amber-600 disabled:opacity-50"
               >
                 {delayLoading ? (

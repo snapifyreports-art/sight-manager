@@ -759,8 +759,12 @@ export async function POST(
 
   // Push notification to next-stage contractors when a job is completed
   if (action === "complete") {
+    // (Jun 2026 daily-flow audit) Leaf jobs only — a parent stage rollup
+    // sorts just before its own children, so without this filter the
+    // "next job" resolves to the next STAGE HEADER, not its first real
+    // sub-job. The contractor sits on the leaf, not the rollup.
     const allPlotJobs = await prisma.job.findMany({
-      where: { plotId: existing.plotId },
+      where: { plotId: existing.plotId, children: { none: {} } },
       orderBy: { sortOrder: "asc" },
     });
     const nextSortOrder = allPlotJobs
@@ -793,8 +797,14 @@ export async function POST(
 
   // For completion or signoff: attach context for the post-completion dialog
   if ((action === "complete" || action === "signoff") && job) {
+    // (Jun 2026 daily-flow audit) Leaf jobs only. Pre-fix the post-
+    // completion "next job" could resolve to the next stage's PARENT
+    // rollup; "Start today" on it set the parent IN_PROGRESS but the
+    // same-transaction rollup recompute immediately reverted it from its
+    // not-started children — so the dialog said success while NO job
+    // actually started. Surfacing the first real leaf fixes it at source.
     const allPlotJobs = await prisma.job.findMany({
-      where: { plotId: existing.plotId },
+      where: { plotId: existing.plotId, children: { none: {} } },
       orderBy: { sortOrder: "asc" },
       select: {
         id: true,
