@@ -11,6 +11,7 @@ import {
   whereOrderOverdue,
 } from "@/lib/lateness";
 import { whereOrdersForSite } from "@/lib/order-scope";
+import { averagePlotCompletePercent } from "@/lib/plot-percent";
 import { sessionHasPermission } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
@@ -602,7 +603,7 @@ export async function GET(
   // notes) — not for items with a stale or overdue state.
 
   // Batch 4
-  const [recentEvents, totalPlots, allJobs, pendingSignOffsRaw, awaitingRestartRaw] = await Promise.all([
+  const [recentEvents, sitePlots, allJobs, pendingSignOffsRaw, awaitingRestartRaw] = await Promise.all([
     prisma.eventLog.findMany({
       where: { siteId: id, createdAt: { gte: subDays(dayStart, 1), lte: dayEnd } },
       select: {
@@ -614,7 +615,10 @@ export async function GET(
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: 20,
     }),
-    prisma.plot.count({ where: { siteId: id } }),
+    // (Jun 2026 SSoT audit) Load each plot's cached percent (not just a
+    // count) so the headline can be plot-weighted "average house %",
+    // matching Story/Closure/handover PDF/Portfolio.
+    prisma.plot.findMany({ where: { siteId: id }, select: { buildCompletePercent: true } }),
     // Only count leaf jobs — parent stages are derived roll-ups, counting them would double-count progress
     prisma.job.count({ where: { plot: { siteId: id }, children: { none: {} } } }),
     // IN_PROGRESS jobs where a later job on the same plot has already been started
@@ -943,10 +947,15 @@ export async function GET(
     isRainedOff: !!rainedOff,
     rainedOffNote: rainedOff?.note ?? null,
     summary: {
-      totalPlots,
+      totalPlots: sitePlots.length,
+      // (Jun 2026 SSoT audit) Plots fully built — pairs with the
+      // plot-weighted headline so the subtext reads "X/Y plots", not jobs.
+      completedPlots: sitePlots.filter((p) => (p.buildCompletePercent ?? 0) >= 100).length,
       totalJobs: allJobs,
       completedJobs,
-      progressPercent: allJobs > 0 ? Math.round((completedJobs / allJobs) * 100) : 0,
+      // Plot-weighted "average house %" via the shared helper — the single
+      // site-% definition used across every surface.
+      progressPercent: Math.round(averagePlotCompletePercent(sitePlots)),
       activeJobCount: activeJobs.length,
       overdueJobCount: overdueJobs.length,
       lateStartCount: genuineLateStartJobs.length,

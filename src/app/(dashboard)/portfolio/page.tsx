@@ -6,6 +6,7 @@ import { auth } from "@/lib/auth";
 import { getUserSiteIds } from "@/lib/site-access";
 import { getServerCurrentDate } from "@/lib/dev-date";
 import { isJobEndOverdue } from "@/lib/lateness";
+import { averagePlotCompletePercent } from "@/lib/plot-percent";
 import { Building2, AlertTriangle, CheckCircle, Activity } from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -79,14 +80,9 @@ export default async function PortfolioPage() {
   now.setHours(0, 0, 0, 0);
   const cards = await Promise.all(
     sites.map(async (s) => {
-      // Average build percent across plots.
-      const avgProgress =
-        s.plots.length > 0
-          ? Math.round(
-              s.plots.reduce((sum, p) => sum + (p.buildCompletePercent ?? 0), 0) /
-                s.plots.length,
-            )
-          : 0;
+      // (Jun 2026 SSoT audit) Plot-weighted site % via the shared helper —
+      // same definition as the Daily Brief, weekly email, Story + handover.
+      const avgProgress = Math.round(averagePlotCompletePercent(s.plots));
       const allJobs = s.plots.flatMap((p) => p.jobs);
       const inProgress = allJobs.filter((j) => j.status === "IN_PROGRESS").length;
       // (May 2026 SSoT pass) Route through isJobEndOverdue (originalEndDate

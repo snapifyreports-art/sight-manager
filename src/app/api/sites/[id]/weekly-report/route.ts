@@ -11,6 +11,7 @@ import {
 import { getServerCurrentDate } from "@/lib/dev-date";
 import { canAccessSite } from "@/lib/site-access";
 import { isJobEndOverdue } from "@/lib/lateness";
+import { averagePlotCompletePercent } from "@/lib/plot-percent";
 import { whereOrdersForSite } from "@/lib/order-scope";
 
 export const dynamic = "force-dynamic";
@@ -47,7 +48,13 @@ export async function GET(
       where: { id },
       select: { name: true, location: true, status: true },
     }),
-    prisma.plot.count({ where: { siteId: id } }),
+    // (Jun 2026 SSoT audit) Load each plot's cached percent so the
+    // headline can be plot-weighted (average house %), matching the
+    // Brief, Story, Closure, handover PDF + Portfolio.
+    prisma.plot.findMany({
+      where: { siteId: id },
+      select: { buildCompletePercent: true },
+    }),
     prisma.job.findMany({
       where: { plot: { siteId: id }, children: { none: {} } },
       // (May 2026 SSoT pass) Overdue count uses isJobEndOverdue which
@@ -258,12 +265,15 @@ export async function GET(
     weekLabel: `${format(weekStart, "dd MMM")} — ${format(weekEnd, "dd MMM yyyy")}`,
 
     overview: {
-      totalPlots: allPlots,
+      totalPlots: allPlots.length,
       totalJobs,
       completedJobs,
       activeJobs,
       overdueJobs,
-      progressPercent: totalJobs > 0 ? Math.round((completedJobs / totalJobs) * 100) : 0,
+      // (Jun 2026 SSoT audit) Plot-weighted "average house %" via the
+      // shared helper — no longer completed-jobs/total-jobs, which
+      // contradicted the handover pack.
+      progressPercent: Math.round(averagePlotCompletePercent(allPlots)),
     },
 
     thisWeek: {

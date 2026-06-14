@@ -3,6 +3,7 @@ import { differenceInWorkingDays } from "./working-days";
 import { whereOrdersForSite } from "./order-scope";
 import { isJobEndOverdue, workingDaysEndOverdue } from "./lateness";
 import { deriveAggregateStatus } from "./parent-job";
+import { averagePlotCompletePercent } from "./plot-percent";
 import { inspectionTypeLabel } from "./inspection-doctype";
 
 /**
@@ -568,11 +569,9 @@ export async function buildSiteStory(
   }).length;
   const plotsNotStarted = plots.length - plotsCompleted - plotsInProgress;
 
-  const overallPercent =
-    plots.length === 0
-      ? 0
-      : plots.reduce((sum, p) => sum + (p.buildCompletePercent ?? 0), 0) /
-        plots.length;
+  // (Jun 2026 SSoT audit) Single site-% helper — same definition the
+  // Daily Brief, weekly email, Closure, handover PDF + Portfolio all use.
+  const overallPercent = averagePlotCompletePercent(plots);
 
   // Days elapsed: from earliest job start (any plot) to today (or
   // completedAt if site is closed). Original plan: earliest original

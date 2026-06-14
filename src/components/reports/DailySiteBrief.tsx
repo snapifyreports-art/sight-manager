@@ -1814,7 +1814,10 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                 <span className="text-lg font-bold leading-none text-foreground">{s.progressPercent}%</span>
                 <div>
                   <p className="text-[11px] font-medium leading-tight">Progress</p>
-                  <p className="text-[10px] text-muted-foreground">{s.completedJobs}/{s.totalJobs} jobs</p>
+                  {/* (Jun 2026 SSoT audit) Headline is now plot-weighted
+                      "average house %", so the subtext reads plots, not
+                      jobs, to match. */}
+                  <p className="text-[10px] text-muted-foreground">{s.completedPlots}/{s.totalPlots} plots</p>
                 </div>
               </div>
             </div>

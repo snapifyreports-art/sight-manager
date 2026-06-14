@@ -23,6 +23,7 @@ export interface BriefData {
   rainedOffNote: string | null;
   summary: {
     totalPlots: number;
+    completedPlots: number;
     totalJobs: number;
     completedJobs: number;
     progressPercent: number;
