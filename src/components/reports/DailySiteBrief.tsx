@@ -102,6 +102,7 @@ import { Label } from "@/components/ui/label";
 // every section module so they can render strongly-typed slices.
 import type { BriefData, DailySiteBriefProps } from "./daily-brief/types";
 import { orderGroupKey } from "./daily-brief/types";
+import { useConfirmAction } from "@/hooks/useConfirmAction";
 
 // (May 2026 sprint 7a) Extracted to ./daily-brief/. WeatherIcon and
 // JobActionButton both used to live in this file but were causing
@@ -703,6 +704,12 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
       setSavingRainedOff(false);
     }
   };
+
+  // (Jun 2026 daily-flow audit — Keith decision) Undo clears the weather
+  // flag but does NOT reverse the +1-day shift the mark applied, so the
+  // confirm spells that out rather than silently leaving the schedule moved.
+  const { confirmAction: confirmUndoRainedOff, dialogs: undoRainedOffDialogs } =
+    useConfirmAction();
 
   const handleUndoRainedOff = async () => {
     const dateStr = format(date, "yyyy-MM-dd");
@@ -1512,12 +1519,21 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
               </div>
             </div>
             <div className="mt-3 print:hidden">
+              {undoRainedOffDialogs}
               {data.isRainedOff ? (
                 <Button
                   variant="outline"
                   size="sm"
                   className="w-full border-blue-200 bg-white text-blue-700 hover:bg-blue-100"
-                  onClick={handleUndoRainedOff}
+                  onClick={() =>
+                    confirmUndoRainedOff({
+                      title: "Undo rained off?",
+                      description: `This clears the weather flag for ${format(date, "d MMM yyyy")}. If marking it rained off shifted any job dates, those stay on their new dates — adjust the programme if you need them put back.`,
+                      confirmLabel: "Undo rained off",
+                      variant: "default",
+                      onConfirm: handleUndoRainedOff,
+                    })
+                  }
                 >
                   Undo rained off
                 </Button>
