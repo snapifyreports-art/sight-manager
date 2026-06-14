@@ -305,12 +305,15 @@ function SidebarNav({ collapsed = false, onNavigate, brandName, logoUrl }: { col
 
   return (
     <div className="flex h-full flex-col">
-      {/* Logo + company name (stacked) */}
-      <div className={cn("flex items-center justify-center border-b border-border/40 px-4 py-4", collapsed && "px-2 py-3")}>
-        <Link href="/dashboard" className="flex min-w-0 flex-col items-center gap-2">
-          {/* (Jun 2026 white-label) Customer logo on top, business name below.
-              Fall back to the platform mark when unbranded; compact icon only
-              on the narrow collapsed rail. */}
+      {/* Logo (links home) with the platform co-brand below it */}
+      <div className={cn("flex flex-col items-center justify-center gap-2.5 border-b border-border/40 px-4 py-4", collapsed && "gap-1.5 px-2 py-3")}>
+        <Link
+          href="/dashboard"
+          aria-label={brandName ?? PLATFORM.name}
+          className="flex min-w-0 items-center justify-center"
+        >
+          {/* (Jun 2026 white-label) Customer logo (or the platform mark when
+              unbranded); compact icon only on the narrow collapsed rail. */}
           {logoUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
@@ -331,12 +334,16 @@ function SidebarNav({ collapsed = false, onNavigate, brandName, logoUrl }: { col
               <HardHat className={collapsed ? "size-5" : "size-7"} />
             </div>
           )}
-          {!collapsed && (
-            <span className="line-clamp-2 max-w-[200px] text-center text-[13px] font-bold leading-tight tracking-tight text-foreground">
-              {brandName ?? PLATFORM.name}
-            </span>
-          )}
         </Link>
+        {/* (Jun 2026 Keith) The logo already carries the business name, so the
+            stacked text below it is the platform co-brand. When a tenant has
+            no logo we still show their name (the mark alone isn't enough). */}
+        {!collapsed && !logoUrl && (
+          <span className="line-clamp-2 max-w-[200px] text-center text-[13px] font-bold leading-tight tracking-tight text-foreground">
+            {brandName ?? PLATFORM.name}
+          </span>
+        )}
+        {!collapsed && <PoweredBy />}
       </div>
 
       {/* Site navigation block */}
@@ -623,13 +630,6 @@ function SidebarNav({ collapsed = false, onNavigate, brandName, logoUrl }: { col
                 <LogOut className="size-3.5" />
               </Button>
             )}
-          </div>
-        )}
-        {/* (Jun 2026 white-label) Platform co-brand badge — present on every
-            internal page. Hidden on the narrow collapsed rail. */}
-        {!collapsed && (
-          <div className="flex justify-center border-t border-border/40 px-3 py-2.5">
-            <PoweredBy />
           </div>
         )}
       </div>
