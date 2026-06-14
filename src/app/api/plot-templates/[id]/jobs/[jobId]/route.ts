@@ -52,6 +52,41 @@ export async function PUT(
     );
   }
 
+  // (Jun 2026 guard) Enforce the two-level nesting ceiling on re-parenting
+  // too (move / drag-drop). Templates support a stage and its sub-jobs only;
+  // the apply-to-plot pipeline instantiates exactly two levels, so a third
+  // would be silently dropped on apply. Two ways a re-parent could create a
+  // third level — block both:
+  //   (a) nesting under a job that is itself already a sub-job;
+  //   (b) nesting a job that already HAS sub-jobs (its children become L3).
+  if (parentId) {
+    const [parent, childCount] = await Promise.all([
+      prisma.templateJob.findUnique({
+        where: { id: parentId },
+        select: { parentId: true },
+      }),
+      prisma.templateJob.count({ where: { parentId: jobId } }),
+    ]);
+    if (parent && parent.parentId !== null) {
+      return NextResponse.json(
+        {
+          error:
+            "Templates support two levels of nesting (a stage and its sub-jobs). You can't nest a sub-job inside another sub-job.",
+        },
+        { status: 400 },
+      );
+    }
+    if (childCount > 0) {
+      return NextResponse.json(
+        {
+          error:
+            "This job has its own sub-jobs, so it can't be nested under another job — that would make a third level. Move its sub-jobs out first.",
+        },
+        { status: 400 },
+      );
+    }
+  }
+
   // (#7) Detect whether this PUT changes a layout-affecting field. If it
   // does, we must rerun resequenceTopLevelStages so siblings + parent
   // caches stay in sync — otherwise the cache silently drifts and the

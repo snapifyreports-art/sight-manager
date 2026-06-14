@@ -78,6 +78,28 @@ export async function POST(
     );
   }
 
+  // (Jun 2026 guard) Templates support TWO levels of nesting only — a
+  // top-level stage and its direct sub-jobs. The apply-to-plot pipeline
+  // (apply-template-helpers.createJobsFromTemplate) instantiates exactly two
+  // levels; a third (a sub-job inside a sub-job) would be silently DROPPED on
+  // apply with no warning. Refuse to create one so the editor can never
+  // produce template data that quietly fails to land on a plot.
+  if (parentId) {
+    const parent = await prisma.templateJob.findUnique({
+      where: { id: parentId },
+      select: { parentId: true },
+    });
+    if (parent && parent.parentId !== null) {
+      return NextResponse.json(
+        {
+          error:
+            "Templates support two levels of nesting (a stage and its sub-jobs). You can't add a sub-job inside a sub-job.",
+        },
+        { status: 400 },
+      );
+    }
+  }
+
   try {
     const job = await prisma.templateJob.create({
       data: {
