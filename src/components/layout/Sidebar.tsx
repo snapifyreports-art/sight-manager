@@ -305,25 +305,34 @@ function SidebarNav({ collapsed = false, onNavigate, brandName, logoUrl }: { col
 
   return (
     <div className="flex h-full flex-col">
-      {/* Logo */}
-      <div className={cn("flex h-14 items-center gap-3 border-b border-border/40 px-4", collapsed && "justify-center px-2")}>
-        <Link href="/dashboard" className="flex min-w-0 items-center gap-3">
-          {/* (Jun 2026 white-label) Customer logo + name; fall back to the
-              platform mark when the business hasn't branded yet. */}
+      {/* Logo + company name (stacked) */}
+      <div className={cn("flex items-center justify-center border-b border-border/40 px-4 py-4", collapsed && "px-2 py-3")}>
+        <Link href="/dashboard" className="flex min-w-0 flex-col items-center gap-2">
+          {/* (Jun 2026 white-label) Customer logo on top, business name below.
+              Fall back to the platform mark when unbranded; compact icon only
+              on the narrow collapsed rail. */}
           {logoUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={logoUrl}
               alt={brandName ?? PLATFORM.name}
-              className="size-8 shrink-0 rounded-lg object-contain"
+              className={cn(
+                "shrink-0 rounded-lg object-contain",
+                collapsed ? "size-9" : "h-14 w-auto max-w-[180px]",
+              )}
             />
           ) : (
-            <div className="flex size-8 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-600/25">
-              <HardHat className="size-4" />
+            <div
+              className={cn(
+                "flex shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-600/25",
+                collapsed ? "size-9" : "size-14",
+              )}
+            >
+              <HardHat className={collapsed ? "size-5" : "size-7"} />
             </div>
           )}
           {!collapsed && (
-            <span className="truncate text-[15px] font-bold tracking-tight text-foreground">
+            <span className="line-clamp-2 max-w-[200px] text-center text-[13px] font-bold leading-tight tracking-tight text-foreground">
               {brandName ?? PLATFORM.name}
             </span>
           )}
