@@ -230,15 +230,19 @@ export function SiteNCRs({ siteId }: { siteId: string }) {
                     )}
                     <div className="flex flex-wrap gap-3 text-xs">
                       {n.plot && (
-                        <span>
+                        <a href={`/sites/${siteId}/plots/${n.plot.id}`} className="hover:underline">
                           Plot: {n.plot.plotNumber ? `#${n.plot.plotNumber}` : n.plot.name}
-                        </span>
+                        </a>
                       )}
-                      {n.job && <span>Job: {n.job.name}</span>}
+                      {n.job && (
+                        <a href={`/jobs/${n.job.id}`} className="hover:underline">
+                          Job: {n.job.name}
+                        </a>
+                      )}
                       {n.contact && (
-                        <span>
+                        <a href={`/contacts/${n.contact.id}`} className="hover:underline">
                           Contractor: {n.contact.company || n.contact.name}
-                        </span>
+                        </a>
                       )}
                       {/* (Jun 2026 S6) Reverse-link to the source inspection. */}
                       {n.inspection && (

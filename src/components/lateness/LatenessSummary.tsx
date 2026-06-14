@@ -499,7 +499,13 @@ function LatenessRow({
     >
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <div className="flex min-w-0 flex-1 items-center gap-2">
-          <p className="min-w-0 truncate font-medium text-slate-900">{targetLabel}</p>
+          {event.job ? (
+            <a href={`/jobs/${event.job.id}`} className="min-w-0 truncate font-medium text-slate-900 hover:underline">{targetLabel}</a>
+          ) : event.order?.supplier ? (
+            <a href={`/suppliers/${event.order.supplier.id}`} className="min-w-0 truncate font-medium text-slate-900 hover:underline">{targetLabel}</a>
+          ) : (
+            <p className="min-w-0 truncate font-medium text-slate-900">{targetLabel}</p>
+          )}
           {needs && (
             <span className="shrink-0 rounded-full bg-amber-200 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-amber-900">
               Needs reason
@@ -750,7 +756,11 @@ function LatenessGroupRow({
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <Layers className="size-4 shrink-0 text-amber-700" aria-hidden />
           <p className="min-w-0 truncate font-semibold text-slate-900">
-            {stageLabel}
+            {first.job?.id ? (
+              <a href={`/jobs/${first.job.id}`} className="hover:underline">{stageLabel}</a>
+            ) : (
+              stageLabel
+            )}
           </p>
           <span className="shrink-0 rounded-full bg-amber-200 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-amber-900">
             {events.length} affected · needs reason

@@ -2226,13 +2226,14 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
                         className="pointer-events-none absolute"
                         style={{ left: colIdx * cellWidth, top: rowTops[plotIndex], width: cellWidth, height: ROW_HEIGHT }}
                       >
-                        <div
-                          title={inCell.map((i) => `${i.name} — ${inspectionDisplayStatus(i.status as Parameters<typeof inspectionDisplayStatus>[0], i.bookedDate).label} (${format(new Date(i.scheduledDate), "d MMM")})`).join("\n")}
-                          className="absolute left-1/2 top-0 flex h-4 min-w-4 -translate-x-1/2 items-center justify-center rounded-sm px-0.5 text-[10px] font-bold leading-none text-white shadow"
+                        <a
+                          href={`/inspections?focus=${inCell[0].id}`}
+                          title={inCell.map((i) => `${i.name} — ${inspectionDisplayStatus(i.status as Parameters<typeof inspectionDisplayStatus>[0], i.bookedDate).label} (${format(new Date(i.scheduledDate), "d MMM")})`).join("\n") + "\nClick to manage"}
+                          className="pointer-events-auto absolute left-1/2 top-0 flex h-4 min-w-4 -translate-x-1/2 cursor-pointer items-center justify-center rounded-sm px-0.5 text-[10px] font-bold leading-none text-white shadow hover:brightness-110"
                           style={{ backgroundColor: colour }}
                         >
                           !{inCell.length > 1 ? inCell.length : ""}
-                        </div>
+                        </a>
                       </div>
                     );
                   });

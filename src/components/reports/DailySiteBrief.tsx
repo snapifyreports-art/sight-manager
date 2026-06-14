@@ -2705,7 +2705,7 @@ export function DailySiteBrief({ siteId }: DailySiteBriefProps) {
                         <Badge variant="outline" className="shrink-0 border-purple-200 text-[10px] text-purple-700">Delayed</Badge>
                       </div>
                       <p className="text-xs text-muted-foreground">
-                        {j.plot.plotNumber ? `Plot ${j.plot.plotNumber}` : j.plot.name}
+                        <Link href={`/sites/${siteId}/plots/${j.plotId}`} className="hover:underline hover:text-blue-600">{j.plot.plotNumber ? `Plot ${j.plot.plotNumber}` : j.plot.name}</Link>
                         {j.assignedTo && <span> · {j.assignedTo.name}</span>}
                         {j.contractors?.[0]?.contact && (
                           <span>

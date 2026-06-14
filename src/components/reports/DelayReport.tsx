@@ -622,7 +622,7 @@ export function DelayReport({ siteId }: DelayReportProps) {
                 {data.completedLateTrend.map((j) => (
                   <div key={j.id} className="flex items-center justify-between px-3 py-2 text-sm">
                     <div>
-                      <p className="font-medium">{j.name}</p>
+                      <p className="font-medium"><Link href={`/jobs/${j.id}`} className="hover:underline hover:text-blue-700">{j.name}</Link></p>
                       <p className="text-xs text-muted-foreground">
                         Plot {j.plotNumber} · Due {format(new Date(j.scheduledEnd), "dd MMM")} ·
                         Completed {format(new Date(j.actualEnd), "dd MMM")}

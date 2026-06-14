@@ -29,7 +29,7 @@ export function GanttBar({ job, timelineStart, rowIndex }: GanttBarProps) {
   const [tooltipPosition, setTooltipPosition] = useState<"above" | "below">(
     "above"
   );
-  const barRef = useRef<HTMLDivElement>(null);
+  const barRef = useRef<HTMLAnchorElement>(null);
 
   if (!job.startDate || !job.endDate) return null;
 
@@ -63,10 +63,11 @@ export function GanttBar({ job, timelineStart, rowIndex }: GanttBarProps) {
   const statusLabel = job.status.replace(/_/g, " ");
 
   return (
-    <div
+    <a
       ref={barRef}
+      href={`/jobs/${job.id}`}
       className={cn(
-        "absolute rounded-md cursor-pointer transition-shadow duration-150",
+        "absolute block rounded-md cursor-pointer transition-shadow duration-150",
         "hover:shadow-md hover:ring-1 hover:ring-white/50",
         colors.bg
       )}
@@ -136,6 +137,6 @@ export function GanttBar({ job, timelineStart, rowIndex }: GanttBarProps) {
           />
         </div>
       )}
-    </div>
+    </a>
   );
 }

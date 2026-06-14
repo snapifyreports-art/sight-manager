@@ -211,7 +211,7 @@ function JobRow({
     <div className="rounded border p-3 text-sm">
       <div className="flex items-start justify-between gap-2">
         <div>
-          <p className="font-medium">{job.name}</p>
+          <p className="font-medium"><a href={`/jobs/${job.id}`} className="hover:underline">{job.name}</a></p>
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <span className="flex items-center gap-1">
               <MapPin className="size-3" />
@@ -570,7 +570,7 @@ export function ContractorDaySheets({ siteId }: ContractorDaySheetsProps) {
             <CardTitle className="flex items-center justify-between text-sm">
               <span className="flex items-center gap-2">
                 <HardHat className="size-4 text-orange-600" />
-                {sheet.contractor.company || sheet.contractor.name}
+                <a href={`/contacts/${sheet.contractor.id}`} className="hover:underline">{sheet.contractor.company || sheet.contractor.name}</a>
               </span>
               <Badge variant="outline">{sheet.jobs.length} job{sheet.jobs.length !== 1 ? "s" : ""}</Badge>
             </CardTitle>

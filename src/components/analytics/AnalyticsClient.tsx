@@ -1135,7 +1135,7 @@ function WeatherLossWidget() {
           <ul className="mt-1 space-y-0.5 text-xs">
             {data.bySite.slice(0, 5).map((s) => (
               <li key={s.id}>
-                <span className="font-medium">{s.name}</span>: {s.days} days
+                <Link href={`/sites/${s.id}`} className="font-medium hover:text-blue-600 hover:underline">{s.name}</Link>: {s.days} days
               </li>
             ))}
           </ul>
@@ -1189,6 +1189,7 @@ interface ProfRow {
   plotId: string;
   plotName: string;
   plotNumber: string | null;
+  siteId: string;
   siteName: string;
   revenue: number;
   cost: number;
@@ -1239,7 +1240,9 @@ function ProfitabilityWidget() {
             {rows.slice(0, 15).map((r) => (
               <tr key={r.plotId} className="border-t">
                 <td className="font-medium">
-                  {r.plotNumber ? `Plot ${r.plotNumber}` : r.plotName}
+                  <Link href={`/sites/${r.siteId}/plots/${r.plotId}`} className="hover:text-blue-600 hover:underline">
+                    {r.plotNumber ? `Plot ${r.plotNumber}` : r.plotName}
+                  </Link>
                 </td>
                 <td className="text-xs text-slate-600">{r.siteName}</td>
                 <td className="text-right text-xs">
@@ -1275,7 +1278,9 @@ interface ContractorRow {
     status: string;
     start: string;
     end: string;
+    plotId: string;
     plotLabel: string;
+    siteId: string;
     siteName: string;
     // (May 2026 audit D-P1) `daysLate > 0` → render the job slot in
     // red so a manager scanning the calendar can spot who's running
@@ -1309,7 +1314,7 @@ function ContractorCalendarWidget() {
           {data.map((c) => (
             <li key={c.contactId} className="py-2">
               <p className="text-sm font-medium">
-                {c.company || c.name}{" "}
+                <Link href={`/contacts/${c.contactId}`} className="hover:text-blue-600 hover:underline">{c.company || c.name}</Link>{" "}
                 {c.company && <span className="text-xs text-slate-500">· {c.name}</span>}
               </p>
               <ul className="ml-3 mt-1 space-y-0.5 text-xs text-slate-600">
@@ -1320,16 +1325,17 @@ function ContractorCalendarWidget() {
                       key={j.jobId}
                       className={isLate ? "text-red-700" : undefined}
                     >
-                      <span
+                      <Link
+                        href={`/sites/${j.siteId}/plots/${j.plotId}`}
                         className={
                           isLate
-                            ? "font-semibold text-red-700"
-                            : "font-medium text-slate-800"
+                            ? "font-semibold text-red-700 hover:underline"
+                            : "font-medium text-slate-800 hover:underline"
                         }
                       >
                         {j.plotLabel}
-                      </span>{" "}
-                      · {j.jobName} ·{" "}
+                      </Link>{" "}
+                      · <Link href={`/jobs/${j.jobId}`} className="hover:underline">{j.jobName}</Link> ·{" "}
                       {new Date(j.start).toLocaleDateString("en-GB", {
                         day: "numeric",
                         month: "short",

@@ -92,7 +92,9 @@ export async function GET(req: NextRequest) {
         status: string;
         start: string;
         end: string;
+        plotId: string;
         plotLabel: string;
+        siteId: string;
         siteName: string;
         // (May 2026 audit D-P1) Lateness overlay — `daysLate > 0`
         // means this job has already crossed its planned endDate.
@@ -122,9 +124,11 @@ export async function GET(req: NextRequest) {
       status: l.job.status,
       start: l.job.startDate.toISOString(),
       end: l.job.endDate.toISOString(),
+      plotId: l.job.plot.id,
       plotLabel: l.job.plot.plotNumber
         ? `Plot ${l.job.plot.plotNumber}`
         : l.job.plot.name,
+      siteId: l.job.plot.site.id,
       siteName: l.job.plot.site.name,
       daysLate,
     });

@@ -1274,7 +1274,7 @@ export function JobDetailClient({ job: initialJob }: { job: JobDetail }) {
             {job.anchoredInspections!.map((i) => (
               <div key={i.id} className="flex items-center justify-between gap-2 text-sm">
                 <span className="flex min-w-0 items-center gap-1.5 truncate">
-                  {i.name}
+                  <a href={`/inspections?focus=${i.id}`} className="truncate hover:underline">{i.name}</a>
                   {i.isBlocking && <span className="rounded bg-red-100 px-1 py-0.5 text-[9px] font-semibold uppercase text-red-700">blocks</span>}
                 </span>
                 <span className="flex shrink-0 items-center gap-2">

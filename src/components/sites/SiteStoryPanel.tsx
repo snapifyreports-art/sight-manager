@@ -642,7 +642,7 @@ export function SiteStoryPanel({ siteId }: { siteId: string }) {
                     className="flex items-center justify-between rounded-md border border-slate-100 bg-slate-50/50 px-2 py-1.5 text-xs"
                   >
                     <span className="truncate font-medium text-slate-700">
-                      {c.company || c.name}
+                      <Link href={`/contacts/${c.contactId}`} className="hover:underline hover:text-blue-700">{c.company || c.name}</Link>
                     </span>
                     <span className="shrink-0 text-slate-500">
                       <span className="font-semibold text-slate-700">
@@ -974,7 +974,7 @@ export function SiteStoryPanel({ siteId }: { siteId: string }) {
               {data.inspections.recent.slice(0, 6).map((ins) => (
                 <li key={ins.id} className="flex items-center justify-between gap-2">
                   <span className="min-w-0 truncate text-slate-700">
-                    {ins.plotNumber ? `Plot ${ins.plotNumber} — ` : ""}{ins.name}
+                    {ins.plotNumber ? `Plot ${ins.plotNumber} — ` : ""}<Link href={`/inspections?focus=${ins.id}`} className="hover:underline hover:text-blue-700">{ins.name}</Link>
                   </span>
                   <span
                     className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${

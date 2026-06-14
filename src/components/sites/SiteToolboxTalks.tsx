@@ -653,12 +653,13 @@ function TalkCard({
             {isRequested ? "Assigned to:" : "Contractors:"}
           </span>
           {t.contractorIds.map((cid) => (
-            <span
+            <a
               key={cid}
-              className="rounded-full bg-blue-50 px-1.5 py-0.5 text-[11px] text-blue-700"
+              href={`/contacts/${cid}`}
+              className="rounded-full bg-blue-50 px-1.5 py-0.5 text-[11px] text-blue-700 hover:underline"
             >
               {contractorLabel(cid)}
-            </span>
+            </a>
           ))}
         </p>
       )}
