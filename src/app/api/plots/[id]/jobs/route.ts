@@ -5,6 +5,8 @@ import { apiError } from "@/lib/api-errors";
 import { canAccessSite } from "@/lib/site-access";
 import { sessionHasPermission } from "@/lib/permissions";
 import { logEvent } from "@/lib/event-log";
+import { computeJobSortOrder } from "@/lib/job-sort-order";
+import { recomputePlotPercent } from "@/lib/plot-percent";
 
 export const dynamic = "force-dynamic";
 
@@ -119,6 +121,11 @@ export async function POST(
   const startDateD = startDate ? new Date(startDate) : null;
   const endDateD = endDate ? new Date(endDate) : null;
 
+  // (Jun 2026 SSoT/cascade audit) Slot the new job into the plot's date
+  // order instead of letting sortOrder default to 0 — a 0 sorts before
+  // every template stage and breaks cascade/next-stage/weather scoping.
+  const sortOrder = await computeJobSortOrder(prisma, plotId, startDateD);
+
   try {
     const job = await prisma.job.create({
       data: {
@@ -130,6 +137,7 @@ export async function POST(
         endDate: endDateD,
         originalStartDate: startDateD ?? now,
         originalEndDate: endDateD ?? now,
+        sortOrder,
       },
       include: {
         assignedTo: {
@@ -137,6 +145,11 @@ export async function POST(
         },
       },
     });
+
+    // (Jun 2026 SSoT cache-drift audit) A new leaf job lands NOT_STARTED,
+    // so it grows the denominator — the cached plot percent must drop.
+    // Mirror the DELETE path, which recomputes when a job is removed.
+    await recomputePlotPercent(prisma, plotId);
 
     // Log the event.
     // (May 2026 Story pass) Was mis-typed JOB_STARTED — this is a job

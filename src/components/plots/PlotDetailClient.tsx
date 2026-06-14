@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { format, differenceInCalendarDays } from "date-fns";
 import { getCurrentStage } from "@/lib/plot-stage";
+import { isJobEndOverdue, isJobStartOverdue } from "@/lib/lateness";
 import { getCurrentDateAtMidnight } from "@/lib/dev-date";
 import { useDevDate } from "@/lib/dev-date-context";
 import {
@@ -653,13 +654,13 @@ function PlotOverview({
     return result;
   }, [activeJobs]);
 
-  // Jobs that haven't started yet but are overdue (startDate < today)
+  // Jobs that haven't started yet but are overdue. (Jun 2026 SSoT audit)
+  // Measured against the immutable originalStartDate baseline via the
+  // shared lateness helper — NOT the current startDate — so this agrees
+  // with the Daily Brief / Dashboard / Tasks, which all use the baseline.
+  // A rescheduled-forward job no longer silently drops off this list.
   const overdueStartJobs = useMemo(
-    () => leafJobs.filter((j) => {
-      if (j.status !== "NOT_STARTED") return false;
-      if (!j.startDate) return false;
-      return new Date(j.startDate) < today;
-    }),
+    () => leafJobs.filter((j) => isJobStartOverdue(j, today)),
     [leafJobs, today]
   );
 
@@ -890,7 +891,8 @@ function PlotOverview({
                           {job.name}
                         </Link>
                         <p className="text-xs text-amber-700">
-                          Should have started {format(new Date(job.startDate!), "d MMM")}
+                          Should have started{" "}
+                          {format(new Date(job.startDate ?? job.originalStartDate!), "d MMM")}
                         </p>
                       </div>
                       {isPending ? (
@@ -910,7 +912,12 @@ function PlotOverview({
                 {activeJobs.map((job) => {
                   const contractor = job.contractors?.[0]?.contact;
                   const isPending = pendingJobActions.has(job.id);
-                  const isOverdue = job.endDate && new Date(job.endDate) < today;
+                  // (Jun 2026 SSoT audit) Overdue is measured against the
+                  // immutable originalEndDate baseline (via the shared
+                  // lateness helper), so the red flag here agrees with the
+                  // Daily Brief / Dashboard rather than the current endDate.
+                  // The displayed date below stays the current due date.
+                  const isOverdue = isJobEndOverdue(job, today);
                   return (
                     <div
                       key={job.id}

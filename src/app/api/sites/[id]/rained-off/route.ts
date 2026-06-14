@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { format } from "date-fns";
 import { canAccessSite } from "@/lib/site-access";
+import { sessionHasPermission } from "@/lib/permissions";
 import { apiError } from "@/lib/api-errors";
 import { addWorkingDays } from "@/lib/working-days";
 import { calculateCascade } from "@/lib/cascade";
@@ -71,6 +72,24 @@ export async function POST(
      *  it doesn't slide it. */
     delayJobs?: boolean;
   };
+
+  // (Jun 2026 SSoT/permissions audit) The delayJobs branch runs a
+  // site-wide programme cascade that shifts job + material-order dates —
+  // the same mutation /bulk-delay and /jobs/[id]/delay both gate on
+  // EDIT_PROGRAMME. Logging the weather day itself stays open to anyone
+  // with site access; only the date-shifting cascade requires the gate.
+  if (
+    delayJobs &&
+    !sessionHasPermission(
+      session.user as { role?: string; permissions?: string[] },
+      "EDIT_PROGRAMME",
+    )
+  ) {
+    return NextResponse.json(
+      { error: "You do not have permission to delay jobs" },
+      { status: 403 },
+    );
+  }
 
   if (!date) {
     return NextResponse.json({ error: "date is required" }, { status: 400 });
