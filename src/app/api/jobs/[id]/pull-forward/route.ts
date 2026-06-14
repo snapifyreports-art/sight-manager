@@ -7,6 +7,7 @@ import { apiError } from "@/lib/api-errors";
 import { logEvent } from "@/lib/event-log";
 import { getServerCurrentDate } from "@/lib/dev-date";
 import { sessionHasPermission } from "@/lib/permissions";
+import { enforceOrderInvariants } from "@/lib/order-invariants";
 
 export const dynamic = "force-dynamic";
 
@@ -387,9 +388,26 @@ export async function POST(
       }
 
       for (const o of ordersToOverride) {
+        // (Jun 2026 audit fix) Mirror the cascade route's override path:
+        // route the PENDING→ORDERED flip through enforceOrderInvariants so
+        // INV-3 pulls a stale (template-set, now-past) expectedDeliveryDate
+        // forward to today + leadTimeDays. Pre-fix this wrote only
+        // status + dateOfOrder and left expectedDeliveryDate in the past, so
+        // whereOrderOverdue immediately flagged the order the manager had
+        // just marked sent as an OVERDUE delivery on the Dashboard + Brief.
+        const patch = enforceOrderInvariants(
+          {
+            dateOfOrder: o.dateOfOrder,
+            expectedDeliveryDate: o.expectedDeliveryDate,
+            deliveredDate: o.deliveredDate,
+            leadTimeDays: o.leadTimeDays,
+          },
+          { dateOfOrder: today, status: "ORDERED", leadTimeDays: o.leadTimeDays },
+          today,
+        );
         await tx.materialOrder.update({
           where: { id: o.id },
-          data: { status: "ORDERED", dateOfOrder: today },
+          data: { status: "ORDERED", dateOfOrder: today, ...patch },
         });
       }
 

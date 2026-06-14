@@ -299,6 +299,28 @@ export async function PUT(
     if (autoBridgePendingToDelivered && !existing.dateOfOrder && body.dateOfOrder === undefined) {
       data.dateOfOrder = getServerCurrentDate(req);
     }
+
+    // (Jun 2026 audit fix) Bridge case, FUTURE placement date. Template
+    // orders are created PENDING with a future dateOfOrder (job-start +
+    // offset). If materials arrive and the manager confirms delivery
+    // BEFORE that planned placement date, the order was — in reality —
+    // both placed and delivered today, so pull dateOfOrder back to the
+    // delivery date. Without this, enforceOrderInvariants' INV-2 instead
+    // pushes deliveredDate FORWARD to the stale future dateOfOrder, so the
+    // order is recorded delivered weeks in the future — landing the actual
+    // spend in a future cash-flow month and zeroing the supplier lead time.
+    if (
+      autoBridgePendingToDelivered &&
+      body.dateOfOrder === undefined &&
+      existing.dateOfOrder
+    ) {
+      const deliveredOn =
+        (data.deliveredDate as Date | undefined) ??
+        (body.deliveredDate ? new Date(body.deliveredDate) : null);
+      if (deliveredOn && new Date(existing.dateOfOrder) > deliveredOn) {
+        data.dateOfOrder = deliveredOn;
+      }
+    }
   }
 
   // (May 2026) Apply the order-sent-late decision's date impact. The

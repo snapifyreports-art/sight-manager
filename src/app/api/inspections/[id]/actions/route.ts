@@ -8,6 +8,8 @@ import { logEvent } from "@/lib/event-log";
 import { handoverDocTypeForInspection } from "@/lib/inspection-doctype";
 import { computeInspectionScheduledDate } from "@/lib/inspection-dates";
 import { maxRefNumber } from "@/lib/ref-sequence";
+import { addWorkingDays } from "@/lib/working-days";
+import { getServerStartOfDay } from "@/lib/dev-date";
 
 export const dynamic = "force-dynamic";
 
@@ -264,6 +266,22 @@ export async function POST(
           insp.offsetDays,
         );
       }
+      // No explicit date AND no anchor to derive from → start from the
+      // current (failed) date so the floor below still applies.
+      if (!reDate) reDate = new Date(insp.scheduledDate);
+      // (Jun 2026 audit fix) Floor the re-inspection to today-or-the-next
+      // working day. The failure case this whole branch is meant to handle
+      // — a statutory hold-point on work that is already BUILT when the
+      // inspector fails it — has an anchor job (and so a re-derived date)
+      // in the PAST. Without this floor the row is written SCHEDULED with a
+      // past date and the nightly inspection-alerts cron flips it straight
+      // back to OVERDUE within 24h, the exact thing re-inspecting is meant
+      // to clear. The manual reschedule + re-anchor paths already floor the
+      // same way; this brings reinspect in line.
+      const todayStart = getServerStartOfDay(req);
+      if (reDate.getTime() < todayStart.getTime()) {
+        reDate = addWorkingDays(todayStart, 0);
+      }
       const updated = await prisma.inspection.update({
         where: { id },
         data: {
@@ -271,7 +289,7 @@ export async function POST(
           bookedDate: null,
           failedAt: null,
           passedAt: null,
-          ...(reDate ? { scheduledDate: reDate } : {}),
+          scheduledDate: reDate,
         },
       });
       await logEvent(prisma, { type: "INSPECTION_SCHEDULED", description: `Re-inspection scheduled for "${insp.name}"`, siteId: insp.plot.siteId, plotId: insp.plotId, jobId: insp.anchorJobId, userId, detail: { inspectionId: id } }).catch(() => {});

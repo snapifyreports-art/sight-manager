@@ -136,6 +136,32 @@ export async function PATCH(
     }
   }
 
+  // (Jun 2026 audit fix) A certificate attached via PATCH must be a
+  // PLOT-scoped document on THIS plot — the same boundary the `pass` action
+  // enforces. Without it a crafted PATCH could point an inspection at a
+  // document on another plot or site (IDOR write), and because the closure
+  // preview's missing-cert warning only checks the id is non-null, that
+  // bogus link silently suppresses the "certificate missing" warning while
+  // the real evidence never lands in the plot's handover folder.
+  if (certificateDocumentId !== undefined && certificateDocumentId) {
+    const certDoc = await prisma.siteDocument.findUnique({
+      where: { id: certificateDocumentId },
+      select: { siteId: true, plotId: true },
+    });
+    if (!certDoc || certDoc.siteId !== existing.plot.siteId) {
+      return NextResponse.json(
+        { error: "The certificate document must belong to this site" },
+        { status: 400 },
+      );
+    }
+    if (certDoc.plotId !== existing.plotId) {
+      return NextResponse.json(
+        { error: "The certificate must be filed against this plot — re-upload it to the plot's documents and try again." },
+        { status: 400 },
+      );
+    }
+  }
+
   try {
     const updated = await prisma.inspection.update({
       where: { id },

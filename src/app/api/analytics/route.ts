@@ -425,6 +425,15 @@ export async function GET(req: NextRequest) {
     const statusKey = order.status === "CONFIRMED" ? "ORDERED" : order.status;
     if (statusKey in ordersByStatus) ordersByStatus[statusKey as keyof typeof ordersByStatus]++;
 
+    // (Jun 2026 audit fix) Exclude CANCELLED orders from supplier spend,
+    // order counts, deliveries and lead-time. They carry priced orderItems
+    // but represent no actual spend, and the portfolio totalSpend already
+    // excludes them (separate query) — counting them here over-counted the
+    // Spend-by-Supplier chart so it no longer reconciled with Total Spend on
+    // the same screen. Placed AFTER the ordersByStatus histogram so the
+    // CANCELLED bar still counts.
+    if (order.status === "CANCELLED") continue;
+
     const orderSpend = order.orderItems.reduce(
       (sum, item) => sum + item.totalCost,
       0

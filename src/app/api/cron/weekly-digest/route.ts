@@ -63,6 +63,15 @@ export async function GET(req: NextRequest) {
       email: { not: "" },
       // (May 2026 audit S-P0) Don't email archived (offboarded) users.
       archivedAt: null,
+      // (Jun 2026 audit fix) Manager roles only — match daily-email /
+      // daily-wrap, which were both explicitly hardened to this list. Pre-
+      // fix the weekly digest had NO role filter, so every CONTRACTOR with
+      // a UserSite row (the routine way managers grant site access) was
+      // emailed the full site retrospective — order volumes, delivery
+      // throughput, inspection pass/fail, days-lost-to-lateness — data the
+      // contractor permission set (VIEW_DASHBOARD/TASKS/SETTINGS only)
+      // blocks them from seeing in-app.
+      role: { in: ["SUPER_ADMIN", "CEO", "DIRECTOR", "SITE_MANAGER", "CONTRACT_MANAGER"] },
       OR: [
         { siteAccess: { some: { site: { status: "ACTIVE" } } } },
         { assignedSites: { some: { status: "ACTIVE" } } },
