@@ -304,7 +304,7 @@ export function SitesClient({
                           e.stopPropagation();
                           handleOpenDelete(site);
                         }}
-                        className="rounded-md p-1 text-muted-foreground opacity-0 transition-all hover:bg-red-50 hover:text-red-600 group-hover:opacity-100"
+                        className="rounded-md p-1 text-muted-foreground/50 transition-all hover:bg-red-50 hover:text-red-600 focus-visible:opacity-100"
                         title="Delete site"
                       >
                         <Trash2 className="size-3.5" />
