@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PLATFORM, PLATFORM_PRIMARY } from "@/lib/platform";
+import { PoweredBy } from "@/components/shared/PoweredBy";
 
 // (Jun 2026 white-label) The login page is unauthenticated, so it themes
 // itself from the PUBLIC GET /api/settings/branding endpoint. Customer brand
@@ -79,7 +80,6 @@ export default function LoginPage() {
 
   const primaryColor = branding?.primaryColor ?? PLATFORM_PRIMARY;
   const displayName = branding?.brandName || branding?.platformName || PLATFORM.name;
-  const poweredBy = branding?.poweredBy ?? PLATFORM.poweredBy;
   const logoUrl = branding?.logoUrl ?? null;
 
   return (
@@ -217,11 +217,11 @@ export default function LoginPage() {
           </form>
         </div>
 
-        {/* (Jun 2026 white-label) Subtle platform co-brand — the only place
-            the product name "Sight Manager" appears on the login screen. */}
-        <p className="mt-8 text-center text-xs text-slate-400">
-          {poweredBy} &middot; &copy; {new Date().getFullYear()}
-        </p>
+        {/* (Jun 2026 white-label) Platform co-brand badge. */}
+        <div className="mt-8 flex flex-col items-center gap-2">
+          <PoweredBy />
+          <p className="text-xs text-slate-400">&copy; {new Date().getFullYear()}</p>
+        </div>
       </div>
     </div>
   );

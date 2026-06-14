@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { format, parseISO } from "date-fns";
 import { WeatherIcon, WEATHER_CATEGORY_LABELS } from "@/components/reports/daily-brief/WeatherIcon";
+import { PoweredBy } from "@/components/shared/PoweredBy";
 
 /**
  * (May 2026 Keith strategic) Wall-cabin TV screen.
@@ -244,6 +245,7 @@ export function LiveCabinScreen(props: Props) {
             />
           ))}
         </div>
+        <PoweredBy theme="dark" asLink={false} size="md" />
         <p className="text-xs text-white/40">
           {props.brand.brandName} · live cabin · auto-refresh every {Math.round(REFRESH_MS / 60_000)} min
         </p>
