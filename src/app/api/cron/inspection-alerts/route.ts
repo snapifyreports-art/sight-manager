@@ -12,6 +12,10 @@ import {
 } from "@/lib/inspection-status";
 
 export const dynamic = "force-dynamic";
+// (Jun 2026 big-site hardening) Raise the function ceiling to the plan max
+// (Vercel clamps to the plan limit) so a multi-hundred-plot scan can't be
+// 504-killed at the short default timeout.
+export const maxDuration = 300;
 
 const inspInclude = {
   plot: { select: { plotNumber: true, name: true } },

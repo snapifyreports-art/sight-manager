@@ -14,6 +14,10 @@ import type { NotificationType } from "@prisma/client";
 // uses sendPushToSiteAudience correctly; this brings weather in line.
 
 export const dynamic = "force-dynamic";
+// (Jun 2026 big-site hardening) Raise the function ceiling to the plan max
+// (Vercel clamps to the plan limit). This cron does a per-site external
+// weather fetch, so many sites = many sequential calls.
+export const maxDuration = 300;
 
 const CATEGORY_LABELS: Record<string, string> = {
   clear: "Clear",

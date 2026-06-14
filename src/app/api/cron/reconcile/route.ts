@@ -9,6 +9,11 @@ import { logEvent } from "@/lib/event-log";
 import { sendPushToSiteAudience } from "@/lib/push";
 
 export const dynamic = "force-dynamic";
+// (Jun 2026 big-site hardening) Raise the function ceiling to the plan max so
+// a multi-hundred-plot portfolio scan can't be 504-killed at the short
+// default timeout. Vercel clamps to the plan limit. Keith: "sites will be
+// big, we need to make sure it runs."
+export const maxDuration = 300;
 
 /**
  * Nightly reconcile — defence-in-depth safety net for cached fields.
@@ -171,6 +176,13 @@ export async function GET(req: NextRequest) {
   // Logged so the manager sees what was auto-adjusted overnight.
   let overlapPlotsFixed = 0;
   let overlapJobsShifted = 0;
+  // (Jun 2026 big-site hardening) Soft time budget for the per-plot overlap
+  // pass — the heaviest, serial part of this cron. Stop cleanly BEFORE the
+  // maxDuration hard kill so a very large portfolio resumes next night (the
+  // pass is idempotent) rather than being 504-killed mid-write with no
+  // signal. Surfaced in the response so it's visible if it ever trips.
+  let overlapTimedOut = false;
+  const OVERLAP_BUDGET_MS = 250_000;
   const overlapEvents: Array<{ plotId: string; triggerJobName: string; deltaDays: number; jobsShifted: number; reason: string }> = [];
   try {
     // (May 2026 audit B-7) Pre-fix the overlap pass used raw `new Date()`
@@ -185,6 +197,7 @@ export async function GET(req: NextRequest) {
       select: { id: true, name: true, plotNumber: true, siteId: true },
     });
     for (const plot of overlapPlots) {
+      if (Date.now() - startedAt > OVERLAP_BUDGET_MS) { overlapTimedOut = true; break; }
       const jobs = await prisma.job.findMany({
         where: { plotId: plot.id, status: { not: "ON_HOLD" } },
         orderBy: { sortOrder: "asc" },
@@ -450,6 +463,9 @@ export async function GET(req: NextRequest) {
     parentsAdjusted,
     overlapPlotsFixed,
     overlapJobsShifted,
+    // (Jun 2026 big-site hardening) True if the overlap pass hit its time
+    // budget and stopped early — the remainder reconciles next night.
+    overlapTimedOut,
     // (Jun 2026 R26) Compliance items flipped to EXPIRED this run + the
     // count covered by the daily expiring/expired push.
     complianceExpiredFlipped,

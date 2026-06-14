@@ -9,6 +9,10 @@ import { latenessReasonLabel } from "@/lib/labels";
 import { whereOrdersForSite } from "@/lib/order-scope";
 
 export const dynamic = "force-dynamic";
+// (Jun 2026 big-site hardening) Raise the function ceiling to the plan max
+// (Vercel clamps to the plan limit) so a multi-hundred-plot scan can't be
+// 504-killed at the short default timeout.
+export const maxDuration = 300;
 
 /**
  * (May 2026 audit #153) Weekly digest email.

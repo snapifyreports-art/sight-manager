@@ -11,6 +11,10 @@ import { getServerCurrentDate } from "@/lib/dev-date";
 import { logEvent } from "@/lib/event-log";
 
 export const dynamic = "force-dynamic";
+// (Jun 2026 big-site hardening) Raise the function ceiling to the plan max
+// (Vercel clamps to the plan limit) so a multi-hundred-plot scan can't be
+// 504-killed at the short default timeout.
+export const maxDuration = 300;
 
 /**
  * (#191) Daily lateness scanner.

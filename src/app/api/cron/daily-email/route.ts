@@ -9,6 +9,10 @@ import { whereOrdersForSite } from "@/lib/order-scope";
 import { logEvent } from "@/lib/event-log";
 
 export const dynamic = "force-dynamic";
+// (Jun 2026 big-site hardening) Raise the function ceiling to the plan max
+// (Vercel clamps to the plan limit) so a multi-hundred-plot scan can't be
+// 504-killed at the short default timeout.
+export const maxDuration = 300;
 
 // GET /api/cron/daily-email
 // Sends a daily morning brief email digest to managers (CEO, DIRECTOR, SITE_MANAGER)

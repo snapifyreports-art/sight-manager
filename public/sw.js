@@ -1,7 +1,9 @@
 // Sight Manager — Service Worker
 // Handles push notifications + offline caching
 
-const CACHE_NAME = "sm-cache-v2";
+// (Jun 2026) Bumped v2 → v3 so the activate handler purges the old cache,
+// which could be holding a stale /live cabin page or pre-deploy chunks.
+const CACHE_NAME = "sm-cache-v3";
 
 // ─── Push Notifications ───
 
@@ -69,6 +71,14 @@ self.addEventListener("fetch", (event) => {
 
   // Network-only for mutations
   if (request.method !== "GET") return;
+
+  // (Jun 2026) The live wall-cabin board (/live/<token>) must NEVER show a
+  // stale cached copy. The network-first-with-cache-fallback below was
+  // serving an old cached cabin page on flaky site WiFi — Keith saw "an old
+  // version for some sites". Bypass the SW entirely for /live so the cabin is
+  // always a direct, fresh network fetch; its own 5-min reload handles
+  // retries when the connection drops.
+  if (url.pathname.startsWith("/live/")) return;
 
   // Cache-first for immutable static assets (content-hashed filenames)
   if (
