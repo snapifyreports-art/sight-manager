@@ -449,6 +449,7 @@ function LatenessRow({
   const [attributedSupplierId, setAttributedSupplierId] = useState<string>(
     event.attributedSupplierId ?? "",
   );
+  const [excused, setExcused] = useState(event.excused);
   const [saving, setSaving] = useState(false);
 
   const targetLabel = event.job
@@ -471,6 +472,7 @@ function LatenessRow({
         body: JSON.stringify({
           reasonCode,
           reasonNote: reasonNote || null,
+          excused,
           // null clears attribution; empty string passes "no choice".
           attributedContactId: attributedContactId || null,
           attributedSupplierId: attributedSupplierId || null,
@@ -482,6 +484,38 @@ function LatenessRow({
       }
       setEditing(false);
       toast.success("Reason saved");
+      onChange();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // (Jun 2026 Keith) "It was sent manually, just not logged here." Flip the
+  // PENDING order to placed — the truthful fix that also clears the
+  // "orders to send" count on the Daily Brief — and excuse the lateness
+  // event so this row clears immediately rather than on the next nightly scan.
+  async function markOrderSent() {
+    if (!event.order) return;
+    setSaving(true);
+    try {
+      const r = await fetch(`/api/orders/${event.order.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "ORDERED" }),
+      });
+      if (!r.ok) {
+        toast.error(await fetchErrorMessage(r, "Couldn't mark the order as sent"));
+        return;
+      }
+      await fetch(`/api/lateness/${event.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          excused: true,
+          reasonNote: event.reasonNote || "Order was sent manually — logged after the fact",
+        }),
+      }).catch(() => {});
+      toast.success("Order marked as sent — cleared from the alerts");
       onChange();
     } finally {
       setSaving(false);
@@ -590,6 +624,17 @@ function LatenessRow({
               {needs ? "Attribute reason" : "Set reason"}
             </button>
           )}
+          {!event.resolvedAt && event.kind === "ORDER_SEND_OVERDUE" && event.order && (
+            <button
+              type="button"
+              onClick={markOrderSent}
+              disabled={saving}
+              title="If the order was placed outside the app and just wasn't logged here"
+              className="text-[11px] font-medium text-emerald-700 hover:underline disabled:opacity-50"
+            >
+              Mark order as sent
+            </button>
+          )}
         </div>
       ) : (
         <div className="mt-2 space-y-1.5 rounded border bg-slate-50/50 p-2">
@@ -641,11 +686,31 @@ function LatenessRow({
               ))}
             </select>
           )}
+          {/* (Jun 2026 Keith) Explain what attribution means, a clear
+              not-a-real-delay escape hatch, and a bespoke free-text reason. */}
+          <p className="text-[11px] leading-snug text-muted-foreground">
+            Attributing to a contractor or supplier records a mark against their
+            on-time record. Leave both blank if it&apos;s no-one&apos;s fault —
+            it&apos;s still logged, but counts against no-one.
+          </p>
+          <label className="flex items-start gap-2 rounded border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-700">
+            <input
+              type="checkbox"
+              checked={excused}
+              onChange={(e) => setExcused(e.target.checked)}
+              className="mt-0.5"
+            />
+            <span>
+              This wasn&apos;t really late — it was handled (e.g. the order was
+              sent manually and just wasn&apos;t logged here). Keeps it off the
+              delay count.
+            </span>
+          </label>
           <input
             type="text"
             value={reasonNote}
             onChange={(e) => setReasonNote(e.target.value)}
-            placeholder="Optional note (what specifically happened)"
+            placeholder="Write your own reason — e.g. order placed by phone, just not logged here"
             className="w-full rounded border bg-white px-2 py-1.5 text-xs"
           />
           <div className="flex gap-1.5">
@@ -659,6 +724,7 @@ function LatenessRow({
               onClick={() => {
                 setReasonCode(event.reasonCode);
                 setReasonNote(event.reasonNote ?? "");
+                setExcused(event.excused);
                 setAttributedContactId(event.attributedContactId ?? "");
                 setAttributedSupplierId(event.attributedSupplierId ?? "");
                 setEditing(false);
@@ -850,11 +916,15 @@ function LatenessGroupRow({
               ))}
             </select>
           )}
+          <p className="text-[11px] leading-snug text-muted-foreground">
+            Attributing to a contractor or supplier records a mark against their
+            on-time record. Leave both blank if it&apos;s no-one&apos;s fault.
+          </p>
           <input
             type="text"
             value={reasonNote}
             onChange={(e) => setReasonNote(e.target.value)}
-            placeholder="Optional note (applied to every event in this group)"
+            placeholder="Write your own reason (applied to every event in this group)"
             className="w-full rounded border bg-white px-2 py-1.5 text-xs"
           />
           <div className="flex gap-1.5">

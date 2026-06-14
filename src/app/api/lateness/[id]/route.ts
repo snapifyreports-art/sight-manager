@@ -83,6 +83,13 @@ export async function PATCH(
     if (body.attributedSupplierId !== undefined) {
       data.attributedSupplierId = body.attributedSupplierId || null;
     }
+    // (Jun 2026 Keith) "Not a real delay" — manager marks an event as no
+    // programme impact (e.g. the order was placed manually and just wasn't
+    // logged here). Excludes it from the days-lost headline + the
+    // needs-attribution prompt; the row keeps its audit trail.
+    if (body.excused !== undefined) {
+      data.excused = !!body.excused;
+    }
     if (Object.keys(data).length === 0) {
       return NextResponse.json({ error: "Nothing to update" }, { status: 400 });
     }
