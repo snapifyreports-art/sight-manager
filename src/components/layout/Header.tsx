@@ -82,7 +82,7 @@ function useSiteId(pathname: string): string | null {
   return urlSiteId || storedSiteId;
 }
 
-export function Header() {
+export function Header({ brandName, logoUrl }: { brandName?: string; logoUrl?: string | null }) {
   const pathname = usePathname();
   const { data: session } = useSession();
   const pageTitle = getPageTitle(pathname);
@@ -104,7 +104,18 @@ export function Header() {
   return (
     <header className="shrink-0">
     <div className="flex h-14 items-center gap-3 border-b border-border/50 bg-white px-4">
-      <MobileSidebar />
+      <MobileSidebar brandName={brandName} logoUrl={logoUrl} />
+
+      {/* (Jun 2026 white-label) Compact customer logo on mobile — the sidebar
+          that holds the brand is hidden behind the hamburger on phones. */}
+      {logoUrl && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={logoUrl}
+          alt={brandName ?? ""}
+          className="size-7 shrink-0 rounded object-contain md:hidden"
+        />
+      )}
 
       <h1 className="text-sm font-semibold text-slate-700">{pageTitle}</h1>
 

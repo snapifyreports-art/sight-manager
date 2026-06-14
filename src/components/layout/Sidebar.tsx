@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname, useSearchParams, useRouter } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
+import { PLATFORM } from "@/lib/platform";
 import { useEffect, useState, Suspense } from "react";
 import {
   HardHat,
@@ -179,7 +180,7 @@ function getInitials(name: string | null | undefined) {
     .slice(0, 2);
 }
 
-function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: boolean; onNavigate?: () => void }) {
+function SidebarNav({ collapsed = false, onNavigate, brandName, logoUrl }: { collapsed?: boolean; onNavigate?: () => void; brandName?: string; logoUrl?: string | null }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -305,13 +306,24 @@ function SidebarNav({ collapsed = false, onNavigate }: { collapsed?: boolean; on
     <div className="flex h-full flex-col">
       {/* Logo */}
       <div className={cn("flex h-14 items-center gap-3 border-b border-border/40 px-4", collapsed && "justify-center px-2")}>
-        <Link href="/dashboard" className="flex items-center gap-3">
-          <div className="flex size-8 items-center justify-center rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-600/25">
-            <HardHat className="size-4" />
-          </div>
+        <Link href="/dashboard" className="flex min-w-0 items-center gap-3">
+          {/* (Jun 2026 white-label) Customer logo + name; fall back to the
+              platform mark when the business hasn't branded yet. */}
+          {logoUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={logoUrl}
+              alt={brandName ?? PLATFORM.name}
+              className="size-8 shrink-0 rounded-lg object-contain"
+            />
+          ) : (
+            <div className="flex size-8 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-600/25">
+              <HardHat className="size-4" />
+            </div>
+          )}
           {!collapsed && (
-            <span className="text-[15px] font-bold tracking-tight text-foreground">
-              Sight Manager
+            <span className="truncate text-[15px] font-bold tracking-tight text-foreground">
+              {brandName ?? PLATFORM.name}
             </span>
           )}
         </Link>
@@ -657,7 +669,7 @@ function renderNavItem(
   return <div key={item.href} className="relative">{linkContent}</div>;
 }
 
-export function Sidebar() {
+export function Sidebar({ brandName, logoUrl }: { brandName?: string; logoUrl?: string | null }) {
   // Persist across navigations — React useState resets on every page load, so
   // without localStorage the sidebar snapped back to expanded every click,
   // which felt like the collapse button was "broken".
@@ -682,7 +694,7 @@ export function Sidebar() {
     >
       <div className="flex-1 overflow-hidden">
         <Suspense fallback={null}>
-          <SidebarNav collapsed={collapsed} />
+          <SidebarNav collapsed={collapsed} brandName={brandName} logoUrl={logoUrl} />
         </Suspense>
       </div>
       {/* Collapse toggle — sits slightly outside the sidebar's right edge.
@@ -705,7 +717,7 @@ export function Sidebar() {
   );
 }
 
-export function MobileSidebar() {
+export function MobileSidebar({ brandName, logoUrl }: { brandName?: string; logoUrl?: string | null }) {
   const [open, setOpen] = useState(false);
 
   // Swipe right from left edge to open, swipe left to close
@@ -738,7 +750,7 @@ export function MobileSidebar() {
       <SheetContent side="left" className="w-[260px] p-0" showCloseButton={false}>
         <SheetTitle className="sr-only">Navigation</SheetTitle>
         <Suspense fallback={null}>
-          <SidebarNav onNavigate={() => setOpen(false)} />
+          <SidebarNav onNavigate={() => setOpen(false)} brandName={brandName} logoUrl={logoUrl} />
         </Suspense>
       </SheetContent>
     </Sheet>

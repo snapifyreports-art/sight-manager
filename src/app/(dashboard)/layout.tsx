@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import { auth } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { getBranding } from "@/lib/branding";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { OfflineIndicator } from "@/components/layout/OfflineIndicator";
@@ -26,16 +26,25 @@ export default async function DashboardLayout({
   // design-system tokens so buttons, ring focus, sidebar primary, and
   // chart accent all pick up the tenant colour. Browsers accept hex
   // alongside the default oklch values without any conversion.
-  const settings = await prisma.appSettings
-    .findUnique({ where: { id: "default" } })
-    .catch(() => null);
-  const primaryColor = settings?.primaryColor ?? "#2563eb";
+  // (Jun 2026 white-label) Resolve branding once and thread the identity
+  // (logo + name) down to the chrome so the Sidebar/Header don't each
+  // re-fetch /api/settings/branding. secondaryColor (when set) feeds the
+  // accent + chart-2 tokens.
+  const { customer } = await getBranding();
+  const primaryColor = customer.primaryColor;
   const brandStyle = {
     "--brand-primary": primaryColor,
     "--primary": primaryColor,
     "--ring": primaryColor,
     "--sidebar-primary": primaryColor,
     "--chart-1": primaryColor,
+    ...(customer.secondaryColor
+      ? {
+          "--brand-secondary": customer.secondaryColor,
+          "--accent": customer.secondaryColor,
+          "--chart-2": customer.secondaryColor,
+        }
+      : {}),
   } as React.CSSProperties;
 
   return (
@@ -46,9 +55,9 @@ export default async function DashboardLayout({
       <OfflineIndicator />
       <NotificationBlockedBanner />
       <div className="flex flex-1 overflow-hidden">
-        <Sidebar />
+        <Sidebar brandName={customer.brandName} logoUrl={customer.logoUrl} />
         <div className="flex flex-1 flex-col overflow-hidden">
-          <Header />
+          <Header brandName={customer.brandName} logoUrl={customer.logoUrl} />
           <main className="flex-1 overflow-y-auto p-4 md:p-6">{children}</main>
         </div>
       </div>

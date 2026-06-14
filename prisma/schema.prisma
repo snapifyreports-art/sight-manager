@@ -1456,10 +1456,26 @@ enum DefectReportStatus {
 /// the dashboard layout.
 model AppSettings {
   id           String   @id @default("default")
-  brandName    String   @default("Sight Manager")
+  // (Jun 2026 white-label) brandName is now NULLABLE with NO default.
+  // Null = the business hasn't set their own name yet → surfaces fall back
+  // to the PLATFORM constant ("Sight Manager"). Pre-fix the default WAS
+  // "Sight Manager", so the product couldn't tell "unbranded tenant" from
+  // "the business is genuinely called Sight Manager", and every surface
+  // printed the platform's name as if it were the customer's.
+  brandName    String?
   logoUrl      String?
   primaryColor String   @default("#2563eb")
   supportEmail String?
+  // (Jun 2026 white-label) Extra visual identity.
+  secondaryColor String?
+  darkLogoUrl    String? // logo variant for dark surfaces (emails / PWA)
+  faviconUrl     String?
+  // (Jun 2026 white-label) Legal identity — for handover certificates +
+  // formal documents.
+  legalName             String?
+  tradingName           String?
+  companyRegistrationNo String?
+  vatNumber             String?
   updatedAt    DateTime @updatedAt
 }
 
