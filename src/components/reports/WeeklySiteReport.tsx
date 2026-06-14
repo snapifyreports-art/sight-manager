@@ -2,10 +2,11 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { ReportExportButtons } from "@/components/shared/ReportExportButtons";
+import { ReportExportButtons, PrintBrandHeader, PrintBrandFooter } from "@/components/shared/ReportExportButtons";
 import { format, startOfWeek, subWeeks, addWeeks } from "date-fns";
 import { getCurrentDate } from "@/lib/dev-date";
 import { useDevDate } from "@/lib/dev-date-context";
+import { useBrandName } from "@/hooks/useBrandName";
 import {
   Loader2,
   ChevronLeft,
@@ -113,6 +114,7 @@ function TrendIcon({ trend }: { trend: "up" | "down" | "flat" }) {
 
 export function WeeklySiteReport({ siteId }: WeeklySiteReportProps) {
   const { devDate } = useDevDate();
+  const { brandName, supportEmail } = useBrandName();
   const [weekDate, setWeekDate] = useState(
     startOfWeek(getCurrentDate(), { weekStartsOn: 1 })
   );
@@ -189,6 +191,10 @@ export function WeeklySiteReport({ siteId }: WeeklySiteReportProps) {
 
   return (
     <div className="space-y-4 print:space-y-6">
+      {/* (Jun 2026 white-label) Print-only customer banner above the report
+          header — the printed / Save-as-PDF output leads with the customer
+          name and ends with the platform co-brand. Hidden on screen. */}
+      <PrintBrandHeader brandName={brandName} supportEmail={supportEmail ?? undefined} />
       {/* Header */}
       <div className="flex items-center justify-between print:block">
         <div>
@@ -234,6 +240,9 @@ export function WeeklySiteReport({ siteId }: WeeklySiteReportProps) {
               },
             ]}
             sheetName="Weekly Summary"
+            brandName={brandName}
+            supportEmail={supportEmail ?? undefined}
+            reportTitle={`Weekly Site Report — ${data.site.name}`}
             compact
           />
         </div>
@@ -698,6 +707,9 @@ export function WeeklySiteReport({ siteId }: WeeklySiteReportProps) {
         </Card>
         </Link>
       )}
+
+      {/* (Jun 2026 white-label) Print-only "Powered by Sight Manager" footer. */}
+      <PrintBrandFooter />
     </div>
   );
 }

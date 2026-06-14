@@ -21,6 +21,15 @@ export interface OrderEmailParams {
   expectedDeliveryDate: string | null;
   orderDate?: string | null;
   urgentDelivery?: boolean; // adds "ASAP delivery required" messaging
+  /**
+   * (Jun 2026 white-label) The SENDING business's brand — this email goes
+   * FROM the construction business TO its supplier, so the sign-off carries
+   * the customer brand, not the platform. Threaded in as a param because this
+   * builder is pure / runs client-side (no server branding fetch here — the
+   * caller resolves it, e.g. useOrderEmail via GET /api/settings/branding).
+   * Absent → falls back to the bare "Regards".
+   */
+  senderBranding?: { brandName: string; supportEmail?: string | null } | null;
 }
 
 /**
@@ -40,6 +49,7 @@ export function buildOrderEmailBody(params: OrderEmailParams): string {
     itemsDescriptionFallback,
     expectedDeliveryDate,
     orderDate,
+    senderBranding,
   } = params;
 
   const greeting = `Hi ${supplierContactName || supplierName},`;
@@ -121,7 +131,18 @@ export function buildOrderEmailBody(params: OrderEmailParams): string {
   lines.push("");
   lines.push("Please confirm receipt and expected delivery date.");
   lines.push("");
-  lines.push("Regards");
+  // (Jun 2026 white-label) Sign off with the sending business's brand when we
+  // have it (this email is from the construction business to its supplier),
+  // else the bare "Regards".
+  if (senderBranding?.brandName) {
+    lines.push("Regards,");
+    lines.push(senderBranding.brandName);
+    if (senderBranding.supportEmail) {
+      lines.push(senderBranding.supportEmail);
+    }
+  } else {
+    lines.push("Regards");
+  }
 
   return lines.join("\n");
 }

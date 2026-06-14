@@ -6,6 +6,8 @@ import { verifyCalendarToken } from "@/lib/share-token";
 import { whereOrdersForSite } from "@/lib/order-scope";
 import { jobStatusLabel } from "@/lib/labels";
 import { inspectionStatusLabel } from "@/lib/inspection-doctype";
+import { getCustomerBranding } from "@/lib/branding";
+import { PLATFORM } from "@/lib/platform";
 
 export const dynamic = "force-dynamic";
 
@@ -118,6 +120,12 @@ export async function GET(
     return new NextResponse("Not found", { status: 404 });
   }
 
+  // (Jun 2026 white-label) Brand the feed with the customer's business
+  // name — subscribers see "{brand} — {site} programme" in their calendar
+  // app, not the generic platform name. Resolves to "Sight Manager" only
+  // when the business hasn't set its own brand.
+  const brand = await getCustomerBranding();
+
   const jobs = await prisma.job.findMany({
     where: {
       plot: { siteId },
@@ -180,10 +188,12 @@ export async function GET(
   const lines: string[] = [];
   lines.push("BEGIN:VCALENDAR");
   lines.push("VERSION:2.0");
-  lines.push("PRODID:-//Sight Manager//EN");
+  // PRODID names the producing software — co-brand the customer with the
+  // platform: "-//{brand} (Sight Manager)//EN".
+  lines.push(`PRODID:-//${escapeIcs(brand.brandName)} (${PLATFORM.name})//EN`);
   lines.push("CALSCALE:GREGORIAN");
   lines.push("METHOD:PUBLISH");
-  lines.push(`X-WR-CALNAME:${escapeIcs(site.name)} programme`);
+  lines.push(`X-WR-CALNAME:${escapeIcs(brand.brandName)} — ${escapeIcs(site.name)} programme`);
   lines.push(`X-WR-CALDESC:Job + delivery schedule for ${escapeIcs(site.name)}`);
 
   for (const j of jobs) {

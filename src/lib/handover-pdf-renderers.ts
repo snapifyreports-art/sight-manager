@@ -3,6 +3,14 @@ import type { InspectionStatus } from "@prisma/client";
 import type { SiteStory, PlotStory, ContractorPerf } from "./site-story";
 import { loadJsPdf, pdfBuffer, safeDate } from "./pdf-builder";
 import {
+  drawBrandHeader,
+  drawBrandFooter,
+  brandHeadFill,
+  hexToRgb,
+  PLATFORM,
+  type PdfBrand,
+} from "./pdf-branding";
+import {
   titleCaseEnum,
   latenessReasonLabel,
   jobStatusLabel,
@@ -24,30 +32,34 @@ import { inspectionTypeLabel, inspectionStatusLabel } from "./inspection-doctype
 // ──────────────────────────────────────────────────────────────────────
 // 01_Site_Overview/site-story.pdf
 // ──────────────────────────────────────────────────────────────────────
-export async function renderSiteStoryPdf(story: SiteStory): Promise<Buffer> {
+export async function renderSiteStoryPdf(
+  story: SiteStory,
+  brand: PdfBrand,
+): Promise<Buffer> {
   const { jsPDF, autoTable } = await loadJsPdf();
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
 
-  // Cover
-  doc.setFontSize(22);
-  doc.text(story.site.name, 14, 22);
-  doc.setFontSize(11);
-  doc.setTextColor(120);
-  doc.text("Site Story — internal retrospective", 14, 30);
-  doc.setTextColor(0);
-
+  // Branded header — customer logo + name; "Powered by" sits in the footer.
+  const headerY = drawBrandHeader(
+    doc,
+    brand,
+    story.site.name,
+    "Site Story — internal retrospective",
+  );
   doc.setFontSize(9);
+  doc.setTextColor(120);
   doc.text(
     `Generated ${format(new Date(), "dd MMM yyyy HH:mm")}`,
     14,
-    37,
+    headerY,
   );
+  doc.setTextColor(0);
 
   // Overview
   doc.setFontSize(13);
-  doc.text("Overview", 14, 52);
+  doc.text("Overview", 14, headerY + 12);
   autoTable(doc, {
-    startY: 56,
+    startY: headerY + 16,
     body: [
       ["Plots completed", `${story.overview.plotsCompleted} of ${story.overview.plotCount}`],
       ["Overall completion", `${Math.round(story.overview.overallPercent)}%`],
@@ -89,7 +101,7 @@ export async function renderSiteStoryPdf(story: SiteStory): Promise<Buffer> {
     head: [["Milestone", "Date"]],
     body: story.milestones.map((m) => [m.label, safeDate(m.date, "not yet")]),
     styles: { fontSize: 9, cellPadding: 1.5 },
-    headStyles: { fillColor: [241, 245, 249], textColor: [51, 65, 85] },
+    headStyles: { fillColor: brandHeadFill(brand), textColor: [255, 255, 255] },
   });
 
   // Variance breakdown
@@ -110,6 +122,9 @@ export async function renderSiteStoryPdf(story: SiteStory): Promise<Buffer> {
     styles: { fontSize: 9, cellPadding: 1.5 },
     columnStyles: { 0: { cellWidth: 70 } },
   });
+
+  // Footer on the first page before we move on.
+  drawBrandFooter(doc, brand);
 
   // Per-plot summary table
   doc.addPage();
@@ -142,9 +157,10 @@ export async function renderSiteStoryPdf(story: SiteStory): Promise<Buffer> {
       String(p.photoCount),
     ]),
     styles: { fontSize: 8, cellPadding: 1 },
-    headStyles: { fillColor: [241, 245, 249], textColor: [51, 65, 85] },
+    headStyles: { fillColor: brandHeadFill(brand), textColor: [255, 255, 255] },
   });
 
+  drawBrandFooter(doc, brand);
   return pdfBuffer(doc);
 }
 
@@ -153,32 +169,70 @@ export async function renderSiteStoryPdf(story: SiteStory): Promise<Buffer> {
 // ──────────────────────────────────────────────────────────────────────
 export async function renderCompletionSummaryPdf(
   story: SiteStory,
+  brand: PdfBrand,
 ): Promise<Buffer> {
   const { jsPDF, autoTable } = await loadJsPdf();
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+  const pageW = doc.internal.pageSize.getWidth();
+  const [pr, pg, pb] = hexToRgb(brand.primaryColor);
 
+  // ── Pack COVER ──────────────────────────────────────────────────────
+  // This PDF is the front of the pack, so the CUSTOMER logo + brand name
+  // get a prominent block rather than the small header the other docs use.
+  let coverY = 26;
+  if (brand.logoDataUrl) {
+    try {
+      const props = doc.getImageProperties(brand.logoDataUrl);
+      const h = 22;
+      const w = Math.min(80, h * (props.width / props.height));
+      doc.addImage(brand.logoDataUrl, props.fileType || "PNG", 14, 16, w, h);
+      coverY = 16 + h + 10;
+    } catch {
+      /* logo embed failed — fall back to the text-only cover below */
+    }
+  }
+
+  // Customer brand name — the prominent issuing identity.
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(24);
+  doc.setTextColor(15, 23, 42);
+  doc.text(brand.brandName, 14, coverY);
+  coverY += 6;
+
+  // primaryColor accent rule across the cover.
+  doc.setDrawColor(pr, pg, pb);
+  doc.setLineWidth(1);
+  doc.line(14, coverY, pageW - 14, coverY);
+  coverY += 12;
+
+  doc.setFont("helvetica", "bold");
   doc.setFontSize(20);
-  doc.text("Site Handover Pack", 14, 22);
+  doc.setTextColor(15, 23, 42);
+  doc.text("Site Handover Pack", 14, coverY);
+  coverY += 8;
+  doc.setFont("helvetica", "normal");
   doc.setFontSize(11);
-  doc.setTextColor(120);
+  doc.setTextColor(100, 116, 139);
   doc.text(
     `${story.site.name}${story.site.location ? ` — ${story.site.location}` : ""}`,
     14,
-    30,
+    coverY,
   );
-  doc.setTextColor(0);
-
+  coverY += 6;
   doc.setFontSize(9);
   doc.text(
     `Pack generated ${format(new Date(), "dd MMM yyyy HH:mm")}`,
     14,
-    38,
+    coverY,
   );
+  doc.setTextColor(0, 0, 0);
+  coverY += 14;
 
+  doc.setFont("helvetica", "bold");
   doc.setFontSize(13);
-  doc.text("Completion summary", 14, 52);
+  doc.text("Completion summary", 14, coverY);
   autoTable(doc, {
-    startY: 56,
+    startY: coverY + 4,
     body: [
       [
         "Site started",
@@ -221,6 +275,7 @@ export async function renderCompletionSummaryPdf(
     columnStyles: { 0: { cellWidth: 70, fontStyle: "bold" } },
   });
 
+  drawBrandFooter(doc, brand);
   return pdfBuffer(doc);
 }
 
@@ -230,31 +285,29 @@ export async function renderCompletionSummaryPdf(
 export async function renderPlotStoryPdf(
   story: SiteStory,
   plot: PlotStory,
+  brand: PdfBrand,
 ): Promise<Buffer> {
   const { jsPDF, autoTable } = await loadJsPdf();
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
 
-  doc.setFontSize(18);
-  doc.text(`Plot ${plot.plotNumber || plot.name}`, 14, 22);
-  doc.setFontSize(11);
-  doc.setTextColor(120);
-  doc.text(
+  const headerY = drawBrandHeader(
+    doc,
+    brand,
+    `Plot ${plot.plotNumber || plot.name}`,
     `${plot.houseType ?? "—"} · ${story.site.name}`,
-    14,
-    30,
   );
-  doc.setTextColor(0);
-
   doc.setFontSize(9);
+  doc.setTextColor(120);
   doc.text(
     `Generated ${format(new Date(), "dd MMM yyyy HH:mm")}`,
     14,
-    37,
+    headerY,
   );
+  doc.setTextColor(0);
 
   // Plot facts
   autoTable(doc, {
-    startY: 50,
+    startY: headerY + 8,
     body: [
       ["Status", titleCaseEnum(plot.status)],
       ["Build completion", `${Math.round(plot.buildCompletePercent)}%`],
@@ -303,11 +356,12 @@ export async function renderPlotStoryPdf(
             : h.description,
       ]),
       styles: { fontSize: 8, cellPadding: 1 },
-      headStyles: { fillColor: [241, 245, 249], textColor: [51, 65, 85] },
+      headStyles: { fillColor: brandHeadFill(brand), textColor: [255, 255, 255] },
       columnStyles: { 0: { cellWidth: 22 }, 1: { cellWidth: 28 } },
     });
   }
 
+  drawBrandFooter(doc, brand);
   return pdfBuffer(doc);
 }
 
@@ -326,27 +380,24 @@ export async function renderPlotSnagLogPdf(
     raisedBy: { name: string } | null;
     assignedTo: { name: string } | null;
   }>,
+  brand: PdfBrand,
 ): Promise<Buffer> {
   const { jsPDF, autoTable } = await loadJsPdf();
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
 
-  doc.setFontSize(16);
-  doc.text(`Snag log — ${plotName}`, 14, 22);
-  doc.setFontSize(9);
-  doc.setTextColor(120);
-  doc.text(
+  const headerY = drawBrandHeader(
+    doc,
+    brand,
+    `Snag log — ${plotName}`,
     `${snags.length} snag${snags.length === 1 ? "" : "s"} recorded`,
-    14,
-    28,
   );
-  doc.setTextColor(0);
 
   if (snags.length === 0) {
     doc.setFontSize(10);
-    doc.text("No snags recorded for this plot.", 14, 40);
+    doc.text("No snags recorded for this plot.", 14, headerY + 4);
   } else {
     autoTable(doc, {
-      startY: 36,
+      startY: headerY,
       head: [["Description", "Location", "Priority", "Status", "Raised", "Resolved", "By"]],
       body: snags.map((s) => [
         s.description.length > 60
@@ -360,10 +411,11 @@ export async function renderPlotSnagLogPdf(
         s.raisedBy?.name ?? "—",
       ]),
       styles: { fontSize: 8, cellPadding: 1 },
-      headStyles: { fillColor: [241, 245, 249], textColor: [51, 65, 85] },
+      headStyles: { fillColor: brandHeadFill(brand), textColor: [255, 255, 255] },
     });
   }
 
+  drawBrandFooter(doc, brand);
   return pdfBuffer(doc);
 }
 
@@ -387,29 +439,26 @@ export async function renderPlotInspectionLogPdf(
     inspector: { name: string; company: string | null } | null;
     certificate: { name: string } | null;
   }>,
+  brand: PdfBrand,
 ): Promise<Buffer> {
   const { jsPDF, autoTable } = await loadJsPdf();
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
 
   const passed = inspections.filter((i) => i.status === "PASSED").length;
 
-  doc.setFontSize(16);
-  doc.text(`Inspection register — ${plotName}`, 14, 22);
-  doc.setFontSize(9);
-  doc.setTextColor(120);
-  doc.text(
+  const headerY = drawBrandHeader(
+    doc,
+    brand,
+    `Inspection register — ${plotName}`,
     `${inspections.length} hold-point${inspections.length === 1 ? "" : "s"} · ${passed} of ${inspections.length} passed`,
-    14,
-    28,
   );
-  doc.setTextColor(0);
 
   if (inspections.length === 0) {
     doc.setFontSize(10);
-    doc.text("No inspections recorded for this plot.", 14, 40);
+    doc.text("No inspections recorded for this plot.", 14, headerY + 4);
   } else {
     autoTable(doc, {
-      startY: 36,
+      startY: headerY,
       head: [["Inspection", "Type", "Status", "Scheduled", "Result", "Inspector", "Certificate"]],
       body: inspections.map((i) => {
         const resolved = i.passedAt ?? i.failedAt;
@@ -424,10 +473,11 @@ export async function renderPlotInspectionLogPdf(
         ];
       }),
       styles: { fontSize: 8, cellPadding: 1 },
-      headStyles: { fillColor: [241, 245, 249], textColor: [51, 65, 85] },
+      headStyles: { fillColor: brandHeadFill(brand), textColor: [255, 255, 255] },
     });
   }
 
+  drawBrandFooter(doc, brand);
   return pdfBuffer(doc);
 }
 
@@ -451,27 +501,24 @@ export async function renderPlotNcrLogPdf(
     closedBy: { name: string } | null;
     contact: { name: string; company: string | null } | null;
   }>,
+  brand: PdfBrand,
 ): Promise<Buffer> {
   const { jsPDF, autoTable } = await loadJsPdf();
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
 
-  doc.setFontSize(16);
-  doc.text(`NCR log — ${plotName}`, 14, 22);
-  doc.setFontSize(9);
-  doc.setTextColor(120);
-  doc.text(
+  const headerY = drawBrandHeader(
+    doc,
+    brand,
+    `NCR log — ${plotName}`,
     `${ncrs.length} non-conformance${ncrs.length === 1 ? "" : "s"} recorded`,
-    14,
-    28,
   );
-  doc.setTextColor(0);
 
   if (ncrs.length === 0) {
     doc.setFontSize(10);
-    doc.text("No NCRs recorded for this plot.", 14, 40);
+    doc.text("No NCRs recorded for this plot.", 14, headerY + 4);
   } else {
     autoTable(doc, {
-      startY: 36,
+      startY: headerY,
       head: [["Ref", "Title", "Status", "Raised", "Closed", "Raised by"]],
       body: ncrs.map((n) => [
         n.ref ?? "—",
@@ -482,7 +529,7 @@ export async function renderPlotNcrLogPdf(
         n.raisedBy?.name ?? "—",
       ]),
       styles: { fontSize: 8, cellPadding: 1 },
-      headStyles: { fillColor: [241, 245, 249], textColor: [51, 65, 85] },
+      headStyles: { fillColor: brandHeadFill(brand), textColor: [255, 255, 255] },
     });
 
     // Detail blocks below the summary table — root cause +
@@ -493,6 +540,7 @@ export async function renderPlotNcrLogPdf(
     y += 8;
     for (const n of ncrs) {
       if (y > 270) {
+        drawBrandFooter(doc, brand);
         doc.addPage();
         y = 22;
       }
@@ -527,6 +575,7 @@ export async function renderPlotNcrLogPdf(
     }
   }
 
+  drawBrandFooter(doc, brand);
   return pdfBuffer(doc);
 }
 
@@ -540,27 +589,24 @@ export async function renderPlotDefectLogPdf(
     reportedAt: Date;
     resolvedAt: Date | null;
   }>,
+  brand: PdfBrand,
 ): Promise<Buffer> {
   const { jsPDF, autoTable } = await loadJsPdf();
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
 
-  doc.setFontSize(16);
-  doc.text(`Defect log — ${plotName}`, 14, 22);
-  doc.setFontSize(9);
-  doc.setTextColor(120);
-  doc.text(
+  const headerY = drawBrandHeader(
+    doc,
+    brand,
+    `Defect log — ${plotName}`,
     `${defects.length} defect${defects.length === 1 ? "" : "s"} recorded`,
-    14,
-    28,
   );
-  doc.setTextColor(0);
 
   if (defects.length === 0) {
     doc.setFontSize(10);
-    doc.text("No defects recorded for this plot.", 14, 40);
+    doc.text("No defects recorded for this plot.", 14, headerY + 4);
   } else {
     autoTable(doc, {
-      startY: 36,
+      startY: headerY,
       head: [["Ref", "Title", "Description", "Status", "Reported", "Resolved"]],
       body: defects.map((d) => [
         d.ref ?? "—",
@@ -573,10 +619,11 @@ export async function renderPlotDefectLogPdf(
         d.resolvedAt ? format(d.resolvedAt, "dd MMM yy") : "—",
       ]),
       styles: { fontSize: 8, cellPadding: 1 },
-      headStyles: { fillColor: [241, 245, 249], textColor: [51, 65, 85] },
+      headStyles: { fillColor: brandHeadFill(brand), textColor: [255, 255, 255] },
     });
   }
 
+  drawBrandFooter(doc, brand);
   return pdfBuffer(doc);
 }
 
@@ -593,29 +640,26 @@ export async function renderPlotVariationLogPdf(
     approvedAt: Date | null;
     createdAt: Date;
   }>,
+  brand: PdfBrand,
 ): Promise<Buffer> {
   const { jsPDF, autoTable } = await loadJsPdf();
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
 
-  doc.setFontSize(16);
-  doc.text(`Variation log — ${plotName}`, 14, 22);
-  doc.setFontSize(9);
-  doc.setTextColor(120);
   const totalCost = variations.reduce((s, v) => s + (v.costDelta ?? 0), 0);
   const totalDays = variations.reduce((s, v) => s + (v.daysDelta ?? 0), 0);
-  doc.text(
+  const headerY = drawBrandHeader(
+    doc,
+    brand,
+    `Variation log — ${plotName}`,
     `${variations.length} variation${variations.length === 1 ? "" : "s"} · £${Math.round(totalCost).toLocaleString()} cost delta · ${totalDays > 0 ? "+" : ""}${totalDays} working days`,
-    14,
-    28,
   );
-  doc.setTextColor(0);
 
   if (variations.length === 0) {
     doc.setFontSize(10);
-    doc.text("No variations recorded for this plot.", 14, 40);
+    doc.text("No variations recorded for this plot.", 14, headerY + 4);
   } else {
     autoTable(doc, {
-      startY: 36,
+      startY: headerY,
       head: [
         ["Ref", "Title", "Requested by", "Status", "£ delta", "Days", "Approved"],
       ],
@@ -631,10 +675,11 @@ export async function renderPlotVariationLogPdf(
         v.approvedAt ? format(v.approvedAt, "dd MMM yy") : "—",
       ]),
       styles: { fontSize: 8, cellPadding: 1 },
-      headStyles: { fillColor: [241, 245, 249], textColor: [51, 65, 85] },
+      headStyles: { fillColor: brandHeadFill(brand), textColor: [255, 255, 255] },
     });
   }
 
+  drawBrandFooter(doc, brand);
   return pdfBuffer(doc);
 }
 
@@ -653,29 +698,26 @@ export async function renderPlotHandoverChecklistPdf(
     checkedBy: { name: string } | null;
     document: { name: string } | null;
   }>,
+  brand: PdfBrand,
 ): Promise<Buffer> {
   const { jsPDF, autoTable } = await loadJsPdf();
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
 
-  doc.setFontSize(16);
-  doc.text(`Handover checklist — ${plotName}`, 14, 22);
-  doc.setFontSize(9);
-  doc.setTextColor(120);
   const required = items.filter((i) => i.required).length;
   const checked = items.filter((i) => i.required && i.checkedAt).length;
-  doc.text(
+  const headerY = drawBrandHeader(
+    doc,
+    brand,
+    `Handover checklist — ${plotName}`,
     `${checked} of ${required} required documents signed off`,
-    14,
-    28,
   );
-  doc.setTextColor(0);
 
   if (items.length === 0) {
     doc.setFontSize(10);
-    doc.text("No handover checklist defined for this plot.", 14, 40);
+    doc.text("No handover checklist defined for this plot.", 14, headerY + 4);
   } else {
     autoTable(doc, {
-      startY: 36,
+      startY: headerY,
       head: [["Document", "Required", "Status", "Signed off", "By", "File", "Notes"]],
       body: items.map((i) => [
         HANDOVER_DOC_TYPE_LABELS[i.docType] ?? titleCaseEnum(i.docType),
@@ -691,10 +733,11 @@ export async function renderPlotHandoverChecklistPdf(
       ]),
       styles: { fontSize: 8, cellPadding: 1.2 },
       columnStyles: { 6: { cellWidth: 40 } },
-      headStyles: { fillColor: [241, 245, 249], textColor: [51, 65, 85] },
+      headStyles: { fillColor: brandHeadFill(brand), textColor: [255, 255, 255] },
     });
   }
 
+  drawBrandFooter(doc, brand);
   return pdfBuffer(doc);
 }
 
@@ -710,28 +753,25 @@ export async function renderPlotPreStartChecksPdf(
     notes: string | null;
     checkedBy: { name: string } | null;
   }>,
+  brand: PdfBrand,
 ): Promise<Buffer> {
   const { jsPDF, autoTable } = await loadJsPdf();
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
 
-  doc.setFontSize(16);
-  doc.text(`Pre-start checks — ${plotName}`, 14, 22);
-  doc.setFontSize(9);
-  doc.setTextColor(120);
   const checked = checks.filter((c) => c.checked).length;
-  doc.text(
+  const headerY = drawBrandHeader(
+    doc,
+    brand,
+    `Pre-start checks — ${plotName}`,
     `${checked} of ${checks.length} items checked`,
-    14,
-    28,
   );
-  doc.setTextColor(0);
 
   if (checks.length === 0) {
     doc.setFontSize(10);
-    doc.text("No pre-start checks recorded.", 14, 40);
+    doc.text("No pre-start checks recorded.", 14, headerY + 4);
   } else {
     autoTable(doc, {
-      startY: 36,
+      startY: headerY,
       head: [["Item", "Status", "Checked", "By", "Notes"]],
       body: checks.map((c) => [
         c.label.length > 50 ? `${c.label.slice(0, 50)}…` : c.label,
@@ -744,10 +784,11 @@ export async function renderPlotPreStartChecksPdf(
       ]),
       styles: { fontSize: 8, cellPadding: 1.2 },
       columnStyles: { 4: { cellWidth: 60 } },
-      headStyles: { fillColor: [241, 245, 249], textColor: [51, 65, 85] },
+      headStyles: { fillColor: brandHeadFill(brand), textColor: [255, 255, 255] },
     });
   }
 
+  drawBrandFooter(doc, brand);
   return pdfBuffer(doc);
 }
 
@@ -764,31 +805,28 @@ export async function renderPlotDrawSchedulePdf(
     notes: string | null;
     triggerJob: { name: string } | null;
   }>,
+  brand: PdfBrand,
 ): Promise<Buffer> {
   const { jsPDF, autoTable } = await loadJsPdf();
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
 
-  doc.setFontSize(16);
-  doc.text(`Draw schedule — ${plotName}`, 14, 22);
-  doc.setFontSize(9);
-  doc.setTextColor(120);
   const total = draws.reduce((s, d) => s + d.amount, 0);
   const paid = draws
     .filter((d) => d.status === "PAID")
     .reduce((s, d) => s + d.amount, 0);
-  doc.text(
+  const headerY = drawBrandHeader(
+    doc,
+    brand,
+    `Draw schedule — ${plotName}`,
     `${draws.length} milestone${draws.length === 1 ? "" : "s"} · £${Math.round(total).toLocaleString()} total · £${Math.round(paid).toLocaleString()} paid`,
-    14,
-    28,
   );
-  doc.setTextColor(0);
 
   if (draws.length === 0) {
     doc.setFontSize(10);
-    doc.text("No draw schedule defined.", 14, 40);
+    doc.text("No draw schedule defined.", 14, headerY + 4);
   } else {
     autoTable(doc, {
-      startY: 36,
+      startY: headerY,
       head: [["#", "Milestone", "Amount", "Status", "Due", "Paid", "Trigger"]],
       body: draws.map((d, i) => [
         String(i + 1),
@@ -800,10 +838,11 @@ export async function renderPlotDrawSchedulePdf(
         d.triggerJob?.name ?? "—",
       ]),
       styles: { fontSize: 8, cellPadding: 1 },
-      headStyles: { fillColor: [241, 245, 249], textColor: [51, 65, 85] },
+      headStyles: { fillColor: brandHeadFill(brand), textColor: [255, 255, 255] },
     });
   }
 
+  drawBrandFooter(doc, brand);
   return pdfBuffer(doc);
 }
 
@@ -813,19 +852,20 @@ export async function renderPlotDrawSchedulePdf(
 export async function renderContractorSummaryPdf(
   siteName: string,
   contractors: ContractorPerf[],
+  brand: PdfBrand,
 ): Promise<Buffer> {
   const { jsPDF, autoTable } = await loadJsPdf();
   const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
 
-  doc.setFontSize(16);
-  doc.text(`Contractor analysis — ${siteName}`, 14, 18);
-  doc.setFontSize(9);
-  doc.setTextColor(120);
-  doc.text(`${contractors.length} contractors`, 14, 24);
-  doc.setTextColor(0);
+  const headerY = drawBrandHeader(
+    doc,
+    brand,
+    `Contractor analysis — ${siteName}`,
+    `${contractors.length} contractors`,
+  );
 
   autoTable(doc, {
-    startY: 30,
+    startY: headerY,
     head: [
       ["Contractor", "Company", "Assigned", "Done", "On time", "Late", "Days late"],
     ],
@@ -841,9 +881,10 @@ export async function renderContractorSummaryPdf(
         : "—",
     ]),
     styles: { fontSize: 9, cellPadding: 1.5 },
-    headStyles: { fillColor: [241, 245, 249], textColor: [51, 65, 85] },
+    headStyles: { fillColor: brandHeadFill(brand), textColor: [255, 255, 255] },
   });
 
+  drawBrandFooter(doc, brand);
   return pdfBuffer(doc);
 }
 
@@ -870,23 +911,20 @@ export async function renderContractorDetailPdf(
     totalDelayDaysAttributed: number;
     jobs: ContractorJobRow[];
   },
+  brand: PdfBrand,
 ): Promise<Buffer> {
   const { jsPDF, autoTable } = await loadJsPdf();
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
 
-  doc.setFontSize(16);
-  doc.text(contractor.name, 14, 22);
-  doc.setFontSize(11);
-  doc.setTextColor(120);
-  doc.text(
+  const headerY = drawBrandHeader(
+    doc,
+    brand,
+    contractor.name,
     `${contractor.company ?? "—"} · ${siteName}`,
-    14,
-    30,
   );
-  doc.setTextColor(0);
 
   autoTable(doc, {
-    startY: 40,
+    startY: headerY,
     body: [
       ["Email", contractor.email ?? "—"],
       ["Phone", contractor.phone ?? "—"],
@@ -916,9 +954,10 @@ export async function renderContractorDetailPdf(
       j.daysLate == null ? "—" : `${j.daysLate}d`,
     ]),
     styles: { fontSize: 8, cellPadding: 1 },
-    headStyles: { fillColor: [241, 245, 249], textColor: [51, 65, 85] },
+    headStyles: { fillColor: brandHeadFill(brand), textColor: [255, 255, 255] },
   });
 
+  drawBrandFooter(doc, brand);
   return pdfBuffer(doc);
 }
 
@@ -938,19 +977,20 @@ interface SupplierSummaryRow {
 export async function renderSupplierSummaryPdf(
   siteName: string,
   suppliers: SupplierSummaryRow[],
+  brand: PdfBrand,
 ): Promise<Buffer> {
   const { jsPDF, autoTable } = await loadJsPdf();
   const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
 
-  doc.setFontSize(16);
-  doc.text(`Supplier analysis — ${siteName}`, 14, 18);
-  doc.setFontSize(9);
-  doc.setTextColor(120);
-  doc.text(`${suppliers.length} suppliers`, 14, 24);
-  doc.setTextColor(0);
+  const headerY = drawBrandHeader(
+    doc,
+    brand,
+    `Supplier analysis — ${siteName}`,
+    `${suppliers.length} suppliers`,
+  );
 
   autoTable(doc, {
-    startY: 30,
+    startY: headerY,
     head: [
       [
         "Supplier",
@@ -972,9 +1012,10 @@ export async function renderSupplierSummaryPdf(
       s.totalDaysLate > 0 ? `${s.totalDaysLate}d` : "—",
     ]),
     styles: { fontSize: 9, cellPadding: 1.5 },
-    headStyles: { fillColor: [241, 245, 249], textColor: [51, 65, 85] },
+    headStyles: { fillColor: brandHeadFill(brand), textColor: [255, 255, 255] },
   });
 
+  drawBrandFooter(doc, brand);
   return pdfBuffer(doc);
 }
 
@@ -1001,19 +1042,20 @@ export async function renderSupplierDetailPdf(
     totalDaysLate: number;
     orders: SupplierOrderRow[];
   },
+  brand: PdfBrand,
 ): Promise<Buffer> {
   const { jsPDF, autoTable } = await loadJsPdf();
   const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
 
-  doc.setFontSize(16);
-  doc.text(supplier.name, 14, 18);
-  doc.setFontSize(10);
-  doc.setTextColor(120);
-  doc.text(`${supplier.contactName ?? "—"} · ${siteName}`, 14, 24);
-  doc.setTextColor(0);
+  const headerY = drawBrandHeader(
+    doc,
+    brand,
+    supplier.name,
+    `${supplier.contactName ?? "—"} · ${siteName}`,
+  );
 
   autoTable(doc, {
-    startY: 32,
+    startY: headerY,
     body: [
       ["Email", supplier.contactEmail ?? "—"],
       ["Orders total", String(supplier.ordersTotal)],
@@ -1046,9 +1088,10 @@ export async function renderSupplierDetailPdf(
       o.daysLate == null ? "—" : `${o.daysLate}d`,
     ]),
     styles: { fontSize: 7, cellPadding: 0.8 },
-    headStyles: { fillColor: [241, 245, 249], textColor: [51, 65, 85] },
+    headStyles: { fillColor: brandHeadFill(brand), textColor: [255, 255, 255] },
   });
 
+  drawBrandFooter(doc, brand);
   return pdfBuffer(doc);
 }
 
@@ -1059,11 +1102,19 @@ export function renderReadmeTxt(
   story: SiteStory,
   triggeredByName: string,
   plotFolderNames: string[],
+  brand: PdfBrand,
 ): Buffer {
   const lines: string[] = [];
   lines.push("=".repeat(72));
   lines.push(`SITE HANDOVER PACK — ${story.site.name}`);
   lines.push("=".repeat(72));
+  lines.push("");
+  // (Jun 2026 white-label) Issuing-business block. Plain text can't carry a
+  // logo, so the customer brand name + support contact head the manifest.
+  lines.push(`Issued by: ${brand.brandName}`);
+  if (brand.supportEmail) {
+    lines.push(`Contact: ${brand.supportEmail}`);
+  }
   lines.push("");
   lines.push(`Generated: ${format(new Date(), "dd MMM yyyy HH:mm")}`);
   lines.push(`Triggered by: ${triggeredByName}`);
@@ -1119,6 +1170,7 @@ export function renderReadmeTxt(
   lines.push("    <yyyy-MM-dd>_<topic>/ (subfolder per talk with briefing docs)");
   lines.push("");
   lines.push("=".repeat(72));
+  lines.push(`Generated by ${PLATFORM.name}`);
   lines.push("");
   return Buffer.from(lines.join("\n"), "utf-8");
 }
@@ -1165,23 +1217,21 @@ function fmtCurrency(n: number): string {
 export async function renderBudgetReportPdf(
   siteName: string,
   data: BudgetReportShape,
+  brand: PdfBrand,
 ): Promise<Buffer> {
   const { jsPDF, autoTable } = await loadJsPdf();
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
 
-  doc.setFontSize(18);
-  doc.text("Budget vs Actual", 14, 22);
-  doc.setFontSize(11);
-  doc.setTextColor(120);
-  doc.text(siteName, 14, 30);
+  const headerY = drawBrandHeader(doc, brand, "Budget vs Actual", siteName);
   doc.setFontSize(8);
-  doc.text(`Generated ${format(new Date(), "dd MMM yyyy HH:mm")}`, 14, 36);
+  doc.setTextColor(120);
+  doc.text(`Generated ${format(new Date(), "dd MMM yyyy HH:mm")}`, 14, headerY);
   doc.setTextColor(0);
 
   doc.setFontSize(12);
-  doc.text("Site summary", 14, 48);
+  doc.text("Site summary", 14, headerY + 8);
   autoTable(doc, {
-    startY: 52,
+    startY: headerY + 12,
     body: [
       ["Total budgeted", fmtCurrency(data.siteSummary.totalBudgeted)],
       ["Total committed", fmtCurrency(data.siteSummary.totalCommitted)],
@@ -1215,7 +1265,7 @@ export async function renderBudgetReportPdf(
         `${r.variancePercent}%`,
       ]),
       styles: { fontSize: 8, cellPadding: 1 },
-      headStyles: { fillColor: [241, 245, 249], textColor: [51, 65, 85] },
+      headStyles: { fillColor: brandHeadFill(brand), textColor: [255, 255, 255] },
     });
   }
 
@@ -1233,10 +1283,11 @@ export async function renderBudgetReportPdf(
         fmtCurrency(p.variance),
       ]),
       styles: { fontSize: 8, cellPadding: 1 },
-      headStyles: { fillColor: [241, 245, 249], textColor: [51, 65, 85] },
+      headStyles: { fillColor: brandHeadFill(brand), textColor: [255, 255, 255] },
     });
   }
 
+  drawBrandFooter(doc, brand);
   return pdfBuffer(doc);
 }
 
@@ -1262,23 +1313,21 @@ interface CashFlowShape {
 export async function renderCashFlowPdf(
   siteName: string,
   data: CashFlowShape,
+  brand: PdfBrand,
 ): Promise<Buffer> {
   const { jsPDF, autoTable } = await loadJsPdf();
   const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
 
-  doc.setFontSize(18);
-  doc.text("Cash Flow", 14, 22);
-  doc.setFontSize(11);
-  doc.setTextColor(120);
-  doc.text(siteName, 14, 30);
+  const headerY = drawBrandHeader(doc, brand, "Cash Flow", siteName);
   doc.setFontSize(8);
-  doc.text(`Generated ${format(new Date(), "dd MMM yyyy HH:mm")}`, 14, 36);
+  doc.setTextColor(120);
+  doc.text(`Generated ${format(new Date(), "dd MMM yyyy HH:mm")}`, 14, headerY);
   doc.setTextColor(0);
 
   doc.setFontSize(12);
-  doc.text("Site totals", 14, 48);
+  doc.text("Site totals", 14, headerY + 8);
   autoTable(doc, {
-    startY: 52,
+    startY: headerY + 12,
     body: [
       ["Total forecast", fmtCurrency(data.totals.forecast)],
       ["Total committed", fmtCurrency(data.totals.committed)],
@@ -1303,10 +1352,11 @@ export async function renderCashFlowPdf(
         fmtCurrency(m.actual),
       ]),
       styles: { fontSize: 9, cellPadding: 1.5 },
-      headStyles: { fillColor: [241, 245, 249], textColor: [51, 65, 85] },
+      headStyles: { fillColor: brandHeadFill(brand), textColor: [255, 255, 255] },
     });
   }
 
+  drawBrandFooter(doc, brand);
   return pdfBuffer(doc);
 }
 
@@ -1364,26 +1414,24 @@ interface DelayReportShape {
 export async function renderDelayReportPdf(
   siteName: string,
   data: DelayReportShape,
+  brand: PdfBrand,
 ): Promise<Buffer> {
   const { jsPDF, autoTable } = await loadJsPdf();
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
 
-  doc.setFontSize(18);
-  doc.text("Delay Report", 14, 22);
-  doc.setFontSize(11);
-  doc.setTextColor(120);
-  doc.text(siteName, 14, 30);
+  const headerY = drawBrandHeader(doc, brand, "Delay Report", siteName);
   doc.setFontSize(8);
-  doc.text(`Generated ${format(new Date(), "dd MMM yyyy HH:mm")}`, 14, 36);
+  doc.setTextColor(120);
+  doc.text(`Generated ${format(new Date(), "dd MMM yyyy HH:mm")}`, 14, headerY);
   doc.setTextColor(0);
 
   // (May 2026 audit D-P0-8) Lead with the LatenessEvent rollup so the
   // reader sees the headline before scrolling tables.
   if (data.latenessSummary) {
     doc.setFontSize(12);
-    doc.text("Lateness summary", 14, 48);
+    doc.text("Lateness summary", 14, headerY + 8);
     autoTable(doc, {
-      startY: 52,
+      startY: headerY + 12,
       body: [
         [
           "Open events",
@@ -1402,7 +1450,7 @@ export async function renderDelayReportPdf(
 
   const weatherStartY = data.latenessSummary
     ? (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 12
-    : 48;
+    : headerY + 8;
   doc.setFontSize(12);
   doc.text("Weather impact", 14, weatherStartY);
   autoTable(doc, {
@@ -1469,7 +1517,7 @@ export async function renderDelayReportPdf(
         j.delayReason || "—",
       ]),
       styles: { fontSize: 8, cellPadding: 1 },
-      headStyles: { fillColor: [241, 245, 249], textColor: [51, 65, 85] },
+      headStyles: { fillColor: brandHeadFill(brand), textColor: [255, 255, 255] },
     });
   }
 
@@ -1491,9 +1539,10 @@ export async function renderDelayReportPdf(
         d.expectedDate ? safeDate(d.expectedDate) : "—",
       ]),
       styles: { fontSize: 8, cellPadding: 1 },
-      headStyles: { fillColor: [241, 245, 249], textColor: [51, 65, 85] },
+      headStyles: { fillColor: brandHeadFill(brand), textColor: [255, 255, 255] },
     });
   }
 
+  drawBrandFooter(doc, brand);
   return pdfBuffer(doc);
 }

@@ -279,6 +279,10 @@ export async function POST(
           url: u.url,
           fileName: u.fileName,
         }));
+        // (Jun 2026 white-label) Resolve branding once for the whole fan-out
+        // rather than per contractor.
+        const { getEmailBranding } = await import("@/lib/email");
+        const branding = await getEmailBranding();
         for (const c of contractors) {
           if (!c.email) continue;
           try {
@@ -290,6 +294,7 @@ export async function POST(
               siteName: site?.name ?? "the site",
               dueBy: dueByLabel,
               attachments: emailAttachments,
+              branding,
             });
             await sendEmail({ to: c.email, subject, html });
             emailSentCount++;

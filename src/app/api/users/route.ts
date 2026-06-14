@@ -134,7 +134,7 @@ export async function POST(req: NextRequest) {
     // semantics are identical (request-reset's own comment says so).
     try {
       const { signResetToken } = await import("@/lib/share-token");
-      const { sendEmail } = await import("@/lib/email");
+      const { sendEmail, getEmailBranding, escapeHtml } = await import("@/lib/email");
       const exp = Date.now() + 7 * 24 * 60 * 60 * 1000; // 7 days for invites
       const token = signResetToken({ userId: user.id, email: user.email, exp });
       const baseUrl =
@@ -142,28 +142,41 @@ export async function POST(req: NextRequest) {
         process.env.NEXTAUTH_URL ??
         "https://sight-manager.vercel.app";
       const inviteUrl = `${baseUrl}/reset-password/${token}`;
+      // (Jun 2026 white-label) Brand the chrome + copy with the customer
+      // brand. The invite LINK (inviteUrl / baseUrl) is left exactly as-is.
+      const branding = await getEmailBranding();
+      const headerLogo = branding.darkLogoUrl || branding.logoUrl;
+      const accent = branding.primaryColor;
       await sendEmail({
         to: user.email,
-        subject: "Welcome to Sight Manager — set your password",
+        subject: `Welcome to ${branding.brandName} — set your password`,
         html: `<!DOCTYPE html>
 <html>
 <body style="margin:0;padding:0;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
   <div style="max-width:540px;margin:32px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
-    <div style="background:linear-gradient(135deg,#2563eb,#4f46e5);padding:24px 32px;">
-      <h1 style="margin:0;color:#fff;font-size:18px;font-weight:700;">Sight Manager</h1>
-      <p style="margin:4px 0 0;color:#bfdbfe;font-size:13px;">Welcome</p>
+    <div style="background:linear-gradient(135deg,${accent},${accent}cc);padding:24px 32px;">
+      ${headerLogo
+        ? `<img src="${escapeHtml(headerLogo)}" alt="${escapeHtml(branding.brandName)}" style="max-height:36px;max-width:220px;display:block;" />`
+        : `<h1 style="margin:0;color:#fff;font-size:18px;font-weight:700;">${escapeHtml(branding.brandName)}</h1>`}
+      <p style="margin:4px 0 0;color:rgba(255,255,255,0.82);font-size:13px;">Welcome</p>
     </div>
     <div style="padding:32px;">
-      <p style="margin:0 0 16px;color:#0f172a;font-size:14px;">Hi ${user.name},</p>
+      <p style="margin:0 0 16px;color:#0f172a;font-size:14px;">Hi ${escapeHtml(user.name)},</p>
       <p style="margin:0 0 16px;color:#475569;font-size:14px;line-height:1.55;">
-        Your Sight Manager account has been created. Click the button below to set your password and sign in. The link is valid for 7 days.
+        Your ${escapeHtml(branding.brandName)} account has been created. Click the button below to set your password and sign in. The link is valid for 7 days.
       </p>
       <div style="margin:24px 0;text-align:center;">
-        <a href="${inviteUrl}" style="background:#2563eb;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-size:14px;font-weight:600;">Set your password</a>
+        <a href="${inviteUrl}" style="background:${accent};color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-size:14px;font-weight:600;">Set your password</a>
       </div>
       <p style="margin:16px 0 0;color:#64748b;font-size:12px;line-height:1.55;">
         If you weren't expecting this email, you can safely ignore it.
       </p>
+    </div>
+    <div style="padding:16px 32px;background:#f8fafc;border-top:1px solid #e2e8f0;text-align:center;">
+      ${branding.supportEmail
+        ? `<p style="margin:0 0 4px;color:#64748b;font-size:12px;">Questions? <a href="mailto:${escapeHtml(branding.supportEmail)}" style="color:#64748b;">${escapeHtml(branding.supportEmail)}</a></p>`
+        : ""}
+      <p style="margin:0;color:#cbd5e1;font-size:11px;">${escapeHtml(branding.poweredBy)}</p>
     </div>
   </div>
 </body>

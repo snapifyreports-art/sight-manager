@@ -24,8 +24,9 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { fetchErrorMessage } from "@/components/ui/toast";
-import { ReportExportButtons } from "@/components/shared/ReportExportButtons";
+import { ReportExportButtons, PrintBrandHeader, PrintBrandFooter } from "@/components/shared/ReportExportButtons";
 import { LatenessSummary } from "@/components/lateness/LatenessSummary";
+import { useBrandName } from "@/hooks/useBrandName";
 
 interface DelayReportProps {
   siteId: string;
@@ -186,6 +187,7 @@ function JobDelayCard({ job }: { job: DelayedJob }) {
 
 export function DelayReport({ siteId }: DelayReportProps) {
   const { devDate } = useDevDate();
+  const { brandName, supportEmail } = useBrandName();
   const reqKey = `${siteId}|${devDate ?? ""}`;
   const [loaded, setLoaded] = useState<{ key: string; data: DelayData | null; error: string | null } | null>(null);
   const data = loaded?.key === reqKey ? loaded.data : null;
@@ -304,6 +306,9 @@ export function DelayReport({ siteId }: DelayReportProps) {
 
   return (
     <div className="space-y-4">
+      {/* (Jun 2026 white-label) Print-only customer banner — leads the
+          printed / Save-as-PDF output with the customer name. */}
+      <PrintBrandHeader brandName={brandName} supportEmail={supportEmail ?? undefined} />
       {/* (#191) Lateness summary block at the top of the Delay Report
           — surfaces every open lateness on the site with reason
           breakdown + attribution. Sits alongside the rest of the
@@ -320,6 +325,9 @@ export function DelayReport({ siteId }: DelayReportProps) {
             filename={`delay-report-${format(new Date(), "yyyy-MM-dd")}`}
             rows={exportRows}
             sheetName="Delays"
+            brandName={brandName}
+            supportEmail={supportEmail ?? undefined}
+            reportTitle="Delay Justification Report"
             compact
           />
         </div>
@@ -644,6 +652,9 @@ export function DelayReport({ siteId }: DelayReportProps) {
           <p className="text-xs">All jobs and deliveries are on schedule</p>
         </div>
       )}
+
+      {/* (Jun 2026 white-label) Print-only "Powered by Sight Manager" footer. */}
+      <PrintBrandFooter />
     </div>
   );
 }

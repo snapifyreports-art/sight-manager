@@ -2,6 +2,8 @@ import { prisma } from "@/lib/prisma";
 import { CheckCircle2, Circle, Hammer, Home as HomeIcon, AlertCircle, ShieldCheck } from "lucide-react";
 import { CustomerNotifyToggle } from "./CustomerNotifyToggle";
 import { inspectionTypeLabel } from "@/lib/inspection-doctype";
+import { getCustomerBranding } from "@/lib/branding";
+import { PLATFORM, type CustomerBranding } from "@/lib/platform";
 
 export const dynamic = "force-dynamic";
 
@@ -91,15 +93,43 @@ function relativeWhen(date: Date): string {
   return `${Math.floor(ms / (30 * day))} months ago`;
 }
 
-function NotFoundCard({ reason }: { reason: string }) {
+function NotFoundCard({
+  reason,
+  brand,
+}: {
+  reason: string;
+  brand?: CustomerBranding;
+}) {
   return (
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-b from-slate-50 to-white p-4">
       <div className="max-w-md rounded-2xl border bg-white p-8 text-center shadow-sm">
+        {/* (Jun 2026 white-label) Customer logo on the error card so even
+            a dead link still feels like the builder's own page. */}
+        {brand?.logoUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={brand.logoUrl}
+            alt={brand.brandName}
+            className="mx-auto mb-5 h-10 w-auto max-w-[12rem] object-contain"
+          />
+        ) : null}
         <AlertCircle className="mx-auto size-12 text-amber-400" />
         <h1 className="mt-4 text-xl font-semibold text-slate-800">{reason}</h1>
         <p className="mt-2 text-sm text-slate-500">
           Please get in touch with the site team if you think this is a mistake.
         </p>
+        {brand?.supportEmail && (
+          <p className="mt-2 text-sm text-slate-500">
+            Contact{" "}
+            <a
+              href={`mailto:${brand.supportEmail}`}
+              className="font-medium underline"
+            >
+              {brand.supportEmail}
+            </a>
+          </p>
+        )}
+        <p className="mt-6 text-[11px] text-slate-400">{PLATFORM.poweredBy}</p>
       </div>
     </div>
   );
@@ -111,8 +141,12 @@ export default async function ProgressPage({
   params: Promise<{ token: string }>;
 }) {
   const { token } = await params;
+  // (Jun 2026 white-label) Branding reads only the AppSettings singleton
+  // (no plot/token data), so it's safe to hoist before the token check —
+  // the error card can then carry the customer's logo + support contact.
+  const brand = await getCustomerBranding();
   if (!token || token.length < 16) {
-    return <NotFoundCard reason="This link isn't active" />;
+    return <NotFoundCard reason="This link isn't active" brand={brand} />;
   }
 
   // Deliberately narrow select (see the hard rules above). Server
@@ -144,7 +178,7 @@ export default async function ProgressPage({
   });
 
   if (!plot || !plot.shareEnabled) {
-    return <NotFoundCard reason="This link isn't active" />;
+    return <NotFoundCard reason="This link isn't active" brand={brand} />;
   }
 
   const photos = await prisma.jobPhoto.findMany({
@@ -181,14 +215,40 @@ export default async function ProgressPage({
   const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-blue-50 to-white">
+    <div
+      className="min-h-screen bg-gradient-to-b from-white to-white"
+      style={{ ["--brand" as string]: brand.primaryColor }}
+    >
       <div className="mx-auto max-w-2xl px-4 py-8 sm:py-12">
         {/* ─── Hero ─── */}
         <header className="mb-8 text-center">
-          <div className="mx-auto mb-4 flex size-16 items-center justify-center rounded-2xl bg-blue-100 text-blue-600 shadow-sm">
-            <HomeIcon className="size-8" />
-          </div>
-          <p className="text-sm font-medium uppercase tracking-wider text-blue-600">
+          {/* (Jun 2026 white-label) Lead with the customer's brand: logo +
+              name above the page. Falls back to the generic home tile
+              (tinted with the brand accent) when no logo is set. */}
+          {brand.logoUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={brand.logoUrl}
+              alt={brand.brandName}
+              className="mx-auto mb-4 h-12 w-auto max-w-[14rem] object-contain"
+            />
+          ) : (
+            <div
+              className="mx-auto mb-4 flex size-16 items-center justify-center rounded-2xl text-white shadow-sm"
+              style={{ backgroundColor: brand.primaryColor }}
+            >
+              <HomeIcon className="size-8" />
+            </div>
+          )}
+          {brand.brandNameRaw && (
+            <p className="mb-2 text-base font-semibold text-slate-700">
+              {brand.brandName}
+            </p>
+          )}
+          <p
+            className="text-sm font-medium uppercase tracking-wider"
+            style={{ color: brand.primaryColor }}
+          >
             Your new home
           </p>
           {/* (May 2026 audit #29) Pre-fix this rendered "Plot —" with a
@@ -257,7 +317,10 @@ export default async function ProgressPage({
                 {completed} of {total} stages complete
               </p>
               {inProgress && (
-                <p className="mt-1 flex items-center gap-1.5 text-sm text-blue-600">
+                <p
+                  className="mt-1 flex items-center gap-1.5 text-sm font-medium"
+                  style={{ color: brand.primaryColor }}
+                >
                   <Hammer className="size-4" />
                   Currently: {inProgress.name}
                 </p>
@@ -286,13 +349,13 @@ export default async function ProgressPage({
                   cx="40"
                   cy="40"
                   r="32"
-                  stroke="currentColor"
+                  stroke={brand.primaryColor}
                   strokeWidth="6"
                   fill="none"
                   strokeLinecap="round"
                   strokeDasharray={2 * Math.PI * 32}
                   strokeDashoffset={2 * Math.PI * 32 * (1 - pct / 100)}
-                  className="text-blue-500 transition-[stroke-dashoffset] duration-700"
+                  className="transition-[stroke-dashoffset] duration-700"
                 />
               </svg>
               <div className="absolute inset-0 flex items-center justify-center text-base font-bold text-slate-900">
@@ -309,7 +372,11 @@ export default async function ProgressPage({
           </h2>
           <ol className="space-y-2">
             {milestones.map((m) => (
-              <MilestoneRow key={m.id} milestone={m} />
+              <MilestoneRow
+                key={m.id}
+                milestone={m}
+                accent={brand.primaryColor}
+              />
             ))}
           </ol>
         </section>
@@ -397,13 +464,22 @@ export default async function ProgressPage({
 
         <footer className="mt-12 border-t pt-6 text-center text-xs text-slate-400">
           We&apos;ll keep this page up to date as your home takes shape.
+          <span className="mt-2 block text-[11px] text-slate-300">
+            {PLATFORM.poweredBy}
+          </span>
         </footer>
       </div>
     </div>
   );
 }
 
-function MilestoneRow({ milestone }: { milestone: Milestone }) {
+function MilestoneRow({
+  milestone,
+  accent,
+}: {
+  milestone: Milestone;
+  accent: string;
+}) {
   const config = {
     completed: {
       Icon: CheckCircle2,
@@ -414,9 +490,13 @@ function MilestoneRow({ milestone }: { milestone: Milestone }) {
     },
     in_progress: {
       Icon: Hammer,
-      iconClass: "text-blue-500",
-      bgClass: "bg-blue-50 border-blue-200",
-      labelClass: "text-blue-700",
+      // (Jun 2026 white-label) The "in progress" milestone is the one the
+      // buyer's eye lands on — tint it with the customer's accent colour
+      // instead of a hardcoded blue. Inline styles below carry the colour;
+      // the slate-200 border keeps a neutral frame.
+      iconClass: "",
+      bgClass: "border-slate-200",
+      labelClass: "",
       label: "In progress",
     },
     upcoming: {
@@ -428,15 +508,24 @@ function MilestoneRow({ milestone }: { milestone: Milestone }) {
     },
   }[milestone.status];
 
+  const inProgress = milestone.status === "in_progress";
+
   return (
     <li
       className={`flex items-center gap-3 rounded-xl border p-3 transition-colors ${config.bgClass}`}
+      style={inProgress ? { backgroundColor: `${accent}14` } : undefined}
     >
-      <config.Icon className={`size-6 shrink-0 ${config.iconClass}`} />
+      <config.Icon
+        className={`size-6 shrink-0 ${config.iconClass}`}
+        style={inProgress ? { color: accent } : undefined}
+      />
       <div className="flex-1 min-w-0">
         <p className="font-medium text-slate-900 truncate">{milestone.name}</p>
       </div>
-      <span className={`text-xs font-medium uppercase tracking-wider ${config.labelClass}`}>
+      <span
+        className={`text-xs font-medium uppercase tracking-wider ${config.labelClass}`}
+        style={inProgress ? { color: accent } : undefined}
+      >
         {config.label}
       </span>
     </li>

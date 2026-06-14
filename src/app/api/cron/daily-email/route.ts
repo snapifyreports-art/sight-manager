@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { sendEmail, escapeHtml } from "@/lib/email";
+import { sendEmail, escapeHtml, getEmailBranding } from "@/lib/email";
 import { format } from "date-fns";
 import { getServerCurrentDate, getServerStartOfDay } from "@/lib/dev-date";
 import { getUserSiteIds } from "@/lib/site-access";
@@ -202,6 +202,13 @@ export async function GET(req: NextRequest) {
     });
   }
 
+  // (Jun 2026 white-label) Resolve customer branding ONCE per run (not per
+  // recipient) — the morning brief leads with the customer's logo/name/colour
+  // and demotes "Sight Manager" to the powered-by footer line.
+  const branding = await getEmailBranding();
+  const headerLogo = branding.darkLogoUrl || branding.logoUrl;
+  const accent = branding.primaryColor;
+
   // Build email HTML
   const dateLabel = format(now, "EEEE d MMMM yyyy");
   // (May 2026 audit B-P1-15) Prefer the request origin when present
@@ -357,9 +364,11 @@ export async function GET(req: NextRequest) {
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
 <body style="margin:0;padding:0;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
   <div style="max-width:600px;margin:32px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
-    <div style="background:linear-gradient(135deg,#2563eb,#4f46e5);padding:24px 32px;">
-      <h1 style="margin:0;color:#fff;font-size:18px;font-weight:700;">Sight Manager</h1>
-      <p style="margin:4px 0 0;color:#bfdbfe;font-size:13px;">Daily Brief — ${dateLabel}</p>
+    <div style="background:linear-gradient(135deg,${accent},${accent}cc);padding:24px 32px;">
+      ${headerLogo
+        ? `<img src="${escapeHtml(headerLogo)}" alt="${escapeHtml(branding.brandName)}" style="max-height:36px;max-width:220px;display:block;" />`
+        : `<h1 style="margin:0;color:#fff;font-size:18px;font-weight:700;">${escapeHtml(branding.brandName)}</h1>`}
+      <p style="margin:4px 0 0;color:rgba(255,255,255,0.82);font-size:13px;">Daily Brief — ${dateLabel}</p>
     </div>
     <div style="padding:32px;">
       ${totalAlerts > 0
@@ -373,11 +382,15 @@ export async function GET(req: NextRequest) {
       <h2 style="margin:0 0 16px;font-size:16px;color:#0f172a;">Site Overview</h2>
       ${buildSiteRows(digests)}
       <div style="margin:24px 0 0;text-align:center;">
-        <a href="${baseUrl}" style="background:#2563eb;color:#fff;padding:10px 24px;border-radius:8px;text-decoration:none;font-size:14px;font-weight:600;">Open Sight Manager</a>
+        <a href="${baseUrl}" style="background:${accent};color:#fff;padding:10px 24px;border-radius:8px;text-decoration:none;font-size:14px;font-weight:600;">Open ${escapeHtml(branding.brandName)}</a>
       </div>
     </div>
     <div style="padding:16px 32px;background:#f8fafc;border-top:1px solid #e2e8f0;text-align:center;">
-      <p style="margin:0;color:#94a3b8;font-size:12px;">Sent from Sight Manager &mdash; daily brief for ${dateLabel}</p>
+      <p style="margin:0 0 4px;color:#94a3b8;font-size:12px;">Daily brief for ${dateLabel}</p>
+      ${branding.supportEmail
+        ? `<p style="margin:0 0 4px;color:#64748b;font-size:12px;">Questions? <a href="mailto:${escapeHtml(branding.supportEmail)}" style="color:#64748b;">${escapeHtml(branding.supportEmail)}</a></p>`
+        : ""}
+      <p style="margin:0;color:#cbd5e1;font-size:11px;">${escapeHtml(branding.poweredBy)}</p>
     </div>
   </div>
 </body>

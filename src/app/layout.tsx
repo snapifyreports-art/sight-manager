@@ -9,20 +9,33 @@ import { GlobalLoadingBar } from "@/components/layout/GlobalLoadingBar";
 import { ToastProvider } from "@/components/ui/toast";
 import { BusyOverlayProvider } from "@/components/ui/busy-overlay";
 import { LateSendPromptProvider } from "@/components/orders/LateSendPromptProvider";
+import { getBranding } from "@/lib/branding";
 
-export const metadata: Metadata = {
-  title: "Sight Manager",
-  description: "Construction Site Management",
-  manifest: "/manifest.json",
-  icons: {
-    apple: "/icons/icon-192.png",
-  },
-  appleWebApp: {
-    capable: true,
-    statusBarStyle: "default",
-    title: "Sight Manager",
-  },
-};
+// (Jun 2026 white-label) Metadata is now async so the browser tab title,
+// title template, and PWA manifest all carry the CUSTOMER brand (falling
+// back to the platform name for unbranded tenants). manifest now points at
+// the dynamic /manifest.webmanifest (src/app/manifest.ts) instead of the
+// static /manifest.json so it themes per tenant.
+export async function generateMetadata(): Promise<Metadata> {
+  const { customer } = await getBranding();
+  const name = customer.brandName; // already resolved (falls back to platform)
+  return {
+    title: {
+      default: name,
+      template: `%s · ${name}`,
+    },
+    description: `${name} — Construction Site Management`,
+    manifest: "/manifest.webmanifest",
+    icons: {
+      apple: "/icons/icon-192.png",
+    },
+    appleWebApp: {
+      capable: true,
+      statusBarStyle: "default",
+      title: name,
+    },
+  };
+}
 
 // (May 2026 audit O-1 / UX-1) Viewport meta tag was missing entirely
 // — every external mobile user (contractor token portal, customer

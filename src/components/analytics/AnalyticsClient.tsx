@@ -6,6 +6,7 @@ import { useSearchParams } from "next/navigation";
 import { format } from "date-fns";
 import { useDevDate } from "@/lib/dev-date-context";
 import { ReportExportButtons } from "@/components/shared/ReportExportButtons";
+import { useBrandName } from "@/hooks/useBrandName";
 import { Breadcrumbs } from "@/components/ui/breadcrumbs";
 import {
   BarChart,
@@ -242,6 +243,7 @@ function RAGBadge({ value }: { value: number | null }) {
 
 export function AnalyticsClient() {
   const { devDate } = useDevDate();
+  const { brandName, supportEmail } = useBrandName();
   const searchParams = useSearchParams();
   const siteFilter = searchParams.get("site") ?? "";
   const reqKey = `${siteFilter}|${devDate ?? ""}`;
@@ -410,6 +412,9 @@ export function AnalyticsClient() {
         <ReportExportButtons
           filename={`analytics-${format(new Date(), "yyyy-MM-dd")}`}
           sheets={exportSheets}
+          brandName={brandName}
+          supportEmail={supportEmail ?? undefined}
+          reportTitle="Analytics"
           compact
         />
       </div>

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { sendEmail, escapeHtml } from "@/lib/email";
+import { sendEmail, escapeHtml, getEmailBranding } from "@/lib/email";
 import { sendPushToSiteAudience } from "@/lib/push";
 import { format, addDays } from "date-fns";
 import { getServerCurrentDate, getServerStartOfDay } from "@/lib/dev-date";
@@ -171,6 +171,14 @@ export async function GET(req: NextRequest) {
     thunder: "Thunderstorms",
   };
 
+  // (Jun 2026 white-label) Resolve branding ONCE per run. The evening wrap
+  // previously had no header card — it now gets the same branded chrome as the
+  // morning brief: customer logo/name + brand colour, "Sight Manager" demoted
+  // to the powered-by footer line.
+  const branding = await getEmailBranding();
+  const headerLogo = branding.darkLogoUrl || branding.logoUrl;
+  const accent = branding.primaryColor;
+
   function buildWrapHtml(digests: typeof siteDigests): string {
     const lines: string[] = [];
     lines.push(
@@ -206,10 +214,32 @@ export async function GET(req: NextRequest) {
         </div>`,
       );
     }
-    lines.push(
-      `<p style="font-family:system-ui,sans-serif;font-size:11px;color:#94a3b8;margin:16px 0 0">Sight Manager · end-of-day wrap</p>`,
-    );
-    return lines.join("");
+    const body = lines.join("");
+    // Wrap in the branded card — header (logo/name + brand colour) and a
+    // footer with the support line + small powered-by co-brand.
+    return `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+  <div style="max-width:600px;margin:32px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
+    <div style="background:linear-gradient(135deg,${accent},${accent}cc);padding:24px 32px;">
+      ${headerLogo
+        ? `<img src="${escapeHtml(headerLogo)}" alt="${escapeHtml(branding.brandName)}" style="max-height:36px;max-width:220px;display:block;" />`
+        : `<h1 style="margin:0;color:#fff;font-size:18px;font-weight:700;">${escapeHtml(branding.brandName)}</h1>`}
+      <p style="margin:4px 0 0;color:rgba(255,255,255,0.82);font-size:13px;">End of day wrap — ${dateLabel}</p>
+    </div>
+    <div style="padding:32px;">
+      ${body}
+    </div>
+    <div style="padding:16px 32px;background:#f8fafc;border-top:1px solid #e2e8f0;text-align:center;">
+      ${branding.supportEmail
+        ? `<p style="margin:0 0 4px;color:#64748b;font-size:12px;">Questions? <a href="mailto:${escapeHtml(branding.supportEmail)}" style="color:#64748b;">${escapeHtml(branding.supportEmail)}</a></p>`
+        : ""}
+      <p style="margin:0;color:#cbd5e1;font-size:11px;">${escapeHtml(branding.poweredBy)}</p>
+    </div>
+  </div>
+</body>
+</html>`;
   }
 
   // Per-site push fan-out.

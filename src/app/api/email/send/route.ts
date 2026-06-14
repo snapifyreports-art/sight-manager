@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import {
   sendEmail,
+  getEmailBranding,
   deliveryConfirmedEmail,
   nextStageReadyEmail,
   snagRaisedEmail,
@@ -103,6 +104,10 @@ export async function POST(req: NextRequest) {
   let subject: string;
   let html: string;
 
+  // (Jun 2026 white-label) Resolve customer branding once; the template
+  // builders render the header logo / brand colour / support footer from it.
+  const branding = await getEmailBranding();
+
   if (type === "delivery_confirmed") {
     const template = deliveryConfirmedEmail({
       contractorName: recipientName,
@@ -110,6 +115,7 @@ export async function POST(req: NextRequest) {
       supplierName: (data.supplierName as string) || "",
       siteName: (data.siteName as string) || "",
       plotName: (data.plotName as string) || "",
+      branding,
     });
     subject = template.subject;
     html = template.html;
@@ -120,6 +126,7 @@ export async function POST(req: NextRequest) {
       nextJobName: (data.nextJobName as string) || "",
       siteName: (data.siteName as string) || "",
       plotName: (data.plotName as string) || "",
+      branding,
     });
     subject = template.subject;
     html = template.html;
@@ -132,6 +139,7 @@ export async function POST(req: NextRequest) {
       plotName: (data.plotName as string) || "",
       siteName: (data.siteName as string) || "",
       photoUrls: (data.photoUrls as string[]) || [],
+      branding,
     });
     subject = template.subject;
     html = template.html;

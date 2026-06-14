@@ -84,6 +84,34 @@ import {
   hexToRgb,
   getPlotStatus,
 } from "./programme-modules/helpers";
+import { PLATFORM, PLATFORM_PRIMARY } from "@/lib/platform";
+
+/**
+ * (Jun 2026 white-label) Resolve the customer brand for CLIENT-side exports.
+ *
+ * The shared server pdf-branding loader fetches the logo bytes server-side, so
+ * client jsPDF exports can't embed a remote logo — these exports carry the
+ * brand NAME + primaryColor + a "Powered by Sight Manager" footer instead.
+ * Fetches GET /api/settings/branding; fail-safe to the platform defaults.
+ */
+async function fetchBrandingClient(): Promise<{
+  brandName: string;
+  primaryColor: string;
+  supportEmail: string | null;
+}> {
+  try {
+    const res = await fetch("/api/settings/branding");
+    if (!res.ok) throw new Error("branding fetch failed");
+    const d = await res.json();
+    return {
+      brandName: d.brandName?.trim() || d.platformName || PLATFORM.name,
+      primaryColor: d.primaryColor || PLATFORM_PRIMARY,
+      supportEmail: d.supportEmail ?? null,
+    };
+  } catch {
+    return { brandName: PLATFORM.name, primaryColor: PLATFORM_PRIMARY, supportEmail: null };
+  }
+}
 
 
 
@@ -910,7 +938,17 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
       return baseRow;
     });
 
-    const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+    // (Jun 2026 white-label) Prepend a [brandName] title row above the
+    // header/data so the downloaded programme carries the customer identity.
+    // Fetched client-side here (these exports run on the client, away from the
+    // server getBranding path); fail-safe to the platform name.
+    const brand = await fetchBrandingClient();
+    const ws = XLSX.utils.aoa_to_sheet([
+      [brand.brandName],
+      [`${site.name} — Programme`],
+      headers,
+      ...rows,
+    ]);
     ws["!cols"] = headers.map((_, i) => ({ wch: i < 12 ? 10 : (viewMode === "day" ? 3 : 6) }));
 
     const wb = XLSX.utils.book_new();
@@ -924,19 +962,31 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
     const { loadJsPdf } = await import("@/lib/pdf-builder");
     const { jsPDF, autoTable } = await loadJsPdf();
 
+    // (Jun 2026 white-label) Resolve customer branding client-side. NOTE: the
+    // shared server pdf-branding loader fetches the logo bytes server-side, so
+    // we can't embed a remote logo here — per the rollout contract, client PDF
+    // exports carry the brand NAME + primaryColor accent + a "Powered by Sight
+    // Manager" footer, and skip the logo image. Fail-safe to the platform name.
+    const brand = await fetchBrandingClient();
+    const brandRgb = hexToRgb(brand.primaryColor);
+
     const plotsToExport = processedPlots;
 
     const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a3" });
 
-    // Title
+    // Title — customer brand name leads, then the site/programme line.
+    doc.setFontSize(11);
+    doc.setTextColor(brandRgb[0], brandRgb[1], brandRgb[2]);
+    doc.text(brand.brandName, 14, 11);
+    doc.setTextColor(0);
     doc.setFontSize(14);
-    doc.text(`${site.name} — Programme`, 14, 15);
+    doc.text(`${site.name} — Programme`, 14, 18);
     doc.setFontSize(8);
     doc.setTextColor(120);
     const filterLabel = hasFilters
       ? ` | Filtered: ${plotsToExport.length} of ${site.plots.length} plots`
       : "";
-    doc.text(`Generated ${format(new Date(), "dd/MM/yyyy HH:mm")}${filterLabel}`, 14, 21);
+    doc.text(`Generated ${format(new Date(), "dd/MM/yyyy HH:mm")}${filterLabel}`, 14, 23);
     doc.setTextColor(0);
 
     // Columns — no "Site" column (already in title)
@@ -1005,7 +1055,7 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
     const timelineColWidth = viewMode === "day" ? 3 : 6;
 
     autoTable(doc, {
-      startY: 25,
+      startY: 27,
       head: [allCols],
       body: rows,
       styles: {
@@ -1015,8 +1065,10 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
         lineColor: [226, 232, 240], // slate-200
       },
       headStyles: {
-        fillColor: [248, 250, 252], // slate-50
-        textColor: [71, 85, 105],   // slate-500
+        // (Jun 2026 white-label) Tint the head row with the customer's primary
+        // colour; white head text keeps it legible over the brand fill.
+        fillColor: brandRgb,
+        textColor: [255, 255, 255],
         fontSize: viewMode === "day" ? 3.5 : 5,
         fontStyle: "bold",
         halign: "center",
@@ -1085,6 +1137,23 @@ export function SiteProgramme({ siteId, postcode }: { siteId: string; postcode?:
       doc.text(label, legendX + 4, legendY + 2.5);
       legendX += 25;
     });
+
+    // (Jun 2026 white-label) "Powered by Sight Manager" co-brand footer, bottom
+    // -right of every page. (No customer logo embedded — client-side jsPDF
+    // can't reach the server logo loader; see the NOTE above.)
+    const pageCount = doc.getNumberOfPages();
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    for (let p = 1; p <= pageCount; p++) {
+      doc.setPage(p);
+      doc.setFontSize(7);
+      doc.setTextColor(148, 163, 184);
+      doc.text(PLATFORM.poweredBy, pageW - 14, pageH - 6, { align: "right" });
+      if (brand.supportEmail) {
+        doc.text(`Questions? ${brand.supportEmail}`, 14, pageH - 6);
+      }
+      doc.setTextColor(0);
+    }
 
     doc.save(`${site.name.replace(/\s+/g, "_")}_programme.pdf`);
   }, [site, processedPlots, columns, hasFilters, todayIndex, viewMode]);

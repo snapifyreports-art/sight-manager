@@ -30,6 +30,7 @@ import {
 import { SnagStatusBadge, SnagPriorityBadge } from "@/components/shared/StatusBadge";
 import { InlinePriorityPicker } from "./InlinePriorityPicker";
 import { useSnagAction, type SnagStatus } from "@/hooks/useSnagAction";
+import { useBrandName } from "@/hooks/useBrandName";
 import { useToast, fetchErrorMessage } from "@/components/ui/toast";
 
 interface SnagPhoto {
@@ -72,6 +73,7 @@ interface SnagListProps {
 
 export function SnagList({ snags, onSelect, onRefresh, showPlot, highlightId, siteId, initialStatusFilter }: SnagListProps) {
   const toast = useToast();
+  const { brandName, supportEmail } = useBrandName();
   const [filterStatus, setFilterStatus] = useState<string>("all");
   // (Jun 2026 review) Respond to PROP CHANGES, not just mount — a
   // client-side navigation can deliver a new ?filter= to an already-
@@ -197,7 +199,16 @@ export function SnagList({ snags, onSelect, onRefresh, showPlot, highlightId, si
       Plot: s.plot ? (s.plot.plotNumber ? `Plot ${s.plot.plotNumber}` : s.plot.name) : "",
       Notes: s.notes || "",
     }));
-    const ws = XLSX.utils.json_to_sheet(rows);
+    // (Jun 2026 white-label) Prepend a brand banner + title row above the
+    // snag data so the downloaded spreadsheet carries the customer identity.
+    // The display name is null-safe (falls back to the platform name in the
+    // hook); the data table is offset below the banner via the origin option.
+    const bannerRows: string[][] = [
+      [supportEmail ? `${brandName} — ${supportEmail}` : brandName],
+      ["Snag List"],
+    ];
+    const ws = XLSX.utils.aoa_to_sheet(bannerRows);
+    XLSX.utils.sheet_add_json(ws, rows, { origin: bannerRows.length });
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Snags");
     XLSX.writeFile(wb, "snag-list.xlsx");

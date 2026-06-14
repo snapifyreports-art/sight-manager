@@ -24,6 +24,7 @@
 
 import { Printer, FileSpreadsheet } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { PLATFORM } from "@/lib/platform";
 
 // (May 2026 audit P-* bundle-bloat) xlsx is ~190 KB gzipped — pre-fix
 // the static import shipped it on every authenticated page that
@@ -54,6 +55,65 @@ export interface ReportExportButtonsProps {
   hideExcel?: boolean;
   /** Compact / small variant. Default false = normal size. */
   compact?: boolean;
+  /**
+   * (Jun 2026 white-label) Customer display name. When provided, the Excel
+   * export gets a leading brand row + a title row above the data, so a
+   * downloaded spreadsheet carries the customer's identity. Omit it (or pass
+   * the platform name) for the previous unbranded behaviour.
+   */
+  brandName?: string;
+  /**
+   * (Jun 2026 white-label) Optional support email. Appended after the brand
+   * name in the Excel banner row when present.
+   */
+  supportEmail?: string;
+  /**
+   * (Jun 2026 white-label) Human title for the report (e.g. "Weekly Site
+   * Report"). Used as the Excel title row when a brand banner is added.
+   */
+  reportTitle?: string;
+}
+
+/**
+ * (Jun 2026 white-label) Print-only co-branded banner. Reports that have a
+ * print view render this above their print header so the printed/Save-as-PDF
+ * output carries the customer name at the top and "Powered by Sight Manager"
+ * at the bottom. Hidden on screen (`print:block` only). Pass the resolved
+ * display name (brandName || platformName) as `brandName`.
+ */
+export function PrintBrandHeader({
+  brandName,
+  supportEmail,
+}: {
+  brandName?: string;
+  supportEmail?: string;
+}) {
+  if (!brandName) return null;
+  return (
+    <div className="hidden print:block">
+      <div className="mb-2 flex items-center justify-between border-b pb-2">
+        <span className="text-base font-bold">{brandName}</span>
+        {supportEmail && (
+          <span className="text-xs text-slate-500">{supportEmail}</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * (Jun 2026 white-label) Print-only co-brand footer — the fixed
+ * "Powered by Sight Manager" platform mark. Reports include it at the
+ * bottom of their print view alongside PrintBrandHeader.
+ */
+export function PrintBrandFooter() {
+  return (
+    <div className="hidden print:block">
+      <p className="mt-4 border-t pt-2 text-center text-[10px] text-slate-400">
+        {PLATFORM.poweredBy}
+      </p>
+    </div>
+  );
 }
 
 export function ReportExportButtons({
@@ -65,6 +125,9 @@ export function ReportExportButtons({
   hidePrint = false,
   hideExcel = false,
   compact = false,
+  brandName,
+  supportEmail,
+  reportTitle,
 }: ReportExportButtonsProps) {
   const handlePrint = () => {
     if (onPrint) onPrint();
@@ -81,6 +144,26 @@ export function ReportExportButtons({
     if (!canExcel) return;
     const XLSX = await import("xlsx");
     const wb = XLSX.utils.book_new();
+
+    // (Jun 2026 white-label) When a brandName is supplied, prepend a brand
+    // banner row (brand name + optional support email) and a title row above
+    // the data, so a downloaded spreadsheet carries the customer's identity.
+    // Without a brandName the sheet is built exactly as before. The data JSON
+    // is offset down by the number of banner rows via the `origin` option.
+    const bannerRows: string[][] = [];
+    if (brandName) {
+      bannerRows.push([supportEmail ? `${brandName} — ${supportEmail}` : brandName]);
+      if (reportTitle) bannerRows.push([reportTitle]);
+    }
+    const buildSheet = (sheetRows: Array<Record<string, unknown>>) => {
+      if (bannerRows.length === 0) return XLSX.utils.json_to_sheet(sheetRows);
+      // Banner rows occupy the top; the data table (with its own header row)
+      // starts immediately below them.
+      const ws = XLSX.utils.aoa_to_sheet(bannerRows);
+      XLSX.utils.sheet_add_json(ws, sheetRows, { origin: bannerRows.length });
+      return ws;
+    };
+
     if (multiSheets.length > 0) {
       // (Jun 2026 Wave-4 D5) One tab per table. Sheet names are limited to
       // 31 chars and must be unique within the workbook.
@@ -90,10 +173,10 @@ export function ReportExportButtons({
         let i = 2;
         while (used.has(name)) name = `${s.name.slice(0, 28)} ${i++}`;
         used.add(name);
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(s.rows), name);
+        XLSX.utils.book_append_sheet(wb, buildSheet(s.rows), name);
       }
     } else {
-      const ws = XLSX.utils.json_to_sheet(rows!);
+      const ws = buildSheet(rows!);
       // Sheet names are limited to 31 chars.
       XLSX.utils.book_append_sheet(wb, ws, sheetName.slice(0, 31));
     }

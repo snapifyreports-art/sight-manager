@@ -17,6 +17,8 @@ import { buildSiteStory } from "./site-story";
 import { whereOrdersForSite } from "./order-scope";
 import { whereJobEndOverdue } from "./lateness";
 import { differenceInWorkingDays } from "./working-days";
+import { loadPdfBrand } from "./pdf-branding";
+import { getBranding } from "./branding";
 import {
   renderSiteStoryPdf,
   renderCompletionSummaryPdf,
@@ -180,6 +182,12 @@ export async function buildHandoverArchive({
     throw err;
   });
 
+  // (Jun 2026 white-label) Resolve the customer brand ONCE — fetched here
+  // and threaded into every renderer so the whole pack heads with the same
+  // customer logo + name and foots with the "Powered by Sight Manager"
+  // co-brand. One logo fetch for the entire ZIP.
+  const brand = await loadPdfBrand((await getBranding(prisma)).customer);
+
   // Build the rich Story payload up front — used by overview PDFs +
   // per-plot PDFs + contractor section.
   const story = await buildSiteStory(prisma, siteId, {
@@ -201,16 +209,16 @@ export async function buildHandoverArchive({
 
   // ─── 00_README ────────────────────────────────────────────────────
   archive.append(
-    renderReadmeTxt(story, triggeredByUserName, plotFolderNames),
+    renderReadmeTxt(story, triggeredByUserName, plotFolderNames, brand),
     { name: "00_README.txt" },
   );
 
   // ─── 01_Site_Overview ─────────────────────────────────────────────
-  const siteStoryPdf = await renderSiteStoryPdf(story);
+  const siteStoryPdf = await renderSiteStoryPdf(story, brand);
   archive.append(siteStoryPdf, {
     name: "01_Site_Overview/site-story.pdf",
   });
-  const completionPdf = await renderCompletionSummaryPdf(story);
+  const completionPdf = await renderCompletionSummaryPdf(story, brand);
   archive.append(completionPdf, {
     name: "01_Site_Overview/completion-summary.pdf",
   });
@@ -228,7 +236,7 @@ export async function buildHandoverArchive({
     const folder = `02_Plots/${plotFolderNames[i]}`;
 
     // plot-story.pdf
-    const plotStoryPdf = await renderPlotStoryPdf(story, plot);
+    const plotStoryPdf = await renderPlotStoryPdf(story, plot, brand);
     archive.append(plotStoryPdf, { name: `${folder}/plot-story.pdf` });
 
     // snag-log.pdf — Snag uses createdAt + description (no separate
@@ -250,6 +258,7 @@ export async function buildHandoverArchive({
     const snagPdf = await renderPlotSnagLogPdf(
       `Plot ${plot.plotNumber || plot.name}`,
       snags,
+      brand,
     );
     archive.append(snagPdf, { name: `${folder}/snag-log.pdf` });
 
@@ -283,6 +292,7 @@ export async function buildHandoverArchive({
       const inspPdf = await renderPlotInspectionLogPdf(
         `Plot ${plot.plotNumber || plot.name}`,
         plotInspections,
+        brand,
       );
       archive.append(inspPdf, { name: `${folder}/inspection-log.pdf` });
       for (const ins of plotInspections) {
@@ -358,7 +368,7 @@ export async function buildHandoverArchive({
           : null,
         contact: n.contact,
       }));
-      const ncrPdf = await renderPlotNcrLogPdf(plotLabel, ncrs);
+      const ncrPdf = await renderPlotNcrLogPdf(plotLabel, ncrs, brand);
       archive.append(ncrPdf, { name: `${folder}/ncr-log.pdf` });
     }
 
@@ -375,7 +385,7 @@ export async function buildHandoverArchive({
       },
     });
     if (defects.length > 0) {
-      const defectPdf = await renderPlotDefectLogPdf(plotLabel, defects);
+      const defectPdf = await renderPlotDefectLogPdf(plotLabel, defects, brand);
       archive.append(defectPdf, {
         name: `${folder}/defect-log.pdf`,
       });
@@ -397,7 +407,7 @@ export async function buildHandoverArchive({
       },
     });
     if (variations.length > 0) {
-      const varPdf = await renderPlotVariationLogPdf(plotLabel, variations);
+      const varPdf = await renderPlotVariationLogPdf(plotLabel, variations, brand);
       archive.append(varPdf, { name: `${folder}/variation-log.pdf` });
     }
 
@@ -444,6 +454,7 @@ export async function buildHandoverArchive({
       const psPdf = await renderPlotPreStartChecksPdf(
         plotLabel,
         preStartChecks,
+        brand,
       );
       archive.append(psPdf, { name: `${folder}/pre-start-checks.pdf` });
     }
@@ -490,7 +501,7 @@ export async function buildHandoverArchive({
           ? { name: triggerJobMap.get(d.triggerJobId) ?? "Unknown" }
           : null,
       }));
-      const dsPdf = await renderPlotDrawSchedulePdf(plotLabel, drawSchedule);
+      const dsPdf = await renderPlotDrawSchedulePdf(plotLabel, drawSchedule, brand);
       archive.append(dsPdf, { name: `${folder}/draw-schedule.pdf` });
     }
 
@@ -516,6 +527,7 @@ export async function buildHandoverArchive({
       const hcPdf = await renderPlotHandoverChecklistPdf(
         plotLabel,
         handoverItems,
+        brand,
       );
       archive.append(hcPdf, { name: `${folder}/handover-checklist.pdf` });
     }
@@ -877,12 +889,13 @@ export async function buildHandoverArchive({
       jobsLate: c.jobsLate,
       totalDelayDaysAttributed: c.totalDelayDaysAttributed,
     })),
+    brand,
   );
   archive.append(contractorSummaryPdf, {
     name: "03_Contractor_Analysis/summary.pdf",
   });
   for (const c of contractors) {
-    const detailPdf = await renderContractorDetailPdf(story.site.name, c);
+    const detailPdf = await renderContractorDetailPdf(story.site.name, c, brand);
     archive.append(detailPdf, {
       name: `03_Contractor_Analysis/per-contractor/${safeName(c.name)}.pdf`,
     });
@@ -992,12 +1005,13 @@ export async function buildHandoverArchive({
   const supplierSummaryPdf = await renderSupplierSummaryPdf(
     story.site.name,
     suppliers,
+    brand,
   );
   archive.append(supplierSummaryPdf, {
     name: "04_Supplier_Analysis/summary.pdf",
   });
   for (const s of suppliers) {
-    const detailPdf = await renderSupplierDetailPdf(story.site.name, s);
+    const detailPdf = await renderSupplierDetailPdf(story.site.name, s, brand);
     archive.append(detailPdf, {
       name: `04_Supplier_Analysis/per-supplier/${safeName(s.name)}.pdf`,
     });
@@ -1126,7 +1140,7 @@ export async function buildHandoverArchive({
         p.budgeted > 0 ? Math.round((p.variance / p.budgeted) * 100) : 0,
     })),
     plots: plotBudgetRows,
-  });
+  }, brand);
   archive.append(budgetPdf, { name: "05_Cost_Analysis/budget-vs-actual.pdf" });
 
   // Cash-flow PDF — group orders by their dateOfOrder month.
@@ -1163,7 +1177,7 @@ export async function buildHandoverArchive({
       forecast: totalBudgeted,
       actual: totalActual,
     },
-  });
+  }, brand);
   archive.append(cashFlowPdf, { name: "05_Cost_Analysis/cash-flow.pdf" });
 
   // ─── 06_Reports — Delay report ───────────────────────────────────
@@ -1337,7 +1351,7 @@ export async function buildHandoverArchive({
     currentlyOverdueJobs,
     overdueDeliveries,
     latenessSummary,
-  });
+  }, brand);
   archive.append(delayPdf, { name: "06_Reports/delay-report-final.pdf" });
 
   // ─── 07_Toolbox_Talks ────────────────────────────────────────────

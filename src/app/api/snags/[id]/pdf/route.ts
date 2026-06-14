@@ -4,6 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { canAccessSite } from "@/lib/site-access";
 import { format } from "date-fns";
 import { loadJsPdf, drawHeader, pdfResponse } from "@/lib/pdf-builder";
+import { getBranding } from "@/lib/branding";
+import { loadPdfBrand, drawBrandFooter } from "@/lib/pdf-branding";
 
 export const dynamic = "force-dynamic";
 
@@ -73,9 +75,13 @@ export async function GET(
   // (May 2026 PDF refactor) Canonical loaders + header helper from
   // src/lib/pdf-builder.ts. Every PDF in the system uses these so
   // the boilerplate is one import instead of inline-per-file.
+  // (Jun 2026 white-label) Resolve the customer branding once and pass it
+  // into drawHeader so the snag report carries the customer logo + name +
+  // accent rule, with a "Powered by Sight Manager" co-brand footer.
+  const brand = await loadPdfBrand((await getBranding()).customer);
   const { jsPDF, autoTable } = await loadJsPdf();
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
-  drawHeader(doc, "Snag Report", { subtitle: snag.plot.site.name });
+  drawHeader(doc, "Snag Report", { subtitle: snag.plot.site.name, brand });
 
   // Status + priority chips at top right
   const priorityColors: Record<string, [number, number, number]> = {
@@ -171,6 +177,10 @@ export async function GET(
   if (snag.photos.length > 0) {
     if (cursorY > 240) {
       doc.addPage();
+      // (Jun 2026 white-label) Re-stamp the co-brand footer on the new page —
+      // drawBrandFooter only marks the current page, so a fresh addPage needs
+      // its own call to keep the "Powered by" line on every sheet.
+      drawBrandFooter(doc, brand);
       cursorY = 20;
     }
     doc.setFontSize(12);

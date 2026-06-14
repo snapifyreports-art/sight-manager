@@ -2,6 +2,8 @@ import { prisma } from "@/lib/prisma";
 import { verifyShareToken } from "@/lib/share-token";
 import { format } from "date-fns";
 import { CheckCircle2, Clock, AlertCircle, PauseCircle, Building2, MapPin } from "lucide-react";
+import { getCustomerBranding } from "@/lib/branding";
+import { PLATFORM, type CustomerBranding } from "@/lib/platform";
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +19,49 @@ function fmt(d: Date | string | null): string {
   return format(new Date(d), "dd MMM yyyy");
 }
 
+// (Jun 2026 white-label) Branded error card — leads with the customer's
+// logo + a support-contact line so even a dead/expired link feels like the
+// builder's own page rather than a generic platform error.
+function ErrorCard({
+  title,
+  message,
+  brand,
+}: {
+  title: string;
+  message: string;
+  brand?: CustomerBranding;
+}) {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-slate-50 p-4">
+      <div className="max-w-md rounded-xl border bg-white p-8 text-center shadow-sm">
+        {brand?.logoUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={brand.logoUrl}
+            alt={brand.brandName}
+            className="mx-auto mb-5 h-10 w-auto max-w-[12rem] object-contain"
+          />
+        ) : null}
+        <AlertCircle className="mx-auto size-12 text-red-400" />
+        <h1 className="mt-4 text-xl font-semibold text-slate-800">{title}</h1>
+        <p className="mt-2 text-sm text-slate-500">{message}</p>
+        {brand?.supportEmail && (
+          <p className="mt-2 text-sm text-slate-500">
+            Contact{" "}
+            <a
+              href={`mailto:${brand.supportEmail}`}
+              className="font-medium underline"
+            >
+              {brand.supportEmail}
+            </a>
+          </p>
+        )}
+        <p className="mt-6 text-[11px] text-slate-300">{PLATFORM.poweredBy}</p>
+      </div>
+    </div>
+  );
+}
+
 export default async function SharePage({
   params,
 }: {
@@ -24,18 +69,19 @@ export default async function SharePage({
 }) {
   const { token } = await params;
 
+  // (Jun 2026 white-label) Branding reads only the AppSettings singleton —
+  // no token/plot data — so it's safe to load before the token check and
+  // brand the error cards too.
+  const brand = await getCustomerBranding();
+
   const payload = verifyShareToken(token);
   if (!payload) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-50 p-4">
-        <div className="max-w-md rounded-xl border bg-white p-8 text-center shadow-sm">
-          <AlertCircle className="mx-auto size-12 text-red-400" />
-          <h1 className="mt-4 text-xl font-semibold text-slate-800">Link Expired or Invalid</h1>
-          <p className="mt-2 text-sm text-slate-500">
-            This sharing link has expired or is not valid. Please ask the site manager to generate a new link.
-          </p>
-        </div>
-      </div>
+      <ErrorCard
+        title="Link Expired or Invalid"
+        message="This sharing link has expired or is not valid. Please ask the site manager to generate a new link."
+        brand={brand}
+      />
     );
   }
 
@@ -75,13 +121,11 @@ export default async function SharePage({
 
   if (!plot) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-50 p-4">
-        <div className="max-w-md rounded-xl border bg-white p-8 text-center shadow-sm">
-          <AlertCircle className="mx-auto size-12 text-red-400" />
-          <h1 className="mt-4 text-xl font-semibold text-slate-800">Plot Not Found</h1>
-          <p className="mt-2 text-sm text-slate-500">This plot no longer exists.</p>
-        </div>
-      </div>
+      <ErrorCard
+        title="Plot Not Found"
+        message="This plot no longer exists."
+        brand={brand}
+      />
     );
   }
 
@@ -90,12 +134,36 @@ export default async function SharePage({
   const progressPct = totalJobs > 0 ? Math.round((completedJobs / totalJobs) * 100) : 0;
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div
+      className="min-h-screen bg-slate-50"
+      style={{ ["--brand" as string]: brand.primaryColor }}
+    >
       {/* Header */}
       <div className="border-b bg-white px-4 py-4 shadow-sm">
         <div className="mx-auto max-w-2xl">
+          {/* (Jun 2026 white-label) Lead with the customer brand — logo +
+              business name — above the site/plot heading. */}
+          {(brand.logoUrl || brand.brandNameRaw) && (
+            <div className="mb-3 flex items-center gap-2 border-b pb-3">
+              {brand.logoUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={brand.logoUrl}
+                  alt={brand.brandName}
+                  className="h-8 w-auto max-w-[12rem] object-contain"
+                />
+              ) : (
+                <span className="text-base font-bold text-slate-800">
+                  {brand.brandName}
+                </span>
+              )}
+            </div>
+          )}
           <div className="flex items-center gap-3">
-            <Building2 className="size-6 shrink-0 text-blue-600" />
+            <Building2
+              className="size-6 shrink-0"
+              style={{ color: brand.primaryColor }}
+            />
             <div>
               <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{plot.site.name}</p>
               <h1 className="text-lg font-bold text-slate-900">
@@ -129,8 +197,8 @@ export default async function SharePage({
           </div>
           <div className="mt-2 h-2.5 w-full overflow-hidden rounded-full bg-slate-100">
             <div
-              className="h-full rounded-full bg-blue-500 transition-all"
-              style={{ width: `${progressPct}%` }}
+              className="h-full rounded-full transition-all"
+              style={{ width: `${progressPct}%`, backgroundColor: brand.primaryColor }}
             />
           </div>
           <p className="mt-1.5 text-xs text-slate-500">
@@ -182,10 +250,14 @@ export default async function SharePage({
           </div>
         </div>
 
-        {/* Footer */}
-        <p className="pb-4 text-center text-[11px] text-slate-400">
-          Read-only view · Expires {fmt(new Date(payload.exp))} · Sight Manager
-        </p>
+        {/* Footer — (Jun 2026 white-label) lead with the customer's
+            business name; demote the platform to a small powered-by line. */}
+        <div className="pb-4 text-center">
+          <p className="text-[11px] text-slate-400">
+            Read-only view · Expires {fmt(new Date(payload.exp))} · {brand.brandName}
+          </p>
+          <p className="mt-1 text-[11px] text-slate-300">{PLATFORM.poweredBy}</p>
+        </div>
       </div>
     </div>
   );

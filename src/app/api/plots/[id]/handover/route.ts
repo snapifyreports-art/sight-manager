@@ -5,6 +5,8 @@ import { getServerCurrentDate } from "@/lib/dev-date";
 import { canAccessSite } from "@/lib/site-access";
 import { apiError } from "@/lib/api-errors";
 import { loadJsPdf, pdfResponse } from "@/lib/pdf-builder";
+import { getBranding } from "@/lib/branding";
+import { loadPdfBrand, drawBrandFooter, brandHeadFill } from "@/lib/pdf-branding";
 import { logEvent } from "@/lib/event-log";
 import { jobStatusLabel, titleCaseEnum, HANDOVER_DOC_TYPE_LABELS } from "@/lib/labels";
 
@@ -235,40 +237,79 @@ export async function POST(
     return NextResponse.json({ error: "Plot not found" }, { status: 404 });
   }
 
+  // (Jun 2026 white-label) Resolve the customer branding once — the buyer
+  // handover pack is the most customer-facing PDF in the system, so it heads
+  // with the customer logo + business name and carries the "Powered by Sight
+  // Manager" co-brand (plus a support-contact line) on every page.
+  const brand = await loadPdfBrand((await getBranding()).customer);
+  const headFill = brandHeadFill(brand);
+
   // Build PDF using canonical pdf-builder
   const { jsPDF, autoTable } = await loadJsPdf();
   const doc = new jsPDF();
 
   // --- Cover Page ---
+  // (Jun 2026 white-label) Customer logo centred above the title (when one is
+  // set + embeddable). Scaled to an 18mm-high box, max 70mm wide, centred on
+  // the A4 page (width 210mm). Fail-safe: a missing/unsupported logo just
+  // drops the image and the title sits where it always did.
+  if (brand.logoDataUrl) {
+    try {
+      const props = doc.getImageProperties(brand.logoDataUrl);
+      const h = 18;
+      const w = Math.min(70, h * (props.width / props.height));
+      doc.addImage(brand.logoDataUrl, props.fileType || "PNG", 105 - w / 2, 28, w, h);
+    } catch {
+      /* logo embed failed — cover still renders without it */
+    }
+  }
+
   doc.setFontSize(24);
   doc.text("Handover Pack", 105, 60, { align: "center" });
 
+  // Issuing business name (the customer brand) under the title.
+  doc.setFontSize(12);
+  doc.setTextColor(71, 85, 105);
+  doc.text(brand.brandName, 105, 70, { align: "center" });
+  doc.setTextColor(0);
+
   doc.setFontSize(14);
-  doc.text(plot.site.name, 105, 80, { align: "center" });
+  doc.text(plot.site.name, 105, 84, { align: "center" });
   doc.text(
     `Plot ${plot.plotNumber || ""} — ${plot.name}`,
     105,
-    90,
+    94,
     { align: "center" }
   );
   if (plot.houseType) {
     doc.setFontSize(11);
-    doc.text(`House Type: ${plot.houseType}`, 105, 100, { align: "center" });
+    doc.text(`House Type: ${plot.houseType}`, 105, 104, { align: "center" });
   }
   if (plot.site.address) {
     doc.setFontSize(10);
-    doc.text(plot.site.address, 105, 112, { align: "center" });
+    doc.text(plot.site.address, 105, 116, { align: "center" });
   }
   doc.setFontSize(10);
   doc.text(
     `Generated: ${getServerCurrentDate(req).toLocaleDateString("en-GB")}`,
     105,
-    130,
+    134,
     { align: "center" }
   );
+  // (Jun 2026 white-label) "Questions?" support line on the cover so the buyer
+  // knows who to contact — only when a support email is configured.
+  if (brand.supportEmail) {
+    doc.setFontSize(10);
+    doc.setTextColor(71, 85, 105);
+    doc.text(`Questions? ${brand.supportEmail}`, 105, 144, { align: "center" });
+    doc.setTextColor(0);
+  }
+  // Co-brand footer on the cover page.
+  drawBrandFooter(doc, brand);
 
   // --- Document Checklist ---
   doc.addPage();
+  drawBrandFooter(doc, brand);
   doc.setFontSize(16);
   doc.text("Document Checklist", 14, 20);
 
@@ -282,11 +323,12 @@ export async function POST(
       item.checkedBy?.name || "—",
     ]),
     styles: { fontSize: 9 },
-    headStyles: { fillColor: [37, 99, 235] },
+    headStyles: { fillColor: headFill },
   });
 
   // --- Job Summary ---
   doc.addPage();
+  drawBrandFooter(doc, brand);
   doc.setFontSize(16);
   doc.text("Job Summary", 14, 20);
 
@@ -299,12 +341,13 @@ export async function POST(
       j.signedOffBy?.name || "—",
     ]),
     styles: { fontSize: 9 },
-    headStyles: { fillColor: [37, 99, 235] },
+    headStyles: { fillColor: headFill },
   });
 
   // --- Open Snags ---
   if (plot.snags.length > 0) {
     doc.addPage();
+    drawBrandFooter(doc, brand);
     doc.setFontSize(16);
     doc.text("Outstanding Snags", 14, 20);
 
@@ -317,6 +360,8 @@ export async function POST(
         titleCaseEnum(s.priority),
         titleCaseEnum(s.status),
       ]),
+      // (Jun 2026 white-label) Outstanding-snags head keeps a red accent —
+      // it flags risk, so it shouldn't be tinted with the brand colour.
       styles: { fontSize: 9 },
       headStyles: { fillColor: [220, 38, 38] },
     });

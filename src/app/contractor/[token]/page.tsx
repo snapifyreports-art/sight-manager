@@ -7,6 +7,8 @@ import { PrintButton } from "./PrintButton";
 import { RequestSignOffButton } from "./RequestSignOffButton";
 import { ContractorJobActionRow } from "./ContractorJobActionRow";
 import { MiniGantt } from "@/components/shared/MiniGantt";
+import { getCustomerBranding } from "@/lib/branding";
+import { PLATFORM, type CustomerBranding } from "@/lib/platform";
 
 export const dynamic = "force-dynamic";
 
@@ -37,10 +39,25 @@ const PRIORITY_COLOR: Record<string, string> = {
 // (May 2026 audit O-7 / O-8) Friendly "link not active" page replacing
 // the previous `notFound()` calls — pre-fix an expired or revoked link
 // dropped the user on a generic 404 with no actionable message.
-function LinkInactiveCard({ reason }: { reason: string }) {
+function LinkInactiveCard({
+  reason,
+  brand,
+}: {
+  reason: string;
+  brand?: CustomerBranding;
+}) {
   return (
     <main className="flex min-h-screen items-center justify-center bg-gradient-to-b from-slate-50 to-white p-4">
       <div className="max-w-md rounded-2xl border bg-white p-8 text-center shadow-sm">
+        {/* (Jun 2026 white-label) Lead the error card with the customer's
+            logo so even a dead link still feels like the builder's page. */}
+        {brand?.logoUrl ? (
+          <img
+            src={brand.logoUrl}
+            alt={brand.brandName}
+            className="mx-auto mb-5 h-10 w-auto max-w-[12rem] object-contain"
+          />
+        ) : null}
         <LinkIcon className="mx-auto size-12 text-amber-400" />
         <h1 className="mt-4 text-xl font-semibold text-slate-800">
           This link isn&apos;t active
@@ -50,6 +67,18 @@ function LinkInactiveCard({ reason }: { reason: string }) {
           Ask the site team to send you a fresh link. If you think this is a
           mistake, get in touch with them directly.
         </p>
+        {brand?.supportEmail && (
+          <p className="mt-2 text-xs text-slate-400">
+            Contact{" "}
+            <a
+              href={`mailto:${brand.supportEmail}`}
+              className="font-medium underline"
+            >
+              {brand.supportEmail}
+            </a>
+          </p>
+        )}
+        <p className="mt-6 text-[11px] text-slate-300">{PLATFORM.poweredBy}</p>
       </div>
     </main>
   );
@@ -62,10 +91,18 @@ export default async function ContractorSharePage({
 }) {
   const { token } = await params;
 
+  // (Jun 2026 white-label) Branding reads only the AppSettings singleton —
+  // no token/contact data — so it's safe to load before the token check and
+  // brand the error card too.
+  const brand = await getCustomerBranding();
+
   const payload = verifyContractorToken(token);
   if (!payload) {
     return (
-      <LinkInactiveCard reason="The link may have expired, or the token is no longer valid." />
+      <LinkInactiveCard
+        reason="The link may have expired, or the token is no longer valid."
+        brand={brand}
+      />
     );
   }
 
@@ -84,7 +121,10 @@ export default async function ContractorSharePage({
 
   if (!contact || !site) {
     return (
-      <LinkInactiveCard reason="The contact or site this link refers to is no longer available." />
+      <LinkInactiveCard
+        reason="The contact or site this link refers to is no longer available."
+        brand={brand}
+      />
     );
   }
 
@@ -427,12 +467,37 @@ export default async function ContractorSharePage({
   const expiresAt = new Date(payload.exp);
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div
+      className="min-h-screen bg-slate-50"
+      style={{ ["--brand" as string]: brand.primaryColor }}
+    >
       <div className="border-b bg-white px-6 py-4 shadow-sm">
         <div className="mx-auto max-w-2xl">
+          {/* (Jun 2026 white-label) Lead with the customer brand — logo +
+              business name — above the contractor's own name. Falls back to
+              the HardHat avatar (tinted with the brand accent) when no logo
+              is set. */}
+          {(brand.logoUrl || brand.brandNameRaw) && (
+            <div className="mb-3 flex items-center gap-2 border-b pb-3">
+              {brand.logoUrl ? (
+                <img
+                  src={brand.logoUrl}
+                  alt={brand.brandName}
+                  className="h-8 w-auto max-w-[12rem] object-contain"
+                />
+              ) : (
+                <span className="text-base font-bold text-slate-800">
+                  {brand.brandName}
+                </span>
+              )}
+            </div>
+          )}
           <div className="flex items-start justify-between gap-3">
             <div className="flex items-center gap-3">
-              <div className="flex size-10 items-center justify-center rounded-full bg-blue-600 text-white">
+              <div
+                className="flex size-10 items-center justify-center rounded-full text-white"
+                style={{ backgroundColor: brand.primaryColor }}
+              >
                 <HardHat className="size-5" />
               </div>
               <div>
@@ -484,12 +549,12 @@ export default async function ContractorSharePage({
               <span>{site.name}{site.location ? ` · ${site.location}` : ""}</span>
             </div>
             {contact.phone && (
-              <a href={`tel:${contact.phone}`} className="flex items-center gap-1.5 text-sm text-blue-600 hover:underline">
+              <a href={`tel:${contact.phone}`} className="flex items-center gap-1.5 text-sm hover:underline" style={{ color: brand.primaryColor }}>
                 <Phone className="size-4" /> {contact.phone}
               </a>
             )}
             {contact.email && (
-              <a href={`mailto:${contact.email}`} className="flex items-center gap-1.5 text-sm text-blue-600 hover:underline">
+              <a href={`mailto:${contact.email}`} className="flex items-center gap-1.5 text-sm hover:underline" style={{ color: brand.primaryColor }}>
                 <Mail className="size-4" /> {contact.email}
               </a>
             )}
@@ -1030,8 +1095,7 @@ export default async function ContractorSharePage({
         )}
 
         <p className="text-center text-[11px] text-muted-foreground">
-          This link is read-only and always up to date.
-          Powered by Sight Manager.
+          This link is read-only and always up to date. {PLATFORM.poweredBy}.
         </p>
       </div>
     </div>

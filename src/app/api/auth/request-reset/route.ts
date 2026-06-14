@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { signResetToken } from "@/lib/share-token";
-import { sendEmail } from "@/lib/email";
+import { sendEmail, getEmailBranding, escapeHtml } from "@/lib/email";
 import { logEvent } from "@/lib/event-log";
 
 export const dynamic = "force-dynamic";
@@ -58,25 +58,40 @@ export async function POST(req: NextRequest) {
   const baseUrl = process.env.NEXTAUTH_URL ?? "https://sight-manager.vercel.app";
   const url = `${baseUrl}/reset-password/${token}`;
 
+  // (Jun 2026 white-label) Brand the visual chrome + copy with the customer
+  // brand. NOTE: only the chrome/text changes — the reset LINK still uses the
+  // platform NEXTAUTH_URL above (host-poisoning security blocker, see comment).
+  const branding = await getEmailBranding();
+  const headerLogo = branding.darkLogoUrl || branding.logoUrl;
+  const accent = branding.primaryColor;
+
   try {
     await sendEmail({
       to: user.email,
-      subject: "Reset your Sight Manager password",
+      subject: `Reset your ${branding.brandName} password`,
       html: `<!DOCTYPE html>
 <html>
 <body style="margin:0;padding:0;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
   <div style="max-width:540px;margin:32px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
-    <div style="background:linear-gradient(135deg,#2563eb,#4f46e5);padding:24px 32px;">
-      <h1 style="margin:0;color:#fff;font-size:18px;font-weight:700;">Sight Manager</h1>
-      <p style="margin:4px 0 0;color:#bfdbfe;font-size:13px;">Password reset</p>
+    <div style="background:linear-gradient(135deg,${accent},${accent}cc);padding:24px 32px;">
+      ${headerLogo
+        ? `<img src="${escapeHtml(headerLogo)}" alt="${escapeHtml(branding.brandName)}" style="max-height:36px;max-width:220px;display:block;" />`
+        : `<h1 style="margin:0;color:#fff;font-size:18px;font-weight:700;">${escapeHtml(branding.brandName)}</h1>`}
+      <p style="margin:4px 0 0;color:rgba(255,255,255,0.82);font-size:13px;">Password reset</p>
     </div>
     <div style="padding:32px;">
-      <p style="margin:0 0 16px;color:#0f172a;font-size:14px;">Hi ${user.name},</p>
+      <p style="margin:0 0 16px;color:#0f172a;font-size:14px;">Hi ${escapeHtml(user.name)},</p>
       <p style="margin:0 0 16px;color:#475569;font-size:14px;line-height:1.55;">Click the button below to set a new password. The link expires in 24 hours.</p>
       <div style="margin:24px 0;text-align:center;">
-        <a href="${url}" style="background:#2563eb;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-size:14px;font-weight:600;">Set new password</a>
+        <a href="${url}" style="background:${accent};color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-size:14px;font-weight:600;">Set new password</a>
       </div>
       <p style="margin:16px 0 0;color:#64748b;font-size:12px;line-height:1.55;">If you didn't request this, you can safely ignore this email — your current password isn't changing.</p>
+    </div>
+    <div style="padding:16px 32px;background:#f8fafc;border-top:1px solid #e2e8f0;text-align:center;">
+      ${branding.supportEmail
+        ? `<p style="margin:0 0 4px;color:#64748b;font-size:12px;">Questions? <a href="mailto:${escapeHtml(branding.supportEmail)}" style="color:#64748b;">${escapeHtml(branding.supportEmail)}</a></p>`
+        : ""}
+      <p style="margin:0;color:#cbd5e1;font-size:11px;">${escapeHtml(branding.poweredBy)}</p>
     </div>
   </div>
 </body>

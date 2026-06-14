@@ -1,5 +1,10 @@
 import { format } from "date-fns";
 import { NextResponse } from "next/server";
+import {
+  type PdfBrand,
+  drawBrandHeader,
+  drawBrandFooter,
+} from "@/lib/pdf-branding";
 
 /**
  * (May 2026 PDF library refactor) Canonical PDF-building helpers.
@@ -81,19 +86,54 @@ interface HeaderOpts {
   showTimestamp?: boolean;
   /** Top-line title size. Default 18. */
   titleSize?: number;
+  /**
+   * (Jun 2026 white-label) When provided, the header is drawn branded —
+   * customer logo top-right, brand name, and the primaryColor accent rule
+   * (via drawBrandHeader) — and a co-branded "Powered by Sight Manager"
+   * footer is stamped on the current page (via drawBrandFooter). Omit it
+   * to keep the plain back-compat header.
+   */
+  brand?: PdfBrand;
 }
 
 /**
  * Draw a standard PDF header: large title (≈18pt) at top-left,
  * optional grey subtitle below, and a generated-at timestamp.
  * Returns the y-position where the next content should start.
+ *
+ * (Jun 2026 white-label) Pass `opts.brand` to render the branded header
+ * (customer logo + name + accent rule) and footer instead. The plain,
+ * no-brand path below is unchanged for back-compat.
  */
 export function drawHeader(
   doc: JsPDFType,
   title: string,
   opts: HeaderOpts = {},
 ): number {
-  const { subtitle, showTimestamp = true, titleSize = 18 } = opts;
+  const { subtitle, showTimestamp = true, titleSize = 18, brand } = opts;
+
+  // (Jun 2026 white-label) Branded path: delegate the header to the shared
+  // pdf-branding helper (logo + brand name + primaryColor accent), stamp the
+  // co-brand footer on this page, and return the Y below the header. The
+  // generated-at timestamp is appended under the header so callers keep it.
+  if (brand) {
+    let y = drawBrandHeader(doc, brand, title, subtitle);
+    if (showTimestamp) {
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8);
+      doc.setTextColor(120);
+      doc.text(
+        `Generated ${format(new Date(), "dd MMM yyyy HH:mm")}`,
+        14,
+        y,
+      );
+      doc.setTextColor(0);
+      y += 6;
+    }
+    drawBrandFooter(doc, brand);
+    return y + 4;
+  }
+
   doc.setFontSize(titleSize);
   doc.text(title, 14, 22);
   let cursorY = 22;

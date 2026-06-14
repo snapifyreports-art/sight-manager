@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { sendEmail, escapeHtml } from "@/lib/email";
+import { sendEmail, escapeHtml, getEmailBranding } from "@/lib/email";
 import { format, subDays, addDays } from "date-fns";
 import { checkCronAuth } from "@/lib/cron-auth";
 import { getServerCurrentDate, getServerStartOfDay } from "@/lib/dev-date";
@@ -252,6 +252,13 @@ export async function GET(req: NextRequest) {
     );
   }
 
+  // (Jun 2026 white-label) Resolve branding ONCE per run (not per recipient)
+  // — the digest leads with the customer's logo/name/colour and demotes
+  // "Sight Manager" to the powered-by footer line.
+  const branding = await getEmailBranding();
+  const headerLogo = branding.darkLogoUrl || branding.logoUrl;
+  const accent = branding.primaryColor;
+
   for (const u of users) {
     // (#183) Default: subscribed to every accessible + assigned site.
     // Subtract any WatchedSite rows (now meaning "muted").
@@ -367,20 +374,28 @@ export async function GET(req: NextRequest) {
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
 <body style="margin:0;padding:0;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
   <div style="max-width:600px;margin:32px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
-    <div style="background:linear-gradient(135deg,#2563eb,#4f46e5);padding:24px 32px;">
-      <h1 style="margin:0;color:#fff;font-size:18px;font-weight:700;">Sight Manager</h1>
-      <p style="margin:4px 0 0;color:#bfdbfe;font-size:13px;">Weekly digest — ${weekLabel}</p>
+    <div style="background:linear-gradient(135deg,${accent},${accent}cc);padding:24px 32px;">
+      ${headerLogo
+        ? `<img src="${escapeHtml(headerLogo)}" alt="${escapeHtml(branding.brandName)}" style="max-height:36px;max-width:220px;display:block;" />`
+        : `<h1 style="margin:0;color:#fff;font-size:18px;font-weight:700;">${escapeHtml(branding.brandName)}</h1>`}
+      <p style="margin:4px 0 0;color:rgba(255,255,255,0.82);font-size:13px;">Weekly digest — ${weekLabel}</p>
     </div>
     <div style="padding:32px;">
       <p style="margin:0 0 24px;color:#475569;font-size:14px;">Hi ${escapeHtml(u.name)},</p>
       <p style="margin:0 0 24px;color:#475569;font-size:14px;">Here's what happened this week across your sites.</p>
       ${siteRows}
       <div style="margin:24px 0 0;text-align:center;">
-        <a href="${baseUrl}/dashboard" style="background:#2563eb;color:#fff;padding:10px 24px;border-radius:8px;text-decoration:none;font-size:14px;font-weight:600;">Open dashboard</a>
+        <a href="${baseUrl}/dashboard" style="background:${accent};color:#fff;padding:10px 24px;border-radius:8px;text-decoration:none;font-size:14px;font-weight:600;">Open ${escapeHtml(branding.brandName)}</a>
       </div>
       <p style="margin:24px 0 0;font-size:11px;color:#94a3b8;text-align:center;">
         You're receiving this for every site you have access to. Mute a site from its header to stop seeing it here.
       </p>
+    </div>
+    <div style="padding:16px 32px;background:#f8fafc;border-top:1px solid #e2e8f0;text-align:center;">
+      ${branding.supportEmail
+        ? `<p style="margin:0 0 4px;color:#64748b;font-size:12px;">Questions? <a href="mailto:${escapeHtml(branding.supportEmail)}" style="color:#64748b;">${escapeHtml(branding.supportEmail)}</a></p>`
+        : ""}
+      <p style="margin:0;color:#cbd5e1;font-size:11px;">${escapeHtml(branding.poweredBy)}</p>
     </div>
   </div>
 </body>

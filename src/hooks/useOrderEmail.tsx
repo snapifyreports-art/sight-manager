@@ -20,7 +20,7 @@
  * Keith already uses — any change here is user-visible.
  */
 
-import { useCallback, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { format } from "date-fns";
 import { Loader2, Mail, Send } from "lucide-react";
 import { useToast } from "@/components/ui/toast";
@@ -145,6 +145,29 @@ export function useOrderEmail(onSent?: (mode: Mode) => void): Result {
   const [sending, setSending] = useState(false);
   const { setManyOrderStatus } = useOrderStatus({ silent: true });
 
+  // (Jun 2026 white-label) These supplier emails go FROM the construction
+  // business, so the sign-off carries the CUSTOMER brand. Fetch the resolved
+  // branding once (public GET — same endpoint the login page themes from) and
+  // hold it in a ref so the mailto builders can append a branded signature.
+  // Best-effort: a failed/pending fetch just falls back to the bare "Regards".
+  const senderBranding = useRef<{ brandName: string; supportEmail: string | null } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/settings/branding")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (cancelled || !d) return;
+        senderBranding.current = {
+          brandName: d.brandName || d.platformName || "",
+          supportEmail: d.supportEmail ?? null,
+        };
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // ─── Chase (overdue delivery) ────────────────────────────────────────
   // Uses the same rich body builder as send-order so suppliers see a
   // consistent format; the `urgentDelivery` flag adds the ASAP banner at
@@ -175,6 +198,7 @@ export function useOrderEmail(onSent?: (mode: Mode) => void): Result {
       itemsDescriptionFallback: o.itemsDescription,
       expectedDeliveryDate: o.expectedDeliveryDate,
       urgentDelivery: true,
+      senderBranding: senderBranding.current,
     });
     // Inject the overdue context just after the greeting (first blank line).
     const chaseNote = `This order was due on ${expectedDate} and is now ${days} day${days !== 1 ? "s" : ""} overdue. Please confirm the updated delivery date at your earliest convenience.`;
@@ -254,6 +278,7 @@ export function useOrderEmail(onSent?: (mode: Mode) => void): Result {
       expectedDeliveryDate: earliestDelivery,
       orderDate: firstOrder.dateOfOrder ?? null,
       urgentDelivery: group.urgent,
+      senderBranding: senderBranding.current,
     });
 
     const plotCount = plotLabels.length;
