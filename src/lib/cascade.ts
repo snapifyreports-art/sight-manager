@@ -273,16 +273,31 @@ export function calculateCascade(
     if (!isParent(parent)) continue;
     if (parent.status === "COMPLETED") continue;
 
-    // Children of this parent that got moved.
-    const movedChildren = allPlotJobs
-      .filter((c) => c.parentId === parent.id)
-      .map((c) => newPositionsById.get(c.id))
-      .filter((pos): pos is { newStart: Date; newEnd: Date } => !!pos);
+    // Re-derive the parent envelope over ALL of its children — each child's
+    // NEW position if it shifted, its EXISTING start/end if it stayed put.
+    // (Jun 2026 cascade audit, I6) Pre-fix this took min/max over only the
+    // MOVED children, so delaying e.g. the 2nd sub-job of a stage jumped the
+    // parent forward and dropped the span of its earlier, unmoved sibling —
+    // and the preview the manager confirmed disagreed with the applied result
+    // (recomputeParentFromChildren reads ALL children). We only push a parent
+    // update when at least one child actually moved.
+    const children = allPlotJobs.filter((c) => c.parentId === parent.id);
+    let anyChildMoved = false;
+    const childPositions: Array<{ newStart: Date; newEnd: Date }> = [];
+    for (const c of children) {
+      const moved = newPositionsById.get(c.id);
+      if (moved) {
+        anyChildMoved = true;
+        childPositions.push(moved);
+      } else if (c.startDate && c.endDate) {
+        childPositions.push({ newStart: c.startDate, newEnd: c.endDate });
+      }
+    }
 
-    if (movedChildren.length === 0) continue;
+    if (!anyChildMoved || childPositions.length === 0) continue;
 
-    const newStart = new Date(Math.min(...movedChildren.map((p) => p.newStart.getTime())));
-    const newEnd = new Date(Math.max(...movedChildren.map((p) => p.newEnd.getTime())));
+    const newStart = new Date(Math.min(...childPositions.map((p) => p.newStart.getTime())));
+    const newEnd = new Date(Math.max(...childPositions.map((p) => p.newEnd.getTime())));
 
     jobUpdates.push({
       jobId: parent.id,

@@ -227,7 +227,12 @@ export async function GET(req: NextRequest) {
 
     // (#177) Count delayed jobs via the SSOT helper — same definition
     // used by Daily Brief, Tasks, Dashboard, Heatmap.
+    // (Jun 2026 cascade audit) Floor to midnight — getServerCurrentDate keeps
+    // the wall-clock time, and without this a job due TODAY read as overdue
+    // here (flipping onTrack to false) while every other surface — which floors
+    // today — did not. originalEndDate is stored at 00:00; "today is not overdue".
     const now = getServerCurrentDate(req);
+    now.setHours(0, 0, 0, 0);
     const delayedJobs = site.plots.reduce(
       (sum, p) => sum + p.jobs.filter((j) => isJobEndOverdue(j, now)).length,
       0

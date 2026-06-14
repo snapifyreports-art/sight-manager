@@ -70,6 +70,13 @@ export default async function PortfolioPage() {
   const now = getServerCurrentDate({
     cookies: { get: (n: string) => cookieStore.get(n) ?? undefined },
   });
+  // (Jun 2026 cascade audit) Floor to local midnight. originalEndDate is stored
+  // at 00:00, and the lateness contract is "today itself is not overdue" — but
+  // getServerCurrentDate keeps the wall-clock time-of-day, so an un-floored
+  // anchor made every job due TODAY read as overdue here (and the 30-day stale-
+  // snag cutoff land mid-day) while Dashboard / Brief / Heatmap / Story / cron
+  // all floor and disagreed. Match them.
+  now.setHours(0, 0, 0, 0);
   const cards = await Promise.all(
     sites.map(async (s) => {
       // Average build percent across plots.

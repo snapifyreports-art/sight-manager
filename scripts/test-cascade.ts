@@ -39,6 +39,7 @@ interface Fixture {
   siteId: string;
   plotId: string;
   userId: string;
+  supplierId: string;
   jobs: (Job & { orders: MaterialOrder[] })[];
 }
 
@@ -118,12 +119,27 @@ async function setupFixture(label: string): Promise<Fixture> {
   const jobB = await createJob("Job B", 1, 2);
   const jobC = await createJob("Job C", 2, 3);
 
-  return { siteId: site.id, plotId: plot.id, userId: user.id, jobs: [jobA, jobB, jobC] };
+  return { siteId: site.id, plotId: plot.id, userId: user.id, supplierId: supplier.id, jobs: [jobA, jobB, jobC] };
 }
 
 async function teardownFixture(f: Fixture) {
-  // Cascade delete from site → plot → jobs → orders
+  // (Jun 2026) Delete the orders FIRST. Deleting the site cascades to
+  // plots → jobs, but the order→job relation is onDelete: SetNull, so the
+  // orders would survive as contextless orphans (no job/plot/site) — which
+  // the smoke test's "No contextless orphan orders" invariant then flags,
+  // failing the deploy gate. Then delete the test supplier we created.
+  await prisma.materialOrder.deleteMany({
+    where: {
+      OR: [
+        { supplierId: f.supplierId },
+        { plotId: f.plotId },
+        { siteId: f.siteId },
+        { jobId: { in: f.jobs.map((j) => j.id) } },
+      ],
+    },
+  }).catch(() => {});
   await prisma.site.delete({ where: { id: f.siteId } }).catch(() => {});
+  await prisma.supplier.delete({ where: { id: f.supplierId } }).catch(() => {});
 }
 
 // ---------- Invariant assertions ----------

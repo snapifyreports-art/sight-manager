@@ -63,7 +63,15 @@ export function isJobEndOverdue(job: LeafJobShape, today: Date): boolean {
   if (job.status === "COMPLETED") return false;
   const end = toDate(job.originalEndDate);
   if (!end) return false;
-  return end < today;
+  // (Jun 2026 cascade audit) Defensively floor `today` to local midnight on a
+  // COPY. originalEndDate is stored at 00:00 and the contract is "today itself
+  // is not overdue" — a caller that passes an un-floored wall-clock time (e.g.
+  // a raw getServerCurrentDate) would otherwise count every job due TODAY as
+  // overdue, disagreeing with the surfaces that floor. Idempotent for the
+  // callers that already floor.
+  const floored = new Date(today);
+  floored.setHours(0, 0, 0, 0);
+  return end < floored;
 }
 
 /**
