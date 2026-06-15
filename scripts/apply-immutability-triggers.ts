@@ -37,6 +37,14 @@
  * GDPR erasure), drop the relevant trigger, fix the row, recreate it. The
  * DDL is itself audited at the Postgres level.
  *
+ * (Jun 2026 Supabase advisor) Both functions are created with
+ * `SET search_path = ''` to close the `function_search_path_mutable`
+ * security lint — they reference no schema objects (only RAISE EXCEPTION
+ * + NEW/OLD record fields), so an empty search_path is safe and prevents
+ * search-path-hijack. The live DB was hardened in place with
+ * `ALTER FUNCTION … SET search_path = ''` (no trigger recreation); this
+ * baked-in version keeps it on any future re-run.
+ *
  * Idempotent — re-running drops + recreates. Run with
  * `npx tsx -r dotenv/config scripts/apply-immutability-triggers.ts`.
  */
@@ -52,7 +60,9 @@ async function main() {
   await prisma.$executeRawUnsafe(`DROP TRIGGER IF EXISTS "eventlog_no_delete" ON "EventLog";`);
   await prisma.$executeRawUnsafe(`DROP FUNCTION IF EXISTS "eventlog_immutability"();`);
   await prisma.$executeRawUnsafe(`
-    CREATE FUNCTION "eventlog_immutability"() RETURNS trigger AS $$
+    CREATE FUNCTION "eventlog_immutability"() RETURNS trigger
+    SET search_path = ''
+    AS $$
     BEGIN
       IF TG_OP = 'DELETE' THEN
         RAISE EXCEPTION 'EventLog is append-only — DELETE forbidden. Drop the trigger temporarily to fix a row (see apply-immutability-triggers.ts header).';
@@ -88,7 +98,9 @@ async function main() {
   await prisma.$executeRawUnsafe(`DROP TRIGGER IF EXISTS "jobaction_no_delete" ON "JobAction";`);
   await prisma.$executeRawUnsafe(`DROP FUNCTION IF EXISTS "jobaction_immutability"();`);
   await prisma.$executeRawUnsafe(`
-    CREATE FUNCTION "jobaction_immutability"() RETURNS trigger AS $$
+    CREATE FUNCTION "jobaction_immutability"() RETURNS trigger
+    SET search_path = ''
+    AS $$
     BEGIN
       RAISE EXCEPTION 'JobAction is append-only — UPDATE forbidden. (DELETE is permitted only via the Site/Plot/Job cascade.)';
     END;

@@ -450,6 +450,7 @@ model Job {
   @@index([plotId, status]) // composite for the hottest filter combo
   @@index([originalEndDate]) // perf: lateness/overdue baseline range scans (@/lib/lateness)
   @@index([plotId, sortOrder]) // perf: "all jobs on a plot in build order" (programme/cascade/next-stage)
+  @@index([assignedToId]) // FK cover (Supabase advisor): "jobs assigned to user X" / who's-on-site
 }
 
 /// (May 2026 audit B-P1-28) JobAction is APPEND-ONLY. Every
@@ -601,6 +602,7 @@ model MaterialOrder {
   @@index([contactId])
   @@index([siteId, status])      // perf: daily-brief/analytics scope orders by site + status
   @@index([status, dateOfOrder]) // perf: "PENDING past its order date" overdue-send scan
+  @@index([plotId]) // FK cover (Supabase advisor): one-off plot-level orders on the plot detail
 }
 
 model OrderItem {
@@ -1155,6 +1157,7 @@ model Snag {
   @@index([createdAt])   // (audit P-*) stale-snag > N days queries
   @@index([resolvedAt])  // (audit P-*) avg resolution-time queries
   @@index([plotId, status]) // perf: daily-brief/quality scope snags by plot + status
+  @@index([jobId]) // FK cover (Supabase advisor): a job's snags on the job detail page
 }
 
 model SnagPhoto {
@@ -1365,6 +1368,7 @@ model NCR {
 
   @@index([siteId, status])
   @@index([plotId])
+  @@index([jobId]) // FK cover (Supabase advisor): a job's NCRs on the job detail page
 }
 
 enum NCRStatus {
