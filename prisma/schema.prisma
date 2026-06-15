@@ -369,6 +369,7 @@ model Plot {
 
   @@unique([siteId, plotNumber])
   @@index([siteId]) // hot path: every site page loads plots
+  @@index([siteId, buildCompletePercent]) // perf: portfolio/analytics avg-complete rollup
 }
 
 // Customer-facing journal — short story-style updates the admin posts
@@ -447,6 +448,8 @@ model Job {
   @@index([endDate])
   @@index([actualEndDate])
   @@index([plotId, status]) // composite for the hottest filter combo
+  @@index([originalEndDate]) // perf: lateness/overdue baseline range scans (@/lib/lateness)
+  @@index([plotId, sortOrder]) // perf: "all jobs on a plot in build order" (programme/cascade/next-stage)
 }
 
 /// (May 2026 audit B-P1-28) JobAction is APPEND-ONLY. Every
@@ -596,6 +599,8 @@ model MaterialOrder {
   @@index([dateOfOrder])
   @@index([deliveredDate])
   @@index([contactId])
+  @@index([siteId, status])      // perf: daily-brief/analytics scope orders by site + status
+  @@index([status, dateOfOrder]) // perf: "PENDING past its order date" overdue-send scan
 }
 
 model OrderItem {
@@ -978,6 +983,8 @@ model Inspection {
   @@index([status])
   @@index([scheduledDate]) // cron range queries
   @@index([anchorJobId]) // recompute lookup on job move
+  @@index([plotId, status])        // perf: daily-brief/quality scope inspections by plot + status
+  @@index([status, scheduledDate]) // perf: cron "OVERDUE / due-soon by scheduledDate" scans
 }
 
 model TemplateOrder {
@@ -1147,6 +1154,7 @@ model Snag {
   @@index([contactId])   // hot: contractor comms "Snags Assigned" filter
   @@index([createdAt])   // (audit P-*) stale-snag > N days queries
   @@index([resolvedAt])  // (audit P-*) avg resolution-time queries
+  @@index([plotId, status]) // perf: daily-brief/quality scope snags by plot + status
 }
 
 model SnagPhoto {

@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { prisma } from "./prisma";
 
 /**
@@ -5,8 +6,15 @@ import { prisma } from "./prisma";
  * - CEO and DIRECTOR roles: returns ALL site IDs (full access).
  * - Other roles: returns only the site IDs from the UserSite join table.
  *   If a non-admin user has no site assignments, returns an empty array (no access).
+ *
+ * (Jun 2026 perf) Wrapped in React cache() so it is memoised PER REQUEST.
+ * canAccessSite + siteAccessFilter + the analytics dashboard (13 endpoints,
+ * each scoping by site) call this repeatedly within one request; pre-fix
+ * each call re-queried the userSite join table. cache() dedupes within a
+ * request (same userId+role → one query) and is fresh on the next request,
+ * so behaviour is identical — just fewer round-trips.
  */
-export async function getUserSiteIds(
+export const getUserSiteIds = cache(async function getUserSiteIds(
   userId: string,
   role: string
 ): Promise<string[] | null> {
@@ -22,7 +30,7 @@ export async function getUserSiteIds(
   });
 
   return userSites.map((us) => us.siteId);
-}
+});
 
 /**
  * Build a Prisma `where` clause fragment to filter by site access.
