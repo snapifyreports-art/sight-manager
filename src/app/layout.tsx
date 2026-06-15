@@ -9,6 +9,7 @@ import { GlobalLoadingBar } from "@/components/layout/GlobalLoadingBar";
 import { ToastProvider } from "@/components/ui/toast";
 import { BusyOverlayProvider } from "@/components/ui/busy-overlay";
 import { LateSendPromptProvider } from "@/components/orders/LateSendPromptProvider";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 import { getBranding } from "@/lib/branding";
 
 // (Jun 2026 white-label) Metadata is now async so the browser tab title,
@@ -79,6 +80,10 @@ export default function RootLayout({
         <FetchPatchProvider />
         <GlobalLoadingBar />
         <ServiceWorkerRegistrar />
+        {/* (Jun 2026 perf) Vercel Speed Insights — real-user page-load
+            metrics (front-end RUM), the complement to the DB-side query
+            report. Passive telemetry, anonymous, no effect on behaviour. */}
+        <SpeedInsights />
       </body>
     </html>
   );
