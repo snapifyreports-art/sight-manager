@@ -55,6 +55,18 @@ export async function PUT(
     data.checkedById = body.checked ? a.session.user.id : null;
   }
 
+  // (Jun 2026 IDOR sweep) authoriseByPlot only proves access to plot `id` —
+  // confirm the check actually belongs to that plot before mutating, or a
+  // user could pass their own plot id + another plot's checkId and edit it.
+  // Mirrors the materials/[materialId] ownership cross-check.
+  const existing = await prisma.preStartCheck.findUnique({
+    where: { id: checkId },
+    select: { plotId: true },
+  });
+  if (!existing || existing.plotId !== id) {
+    return NextResponse.json({ error: "Check not found on this plot" }, { status: 404 });
+  }
+
   try {
     const check = await prisma.preStartCheck.update({
       where: { id: checkId },
@@ -73,6 +85,16 @@ export async function DELETE(
   const { id, checkId } = await params;
   const a = await authoriseByPlot(id, "DELETE_ITEMS");
   if ("error" in a) return a.error;
+  // (Jun 2026 IDOR sweep) Confirm the check belongs to plot `id` before
+  // deleting — authoriseByPlot only proves access to the path plot, not
+  // that the attacker-controllable checkId lives on it.
+  const existing = await prisma.preStartCheck.findUnique({
+    where: { id: checkId },
+    select: { plotId: true },
+  });
+  if (!existing || existing.plotId !== id) {
+    return NextResponse.json({ error: "Check not found on this plot" }, { status: 404 });
+  }
   try {
     await prisma.preStartCheck.delete({ where: { id: checkId } });
     return NextResponse.json({ ok: true });

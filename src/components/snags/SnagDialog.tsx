@@ -705,7 +705,7 @@ export function SnagDialog({
           <HelpTip title="About Snags" anchor="below-left">
             <p><strong>What it does:</strong> records a defect found on-site so it can be tracked, photographed, and assigned to a contractor to fix.</p>
             <p><strong>Why:</strong> snags are how quality issues travel from inspection to closure. Linking a sub-job and contractor makes accountability explicit; the &ldquo;before&rdquo; / &ldquo;after&rdquo; photos are the evidence trail.</p>
-            <p><strong>Priority:</strong> drives scheduling — <strong>Critical</strong> and <strong>High</strong> surface on the Daily Brief and the contractor&apos;s snag list.</p>
+            <p><strong>Priority:</strong> <em>every</em> open snag shows on the Daily Brief and the contractor&apos;s snag list regardless of priority — priority drives the <strong>sort order</strong> and badge colour (Critical/High sort to the top in red/amber), and only <strong>Critical</strong> and <strong>High</strong> fire a louder push notification when the snag is raised.</p>
             <p><strong>Gotcha:</strong> a snag is only <em>closed</em> once you add a closing note and (ideally) an &ldquo;after&rdquo; photo — &ldquo;Resolved&rdquo; is an interim state.</p>
           </HelpTip>
           <DialogHeader>

@@ -90,6 +90,12 @@ export async function POST(
     const currentJob = await prisma.job.findFirst({
       where: {
         plotId,
+        // (Jun 2026 IDOR sweep) Scope to the URL site so a caller-supplied
+        // plotId belonging to ANOTHER site resolves to no job and is pushed
+        // to `skipped` rather than cascaded — mirrors bulk-status' per-job
+        // `job.plot.siteId !== siteId` guard. Without this a site-scoped
+        // user could shift another site's programme via foreign plotIds.
+        plot: { siteId },
         status: { in: ["NOT_STARTED", "IN_PROGRESS"] },
         endDate: { not: null },
       },

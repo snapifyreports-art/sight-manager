@@ -116,20 +116,47 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // (May 2026 pattern sweep) Pre-fix POST accepted any caller-supplied
-  // siteId/plotId/jobId without verifying access. Any authenticated user
-  // could spam audit-log entries against any site they don't belong to,
-  // or cross-attribute events between tenants.
-  if (siteId) {
-    const accessibleSiteIds = await getUserSiteIds(
-      session.user.id,
-      (session.user as { role: string }).role,
-    );
-    if (accessibleSiteIds !== null && !accessibleSiteIds.includes(siteId)) {
+  // (May 2026 pattern sweep + Jun 2026 IDOR sweep) Pre-fix POST accepted
+  // any caller-supplied siteId/plotId/jobId without verifying access — a
+  // site-scoped user could spam or cross-attribute audit-log entries
+  // against sites/plots/jobs they don't belong to. The siteId-only check
+  // missed plotId/jobId, which are written straight onto the (append-only)
+  // EventLog. Verify EVERY supplied id resolves to a site the caller can
+  // reach (admins: getUserSiteIds === null === all sites).
+  const accessibleSiteIds = await getUserSiteIds(
+    session.user.id,
+    (session.user as { role: string }).role,
+  );
+  if (accessibleSiteIds !== null) {
+    if (siteId && !accessibleSiteIds.includes(siteId)) {
       return NextResponse.json(
         { error: "You do not have access to this site" },
         { status: 403 },
       );
+    }
+    if (plotId) {
+      const plot = await prisma.plot.findUnique({
+        where: { id: plotId },
+        select: { siteId: true },
+      });
+      if (!plot || !accessibleSiteIds.includes(plot.siteId)) {
+        return NextResponse.json(
+          { error: "You do not have access to this plot" },
+          { status: 403 },
+        );
+      }
+    }
+    if (jobId) {
+      const job = await prisma.job.findUnique({
+        where: { id: jobId },
+        select: { plot: { select: { siteId: true } } },
+      });
+      if (!job || !accessibleSiteIds.includes(job.plot.siteId)) {
+        return NextResponse.json(
+          { error: "You do not have access to this job" },
+          { status: 403 },
+        );
+      }
     }
   }
 

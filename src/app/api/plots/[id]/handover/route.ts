@@ -192,6 +192,8 @@ export async function POST(
   }
 
   const { id } = await params;
+  const guard = await guardPlotAccess(id, session.user.id, (session.user as { role: string }).role);
+  if (guard) return NextResponse.json(guard.body, { status: guard.status });
 
   // Gather all data in 2 batches (Supabase pool limit = 3)
   const [plot, checklist] = await Promise.all([
